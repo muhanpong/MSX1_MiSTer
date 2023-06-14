@@ -1,48 +1,62 @@
-
-
-parameter MAPPER_NO_UNKNOWN = 6'd0;
-parameter MAPPER_ASCII8     = 6'd1;
-parameter MAPPER_ASCII16    = 6'd2;
-parameter MAPPER_KONAMI     = 6'd3;
-parameter MAPPER_KONAMI_SCC = 6'd4;
-parameter MAPPER_KOEI       = 6'd5;
-parameter MAPPER_LINEAR     = 6'd5;
-parameter MAPPER_R_TYPE     = 6'd7;
-parameter MAPPER_WIZARDRY   = 6'd8;
-
-parameter CART_TYPE_ROM     = 3'd0;
-parameter CART_TYPE_SCC     = 3'd1;
-parameter CART_TYPE_SCC2    = 3'd2;
-parameter CART_TYPE_FM_PAC  = 3'd3;
-parameter CART_TYPE_GM2     = 3'd4;
-parameter CART_TYPE_FDC     = 3'd5;
-parameter CART_TYPE_EMPTY   = 3'd6;
-
-parameter IMG_SRAM          = 4'd0;
-parameter IMG_SRAM_A        = 4'd1;
-parameter IMG_SRAM_B        = 4'd2;
-
-parameter MEM_BIOS          = 0;
-parameter MEM_EXT           = 1;
-parameter MEM_RAM           = 2;
-parameter MEM_DSK           = 3;
-parameter MEM_FWA           = 4;
-parameter MEM_SRAMA         = 5;
-parameter MEM_FWB           = 6;
-parameter MEM_SRAMB         = 7;
-
-typedef enum logic {MSX2,MSX1} MSX_typ_t;
 typedef enum logic [1:0] {AUTO,PAL,NTSC} video_mode_t;
 typedef enum logic {CAS_AUDIO_FILE,CAS_AUDIO_ADC} cas_audio_src_t;
-typedef enum logic [1:0]{SIZE128,SIZE64,SIZE512,SIZE256} ram_size_t;
+typedef enum logic [1:0] {BLOCK_TYP_NONE, BLOCK_TYP_UNUSED3, BLOCK_TYP_UNUSED2, BLOCK_TYP_UNUSED1} block_typ_t;
+typedef enum logic [3:0] {CONFIG_NONE, CONFIG_FDC, CONFIG_SLOT_A, CONFIG_SLOT_B, CONFIG_SLOT_INTERNAL, CONFIG_KBD_LAYOUT, CONFIG_CONFIG} config_typ_t;
+typedef enum logic [2:0] {CART_TYP_ROM, CART_TYP_SCC, CART_TYP_SCC2, CART_TYP_FM_PAC, CART_TYP_MFRSD, CART_TYP_GM2, CART_TYP_FDC, CART_TYP_EMPTY } cart_typ_t;
+typedef enum logic [4:0] {MAPPER_UNUSED, MAPPER_RAM, MAPPER_AUTO, MAPPER_NONE, MAPPER_ASCII8, MAPPER_ASCII16, MAPPER_KONAMI, MAPPER_KONAMI_SCC, MAPPER_KOEI, MAPPER_LINEAR, MAPPER_RTYPE, MAPPER_WIZARDY, /*NEXT INTERNAL*/ MAPPER_FMPAC,MAPPER_OFFSET, MAPPER_MFRSD1,MAPPER_MFRSD2, MAPPER_MFRSD3, MAPPER_GM2} mapper_typ_t;
+typedef enum logic [3:0] {DEVICE_NONE, DEVICE_FDC, DEVICE_OPL3, DEVICE_SCC, DEVICE_SCC2, DEVICE_MFRSD0} device_typ_t;
+typedef enum logic [3:0] {ROM_NONE, ROM_ROM, ROM_RAM, ROM_FDC, ROM_FMPAC, ROM_MFRSD, ROM_GM2 } data_ID_t;
+typedef enum logic {MSX1,MSX2} MSX_typ_t;
 
-package MSX;  
+typedef logic [6:0] dev_typ_t;
+parameter DEV_NONE   = 7'b000000;
+parameter DEV_FDC    = 7'b000001;
+parameter DEV_OPL3   = 7'b000010;
+/*cart*/
+parameter DEV_SCC    = 7'b000100;
+parameter DEV_SCC2   = 7'b001000;
+parameter DEV_MFRSD2 = 7'b010000;
+parameter DEV_FLASH  = 7'b100000;
+
+package MSX;
+    
     typedef struct {
         MSX_typ_t       typ;
         logic           scandoubler;
         logic           border;
-        ram_size_t      ram_size;
         video_mode_t    video_mode;
         cas_audio_src_t cas_audio_src;
-    } config_t;
+    } user_config_t;    
+    
+    typedef struct {
+        logic     [3:0] slot_expander_en;   
+        MSX_typ_t       MSX_typ;
+        logic     [7:0] ram_size;
+    } bios_config_t;    
+    
+    typedef struct {
+        logic  [3:0] ref_ram;
+        logic  [1:0] offset_ram;
+        mapper_typ_t mapper;
+        device_typ_t device;
+        logic        cart_num;
+    } block_t;    
+    
+    typedef struct {
+        logic [26:0] addr;
+        logic [15:0] size;
+        logic        ro;
+    } lookup_RAM_t;
+    
+    typedef struct {
+        logic [17:0] addr;
+        logic [15:0] size;
+    } lookup_SRAM_t;
+
+    typedef struct {
+        cart_typ_t   typ;
+        mapper_typ_t selected_mapper;
+        logic [7:0]  selected_sram_size;
+    } config_cart_t;
+        
 endpackage
