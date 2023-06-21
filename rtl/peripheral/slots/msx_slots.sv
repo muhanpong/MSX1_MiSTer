@@ -47,6 +47,8 @@ module msx_slots
    input  MSX::bios_config_t   bios_config,
    input  mapper_typ_t         selected_mapper[2],
    input  dev_typ_t            cart_device[2],
+   input  dev_typ_t            msx_device,
+   input                 [3:0] msx_dev_ref_ram[8],
    //SD CARD
    output             [7:0] d_to_sd,
    input              [7:0] d_from_sd,
@@ -58,7 +60,7 @@ module msx_slots
    output                   debug_erase
 );
 
-assign sound = sound_opll + scc_wave;
+assign sound = sound_opll + scc_wave + sound_psg;
 assign d_to_sd = cpu_dout;
 assign debug_FDC_req = FDC_req;
 
@@ -89,6 +91,7 @@ wire          [1:0] block      = cpu_addr[15:14];
 wire          [1:0] subslot    = mapper_slot[active_slot][(3'd2 * block) +:2];
 wire          [5:0] layout_id  = {active_slot, subslot, block};
 wire          [3:0] ref_ram    = slot_layout[layout_id].ref_ram;
+wire          [1:0] ref_sram   = slot_layout[layout_id].ref_sram;
 wire          [1:0] offset_ram = slot_layout[layout_id].offset_ram;
 wire                cart_num   = slot_layout[layout_id].cart_num;
 assign              mapper     = slot_layout[layout_id].mapper;
@@ -96,9 +99,14 @@ assign              device     = slot_layout[layout_id].device;
 wire         [26:0] base_ram   = lookup_RAM[ref_ram].addr;
 wire         [15:0] size       = lookup_RAM[ref_ram].size;  //16kB * size
 wire                ram_ro     = lookup_RAM[ref_ram].ro;
-wire         [17:0] base_sram  = lookup_SRAM[cart_num ? 2'd3 :2'd2].addr;
+wire         [17:0] base_sram  = lookup_SRAM[ref_sram].addr;
+wire         [15:0] size_sram  = lookup_SRAM[ref_sram].size;
 
-assign ram_addr = (sram_cs ? 27'(base_sram) : base_ram) + mapper_addr;
+assign ram_addr   = device_kanji_ram_ce ? device_kanji_addr                                   :
+                                          (sram_cs ? 27'(base_sram) : base_ram) + mapper_addr ;
+
+wire cart_ascii8  = mapper == MAPPER_ASCII8  | mapper == MAPPER_KOEI | mapper == MAPPER_WIZARDY;
+wire cart_ascii16 = mapper == MAPPER_ASCII16 | mapper == MAPPER_RTYPE;
 
 wire [26:0] mapper_addr = mem_unmaped                 ? 27'hDEAD                    :
                           mapper == MAPPER_NONE       ? 27'(mapper_none_addr)       :
@@ -111,10 +119,10 @@ wire [26:0] mapper_addr = mem_unmaped                 ? 27'hDEAD                
                           mapper == MAPPER_MFRSD1     ? 27'(mapper_mfrsd1_addr)     :
                           mapper == MAPPER_MFRSD2     ? 27'(mapper_mfrsd2_addr)     :
                           mapper == MAPPER_MFRSD3     ? 27'(mapper_mfrsd3_addr)     :
-                          mapper == MAPPER_ASCII8     ? 27'(mapper_ascii8_addr)     :
-                          mapper == MAPPER_ASCII16    ? 27'(mapper_ascii16_addr)    :
+                          mapper == MAPPER_HALNOTE    ? 27'(mapper_halnote_addr)    :
+                          cart_ascii8                 ? 27'(mapper_ascii8_addr)     :
+                          cart_ascii16                ? 27'(mapper_ascii16_addr)    :
                           mapper == MAPPER_GM2        ? 27'(mapper_gm2_addr)        :
-                          mapper == MAPPER_RTYPE      ? 27'(mapper_ascii16_addr)    :
                                                         27'hDEAD                    ;
 
 assign cpu_din          = mapper_ram_dout                        //IO
@@ -125,11 +133,12 @@ assign cpu_din          = mapper_ram_dout                        //IO
                         & d_to_cpu_FDC                           //UNMAPPED
                         & scc_sound_dout                         //UNMAPPED
                         & flash_dout
+                        & d_to_cpu_reset_status                  //IO
                         & (mem_unmaped  ? 8'hFF : ram_dout);
 
-assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped;
-assign bram_ce  = (sdram_size == 2'd0 | sram_cs)  & cpu_mreq & (cpu_rd | (cpu_wr & (~ram_ro | sram_cs))) & mapper != MAPPER_UNUSED & ~mem_unmaped;
-assign ram_rnw  = (sram_cs & ~sram_wr) | (~sram_cs & ~cpu_wr & cpu_mreq);
+assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce);
+assign bram_ce  = (sdram_size == 2'd0 | sram_cs)  & ((cpu_mreq & (cpu_rd | (cpu_wr & (~ram_ro | sram_cs))) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce);
+assign ram_rnw  = ~((sram_cs & sram_wr) | (~sram_cs & cpu_wr & cpu_mreq & ~ram_ro));
 
 assign ram_din  = cpu_dout;
 
@@ -139,14 +148,15 @@ wire mem_unmaped = mapper_konami_unmaped     |
                    mapper_mfrsd1_unmaped     | 
                    mapper_mfrsd3_unmaped     | 
                    mapper_ascii8_unmaped     | 
-                   mapper_ascii16_unmaped    | 
+                   mapper_ascii16_unmaped    |
+                   mapper_halnote_unmaped    | 
                    mapper_rd                 | 
                    FDC_req                   |
                    flash_rq                  ;
                    
 wire [3:0] mapper_mask = mapper_mfrd_mask;
-wire sram_cs     = fmpac_sram_cs | gm2_sram_cs;
-wire sram_wr     = fmpac_sram_wr | gm2_sram_wr;
+wire sram_cs     = fmpac_sram_cs | gm2_sram_cs | ascii16_sram_cs | ascii8_sram_cs;
+wire sram_wr     = fmpac_sram_wr | gm2_sram_wr | ascii16_sram_wr | ascii8_sram_wr;
 
 //MAPPER NONE
 wire [26:0] mapper_none_addr = 27'(cpu_addr[13:0]) + (27'(offset_ram) << 14);
@@ -157,6 +167,18 @@ wire [26:0] mapper_linear_addr = 27'(cpu_addr[15:0]) & ((27'(size) << 14)-27'd1)
 //NONE 
 wire [26:0] mapper_offset_addr  = 27'({(cpu_addr[15:14] - offset_ram),cpu_addr[13:0]});
 //wire mapper_offset_unmaped      = cpu_addr[15:14] < offset_ram; //TODO podminit mapperem
+
+wire [24:0] mapper_halnote_addr;
+wire        mapper_halnote_unmaped;
+mapper_halnote halnote
+(
+   //.rom_size(25'(size) << 14),
+   .din(cpu_dout),
+   .cs(mapper == MAPPER_HALNOTE),
+   .mem_unmaped(mapper_halnote_unmaped),
+   .mem_addr(mapper_halnote_addr),
+   .*
+);
 
 wire flash_rq;
 wire [7:0] flash_dout;
@@ -277,26 +299,32 @@ cart_konami konami
 
 wire [24:0] mapper_ascii8_addr;
 wire        mapper_ascii8_unmaped;
+wire        ascii8_sram_cs, ascii8_sram_wr;
 cart_ascii8 ascii8
 (
    .rom_size(25'(size) << 14),
    .cpu_addr(cpu_addr),
    .din(cpu_dout),
-   .cs(mapper == MAPPER_ASCII8),
+   .cs(cart_ascii8),
    .mem_unmaped(mapper_ascii8_unmaped),
    .mem_addr(mapper_ascii8_addr),
+   .sram_cs(ascii8_sram_cs),
+   .sram_we(ascii8_sram_wr),
    .*
 );
 
 wire [24:0] mapper_ascii16_addr;
 wire        mapper_ascii16_unmaped;
+wire        ascii16_sram_cs, ascii16_sram_wr;
 cart_ascii16 ascii16
 (
    .rom_size(25'(size) << 14),
    .din(cpu_dout),
-   .cs(mapper == MAPPER_ASCII16 | mapper == MAPPER_RTYPE),
+   .cs(cart_ascii16),
    .mem_unmaped(mapper_ascii16_unmaped),
    .mem_addr(mapper_ascii16_addr),
+   .sram_cs(ascii16_sram_cs),
+   .sram_we(ascii16_sram_wr),
    .*
 );
 
@@ -371,9 +399,41 @@ opll opll
    .cen(clk_en),
    .din(cpu_dout),
    .addr(cpu_addr[0]),
-   .wr({1'b0, (opll_io_wr & fmpac_opll_io_enable[1]) | fmpac_opll_wr[1] , (opll_io_wr & fmpac_opll_io_enable[0]) | fmpac_opll_wr[0]}),
-   .cs({1'b0, |(cart_device[1] & DEV_OPL3), |(cart_device[0] & DEV_OPL3)}),
+   .wr({opll_io_wr, (opll_io_wr & fmpac_opll_io_enable[1]) | fmpac_opll_wr[1] , (opll_io_wr & fmpac_opll_io_enable[0]) | fmpac_opll_wr[0]}),
+   .cs({|(msx_device & DEV_OPL3), |(cart_device[1] & DEV_OPL3), |(cart_device[0] & DEV_OPL3)}),
    .sound(sound_opll)
+);
+
+wire        device_kanji_ram_ce;
+wire [26:0] device_kanji_addr;
+kanji kanji
+(
+   .addr(cpu_addr[7:0]),
+   .din(cpu_dout),
+   .cs(|(msx_device & DEV_KANJI)),
+   .base_ram(lookup_RAM[msx_dev_ref_ram[0]].addr),
+   .rom_size(lookup_RAM[msx_dev_ref_ram[0]].size),
+   .mem_addr(device_kanji_addr),
+   .ram_ce(device_kanji_ram_ce),
+   .*
+);
+
+wire [7:0] d_to_cpu_reset_status;
+dev_reset_status dev_reset_status
+(
+   .cpu_addr(cpu_addr[7:0]),
+   .cs(|(msx_device & DEV_RESET_STATUS)),
+   .dout(d_to_cpu_reset_status),
+   .*
+);
+
+wire signed [15:0] sound_psg;
+psg psg
+(
+   .cpu_addr(cpu_addr[7:0]),
+   .cs({|(cart_device[1] & DEV_PSG), |(cart_device[0] & DEV_PSG)}),
+   .sound(sound_psg),
+   .*
 );
 
 wire        FDC_req;
