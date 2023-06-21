@@ -402,7 +402,8 @@ vdp vdp_vdp
    .LEGACY_VGA(1),
    .RATIOMODE(3'b000),
    .NTSC_PAL_TYPE(msxConfig.video_mode == AUTO),
-   .FORCED_V_MODE(msxConfig.video_mode == PAL)
+   .FORCED_V_MODE(msxConfig.video_mode == PAL),
+   .VDP_ID("00010")
 );
 
 wire [15:0] VRAM_address;

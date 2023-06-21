@@ -791,7 +791,8 @@ ARCHITECTURE RTL OF VDP IS
 
             -- SWITCHED I/O SIGNALS
             FORCED_V_MODE               : IN    STD_LOGIC;
-            VDP_ID                      : IN    STD_LOGIC_VECTOR(  4 DOWNTO 0 )
+            --VDP_ID                      : IN    STD_LOGIC_VECTOR(  4 DOWNTO 0 )
+            VDP_ID                      : IN    STD_LOGIC_VECTOR(  4 DOWNTO 0 ) := "00010"
         );
     END COMPONENT;
 
