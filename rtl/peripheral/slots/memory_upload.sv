@@ -265,7 +265,8 @@ module memory_upload
                         mapper      <= mapper_typ_t'(conf[8]);
                         mem_device  <= device_typ_t'(conf[4]);
                         data_size   <= {conf[5][2:0], conf[6],14'h0};
-                        sram_size   <= 25'd0;
+                        sram_size   <= 25'({conf[12], 10'd0});
+                        ref_sram    <= 3;
                         data_id     <= data_ID_t'(conf[4]);
                         mode        <= conf[9];
                         param       <= conf[10];
@@ -366,7 +367,7 @@ module memory_upload
                         data_id       <= ROM_RAM;
                         if (~bram_rq) ram_addr <= sram_addr;
                         if (sdram_size != 0) save_ram_addr <= ram_addr;
-                        $display("           FILL SRAM ID:%d addr:%x size:%d kB (save:%x)",ref_sram, ~bram_rq ? sram_addr : ram_addr, sram_size, save_ram_addr);
+                        $display("           FILL SRAM ID: %d addr:%x size:%d kB (save:%x)",ref_sram, ~bram_rq ? sram_addr : ram_addr, sram_size[24:10], save_ram_addr);
                      end else state <= STATE_STORE_SLOT_CONFIG;
                end
             end
