@@ -419,11 +419,8 @@ vdp vdp_vdp
    .RATIOMODE(3'b000),
    .NTSC_PAL_TYPE(msxConfig.video_mode == AUTO),
    .FORCED_V_MODE(msxConfig.video_mode == PAL),
-<<<<<<< HEAD
-   .VDP_ID("00010")
-=======
+   .VDP_ID("00010"),
    .BORDER(msxConfig.border)
->>>>>>> origin/MSX2
 );
 
 wire [15:0] VRAM_address;
