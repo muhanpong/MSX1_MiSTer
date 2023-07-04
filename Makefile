@@ -1,7 +1,8 @@
 ALL: build deploy
 update:
 	@git fetch
-	@git merge origin/main
+	@git merge origin/MSX2
+	@git merge origin/MSX2test
 	@git fetch
 	$(build)
 build:

@@ -198,7 +198,7 @@ ENTITY VDP_REGISTER IS
 
         -- SWITCHED I/O SIGNALS
         FORCED_V_MODE               : IN    STD_LOGIC;
-        VDP_ID                      : IN    STD_LOGIC_VECTOR(  4 DOWNTO 0 ) := "00010"
+        VDP_ID                      : IN    STD_LOGIC_VECTOR(  4 DOWNTO 0 )
     );
 END VDP_REGISTER;
 
@@ -277,6 +277,7 @@ BEGIN
 
     VDPMODEISVRAMINTERLEAVE <=  '1' WHEN( (REG_R0_DISP_MODE(3) AND REG_R0_DISP_MODE(1)) = '1' )ELSE
                                 '0';
+
     ----------------------------------------------------------------------------------------
     PROCESS( RESET, CLK21M )
     BEGIN

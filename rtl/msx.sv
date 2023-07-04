@@ -419,7 +419,6 @@ vdp vdp_vdp
    .RATIOMODE(3'b000),
    .NTSC_PAL_TYPE(msxConfig.video_mode == AUTO),
    .FORCED_V_MODE(msxConfig.video_mode == PAL),
-   .VDP_ID("00010"),
    .BORDER(msxConfig.border)
 );
 

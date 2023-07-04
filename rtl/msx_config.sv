@@ -63,7 +63,6 @@ assign ROM_B_load_hide    = cart_conf[1].typ != CART_TYP_ROM;
 assign sram_A_select_hide = cart_conf[0].typ != CART_TYP_ROM | mapper_A_select == 4'd0; 
 assign fdc_enabled = bios_config.use_FDC | cart_conf[0].typ == CART_TYP_FDC;
 
-
 logic  [18:0] lastConfig;
 wire [18:0] act_config = {cart_conf[1].typ, cart_conf[0].typ, cart_conf[0].selected_mapper, cart_conf[1].selected_mapper, sram_A_select};
 
