@@ -59,7 +59,7 @@
     <secondary slot="0">
       <block start="0" id="Main RAM">
         <type>RAM MAPPER</type>
-        <block_count>64</block_count>
+        <block_count>32</block_count>
         <pattern>4</pattern>
       </block>
     </secondary>

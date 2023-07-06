@@ -27,6 +27,7 @@ package MSX;
         MSX_typ_t       typ;
         logic           scandoubler;
         logic           border;
+        logic           vdp_id;
         video_mode_t    video_mode;
         cas_audio_src_t cas_audio_src;
     } user_config_t;    

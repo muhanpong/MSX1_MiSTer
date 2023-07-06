@@ -420,7 +420,7 @@ vdp vdp_vdp
    .NTSC_PAL_TYPE(msxConfig.video_mode == AUTO),
    .FORCED_V_MODE(msxConfig.video_mode == PAL),
    .BORDER(msxConfig.border),
-   .VDP_ID(5'b00010)
+   .VDP_ID(5'b00000 | msxConfig.vdp_id << 1)
 );
 
 wire [15:0] VRAM_address;
