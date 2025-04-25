@@ -281,6 +281,7 @@ localparam CONF_STR = {
    "P1O[7:6],Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
    "P1O[40],Vertical Crop,No,Yes;",
    "P1O[41],Border,No,Yes;",
+   "P1O[42],V9958,No,Yes;",
    "-;",
    "T[0],Reset;",
    "R[10],Reset & Detach ROM Cartridge;",					
