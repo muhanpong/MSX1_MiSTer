@@ -76,4 +76,16 @@ set_global_assignment -name SEED 1
 source sys/sys.tcl
 source sys/sys_analog.tcl
 source files.qip
+set_global_assignment -name CDF_FILE jtag.cdf
+set_global_assignment -name QIP_FILE sys/sys.qip
+set_global_assignment -name QIP_FILE rtl/files.qip
+set_global_assignment -name VERILOG_FILE rtl/IKASCC/src/IKASCC.v
+set_global_assignment -name VERILOG_FILE rtl/IKASCC/src/IKASCC_modules/IKASCC_vrc_s.v
+set_global_assignment -name VERILOG_FILE rtl/IKASCC/src/IKASCC_modules/IKASCC_vrc_a.v
+set_global_assignment -name VERILOG_FILE rtl/IKASCC/src/IKASCC_modules/IKASCC_primitives.v
+set_global_assignment -name VERILOG_FILE rtl/IKASCC/src/IKASCC_modules/IKASCC_player_s.v
+set_global_assignment -name VERILOG_FILE rtl/IKASCC/src/IKASCC_modules/IKASCC_player_a.v
+set_global_assignment -name SDC_FILE MSX1.sdc
+set_global_assignment -name SYSTEMVERILOG_FILE MSX1.sv
+set_global_assignment -name IP_SEARCH_PATHS /home/muhanpong/Documents/MiSTer_build/MSX1_MiSTer/rtl/IKASCC
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top

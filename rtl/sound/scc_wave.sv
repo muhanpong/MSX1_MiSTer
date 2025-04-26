@@ -145,7 +145,7 @@ always @(posedge clk) begin
             ff_cnt[2] <= reg_freq[2];
          end else begin
             if (ff_cnt[2] == 12'd0) begin
-               ff_ptr[2] <= ff_ptr[2] + 5'd1;
+               ff_ptr[2] <= ff_ptr[2] + 5'd1;wave
                ff_cnt[2] <= reg_freq[2];
             end else begin
                ff_cnt[2] <= ff_cnt[2] - 12'd1;
@@ -227,7 +227,21 @@ always @(posedge clk) begin
 end
 
 // wave out
-always @(posedge clk) begin
+always @(posedge clk) beginscc_wave scc_wave_B
+//(
+//   .clk(clk),
+//   .clkena(clk_en),
+//   .reset(reset),
+//   .req(cart_num & cs),   
+//   .ack(),
+//   .wrt(cpu_wr & cpu_mreq),
+//   .adr(cpu_addr),
+//   .dbo(din),
+//   .dbi(scc_dout_B),
+//   .wave(wave_B),
+//   .sccPlusChip(sccPlusChip[1]),
+//   .sccPlusMode(sccPlusMode[1])
+//);
    if (reset)
       ff_wave <= 15'd0;
    else
