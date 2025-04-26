@@ -11,84 +11,49 @@ module scc_sound
    input          [7:0] cpu_addr,
    input          [7:0] din,
    output         [7:0] scc_dout,
-   //output signed [15:0] wave,
-	output signed [10:0] wave,
+   output signed [15:0] wave,
    input          [1:0] sccPlusChip,
    input          [1:0] sccPlusMode
 );
 /*verilator tracing_off*/
-//wire signed [14:0] wave_A, wave_B;
-wire signed [10:0] wave_A, wave_B;
+wire signed [14:0] wave_A, wave_B;
 
 assign scc_dout = scc_dout_A & scc_dout_B;
-//assign wave = (oe[0] ? {wave_A[14],wave_A}   : 16'd0) +
-//              (oe[1] ? {wave_B[14],wave_B}   : 16'd0) ;
-assign wave = (oe[0] ? {wave_A[10],wave_A}   : 16'd0) +
-              (oe[1] ? {wave_B[10],wave_B}   : 16'd0) ;
+assign wave = (oe[0] ? {wave_A[14],wave_A}   : 16'd0) +
+              (oe[1] ? {wave_B[14],wave_B}   : 16'd0) ;
 
 
 wire [7:0] scc_dout_A;
-//scc_wave scc_wave_A
-//(
-//   .clk(clk),
-//   .clkena(clk_en),
-//   .reset(reset),
-//   .req(~cart_num & cs),   
-//   .ack(),
-//   .wrt(cpu_wr & cpu_mreq),
-//   .adr(cpu_addr),
-//   .dbo(din),
-//   .dbi(scc_dout_A),
-//   .wave(wave_A),
-//   .sccPlusChip(sccPlusChip[0]),
-//   .sccPlusMode(sccPlusMode[0])
-//);
-IKASCC scc_wave_A
+scc_wave scc_wave_A
 (
-   .i_EMUCLK(clk),
-   .i_MCLK_PCEN_n(clk_en),
-   .i_RST_n(reset),
-   .i_CS_n(~cart_num & cs),   
-   .o_DB_OE(),
-   .i_WR_n(cpu_wr & cpu_mreq),
-   .i_ABLO(cpu_addr),
-   .i_DB(din),
-   .o_DB(scc_dout_A),
-   .o_SOUND(wave_A),
-   //.sccPlusChip(sccPlusChip[0]),
-   //.sccPlusMode(sccPlusMode[0])
+   .clk(clk),
+   .clkena(clk_en),
+   .reset(reset),
+   .req(~cart_num & cs),   
+   .ack(),
+   .wrt(cpu_wr & cpu_mreq),
+   .adr(cpu_addr),
+   .dbo(din),
+   .dbi(scc_dout_A),
+   .wave(wave_A),
+   .sccPlusChip(sccPlusChip[0]),
+   .sccPlusMode(sccPlusMode[0])
 );
 
-
 wire [7:0] scc_dout_B;
-//scc_wave scc_wave_B
-//(
-//   .clk(clk),
-//   .clkena(clk_en),
-//   .reset(reset),
-//   .req(cart_num & cs),   
-//   .ack(),
-//   .wrt(cpu_wr & cpu_mreq),
-//   .adr(cpu_addr),
-//   .dbo(din),
-//   .dbi(scc_dout_B),
-//   .wave(wave_B),
-//   .sccPlusChip(sccPlusChip[1]),
-//   .sccPlusMode(sccPlusMode[1])
-//);
-IKASCC scc_wave_B
+scc_wave scc_wave_B
 (
-   .i_EMUCLK(clk),
-   .i_MCLK_PCEN_n(clk_en),
-   .i_RST_n(reset),
-   .i_CS_n(~cart_num & cs),   
-   .o_DB_OE(),
-   .i_WR_n(cpu_wr & cpu_mreq),
-   .i_ABLO(cpu_addr),
-   .i_DB(din),
-   .o_DB(scc_dout_B),
-   .o_SOUND(wave_B),
-   //.sccPlusChip(sccPlusChip[0]),
-   //.sccPlusMode(sccPlusMode[0])
+   .clk(clk),
+   .clkena(clk_en),
+   .reset(reset),
+   .req(cart_num & cs),   
+   .ack(),
+   .wrt(cpu_wr & cpu_mreq),
+   .adr(cpu_addr),
+   .dbo(din),
+   .dbi(scc_dout_B),
+   .wave(wave_B),
+   .sccPlusChip(sccPlusChip[1]),
+   .sccPlusMode(sccPlusMode[1])
 );
 endmodule
