@@ -352,7 +352,8 @@ cart_konami_scc konami_scc
 );
 
 wire        [7:0] scc_sound_dout;
-wire signed [15:0] scc_wave;
+//wire signed [15:0] scc_wave;
+wire signed [10:0] scc_wave; // for IKASCC's waveout [10:0]
 scc_sound scc_sound
 (
    .cs(mapper_konami_scc_sccReq | mapper_mfrdsd1_sccReq),  
