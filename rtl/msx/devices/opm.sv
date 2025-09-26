@@ -1,0 +1,110 @@
+// OPM device
+//
+// Copyright (c) 2025 Molekula
+//
+// All rights reserved
+//
+// Redistribution and use in source and synthezised forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// * Redistributions of source code must retain the above copyright notice,
+//   this list of conditions and the following disclaimer.
+//
+// * Redistributions in synthesized form must reproduce the above copyright
+//   notice, this list of conditions and the following disclaimer in the
+//   documentation and/or other materials provided with the distribution.
+//
+// * Neither the name of the author nor the names of other contributors may
+//   be used to endorse or promote products derived from this software without
+//   specific prior written agreement from the author.
+//
+// * License is granted for non-commercial use only.  A fee may not be charged
+//   for redistributions as source code or in synthesized/hardware form without
+//   specific prior written agreement from the author.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
+// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+// POSSIBILITY OF SUCH DAMAGE.
+//
+
+module dev_opm #(parameter COUNT=3) (
+    cpu_bus_if.device_mp   cpu_bus,
+    device_bus             device_bus,
+    clock_bus_if.base_mp   clock_bus,
+    input MSX::io_device_t io_device[COUNT],
+    output signed [15:0]   sound_L,
+    output signed [15:0]   sound_R,
+    output         [7:0]   data,
+    output                 irq
+);
+    
+    logic signed [15:0] sound_L_accum, sound_R_accum;
+    logic [7:0] data_comb;
+    logic irq_comb;
+    always_comb begin
+        sound_L_accum = '0;
+        sound_R_accum = '0;
+        data_comb     = '1;
+        irq_comb      = '1;
+        for (int i = 0; i < COUNT; i++) begin
+            if (io_device[i].enable) begin
+                sound_L_accum += sound_OPM_L[i];
+                sound_R_accum += sound_OPM_R[i];
+                data_comb     &= jt51_data_out[i];
+                irq_comb      &= irq_n[i];
+            end
+        end
+    end
+
+    assign sound_L = sound_L_accum;
+    assign sound_R = sound_R_accum;
+    assign irq     = ~irq_comb;
+    assign data    = data_comb;
+
+    logic signed [15:0] sound_OPM_L[COUNT], sound_OPM_R[COUNT];
+    logic         [7:0] jt51_data_out[COUNT];
+    logic               irq_n[COUNT];
+    logic               io_en;
+    
+    assign io_en = cpu_bus.iorq && ~cpu_bus.m1;
+
+    genvar i;
+    generate
+        for (i = 0; i < COUNT; i++) begin : OPM_INSTANCES
+            wire cs_io_active = (cpu_bus.addr[7:0] & io_device[i].mask) == io_device[i].port;
+            wire cs_io        = (io_device[i].enable && cs_io_active && io_en);
+            wire cs_dev       = (io_device[i].enable && io_device[i].device_ref == device_bus.device_ref && device_bus.en);
+            wire [7:0] data_tmp;
+
+            assign jt51_data_out[i] = (cs_io || cs_dev) && cpu_bus.rd ? data_tmp : '1;
+
+            jt51 jt51_i (
+                .rst(cpu_bus.reset),
+                .clk(cpu_bus.clk),
+                .cen_p1(clock_bus.ce_1m79_n),
+                .cs_n(~(cs_io || cs_dev)),
+                .wr_n(~(cpu_bus.wr && cpu_bus.req)),
+                .a0(cpu_bus.addr[0]),
+                .din(cpu_bus.data),
+                .dout(data_tmp),
+                .ct1(),
+                .ct2(),
+                .irq_n(irq_n[i]),
+                .sample(),
+                .left(sound_OPM_L[i]),
+                .right(sound_OPM_R[i]),
+                .xleft(),
+                .xright()
+            );
+        end
+    endgenerate
+
+endmodule

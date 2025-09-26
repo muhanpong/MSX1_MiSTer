@@ -1,0 +1,242 @@
+// WD279x FDC
+//
+// Copyright (c) 2025 Molekula
+//
+// All rights reserved
+//
+// Redistribution and use in source and synthezised forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// * Redistributions of source code must retain the above copyright notice,
+//   this list of conditions and the following disclaimer.
+//
+// * Redistributions in synthesized form must reproduce the above copyright
+//   notice, this list of conditions and the following disclaimer in the
+//   documentation and/or other materials provided with the distribution.
+//
+// * Neither the name of the author nor the names of other contributors may
+//   be used to endorse or promote products derived from this software without
+//   specific prior written agreement from the author.
+//
+// * License is granted for non-commercial use only.  A fee may not be charged
+//   for redistributions as source code or in synthesized/hardware form without
+//   specific prior written agreement from the author.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
+// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+// POSSIBILITY OF SUCH DAMAGE.
+//
+
+module wd279x_command_I
+(
+	input  logic        clk,         // sys clock
+	input  logic        msclk,       // clock 1ms enable
+	input  logic        interrupt,
+	input  logic        MRn,	     // master reset
+	input  logic        command_start,
+	input  logic  [7:0] command,
+	input  logic  [7:0] reg_data,
+	output logic  [7:0] reg_data_out,
+	output logic        reg_data_write,
+	output logic  [7:0] status,
+	output logic        INTRQ,
+	input  logic        INTRQ_ACK,
+	output logic 		STEPn,
+	output logic 		SDIRn,
+	input  logic 		INDEXn,
+	input  logic 		READYn,
+	input  logic 		WPROTn,
+	input  logic 		TRK00n,
+	output logic        HLD,
+
+
+	input  logic  [7:0] track,
+	output logic  [7:0] track_out,
+	output logic  		track_write,
+
+	input  logic		IDAM_valid,	
+	input  logic  [7:0] IDAM_data[6]
+);
+
+	localparam ID_TRACK  = 0;
+    localparam ID_SIDE   = 1;
+    localparam ID_SECTOR = 2;
+    localparam ID_LENGHT = 3;
+    localparam ID_CRC1   = 4;
+    localparam ID_CRC2   = 5;
+
+	typedef enum {
+		STATE_IDLE,
+		STATE_STEP_A,
+		STATE_STEP_BC,
+		STATE_STEP_WAIT,
+		STATE_VERIFY,
+		STATE_VERIFY_II,
+		STATE_VERIFY_III
+	} step_state_t;
+
+	step_state_t state;
+
+	logic busy;
+	
+	logic reg_CRC_ERROR;
+	logic reg_SEEK_ERROR;
+	logic [7:0] track_rq;
+	logic [4:0] wait_count;
+	logic [2:0] index_count;
+	logic       last_index;
+
+	assign busy = state != STATE_IDLE;
+	assign status = command[7] ? 8'h00 : {READYn, ~WPROTn, HLD, reg_SEEK_ERROR, reg_CRC_ERROR, ~TRK00n, ~INDEXn, busy};
+	
+
+	always_ff @(posedge clk) begin
+		track_write <= 0;
+		last_index <= INDEXn;
+		if (last_index && !INDEXn) index_count <= index_count + 3'd1;
+		if (~MRn || interrupt) begin
+			STEPn <= 1;
+			SDIRn <= 1;
+			HLD <= 1;
+			reg_CRC_ERROR <= 0;
+			reg_SEEK_ERROR <= 0;
+			INTRQ <= 0;
+			state <= STATE_IDLE;
+			reg_data_write <= 0;
+		end else begin
+			reg_data_write <= 0;
+			if (INTRQ_ACK) INTRQ <= 0;
+			case(state)
+				STATE_IDLE: begin
+					if (command_start) begin
+						INTRQ <= 0;
+						if (!command[7]) begin
+							reg_CRC_ERROR <= 0;
+							reg_SEEK_ERROR <= 0;
+							HLD <= ~command[3];
+							state <= STATE_STEP_BC;
+							$display("Command I Track %X Command %x dataReg %X %t", track, command, reg_data, $time);
+							case(command[6:5])
+								2'b00: begin
+									if (!command[4]) begin				// RESTORE
+										track_out <= 8'hFF;
+										track_rq      <= 0;
+										track_write <= 1;
+										reg_data_out <= '0;
+										reg_data_write <= 1;
+									end else begin						// SEEK
+										track_rq      <= reg_data;
+									end
+									state           <= STATE_STEP_A;
+								end
+								2'b01: begin							// Step
+									if (SDIRn) begin
+										track_rq      <= track + 8'd1;
+										track_out <= track + 8'd1;
+									end else begin
+										track_rq      <= track - 8'd1;
+										track_out <= track - 8'd1;
+									end
+									track_write <= command[4];
+								end
+								2'b10: begin							// Step in
+									SDIRn           <= 1;
+									track_rq        <= track + 8'd1;
+									track_out   <= track + 8'd1;
+									track_write <= command[4];
+								end
+								2'b11: begin							// Step out
+									SDIRn           <= 0;
+									track_rq        <= track - 8'd1;
+									track_out   <= track - 8'd1;
+									track_write <= command[4];
+								end
+							endcase					
+						end
+					end
+				end
+				STATE_STEP_A: begin
+					state <= STATE_STEP_BC;
+					if (track == track_rq) begin
+						state <= STATE_VERIFY;
+					end else begin
+						if (track_rq > track) begin
+							SDIRn <= 1;
+							track_out <= track_out + 8'd1;
+						end else begin
+							SDIRn <= 0;
+							track_out <= track_out - 8'd1;
+						end
+						track_write <= 1;
+					end
+				end
+				STATE_STEP_BC: begin
+					if (!SDIRn && !TRK00n) begin
+						track_out <= 0;
+						track_write <= 1;
+						state <= STATE_VERIFY;
+					end else begin
+						state <= STATE_STEP_WAIT;
+						STEPn <= 0;
+						case(command[1:0])
+							2'b00: wait_count <= 6;
+							2'b01: wait_count <= 12;
+							2'b10: wait_count <= 20;
+							2'b11: wait_count <= 30;
+						endcase
+					end
+				end
+				STATE_STEP_WAIT: begin
+					STEPn <= 1;
+					if (msclk) begin
+						if (wait_count == 0) begin
+							if (command[7:5] == 3'b000) // SEEK, RESTORE
+								state <= STATE_STEP_A;
+							else 
+								state <= STATE_VERIFY;
+						end else begin
+							wait_count <= wait_count - 5'd1;
+						end
+					end
+				end
+				STATE_VERIFY: begin
+					if (!command[2]) begin
+						state <= STATE_IDLE;
+						INTRQ <= 1;
+					end else begin
+						HLD <= 1;
+						wait_count <= 15;
+						state <= STATE_VERIFY_II;
+					end
+				end
+				STATE_VERIFY_II: begin
+					if (wait_count != 0) begin
+						if (msclk) begin
+							wait_count <= wait_count - 5'd1;
+							index_count <= 0;
+						end
+					end else begin			// Lze kontrolovat
+						if (index_count > 4) begin
+							state <= STATE_IDLE;
+							INTRQ <= 1;
+							reg_SEEK_ERROR <= 1;
+						end
+						if (IDAM_valid && IDAM_data[ID_TRACK] == track_rq) begin
+							state <= STATE_IDLE;
+							INTRQ <= 1;
+						end
+					end
+				end
+				default: ;
+			endcase
+		end
+	end
+endmodule

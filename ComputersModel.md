@@ -1,0 +1,77 @@
+## Supported MSX Models
+- Al Alamiah
+  - AX170
+  - AX230
+- AVT
+  - DPC-200
+- Canon
+  -  V-20
+  -  V20E
+  -  V-20F
+  -  C-20G
+  -  V-20S
+- Casio
+  -  MX-10
+  -  MX-15
+  -  PV-16
+  -  PV-7
+- Daewoo
+  -  CPC-300
+  -  CPC-400S
+  -  CPC-51 Zemix V
+  -  DPC-100
+  -  DPC-180
+  -  DPC-200
+  -  DPC-200E(FR)
+- Goldstar
+  - FC-200
+  - FC-80
+  - FC-80U
+  - GFC-1080
+  - GFC-1080A
+- Gradiente
+  - Expert DD Plus
+  - Expert GPC-1
+  - Expert Plus
+  - Expert XP-800
+- Hitachi
+  - MB-H2
+- National
+  - FS-4600F
+- Panasonic
+  - FS-A1
+  - FS-A1F
+- Philips
+  - NMS 801
+  - NMS 8220
+  - NMS 8245
+  - NMS 8250
+  - NMS 8250-16
+  - NMS 8250-19
+  - NSM 8255
+  - VG 8000-00
+  - VG 8010-00
+  - VG 8010-19
+  - VG 8020-00
+  - VG 8020-19
+  - VG 8020-20
+  - VG 8230
+  - VG 8235-00
+  - VG 8235-20
+  - VG 8235-39
+  - VG 8240
+- Samsung
+  - SPC-800
+- Sony
+  - HB-201
+  - HB-F1
+  - HB-F1XDmk2
+  - HB-F5
+- Yamaha
+  - AX350IIF
+  - CX11
+  - CX5F
+  - CX5M
+  - CX5MII
+  - CX5MII 128
+  - CX5MU

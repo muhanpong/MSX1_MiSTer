@@ -37,12 +37,7 @@ module sdram
     output            SDRAM_CKE,   // clock enable
     output            SDRAM_CLK,   // clock for chip
 
-    input      [26:0] ch1_addr,    // 25 bit address for 8bit mode. addr[0] = 0 for 16bit mode for correct operations.
-    output reg  [7:0] ch1_dout,    // data output to cpu
-    input       [7:0] ch1_din,
-    input             ch1_req,     // request
-    input             ch1_rnw,     // 1 - read, 0 - write
-    output reg        ch1_ready,
+    memory_bus_if.ram_mp memory_bus_ch1,
     
     input      [26:0] ch2_addr,    
     output reg  [7:0] ch2_dout,    
@@ -50,6 +45,7 @@ module sdram
     input             ch2_req,
 	input             ch2_rnw,     // 1 - read, 0 - write
     output reg        ch2_ready,
+    output reg        ch2_done,
 
     input      [26:0] ch3_addr,
     output reg  [7:0] ch3_dout,
@@ -107,7 +103,7 @@ localparam STATE_IDLE_4  = 8;
 localparam STATE_IDLE_5  = 9;
 localparam STATE_RFSH    = 10;
 
-assign ch1_dout = ch1_saved_a0 ? ch1_saved_data[15:8] : ch1_saved_data[7:0];
+assign memory_bus_ch1.q = ch1_saved_a0 ? ch1_saved_data[15:8] : ch1_saved_data[7:0];
 assign ch2_dout = ch2_saved_a0 ? ch2_saved_data[15:8] : ch2_saved_data[7:0];
 assign ch3_dout = ch3_saved_a0 ? ch3_saved_data[15:8] : ch3_saved_data[7:0];
 
@@ -129,17 +125,17 @@ always @(posedge clk) begin
     
     reg        doRefresh_1;
     
-    ch1_req_1 <= ch1_req;
+    ch1_req_1 <= memory_bus_ch1.ram_cs;
     ch2_req_1 <= ch2_req;
     ch3_req_1 <= ch3_req;
       
     doRefresh_1 <= doRefresh;
 
-    if (ch1_req & ~ch1_req_1) begin
+    if (memory_bus_ch1.ram_cs & ~ch1_req_1) begin
         ch1_rq     <= 1;
-        ch1_rnw_1  <= ch1_rnw;
-        ch1_addr_1 <= ch1_addr;
-        ch1_din_1  <= ch1_din;
+        ch1_rnw_1  <= memory_bus_ch1.rnw;
+        ch1_addr_1 <= memory_bus_ch1.addr;
+        ch1_din_1  <= memory_bus_ch1.data;
     end
     if (ch2_req & ~ch2_req_1) begin
         ch2_rq <= 1;
@@ -153,7 +149,8 @@ always @(posedge clk) begin
         ch3_addr_1 <= ch3_addr;
         ch3_din_1  <= ch3_din;
     end
-	if (~ch3_req) ch3_done <= 0;
+	if (~ch2_req) ch2_done <= 0;
+    if (~ch3_req) ch3_done <= 0;
 
     refresh_count <= refresh_count+1'b1;
 
@@ -163,7 +160,7 @@ always @(posedge clk) begin
 
 
     if(data_ready_delay1[CAS_LATENCY+BURST_LENGTH-1]) ch1_saved_data <= SDRAM_DQ;
-    if(data_ready_delay1[CAS_LATENCY+BURST_LENGTH-1]) ch1_ready <= 1;
+    if(data_ready_delay1[CAS_LATENCY+BURST_LENGTH-1]) memory_bus_ch1.sdram_ready <= 1;
 
     if(data_ready_delay2[CAS_LATENCY+BURST_LENGTH-1]) ch2_saved_data <= SDRAM_DQ;
 	if(data_ready_delay2[CAS_LATENCY+BURST_LENGTH-1]) ch2_ready <= 1;
@@ -205,7 +202,7 @@ always @(posedge clk) begin
             if (!refresh_count) begin
                 state   <= STATE_IDLE;
                 refresh_count <= 0;
-                ch1_ready <= 1;
+                memory_bus_ch1.sdram_ready <= 1;
 				ch2_ready <= 1;
 				ch3_ready <= 1;
             end
@@ -231,7 +228,7 @@ always @(posedge clk) begin
                 chip          <= 0;
             end 
             else if(ch1_rq) begin
-                if (ch1_rnw)
+                if (memory_bus_ch1.rnw)
                     {cas_addr[12:9],SDRAM_BA,SDRAM_A,cas_addr[8:0]} <= {2'b00, 1'b1, ch1_addr_1[25:1]};
                 else
                     {cas_addr[12:9],SDRAM_BA,SDRAM_A,cas_addr[8:0]} <= {~ch1_addr_1[0],ch1_addr_1[0], 1'b1, ch1_addr_1[25:1]};
@@ -243,10 +240,10 @@ always @(posedge clk) begin
                 ch1_rq     <= 0;
                 command    <= CMD_ACTIVE;
                 state      <= STATE_WAIT;
-                ch1_ready  <= 0;
+                memory_bus_ch1.sdram_ready  <= 0;
             end
             else if(ch2_rq) begin
-				if (ch1_rnw)
+				if (ch2_rnw)
                     {cas_addr[12:9],SDRAM_BA,SDRAM_A,cas_addr[8:0]} <= {2'b00, 1'b1, ch2_addr_1[25:1]};
                 else
                     {cas_addr[12:9],SDRAM_BA,SDRAM_A,cas_addr[8:0]} <= {~ch2_addr_1[0],ch2_addr_1[0], 1'b1, ch2_addr_1[25:1]};
@@ -289,8 +286,8 @@ always @(posedge clk) begin
             if(saved_wr) begin
                 command  <= CMD_WRITE;
                 SDRAM_DQ <= saved_data;
-                if(ch == 0) ch1_ready  <= 1;
-                if(ch == 1) ch2_ready  <= 1;
+                if(ch == 0) memory_bus_ch1.sdram_ready  <= 1;
+                if(ch == 1) begin ch2_ready  <= 1; ch2_done   <= 1; end
                 if(ch == 2) begin ch3_ready  <= 1; ch3_done   <= 1; end
                 state <= STATE_IDLE_2;
             end

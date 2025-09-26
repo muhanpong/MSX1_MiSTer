@@ -1,120 +1,217 @@
 module nvram_backup
 (
-   input                      clk,
-   input MSX::lookup_SRAM_t   lookup_SRAM[4],
-   input                      load_req,
-   input                      save_req,
+   input                      clk,                  // Clock signal
+   input MSX::lookup_SRAM_t   lookup_SRAM[4],       // Lookup table for SRAM access
+   input                      load_req,             // Request to load data
+   input                      save_req,             // Request to save data
+
    // SD config
-   input                [3:0] img_mounted,
-   input                      img_readonly,
-   input               [63:0] img_size,
+   input                [3:0] img_mounted,          // Indicates mounted images
+   input                      img_readonly,         // Indicates read-only mode
+   input               [31:0] img_size,             // Size of the image
+
    // SD block level access
-   output              [31:0] sd_lba[4],
-   output logic         [3:0] sd_rd = 4'd0,
-   output logic         [3:0] sd_wr = 4'd0,
-   input                [3:0] sd_ack,
-   input               [13:0] sd_buff_addr,
-   output               [7:0] sd_buff_din[4],
+   output logic        [31:0] sd_lba[4],            // Logical Block Address for SD
+   output logic         [3:0] sd_rd = 4'd0,         // SD read enable
+   output logic         [3:0] sd_wr = 4'd0,         // SD write enable
+   input                [3:0] sd_ack,               // SD acknowledgement
+   input                      sd_buff_wr,           // SD buffer write enable
+   input               [13:0] sd_buff_addr,         // SD buffer address
+   input                [7:0] sd_buff_dout,         // Data out from SD buffer
+   output logic         [7:0] sd_buff_din[4],       // Data into SD buffer
+
    // RAM access
-   output              [17:0] ram_addr,   
-   output                     ram_we,
-   input                [7:0] ram_dout
+   output logic        [26:0] ram_addr,             // RAM address
+   output logic               ram_req,              // RAM request enable
+   output logic               ram_rnw,              // RAM read/not-write enable
+   input                      ram_ready,            // RAM ready signal
+   input                [7:0] ram_dout,             // Data out from RAM
+   output logic         [7:0] ram_din               // Data into RAM
 );
 
-logic [63:0] image_size[4], new_size;
+logic [31:0] image_size[4];
 logic  [3:0] image_mounted; 
-logic        store_new_size = 1'b0;
+logic        store_new_size;
+logic [3:0]  request_load, request_save;
+logic [1:0]  num;
+logic        wr, rd;
+logic        done;
+logic        last_load_req, last_save_req;
+logic [8:0]  buff_addr;
+logic [20:0] block_count;
+logic [31:0] lba_start;
+logic        last_ack;
 
-always @(posedge clk) begin
-   if (img_mounted[0]) begin image_mounted[0] <= ~img_readonly; image_size[0] <= img_size; end //ROM
-   if (img_mounted[1]) begin image_mounted[1] <= ~img_readonly; image_size[1] <= img_size; end //Extension A
-   if (img_mounted[2]) begin image_mounted[2] <= ~img_readonly; image_size[2] <= img_size; end //Extension B
-   if (img_mounted[3]) begin image_mounted[3] <= ~img_readonly; image_size[3] <= img_size; end //Computer CMOS
-   if (store_new_size) image_size[num] <= (64'(lookup_SRAM[num].size)) << 13;
+typedef enum logic [1:0] {
+    STATE_SLEEP, 
+    STATE_BUFF_WR, 
+    STATE_SD_IO, 
+    STATE_SRAM_WR
+} state_t;
+
+state_t      state;
+
+// SD buffer data read
+wire [7:0] buff_data;
+assign sd_buff_din[0] = buff_data;
+assign sd_buff_din[1] = buff_data;
+assign sd_buff_din[2] = buff_data;
+assign sd_buff_din[3] = buff_data;
+
+// RAM address calculation
+assign ram_addr = lookup_SRAM[num].addr + {sd_lba[num][16:0], buff_addr};
+
+initial begin
+   last_ack = 1'b0;
 end
 
-logic [3:0] request_load = 4'b0, request_save = 4'b0;
-logic [1:0] num          = 2'd0;
-logic       wr           = 1'b0, rd = 1'b0;
+always @(posedge clk) begin
+   if (img_mounted[0]) begin 
+      image_mounted[0] <= ~img_readonly; 
+      image_size[0] <= img_size; 
+   end 
+   if (img_mounted[1]) begin 
+      image_mounted[1] <= ~img_readonly; 
+      image_size[1] <= img_size; 
+   end 
+   if (img_mounted[2]) begin 
+      image_mounted[2] <= ~img_readonly; 
+      image_size[2] <= img_size; 
+   end 
+   if (img_mounted[3]) begin 
+      image_mounted[3] <= ~img_readonly; 
+      image_size[3] <= img_size; 
+   end 
+   if (store_new_size) 
+      image_size[num] <= {3'b0, lookup_SRAM[num].size, 13'b0};
+end
 
 always @(posedge clk) begin
-   logic last_load_req, last_save_req; 
-   if (~last_load_req & load_req) request_load <= 4'b1111;
-   if (~last_save_req & save_req) request_save <= 4'b1111;
+   last_load_req <= load_req;
+   last_save_req <= save_req;
+
+   if (~last_load_req & load_req)
+      request_load <= 4'b1111;
+
+   if (~last_save_req & save_req)
+      request_save <= 4'b1111;
+
    if (done) begin
       wr <= 1'b0;
       rd <= 1'b0;
       if (wr) request_save[num] <= 1'b0;
       if (rd) request_load[num] <= 1'b0;
    end
-   if (~wr & ~rd ) begin
+   
+   if (~wr & ~rd) begin
       if (request_save[num]) begin
-         wr  <= 1'b1;
-      end else
-         if (request_load[num]) begin
-            rd  <= 1'b1;
-         end else begin
-            if (num == 3) num <= 0;
-            else num <= num + 2'b1;
-         end
+         wr <= 1'b1;
+      end else if (request_load[num]) begin
+         rd <= 1'b1;
+      end else begin
+         num <= (num == 2'b11) ? 2'd0 : num + 2'b1;
+      end
    end
-   last_load_req <= load_req;
-   last_save_req <= save_req;
 end
 
-typedef enum logic [2:0] {STATE_SLEEP, STATE_CHECK_SIZE, STATE_FORMAT, STATE_PROCESS, STATE_NEXT} state_t;
-
-logic [20:0] block_count;
-logic [31:0] lba_start;
-logic        done = 1'b0;
-
-assign ram_we         = rd & sd_ack[num] & ~sd_buff_addr[9] ;
-assign ram_addr       = lookup_SRAM[num].addr + 18'({sd_lba[num],sd_buff_addr[8:0]});
-assign sd_buff_din[0] = ram_dout;
-assign sd_buff_din[1] = ram_dout;
-assign sd_buff_din[2] = ram_dout;
-assign sd_buff_din[3] = ram_dout;
-
-logic last_ack;
-state_t state;
-
-initial begin
-   last_ack = 1'b0;
-end
 always @(posedge clk) begin
    done <= 1'b0;
    store_new_size <= 1'b0;
-   case(state)
-      STATE_SLEEP: begin
-         if ((rd | wr) & ~done) begin
-            if (lookup_SRAM[num].size > 16'h00 & image_mounted[num] & (wr | (rd & (image_size[num] > 0)))) begin
-               sd_lba[num] <= 0;
-               block_count <= 21'(lookup_SRAM[num].size) << 1;
-               sd_wr[num]  <= wr;
-               sd_rd[num]  <= rd;
-               state       <= STATE_PROCESS;
-               $display("START %d", num);
-            end else begin
-               done <= 1'b1;
+   
+   if (ram_req) begin
+      ram_req <= 1'b0;
+      buff_addr <= buff_addr + (rd ? 9'd1 : 9'd0);
+   end else begin
+      case(state)
+         STATE_SLEEP: begin
+            ram_rnw <= 1'b1;
+            if ((rd | wr) & ~done) begin
+               if (lookup_SRAM[num].size > 16'h00 && image_mounted[num] && (wr || (rd && image_size[num] > 0))) begin
+                  sd_lba[num] <= 32'd0;
+                  block_count <= 21'(lookup_SRAM[num].size) << 1;
+                  buff_addr <= 9'd0;
+                  if (wr) begin
+                     state <= STATE_BUFF_WR;
+                     ram_req <= 1'b1;
+                  end
+                  if (rd) begin
+                     state <= STATE_SD_IO;
+                     sd_rd[num] <= 1'b1;
+                  end
+               end else begin
+                  done <= 1'b1;
+               end
             end
          end
-      end
-      STATE_PROCESS: begin
-         if (~sd_ack[num] & last_ack) begin
-            if (sd_lba[num][20:0] < (block_count - 21'd1)) begin
-               sd_lba[num] <= sd_lba[num] + 1'b1;
-            end else begin
-               sd_wr[num]     <= 1'b0;
-               sd_rd[num]     <= 1'b0;
-               done           <= 1'b1;
-               store_new_size <= wr;
-               state          <= STATE_SLEEP;
+
+         STATE_BUFF_WR: begin
+            if (ram_ready) begin
+               buff_addr <= buff_addr + 1'b1;
+               ram_req <= 1'b1;
+               if (buff_addr == 9'b111111111) begin
+                  ram_req <= 1'b0;
+                  sd_wr[num] <= 1'b1;
+                  state <= STATE_SD_IO;
+               end
             end
          end
-      end
-      default: ;
-   endcase
-   last_ack <= sd_ack[num];
+
+         STATE_SD_IO: begin
+            if (~sd_ack[num] & last_ack) begin
+               if (wr) begin
+                  sd_wr[num] <= 1'b0;
+                  if (sd_lba[num][20:0] < block_count - 21'd1) begin
+                     sd_lba[num] <= sd_lba[num] + 1'b1;
+                     state <= STATE_BUFF_WR;
+                     ram_req <= 1'b1;
+                  end else begin
+                     done <= 1'b1;
+                     store_new_size <= wr;
+                     state <= STATE_SLEEP;
+                  end
+               end else begin
+                  sd_rd[num] <= 1'b0;
+                  ram_req <= 1'b1;
+                  ram_rnw <= 1'b0;
+                  state <= STATE_SRAM_WR;
+               end
+            end
+         end
+
+         STATE_SRAM_WR: begin
+            if (ram_ready) begin
+               ram_req <= 1'b1;
+               if (buff_addr == 9'b111111111) begin
+                  if (sd_lba[num][20:0] < block_count - 21'd1) begin
+                     sd_lba[num] <= sd_lba[num] + 1'b1;
+                     state <= STATE_SD_IO;
+                     sd_rd[num] <= rd;
+                  end else begin
+                     state <= STATE_SLEEP;
+                     done <= 1'b1;
+                  end
+               end
+            end
+         end
+
+         default: ;
+      endcase
+      last_ack <= sd_ack[num];
+   end   
 end
+
+// Instantiate DPRAM
+dpram #(.addr_width(9)) NVRAMbuff
+(
+   .clock(clk),
+   .address_a(sd_buff_addr[8:0]),
+   .wren_a(sd_buff_wr),
+   .data_a(sd_buff_dout),
+   .q_a(buff_data),
+   .address_b(buff_addr),
+   .wren_b(state == STATE_BUFF_WR),
+   .data_b(ram_dout),
+   .q_b(ram_din)
+);
 
 endmodule

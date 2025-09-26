@@ -1,40 +1,37 @@
-module msx
+   module msx #(parameter sysCLK)
 (
-   input                    reset,
+   input                    core_reset,
+   input                    core_hard_reset,
    //Clock
-   input                    clk21m,
-   input                    ce_10m7_p,
-   input                    ce_3m58_p,
-   input                    ce_3m58_n,
-   input                    ce_5m39_n,
-   input                    ce_10hz,
-   input                    clk_sdram,
+   clock_bus_if.base_mp     clock_bus,
    //Video
-   output             [7:0] R,
-   output             [7:0] G,
-   output             [7:0] B,
-   output                   DE,
-   output                   HS,
-   output                   VS,
-   output                   hblank,
-   output                   vblank,
-   output                   ce_pix,
+   video_bus_if.device_mp   video_bus,
+   vram_bus_if.device_mp    vram_bus,
+   //Ext SD card
+   ext_sd_card_if.device_mp ext_SD_card_bus,
+   //Flash acces to SDRAM
+   flash_bus_if.device_mp   flash_bus,
+   memory_bus_if.device_mp  memory_bus,
+   //debug
+   output MSX::cpu_regs_t   cpu_regs,   
+   output  [31:0]           opcode,
+   output  [1:0]            opcode_num,
+   output                   opcode_out,
+   output logic [15:0]      opcode_PC_start,
    //I/O
-   output            [15:0] audio,
-   input  [           10:0] ps2_key,
-   input              [5:0] joy0,
-   input              [5:0] joy1,
+   output            [15:0] audio_L,
+   output            [15:0] audio_R,
+   input             [10:0] ps2_key,
+   input              [5:0] joy[2],
+   //UART
+   input              [7:0] uart_rx_data,
+   input                    uart_rx,
    //Cassete
-   output                   cas_motor,
-   input                    cas_audio_in,
+   output                   tape_motor_on,
+   input                    tape_in,
    //MSX config
    input             [64:0] rtc_time,
-   input MSX::bios_config_t bios_config,
-   input MSX::user_config_t msxConfig,
-   input  dev_typ_t         cart_device[2],
-   input  dev_typ_t         msx_device,
-   input              [3:0] msx_dev_ref_ram[8],
-   input  mapper_typ_t      selected_mapper[2],
+   input MSX::user_config_t msx_user_config,
    input                    sram_save,
    input                    sram_load,
    //IOCTL
@@ -42,27 +39,19 @@ module msx
    input             [15:0] ioctl_index,
    input             [26:0] ioctl_addr,
    //SDRAM/BRAM
-   output            [26:0] ram_addr,
-   output             [7:0] ram_din,
-   output                   ram_rnw,
-   output                   sdram_ce,
-   output                   bram_ce,
-   input              [7:0] ram_dout,
-   input              [1:0] sdram_size,
+   input MSX::slot_expander_t slot_expander[4],
    input MSX::block_t       slot_layout[64],
    input MSX::lookup_RAM_t  lookup_RAM[16],
    input MSX::lookup_SRAM_t lookup_SRAM[4],
+   input MSX::io_device_t   io_device[32][3],
+   input MSX::io_device_mem_ref_t io_memory[8],
+   input MSX::msx_config_t  msx_config,
    //KBD
-   input                    kbd_request,
-   input              [8:0] kbd_addr,
-   input              [7:0] kbd_din,
-   input                    kbd_we,
-   output            [26:0] flash_addr,
-   output             [7:0] flash_din,
-   output                   flash_req,
-   input                    flash_ready,
-   input                    flash_done,
+   input MSX::kb_memory_t   kb_upload_memory,
    //SD FDC
+   FDD_if.FDC_mp           FDD_bus[3]
+
+   /*
    input                    img_mounted,
    input             [31:0] img_size,
    input                    img_readonly,
@@ -73,428 +62,231 @@ module msx
    input             [13:0] sd_buff_addr,
    input              [7:0] sd_buff_dout,
    output             [7:0] sd_buff_din,
-   input                    sd_buff_wr,
-   output             [7:0] d_to_sd,
-   input              [7:0] d_from_sd,
-   output                   sd_tx,
-   output                   sd_rx
+   input                    sd_buff_wr
+	*/
 );
+
+device_bus device_bus();
+block_info block_info();
+cpu_bus_if cpu_bus(clock_bus.clk, reset);
+memory_bus_if memory_bus_slots();
+memory_bus_if memory_bus_devices();
+
+//TODO tempoary disabled
+assign cpu_regs        = '{default: '0};
+assign opcode_num      = '0;
+assign opcode_out      = '0;
+assign opcode_PC_start = '0;
+assign opcode          = '0;
+
+//  -----------------------------------------------------------------------------
+//  -- reset
+//  -----------------------------------------------------------------------------
+   logic reset = '0;
+   always_ff @(posedge clock_bus.clk) begin
+      reset <= core_hard_reset || (core_reset && ~reset_lock) || reset_request;
+   end
 
 //  -----------------------------------------------------------------------------
 //  -- Audio MIX
 //  -----------------------------------------------------------------------------
-wire  [9:0] audioPSG    = ay_ch_mix + {keybeep,5'b00000} + {(cas_audio_in & ~cas_motor),4'b0000};
-wire [16:0] fm          = {3'b00, audioPSG, 4'b0000};
-wire [16:0] audio_mix   = {cart_sound[15], cart_sound} + fm;
-wire [15:0] compr[7:0]  = '{ {1'b1, audio_mix[13:0], 1'b0}, 16'h8000, 16'h8000, 16'h8000, 16'h7FFF, 16'h7FFF, 16'h7FFF,  {1'b0, audio_mix[13:0], 1'b0}};
-assign audio            = compr[audio_mix[16:14]];
+wire [15:0] compr_L[7:0], compr_R[7:0];
+wire  [9:0] sysAudio    = {4'b0, keybeep,5'b00000} + {5'b0, (tape_in & ~tape_motor_on),4'b0000};
+wire [16:0] fm          = {3'b00, sysAudio, 4'b0000};
+wire [16:0] audio_mix_L   = {device_sound_L[15], device_sound_L} + fm;
+wire [16:0] audio_mix_R   = {device_sound_R[15], device_sound_R} + fm;
+assign compr_L            = '{ {1'b1, audio_mix_L[13:0], 1'b0}, 16'h8000, 16'h8000, 16'h8000, 16'h7FFF, 16'h7FFF, 16'h7FFF,  {1'b0, audio_mix_L[13:0], 1'b0}};
+assign compr_R            = '{ {1'b1, audio_mix_R[13:0], 1'b0}, 16'h8000, 16'h8000, 16'h8000, 16'h7FFF, 16'h7FFF, 16'h7FFF,  {1'b0, audio_mix_R[13:0], 1'b0}};
+assign audio_L            = compr_L[audio_mix_L[16:14]];
+assign audio_R            = compr_R[audio_mix_R[16:14]];
 
 //  -----------------------------------------------------------------------------
 //  -- T80 CPU
 //  -----------------------------------------------------------------------------
-wire [15:0] a;
-wire [7:0] d_to_cpu, d_from_cpu;
-wire mreq_n, wr_n, m1_n, iorq_n, rd_n, rfrsh_n;
-t80pa #(.Mode(0)) T80
+wire [7:0] d_to_cpu;
+wire cpu_interrupt;
+
+
+logic cpu_clk;
+always_comb begin
+   case(msx_config.cpu_clock_sel[1:0])
+      2'b00: cpu_clk = clock_bus.ce_3m58_n;
+      2'b01: cpu_clk = clock_bus.ce_10m7_n;
+      2'b10: cpu_clk = clock_bus.ce_5m39_n;
+      2'b11: cpu_clk = clock_bus.ce_3m58_n;
+      endcase
+end
+wire m1_n, mreq_n, iorq_n, rd_n, wr_n, rfsh_n;
+
+assign cpu_bus.cpu_mp.mreq    = ~mreq_n;
+assign cpu_bus.cpu_mp.iorq    = ~iorq_n;
+assign cpu_bus.cpu_mp.m1      = ~m1_n;
+assign cpu_bus.cpu_mp.rd      = ~rd_n;
+assign cpu_bus.cpu_mp.wr      = ~wr_n;
+assign cpu_bus.cpu_mp.rfsh    = ~rfsh_n;
+assign cpu_bus.cpu_mp.cpu_clk = cpu_clk;
+assign cpu_bus.cpu_mp.int_rq = cpu_interrupt;
+assign cpu_bus.cpu_mp.req     = ~((iorq_n & mreq_n) | (wr_n & rd_n) | iack);
+
+logic iack;
+always @(posedge cpu_bus.clk) begin
+   if (cpu_bus.reset)
+   iack <= 0;
+   else begin
+   if (iorq_n && mreq_n)
+      iack <= 0;
+   else
+      if (cpu_bus.cpu_mp.req)
+         iack <= 1;
+   end
+end
+
+
+TV80a #(.Mode(0), .R800_MULU(1), .IOWait(1)) Z80
 (
    .RESET_n(~reset),
-   .CLK(clk21m),
-   .CEN_p(ce_3m58_p),
-   .CEN_n(ce_3m58_n),
+   .R800_mode('0),
+   .CLK_n(cpu_clk),
    .WAIT_n(wait_n),
-   .INT_n(vdp_int_n),
-   .NMI_n(1),
-   .BUSRQ_n(1),
+   .INT_n(~cpu_interrupt),
+   .NMI_n('1),
+   .BUSRQ_n('1),
    .M1_n(m1_n),
    .MREQ_n(mreq_n),
    .IORQ_n(iorq_n),
    .RD_n(rd_n),
    .WR_n(wr_n),
-   .RFSH_n(rfrsh_n),
-   .HALT_n(1),
+   .RFSH_n(rfsh_n),
+   .HALT_n(),
    .BUSAK_n(),
-   .A(a),
+   .A(cpu_bus.cpu_mp.addr),
    .DI(d_to_cpu),
-   .DO(d_from_cpu)
+   .DO(cpu_bus.cpu_mp.data)
 );
-
 //  -----------------------------------------------------------------------------
 //  -- WAIT CPU
 //  -----------------------------------------------------------------------------
-wire exwait_n = 1;
+logic wait_n;
+logic [2:0] wait_count = 0;
+logic last_m1;
 
-logic wait_n = 1'b0;
-always @(posedge clk21m, negedge exwait_n, negedge u1_2_q) begin
-   if (~exwait_n)
-      wait_n <= 1'b0;
-   else if (~u1_2_q)
-      wait_n <= 1'b1;
-   else if (ce_3m58_p)
-      wait_n <= m1_n;
+always_ff @(negedge cpu_bus.cpu_clk) begin
+   last_m1 <= cpu_bus.device_mp.m1;
+   if (~last_m1 && cpu_bus.device_mp.m1) begin
+      wait_count <= msx_config.wait_count;
+   end else if (wait_count != 3'd0) begin
+      wait_count <= wait_count - 3'b01;
+   end
 end
 
-logic u1_2_q = 1'b0;
-always @(posedge clk21m, negedge exwait_n) begin
-   if (~exwait_n)
-      u1_2_q <= 1'b1;
-   else if (ce_3m58_p)
-      u1_2_q <= wait_n;
-end
-
-logic map_valid = 0;
-wire ppi_en = ~ppi_n;
-wire [1:0] slot;
-
-always @(posedge reset, posedge clk21m) begin
-    if (reset)
-        map_valid = 0;
-    else if (ppi_en)
-        map_valid = 1;
-end
-
-assign slot =    ~map_valid         ? 2'b00         :
-                  a[15:14] == 2'b00 ? ppi_out_a[1:0] :
-                  a[15:14] == 2'b01 ? ppi_out_a[3:2] :
-                  a[15:14] == 2'b10 ? ppi_out_a[5:4] :
-                                      ppi_out_a[7:6] ;
+assign wait_n = wait_count == 3'd00; // && ~dev_cpu_wait; //TODO OCM
 
 //  -----------------------------------------------------------------------------
-//  -- IO Decoder
+//  -- Slots
 //  -----------------------------------------------------------------------------
-wire psg_n  = ~((a[7:3] == 5'b10100)   & ~iorq_n & m1_n);
-wire ppi_n  = ~((a[7:3] == 5'b10101)   & ~iorq_n & m1_n);
-wire vdp_en =   (a[7:3] == 5'b10011)   & ~iorq_n & m1_n ;
-wire rtc_en =   (a[7:1] == 7'b1011010) & ~iorq_n & m1_n & bios_config.MSX_typ == MSX2;
+wire [1:0] active_slot;
 
-//  -----------------------------------------------------------------------------
-//  -- 82C55 PPI
-//  -----------------------------------------------------------------------------
-wire [7:0] d_from_8255;
-wire [7:0] ppi_out_a, ppi_out_c;
-wire keybeep = ppi_out_c[7];
-assign cas_motor =  ppi_out_c[4];
-jt8255 PPI
-(
-   .rst(reset),
-   .clk(clk21m),
-   .addr(a[1:0]),
-   .din(d_from_cpu),
-   .dout(d_from_8255),
-   .rdn(rd_n),
-   .wrn(wr_n),
-   .csn(ppi_n),
-   .porta_din(8'h0),
-   .portb_din(d_from_kb),
-   .portc_din(8'h0),
-   .porta_dout(ppi_out_a),
-   .portb_dout(),
-   .portc_dout(ppi_out_c)
- );
+assign active_slot =    //~map_valid                             ? default_slot   :
+                        cpu_bus.device_mp.addr[15:14] == 2'b00 ? slot_config[1:0] :
+                        cpu_bus.device_mp.addr[15:14] == 2'b01 ? slot_config[3:2] :
+                        cpu_bus.device_mp.addr[15:14] == 2'b10 ? slot_config[5:4] :
+                                                                 slot_config[7:6] ;
 
 //  -----------------------------------------------------------------------------
 //  -- CPU data multiplex
 //  -----------------------------------------------------------------------------
-assign d_to_cpu = rd_n   ? 8'hFF           :
-                  vdp_en ? d_to_cpu_vdp    :
-                  rtc_en ? d_from_rtc      :
-                  ~psg_n ? d_from_psg      :
-                  ~ppi_n ? d_from_8255     :
-                           d_from_slots    ;
+logic bus_read;
+assign bus_read = cpu_bus.device_mp.rd || (cpu_bus.iorq && cpu_bus.device_mp.m1);
+assign d_to_cpu = ~bus_read               ? 8'hFF           :
+                  device_oe_rq            ? device_data     :                       // prior data
+                  slot_oe_rq              ? d_from_slots    :                       // prior data
+                                            device_data & memory_bus.q & d_from_slots;
+
+
 //  -----------------------------------------------------------------------------
-//  -- Keyboard decoder
+//  -- devices and slots split
 //  -----------------------------------------------------------------------------
-wire [7:0] d_from_kb;
-keyboard msx_key
+
+assign memory_bus.addr    = memory_bus_slots.addr    & memory_bus_devices.addr;
+assign memory_bus.ram_cs  = memory_bus_slots.ram_cs  | memory_bus_devices.ram_cs;
+assign memory_bus.sram_cs = memory_bus_slots.sram_cs | memory_bus_devices.sram_cs;
+assign memory_bus.rnw     = memory_bus_slots.rnw     & memory_bus_devices.rnw;
+assign memory_bus.data    = memory_bus_slots.data    & memory_bus_devices.data;
+
+assign memory_bus_slots.q   = memory_bus.q;
+assign memory_bus_devices.q = memory_bus.q;
+
+wire  [7:0] device_data;
+wire  [7:0] data_to_mapper;
+wire  [7:0] slot_config;
+wire        device_oe_rq;
+wire        keybeep;
+wire        reset_lock, reset_request, ocm_megaSD_enable;
+wire [1:0]  ocm_slot2_mode;
+wire        ocm_slot1_mode;
+//wire [1:0]  dev_cpu_clock_sel;
+//wire        dev_cpu_wait;
+wire signed [15:0] device_sound_L, device_sound_R;
+devices #(.sysCLK(sysCLK)) devices
 (
-   .reset(reset),
-   .clk(clk21m),
+   .clock_bus(clock_bus),
+   .cpu_bus(cpu_bus),
+   .device_bus(device_bus),
+   .FDD_bus(FDD_bus),
+   .io_device(io_device),
+   .io_memory(io_memory),
+   .sound_L(device_sound_L),
+   .sound_R(device_sound_R),
+   .data(device_data),
+   .data_oe_rq(device_oe_rq),
+   .data_to_mapper(data_to_mapper),
+   .memory_bus(memory_bus_devices),
+   .block_info(block_info),
+   .vram_bus(vram_bus),
+   .video_bus(video_bus),
+   .cpu_interrupt(cpu_interrupt),
+   .kb_upload_memory(kb_upload_memory),
    .ps2_key(ps2_key),
-   .kb_row(ppi_out_c[3:0]),
-   .kb_data(d_from_kb),
-   .kbd_addr(kbd_addr),
-   .kbd_din(kbd_din),
-   .kbd_we(kbd_we),
-   .kbd_request(kbd_request)
+   .rtc_time(rtc_time),
+   .uart_rx(uart_rx),
+   .uart_rx_data(uart_rx_data),
+   .joy(joy),
+   .tape_in(tape_in),
+   .tape_motor_on(tape_motor_on),
+   .slot_config(slot_config),
+   .keybeep(keybeep),
+   .msx_user_config(msx_user_config),
+   .reset_lock(reset_lock),
+   .reset_request(reset_request),
+   //.cpu_wait(dev_cpu_wait),
+   //.cpu_clock_sel(dev_cpu_clock_sel),
+   .ocm_megaSD_enable(ocm_megaSD_enable),
+   .ocm_slot1_mode(ocm_slot1_mode),
+   .ocm_slot2_mode(ocm_slot2_mode)
 );
 
-//  -----------------------------------------------------------------------------
-//  -- Sound AY-3-8910
-//  -----------------------------------------------------------------------------
-wire [7:0] d_from_psg, psg_ioa, psg_iob;
-wire [5:0] joy_a = psg_iob[4] ? 6'b111111 : {~joy0[5], ~joy0[4], ~joy0[0], ~joy0[1], ~joy0[2], ~joy0[3]};
-wire [5:0] joy_b = psg_iob[5] ? 6'b111111 : {~joy1[5], ~joy1[4], ~joy1[0], ~joy1[1], ~joy1[2], ~joy1[3]};
-wire [5:0] joyA = joy_a & {psg_iob[0], psg_iob[1], 4'b1111};
-wire [5:0] joyB = joy_b & {psg_iob[2], psg_iob[3], 4'b1111};
-assign psg_ioa = {cas_audio_in,1'b0, psg_iob[6] ? joyB : joyA};
-wire [9:0] ay_ch_mix;
-
-logic u21_1_q = 1'b0;
-always @(posedge clk21m,  posedge psg_n) begin
-   if (psg_n)
-      u21_1_q <= 1'b0;
-   else if (ce_3m58_p)
-      u21_1_q <= ~psg_n;
-end
-
-logic u21_2_q = 1'b0;
-always @(posedge clk21m, posedge psg_n) begin
-   if (psg_n)
-      u21_2_q <= 1'b0;
-   else if (ce_3m58_p)
-      u21_2_q <= u21_1_q;
-end
-
-wire psg_e = !(!u21_2_q | ce_3m58_p) | psg_n;
-wire psg_bc   = !(a[0] | psg_e);
-wire psg_bdir = !(a[1] | psg_e);
-jt49_bus PSG
-(
-   .rst_n(~reset),
-   .clk(clk21m),
-   .clk_en(ce_3m58_p),
-   .bdir(psg_bdir),
-   .bc1(psg_bc),
-   .din(d_from_cpu),
-   .sel(0),
-   .dout(d_from_psg),
-   .sound(ay_ch_mix),
-   .A(),
-   .B(),
-   .C(),
-   .IOA_in(psg_ioa),
-   .IOA_out(),
-   .IOB_in(8'hFF),
-   .IOB_out(psg_iob)
-);
-
-//  -----------------------------------------------------------------------------
-//  -- RTC
-//  -----------------------------------------------------------------------------
-wire [7:0] d_from_rtc;
-rtc rtc
-(
-   .clk21m(clk21m),
-   .reset(reset),
-   .setup(reset),
-   .rt(rtc_time),
-   .clkena(ce_10hz),
-   .req(req & rtc_en),
-   .ack(),
-   .wrt(~wr_n),
-   .adr(a),
-   .dbi(d_from_rtc),
-   .dbo(d_from_cpu)
-);
-
-//  -----------------------------------------------------------------------------
-//  -- Video
-//  -----------------------------------------------------------------------------
-wire       VRAM_we_lo_vdp, VRAM_we_hi_vdp, vdp18, vdp ;
-wire       vdp_int_n;
-wire [7:0] d_to_cpu_vdp;
-
-assign vdp18          = bios_config.MSX_typ == MSX1;
-assign vdp            = bios_config.MSX_typ == MSX2;
-
-//CPU access
-assign d_to_cpu_vdp   = vdp18 ? d_from_vdp18                : d_from_vdp;
-assign vdp_int_n      = vdp18 ? int_n_vdp18                 : int_n_vdp;
-
-//Video access
-assign R              = vdp18 ? R_vdp18                     : {R_vdp,R_vdp[5:4]};
-assign G              = vdp18 ? G_vdp18                     : {G_vdp,G_vdp[5:4]};
-assign B              = vdp18 ? B_vdp18                     : {B_vdp,B_vdp[5:4]};
-assign HS             = vdp18 ? ~HS_n_vdp18                 : ~HS_n_vdp;
-assign VS             = vdp18 ? ~VS_n_vdp18                 : ~VS_n_vdp;
-assign DE             = vdp18 ? DE_vdp18                    : DE_vdp;
-assign hblank         = vdp18 ? hblank_vdp18                : hblank_vdp_cor;
-assign vblank         = vdp18 ? vblank_vdp18                : vblank_vdp;
-assign ce_pix         = vdp18 ? ce_5m39_n                   : ~DHClk_vdp;
-
-logic hblank_vdp_cor;
-always @(posedge clk21m) begin
-   if (hblank_vdp)
-      hblank_vdp_cor <= 1'b1;
-   else 
-      if (DHClk_vdp & DLClk_vdp)
-         hblank_vdp_cor <= 1'b0;
-end
-
-
-//VRAM access
-assign VRAM_address   = vdp18 ? {2'b00, VRAM_address_vdp18} : VRAM_address_vdp[15:0];
-assign VRAM_we_lo     = vdp18 ? VRAM_we_vdp18               : VRAM_we_lo_vdp;
-assign VRAM_we_hi     = vdp18 ? 1'b0                        : VRAM_we_hi_vdp;
-assign VRAM_do        = vdp18 ? VRAM_do_vdp18               : VRAM_do_vdp;
-
-assign VRAM_we_lo_vdp = ~VRAM_we_n_vdp & DLClk_vdp & ~VRAM_address_vdp[16];
-assign VRAM_we_hi_vdp = ~VRAM_we_n_vdp & DLClk_vdp &  VRAM_address_vdp[16];
-
-logic iack;
-always @(posedge clk21m) begin
-   if (reset) iack <= 0;
-   else begin
-      if (iorq_n  & mreq_n)
-         iack <= 0;
-      else
-         if (req)
-            iack <= 1;
-   end
-end
-wire req = ~((iorq_n & mreq_n) | (wr_n & rd_n) | iack);
-
-wire        int_n_vdp18;
-wire  [7:0] d_from_vdp18;
-wire  [7:0] R_vdp18, G_vdp18, B_vdp18;
-wire        HS_n_vdp18, VS_n_vdp18, DE_vdp18, DLClk_vdp18, hblank_vdp18, vblank_vdp18, Blank_vdp18;
-wire [13:0] VRAM_address_vdp18;
-wire  [7:0] VRAM_do_vdp18;
-wire        VRAM_we_vdp18;
-vdp18_core #(.compat_rgb_g(0)) vdp_vdp18
-(
-   .clk_i(clk21m),
-   .clk_en_10m7_i(ce_10m7_p),
-   .reset_n_i(~reset),
-   .csr_n_i(~(vdp_en & vdp18) | rd_n),
-   .csw_n_i(~(vdp_en & vdp18) | wr_n),
-   .mode_i(a[0]),
-   .cd_i(d_from_cpu),
-   .cd_o(d_from_vdp18),
-   .int_n_o(int_n_vdp18),
-   .vram_we_o(VRAM_we_vdp18),
-   .vram_a_o(VRAM_address_vdp18),
-   .vram_d_o(VRAM_do_vdp18),
-   .vram_d_i(VRAM_di_lo),
-   .border_i(msxConfig.border),
-   .rgb_r_o(R_vdp18),
-   .rgb_g_o(G_vdp18),
-   .rgb_b_o(B_vdp18),
-   .hsync_n_o(HS_n_vdp18),
-   .vsync_n_o(VS_n_vdp18),
-   .hblank_o(hblank_vdp18),
-   .vblank_o(vblank_vdp18),
-   .blank_n_o(DE_vdp18),
-   .is_pal_i(msxConfig.video_mode == PAL)
-);
-
-wire        int_n_vdp;
-wire  [7:0] d_from_vdp;
-wire  [5:0] R_vdp, G_vdp, B_vdp;
-wire        HS_n_vdp, VS_n_vdp, DE_vdp, DLClk_vdp, DHClk_vdp, Blank_vdp, hblank_vdp, vblank_vdp;
-wire [16:0] VRAM_address_vdp;
-wire  [7:0] VRAM_do_vdp;
-wire        VRAM_we_n_vdp;
-vdp vdp_vdp 
-(
-   .CLK21M(clk21m),
-   .RESET(reset),
-   .REQ(req & vdp_en & vdp),
-   .ACK(),
-   .WRT(~wr_n),
-   .ADR(a),
-   .DBI(d_from_vdp),
-   .DBO(d_from_cpu),
-   .INT_N(int_n_vdp),
-   .PRAMOE_N(),
-   .PRAMWE_N(VRAM_we_n_vdp),
-   .PRAMADR(VRAM_address_vdp),
-   .PRAMDBI({VRAM_di_hi, VRAM_di_lo}),
-   .PRAMDBO(VRAM_do_vdp),
-   .VDPSPEEDMODE(0),
-   .CENTERYJK_R25_N(0),
-   .PVIDEOR(R_vdp),
-   .PVIDEOG(G_vdp),
-   .PVIDEOB(B_vdp),
-   .PVIDEODE(DE_vdp),
-   .BLANK_O(Blank_vdp),
-   .HBLANK(hblank_vdp),
-   .VBLANK(vblank_vdp),
-   .PVIDEOHS_N(HS_n_vdp),
-   .PVIDEOVS_N(VS_n_vdp),
-   .PVIDEOCS_N(),
-   .PVIDEODHCLK(DHClk_vdp),
-   .PVIDEODLCLK(DLClk_vdp),
-   .DISPRESO(/*msxConfig.scandoubler*/ 0),
-   .LEGACY_VGA(1),
-   .RATIOMODE(3'b000),
-   .NTSC_PAL_TYPE(msxConfig.video_mode == AUTO),
-   .FORCED_V_MODE(msxConfig.video_mode == PAL),
-   .BORDER(msxConfig.border),
-   .VDP_ID(5'b00000 | msxConfig.vdp_id << 1)
-);
-
-wire [15:0] VRAM_address;
-wire  [7:0] VRAM_do, VRAM_di_lo, VRAM_di_hi;
-wire        VRAM_we_lo, VRAM_we_hi;
-spram #(.addr_width(16),.mem_name("VRA2")) vram_lo
-(
-   .clock(clk21m),
-   .address(VRAM_address),
-   .wren(VRAM_we_lo),
-   .data(VRAM_do),
-   .q(VRAM_di_lo)
-);
-spram #(.addr_width(16),.mem_name("VRA3")) vram_hi
-(
-   .clock(clk21m),
-   .address(VRAM_address),
-   .wren(VRAM_we_hi),
-   .data(VRAM_do),
-   .q(VRAM_di_hi)
-);
-
-wire         [7:0] d_from_slots;
-wire signed [15:0] cart_sound;
+wire  [7:0] d_from_slots;
+wire        slot_oe_rq;
 msx_slots msx_slots
 (
-   .clk(clk21m),
-   .clk_en(ce_3m58_p),
-   .reset(reset),
-   .cpu_addr(a),
-   .cpu_din(d_from_slots),  
-   .cpu_dout(d_from_cpu),
-   .cpu_iorq(~iorq_n),
-   .cpu_m1(~m1_n),
-   .cpu_mreq(~mreq_n),
-   .cpu_rd(~rd_n),
-   .cpu_wr(~wr_n),
-   .sound(cart_sound),
-   .ram_addr(ram_addr),
-   .ram_din(ram_din),
-   .ram_rnw(ram_rnw),
-   .ram_dout(ram_dout),
-   .sdram_ce(sdram_ce),
-   .bram_ce(bram_ce),
-   .sdram_size(sdram_size),
-   .flash_addr(flash_addr),
-   .flash_din(flash_din),
-   .flash_req(flash_req),
-   .flash_ready(flash_ready),
-   .flash_done(flash_ready),
+   .clock_bus(clock_bus),
+   .cpu_bus(cpu_bus),
+   .device_bus(device_bus),
+   .ext_SD_card_bus(ext_SD_card_bus),
+   .flash_bus(flash_bus),
+   .slot_expander(slot_expander),
    .slot_layout(slot_layout),
-   .img_mounted(img_mounted),
-   .img_size(img_size),
-   .img_readonly(img_readonly),
-   .sd_lba(sd_lba),
-   .sd_rd(sd_rd),
-   .sd_wr(sd_wr),
-   .sd_ack(sd_ack),
-   .sd_buff_addr(sd_buff_addr),
-   .sd_buff_dout(sd_buff_dout),
-   .sd_buff_din(sd_buff_din),
-   .sd_buff_wr(sd_buff_wr),
-   .active_slot(slot),
    .lookup_RAM(lookup_RAM),
    .lookup_SRAM(lookup_SRAM),
-   .bios_config(bios_config),
-   .cart_device(cart_device),
-   .msx_device(msx_device),
-   .msx_dev_ref_ram(msx_dev_ref_ram),
-   .selected_mapper(selected_mapper),
-   .sd_tx(sd_tx),
-   .sd_rx(sd_rx),
-   .d_to_sd(d_to_sd),
-   .d_from_sd(d_from_sd)
+   .data(d_from_slots),
+   .data_oe_rq(slot_oe_rq),
+   .memory_bus(memory_bus_slots),
+   .block_info(block_info),
+   .active_slot(active_slot),
+   .data_to_mapper(data_to_mapper),
+   .ocm_megaSD_enable(ocm_megaSD_enable),
+   .ocm_slot1_mode(ocm_slot1_mode),
+   .ocm_slot2_mode(ocm_slot2_mode)
 );
 
 endmodule

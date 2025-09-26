@@ -1,0 +1,20 @@
+{
+  "NONE": 0,
+  "OPLL": 1,
+  "SCC": 2,
+  "WD2793": 3,
+  "MEM_MAPPER": 4,
+  "LATCH_PORT": 5,
+  "KANJI": 6,
+  "OCM_BOOT": 7,
+  "TMS99xx": 8,
+  "V99xx": 9,
+  "RTC":10,
+  "PSG":11,
+  "PPI":12,
+  "RESET_STATUS":13,
+  "TC8566AF":14,
+  "OPM":15,
+  "YM2148":16,
+  "DAC":17
+}
