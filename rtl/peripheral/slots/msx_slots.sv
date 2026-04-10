@@ -352,12 +352,14 @@ cart_konami_scc konami_scc
 );
 
 wire        [7:0] scc_sound_dout;
-//wire signed [15:0] scc_wave;
-wire signed [10:0] scc_wave; // for IKASCC's waveout [10:0]
+wire signed [15:0] scc_wave;
 scc_sound scc_sound
 (
    .cs(mapper_konami_scc_sccReq | mapper_mfrdsd1_sccReq),  
-   .cpu_addr(cpu_addr[7:0]),
+   .cpu_rd(cpu_rd),
+   .cpu_wr(cpu_wr),
+   .cpu_mreq(cpu_mreq),
+   .cpu_addr(cpu_addr),
    .din(cpu_dout),
    .scc_dout(scc_sound_dout),
    .oe({|(cart_device[1] & (DEV_SCC | DEV_SCC2)), |(cart_device[0] & (DEV_SCC | DEV_SCC2))}),

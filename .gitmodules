@@ -4,3 +4,6 @@
 [submodule "rtl/peripheral/SOUND/jt51"]
 	path = rtl/peripheral/SOUND/jt51
 	url = https://github.com/jotego/jt51.git
+[submodule "rtl/IKASCC"]
+	path = rtl/IKASCC
+	url = https://github.com/ika-musume/IKASCC

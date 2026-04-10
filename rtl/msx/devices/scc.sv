@@ -44,25 +44,11 @@ module dev_scc (
     output           [7:0] data
 );
 
-    assign sound = (io_device[0].enable ? {sound_SCC[0][14], sound_SCC[0]} : '0) +
-                   (io_device[1].enable ? {sound_SCC[1][14], sound_SCC[1]} : '0);
-
-    always_ff @(posedge cpu_bus.clk) begin
-        if (cpu_bus.reset) begin
-            scc_mode    <= 2'b00;
-            scc_plus    <= 2'b00;
-        end else begin
-            scc_mode[0] <= io_device[0].device_ref == device_bus.device_ref ? device_bus.mode : scc_mode[0];
-            scc_mode[1] <= io_device[1].device_ref == device_bus.device_ref ? device_bus.mode : scc_mode[1];
-            scc_plus[0] <= io_device[0].device_ref == device_bus.device_ref ? device_bus.param : scc_plus[0];
-            scc_plus[1] <= io_device[1].device_ref == device_bus.device_ref ? device_bus.param : scc_plus[1];
-        end
-    end
-
-    wire signed [14:0] sound_SCC[0:1];
+    wire signed [10:0] sound_SCC[0:1];
     wire [7:0] data_SCC[2];
-    logic [1:0] scc_mode;
-    logic [1:0] scc_plus;
+
+    assign sound = (io_device[0].enable ? { {5{sound_SCC[0][10]}}, sound_SCC[0] } : '0) +
+                   (io_device[1].enable ? { {5{sound_SCC[1][10]}}, sound_SCC[1] } : '0);
 
     assign data = cpu_bus.rd ? data_SCC[0] & data_SCC[1] : 8'hFF;
 
@@ -70,19 +56,18 @@ module dev_scc (
     generate
         for (i = 0; i < 2; i++) begin : SCC_INSTANCES
             wire cs_dev_bus   = (io_device[i].enable && io_device[i].device_ref == device_bus.device_ref && device_bus.en);
-            scc_wave SCC_i (
-                .clk(cpu_bus.clk),
-                .clkena(clock_bus.ce_3m58_n),
-                .reset(cpu_bus.reset),
-                .req(cs_dev_bus && (cpu_bus.rd || cpu_bus.wr)),
-                .ack(),
-                .wrt(cpu_bus.wr && cpu_bus.req),
-                .adr(cpu_bus.addr[7:0]),
-                .dbo(cpu_bus.data),
-                .dbi(data_SCC[i]),
-                .wave(sound_SCC[i]),
-                .sccPlusChip(scc_plus[i]),
-                .sccPlusMode(scc_mode[i])
+            IKASCC #(.IMPL_TYPE(1), .RAM_BLOCK(1)) SCC_i (
+                .i_EMUCLK(cpu_bus.clk),
+                .i_MCLK_PCEN_n(~clock_bus.ce_3m58_n),
+                .i_RST_n(~cpu_bus.reset),
+                .i_CS_n(~cs_dev_bus),
+                .i_RD_n(~cpu_bus.rd),
+                .i_WR_n(~cpu_bus.wr),
+                .i_ABLO(cpu_bus.addr[7:0]),
+                .i_ABHI(cpu_bus.addr[15:11]),
+                .i_DB(cpu_bus.data),
+                .o_DB(data_SCC[i]),
+                .o_SOUND(sound_SCC[i])
             );
         end
     endgenerate

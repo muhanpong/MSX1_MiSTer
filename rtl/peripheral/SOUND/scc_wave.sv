@@ -20,14 +20,14 @@
 // THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
 // "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
 // TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
-// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR
-// CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
-// EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-// OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-// OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-// ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
+// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+// POSSIBILITY OF SUCH DAMAGE.
 //
 
 //  2007/01/31  modified by t.hara
@@ -144,7 +144,7 @@ always @(posedge clk) begin
             ff_cnt[2] <= reg_freq[2];
          end else begin
             if (ff_cnt[2] == 12'd0) begin
-               ff_ptr[2] <= ff_ptr[2] + 5'd1;wave
+               ff_ptr[2] <= ff_ptr[2] + 5'd1;
                ff_cnt[2] <= reg_freq[2];
             end else begin
                ff_cnt[2] <= ff_cnt[2] - 12'd1;
@@ -226,21 +226,7 @@ always @(posedge clk) begin
 end
 
 // wave out
-always @(posedge clk) beginscc_wave scc_wave_B
-//(
-//   .clk(clk),
-//   .clkena(clk_en),
-//   .reset(reset),
-//   .req(cart_num & cs),   
-//   .ack(),
-//   .wrt(cpu_wr & cpu_mreq),
-//   .adr(cpu_addr),
-//   .dbo(din),
-//   .dbi(scc_dout_B),
-//   .wave(wave_B),
-//   .sccPlusChip(sccPlusChip[1]),
-//   .sccPlusMode(sccPlusMode[1])
-//);
+always @(posedge clk) begin
    if (reset)
       ff_wave <= 15'd0;
    else
