@@ -1,0 +1,105 @@
+// PSG device
+//
+// Copyright (c) 2024-2025 Molekula
+//
+// All rights reserved
+//
+// Redistribution and use in source and synthezised forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// * Redistributions of source code must retain the above copyright notice,
+//   this list of conditions and the following disclaimer.
+//
+// * Redistributions in synthesized form must reproduce the above copyright
+//   notice, this list of conditions and the following disclaimer in the
+//   documentation and/or other materials provided with the distribution.
+//
+// * Neither the name of the author nor the names of other contributors may
+//   be used to endorse or promote products derived from this software without
+//   specific prior written agreement from the author.
+//
+// * License is granted for non-commercial use only.  A fee may not be charged
+//   for redistributions as source code or in synthesized/hardware form without
+//   specific prior written agreement from the author.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
+// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+// POSSIBILITY OF SUCH DAMAGE.
+//
+
+
+module dev_psg (
+    cpu_bus_if.device_mp   cpu_bus,
+    clock_bus_if.base_mp   clock_bus,
+    input MSX::io_device_t io_device[3],
+    output signed [15:0]   sound,
+    input          [5:0]   joy[2],
+    input                  tape_in,
+    output           [7:0] data
+);
+
+    wire [7:0] ioA, ioB;
+    wire [5:0] joy_a, joy_b, joyA, joyB;
+    wire [7:0] psg_data[3], data_tmp[3];
+    wire [9:0] audio_PSG[3];
+    wire [7:0] psg_ioB[3];
+    wire       io_en;
+
+    assign joy_a = ioB[4] ? 6'b111111 : {~joy[0][5], ~joy[0][4], ~joy[0][0], ~joy[0][1], ~joy[0][2], ~joy[0][3]};
+    assign joy_b = ioB[5] ? 6'b111111 : {~joy[1][5], ~joy[1][4], ~joy[1][0], ~joy[1][1], ~joy[1][2], ~joy[1][3]};
+    assign joyA  = joy_a & {ioB[0], ioB[1], 4'b1111};
+    assign joyB  = joy_b & {ioB[2], ioB[3], 4'b1111};
+    
+    assign sound = (io_device[0].enable ? {2'b00, audio_PSG[0], 4'b0000} : '0) +
+                   (io_device[1].enable ? {2'b00, audio_PSG[1], 4'b0000} : '0) +
+                   (io_device[2].enable ? {2'b00, audio_PSG[2], 4'b0000} : '0);
+
+    assign data  = psg_data[0] & psg_data[1] & psg_data[2];
+    
+    assign ioB   = (io_device[0].param[0] ? psg_ioB[0]  : '1) &
+                   (io_device[1].param[0] ? psg_ioB[1]  : '1) &
+                   (io_device[2].param[0] ? psg_ioB[2]  : '1); 
+
+    assign ioA   = {tape_in, 1'b0, ioB[6] ? joyB : joyA};
+
+    assign io_en = cpu_bus.iorq && ~cpu_bus.m1;
+    
+    genvar i;
+
+    generate
+        for (i = 0; i < 3; i++) begin : PSG_INSTANCES
+            wire cs_io_active = (cpu_bus.addr[7:0] & io_device[i].mask) == io_device[i].port;
+            wire cs_enable = io_device[i].enable && cs_io_active && io_en;
+            
+            assign psg_data[i] = cs_enable && io_device[i].param[0] ? data_tmp[i] : '1;
+            
+            jt49_bus psg_i (
+                    .rst_n(~cpu_bus.reset),
+                    .clk(cpu_bus.clk),
+                    .clk_en(clock_bus.ce_3m58_p),
+                    .bdir(cs_enable &&  ~cpu_bus.addr[1]),
+                    .bc1(cs_enable &&  ~cpu_bus.addr[0]),
+                    .din(cpu_bus.data),
+                    .sel(0),
+                    .dout(data_tmp[i]),
+                    .sound(audio_PSG[i]),
+                    .A(),
+                    .B(),
+                    .C(),
+                    .IOA_in(io_device[i].param[0] ? ioA : '1),
+                    .IOA_out(),
+                    .IOB_in('1),
+                    .IOB_out(psg_ioB[i])
+            );
+        end
+    endgenerate
+
+endmodule

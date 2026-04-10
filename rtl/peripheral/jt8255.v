@@ -13,7 +13,6 @@
     Version: 1.0
     Date: 28-3-2021
  */
-
 module jt8255(
     input               rst,
     input               clk,
@@ -33,7 +32,10 @@ module jt8255(
 
     output reg  [7:0]   porta_dout,
     output reg  [7:0]   portb_dout,
-    output      [7:0]   portc_dout
+    output      [7:0]   portc_dout,
+
+    input       [7:0]   porta_reset_default,
+    input       [6:0]   control_reset_default
 );
 
 localparam ISINA=4, ISINB=1, ISINCL=0, ISINCH=3; // Control word bits
@@ -78,8 +80,9 @@ assign last_stbb = last_ackb;
 // Mode control
 always @(posedge clk, posedge rst) begin
     if( rst ) begin
-        ctrl       <= 7'h1b;
-        latch_a    <= 8'hff;
+        //ctrl       <= 7'h1b;
+        //latch_a    <= 8'hff;
+        latch_a    <= porta_reset_default;
         latch_b    <= 8'hff;
         latch_c    <= 8'hff;
 

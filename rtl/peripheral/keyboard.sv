@@ -1,14 +1,48 @@
+// keyboard interface
+//
+// Copyright (c) 2024 Molekula
+//
+// All rights reserved
+//
+// Redistribution and use in source and synthezised forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// * Redistributions of source code must retain the above copyright notice,
+//   this list of conditions and the following disclaimer.
+//
+// * Redistributions in synthesized form must reproduce the above copyright
+//   notice, this list of conditions and the following disclaimer in the
+//   documentation and/or other materials provided with the distribution.
+//
+// * Neither the name of the author nor the names of other contributors may
+//   be used to endorse or promote products derived from this software without
+//   specific prior written agreement from the author.
+//
+// * License is granted for non-commercial use only.  A fee may not be charged
+//   for redistributions as source code or in synthesized/hardware form without
+//   specific prior written agreement from the author.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+// THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+// PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE
+// LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+// CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+// SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+// INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+// CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+// ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+// POSSIBILITY OF SUCH DAMAGE.
+//
+
 module keyboard
 (
-   input         clk,
-   input         reset,
-   input  [10:0] ps2_key,
-   input   [3:0] kb_row,
-   output  [7:0] kb_data,
-   input   [8:0] kbd_addr,
-   input   [7:0] kbd_din,
-   input         kbd_we,
-   input         kbd_request
+   input                  clk,
+   input                  reset,
+   input           [10:0] ps2_key,
+   input            [3:0] kb_row,
+   output           [7:0] kb_data,
+   input MSX::kb_memory_t upload_memory
 );
 
 wire [3:0] row;
@@ -21,9 +55,8 @@ logic [7:0] pos;
 assign kb_data    = row_state[kb_row];
 assign key_decode = ps2_key[8:0];
 
+logic [10:0] old_key = 11'd0;
 always @(posedge clk) begin
-   logic [10:0] old_key = 11'd0;
-   
    change     <= 1'b0;
    old_key <= ps2_key;
    if (old_key != ps2_key) begin
@@ -32,8 +65,8 @@ always @(posedge clk) begin
    end
 end
 
-assign row = map[7:4];
-assign pos = 8'b1 << map[3:0];
+assign row = map_key[7:4];
+assign pos = 8'b1 << map_key[3:0];
 
 always @(posedge clk) begin
    if (change) begin
@@ -41,14 +74,14 @@ always @(posedge clk) begin
    end
 end
 
-wire [7:0] map;
+wire [7:0] map_key;
 spram #(.addr_width(9), .mem_name("KBD"), .mem_init_file("kbd.mif")) kbd_ram 
 (
    .clock(clk),
-   .address(kbd_request ? kbd_addr : key_decode),
-   .data(kbd_din),
-   .q(map),
-   .wren(kbd_we)
+   .address(upload_memory.rq ? upload_memory.addr : key_decode),
+   .data(upload_memory.data),
+   .q(map_key),
+   .wren(upload_memory.we)
 );
 
 endmodule

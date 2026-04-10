@@ -75,7 +75,8 @@ entity dpram is
 	generic (
 		addr_width    : integer := 8;
 		data_width    : integer := 8;
-		mem_init_file : string := " "
+		mem_init_file : string := " ";
+		mem_name      : string := "MEM" -- for InSystem Memory content editor.
 	);
 	PORT
 	(

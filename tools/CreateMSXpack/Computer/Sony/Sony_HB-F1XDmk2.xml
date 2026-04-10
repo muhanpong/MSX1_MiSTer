@@ -1,50 +1,53 @@
 <?xml version="1.0" ?>
 <msxConfig>
-  <type>MSX2</type>
+  <cpu>Z80</cpu>                   <!-- Z80 --> 
+  <wait_count>1</wait_count>       <!-- 0 - 3 -->  
+  <cpu_frequency>0</cpu_frequency> <!-- 0-3.58, 1-5.39, 2-10.7-->  
+  <device mask="0xFC" port="0x98" VDP_ID="V9938">V99xx</device>
+  <device mask="0xF8" port="0xA0" system="true">PSG</device>
+  <device mask="0xF8" port="0xA8">PPI</device>
+  <device mask="0xFE" port="0xB4">RTC</device>
   <kbd_layout>/yX/cWdlZv//ZP//cHMh////YP9hRgH///9XUCZUAv//MFUxMgQD//+AUzNRRwX//0MnNTRWBv///0I3UgcQ//8iQDZEABH//yMkQRdFEv///yD/FRP//2Ngdxb/FP//////////df///////////////////3L/dv//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////Yv//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////hIH///+Cg4b/h4X///////90//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////8=</kbd_layout>
   <primary slot="0">
     <secondary slot="0">
-      <block start="0">
-        <type>ROM</type>
-        <block_count>2</block_count>
-        <filename>hb-f1xdmk2_basic-bios2.rom</filename>
-        <SHA1>4ce41fcc1a603411ec4e99556409c442078f0ecf</SHA1>
+      <block start="0" count="2">
+        <memory SHA1="4ce41fcc1a603411ec4e99556409c442078f0ecf" filename="hb-f1xdmk2_basic-bios2">ROM</memory>
       </block>
     </secondary>
   </primary>
+  <primary slot="3">
+    <secondary slot="0">
+      <block start="0" count="1">
+        <memory SHA1="0fbd45ef3dd7bb82d4c31f1947884f411f1ca344" filename="hb-f1xdmk2_msx2sub.rom">ROM</memory>
+      </block>
+      <block start="1" count="1">
+        <memory SHA1="12f2cc79b3d09723840bae774be48c0d721ec1c6" filename="hb-f1xdmk2_disk.rom">ROM</memory>
+        <device style="Philips" fdd_count="1">WD2793</device>
+      </block>
+      <block start="2" count="1">
+        <ref to_block="1">DEVICE</ref>
+      </block>
+    </secondary>
+    <secondary slot="3">
+      <block start="0">
+        <memory size="65536" pattern="4">RAM</memory>
+        <mapper>MSX2_RAM</mapper>
+        <device mask="0xFC" port="0xFC" size="65536">MEM_MAPPER</device>
+      </block>
+    </secondary>
+  </primary>  
+  <!-- Location of external slots at the end of the XML definition -->
   <primary slot="1">
     <secondary slot="0">
       <block start="0">
-        <type>SLOT A</type>
+        <cart>A</cart>
       </block>
     </secondary>
   </primary>
   <primary slot="2">
     <secondary slot="0">
       <block start="0">
-        <type>SLOT B</type>
-      </block>
-    </secondary>
-  </primary>
-  <primary slot="3">
-    <secondary slot="0">
-      <block start="0">
-        <type>ROM</type>
-        <block_count>1</block_count>
-        <filename>hb-f1xdmk2_msx2sub.rom</filename>
-        <SHA1>0fbd45ef3dd7bb82d4c31f1947884f411f1ca344</SHA1>
-      </block>
-      <block start="1">
-        <type>FDC</type>
-        <block_count>1</block_count>
-        <filename>hb-f1xdmk2_disk.rom</filename>
-        <SHA1>12f2cc79b3d09723840bae774be48c0d721ec1c6</SHA1>
-      </block>
-    </secondary>
-    <secondary slot="3">
-      <block start="0">
-        <type>RAM MAPPER</type>
-        <block_count>4</block_count>
+        <cart>B</cart>
       </block>
     </secondary>
   </primary>
