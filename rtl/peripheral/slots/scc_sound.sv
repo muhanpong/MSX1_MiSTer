@@ -14,7 +14,8 @@ module scc_sound
    output         [7:0] scc_dout,
    output signed [15:0] wave,
    input          [1:0] sccPlusChip,
-   input          [1:0] sccPlusMode
+   input          [1:0] sccPlusMode,
+   output               debug_scc_wr
 );
 
 wire signed [10:0] wave_A, wave_B;
@@ -35,17 +36,23 @@ wire scc_cs_A = ~cart_num & cs;
 wire scc_rdrq_A = scc_cs_A & cpu_rd & cpu_mreq;
 wire scc_wr_A = scc_cs_A & cpu_wr & cpu_mreq;
 
-IKASCC_player_s #(.RAM_TYPE(1), .FAST_CLOCK(0), .RAMCTRL_ASYNC(1)) scc_wave_A
+// Debug: Pulse high for 1 second on ANY write to SCC registers
+reg [24:0] dbg_cnt;
+always @(posedge clk) begin
+   if (reset) dbg_cnt <= 0;
+   else if (scc_wr_A | (cart_num & cs & cpu_wr & cpu_mreq)) dbg_cnt <= 25'd21000000;
+   else if (dbg_cnt > 0) dbg_cnt <= dbg_cnt - 1;
+end
+assign debug_scc_wr = (dbg_cnt > 0);
+
+IKASCC_player_a #(.DELAY_LENGTH(4)) scc_wave_A
 (
    .i_EMUCLK(clk),
-   .i_MCLK_PCEN_n(~clk_en),
    .i_RST_n(~reset),
    .i_SCCREG_EN(1'b1),
-   .i_CS_n(~(scc_rdrq_A | scc_wr_A)),   
-   .i_RD_n(~scc_rdrq_A),
-   .i_WR_n(~scc_wr_A),
-   .i_RDRQ(scc_rdrq_A),
-   .i_WRRQ(scc_wr_A),
+   .i_CS_n(~scc_cs_A),   
+   .i_RD_n(~(cpu_rd & cpu_mreq)),
+   .i_WR_n(~(cpu_wr & cpu_mreq)),
    .i_ABLO(cpu_addr[7:0]),
    .i_DB(din),
    .o_DB(scc_dout_A_int),
@@ -58,17 +65,14 @@ wire scc_cs_B = cart_num & cs;
 wire scc_rdrq_B = scc_cs_B & cpu_rd & cpu_mreq;
 wire scc_wr_B = scc_cs_B & cpu_wr & cpu_mreq;
 
-IKASCC_player_s #(.RAM_TYPE(1), .FAST_CLOCK(0), .RAMCTRL_ASYNC(1)) scc_wave_B
+IKASCC_player_a #(.DELAY_LENGTH(4)) scc_wave_B
 (
    .i_EMUCLK(clk),
-   .i_MCLK_PCEN_n(~clk_en),
    .i_RST_n(~reset),
    .i_SCCREG_EN(1'b1),
-   .i_CS_n(~(scc_rdrq_B | scc_wr_B)),   
-   .i_RD_n(~scc_rdrq_B),
-   .i_WR_n(~scc_wr_B),
-   .i_RDRQ(scc_rdrq_B),
-   .i_WRRQ(scc_wr_B),
+   .i_CS_n(~scc_cs_B),   
+   .i_RD_n(~(cpu_rd & cpu_mreq)),
+   .i_WR_n(~(cpu_wr & cpu_mreq)),
    .i_ABLO(cpu_addr[7:0]),
    .i_DB(din),
    .o_DB(scc_dout_B_int),
