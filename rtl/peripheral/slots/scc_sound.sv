@@ -30,9 +30,10 @@ assign scc_dout = (~cart_num & cs & cpu_rd & cpu_mreq & (cpu_addr[7:0] < 8'h80))
                   ( cart_num & cs & cpu_rd & cpu_mreq & (cpu_addr[7:0] < 8'h80)) ? scc_dout_B_int : 8'hFF;
 
 
+// --- Channel A Logic ---
 wire scc_cs_A = ~cart_num & cs;
 wire scc_rdrq_A = scc_cs_A & cpu_rd & cpu_mreq;
-wire scc_wrrq_A = scc_cs_A & cpu_wr & cpu_mreq;
+wire scc_wr_A = scc_cs_A & cpu_wr & cpu_mreq;
 
 IKASCC_player_s #(.RAM_TYPE(1), .FAST_CLOCK(0), .RAMCTRL_ASYNC(1)) scc_wave_A
 (
@@ -40,11 +41,11 @@ IKASCC_player_s #(.RAM_TYPE(1), .FAST_CLOCK(0), .RAMCTRL_ASYNC(1)) scc_wave_A
    .i_MCLK_PCEN_n(~clk_en),
    .i_RST_n(~reset),
    .i_SCCREG_EN(1'b1),
-   .i_CS_n(~(scc_rdrq_A | scc_wrrq_A)),   
+   .i_CS_n(~(scc_rdrq_A | scc_wr_A)),   
    .i_RD_n(~scc_rdrq_A),
-   .i_WR_n(~scc_wrrq_A),
+   .i_WR_n(~scc_wr_A),
    .i_RDRQ(scc_rdrq_A),
-   .i_WRRQ(scc_wrrq_A),
+   .i_WRRQ(scc_wr_A),
    .i_ABLO(cpu_addr[7:0]),
    .i_DB(din),
    .o_DB(scc_dout_A_int),
@@ -52,10 +53,10 @@ IKASCC_player_s #(.RAM_TYPE(1), .FAST_CLOCK(0), .RAMCTRL_ASYNC(1)) scc_wave_A
    .o_SOUND(wave_A)
 );
 
-
+// --- Channel B Logic ---
 wire scc_cs_B = cart_num & cs;
 wire scc_rdrq_B = scc_cs_B & cpu_rd & cpu_mreq;
-wire scc_wrrq_B = scc_cs_B & cpu_wr & cpu_mreq;
+wire scc_wr_B = scc_cs_B & cpu_wr & cpu_mreq;
 
 IKASCC_player_s #(.RAM_TYPE(1), .FAST_CLOCK(0), .RAMCTRL_ASYNC(1)) scc_wave_B
 (
@@ -63,11 +64,11 @@ IKASCC_player_s #(.RAM_TYPE(1), .FAST_CLOCK(0), .RAMCTRL_ASYNC(1)) scc_wave_B
    .i_MCLK_PCEN_n(~clk_en),
    .i_RST_n(~reset),
    .i_SCCREG_EN(1'b1),
-   .i_CS_n(~(scc_rdrq_B | scc_wrrq_B)),   
+   .i_CS_n(~(scc_rdrq_B | scc_wr_B)),   
    .i_RD_n(~scc_rdrq_B),
-   .i_WR_n(~scc_wrrq_B),
+   .i_WR_n(~scc_wr_B),
    .i_RDRQ(scc_rdrq_B),
-   .i_WRRQ(scc_wrrq_B),
+   .i_WRRQ(scc_wr_B),
    .i_ABLO(cpu_addr[7:0]),
    .i_DB(din),
    .o_DB(scc_dout_B_int),
