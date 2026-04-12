@@ -362,7 +362,7 @@ scc_sound scc_sound
    .cpu_addr(cpu_addr),
    .din(cpu_dout),
    .scc_dout(scc_sound_dout),
-   .oe({|(cart_device[1] & (DEV_SCC | DEV_SCC2)), |(cart_device[0] & (DEV_SCC | DEV_SCC2))}),
+   .oe(2'b11), // FORCE ENABLE TO TEST IF CART_DEVICE IS ZERO
    .wave(scc_wave),
    .sccPlusChip({|(cart_device[1] & DEV_SCC2), |(cart_device[0] & DEV_SCC2)}),
    .sccPlusMode(mapper_mfrdsd1_sccReq ? {1'b0,mapper_mfrdsd1_sccMode} : mapper_konami_scc_sccMode),
