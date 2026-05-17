@@ -6,10 +6,10 @@ parameter CONF_STR_SLOT_B = {
     "O[31:29],SLOT B,ROM,SCC,SCC+,FM-PAC,Empty;"
 };
 parameter CONF_STR_MAPPER_A = {
-    "H3O[23:20],Mapper type,auto,none,ASCII8,ASCII16,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY;"
+    "H3O[23:20],Mapper type,auto,none,ASCII8,ASCII16,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY,ASCII16X;"
 };
 parameter CONF_STR_MAPPER_B = {
-    "H4O[35:32],Mapper type,auto,none,ASCII8,ASCII16,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY;"
+    "H4O[35:32],Mapper type,auto,none,ASCII8,ASCII16,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY,ASCII16X;"
 };
 parameter CONF_STR_SRAM_SIZE_A = {
     "H5O[28:26],SRAM size,auto,1kB,2kB,4kB,8kB,16kB,32kB,none;"

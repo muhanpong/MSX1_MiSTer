@@ -32,9 +32,9 @@ assign scc_dout = (~cart_num & cs & cpu_rd & cpu_mreq & (cpu_addr[7:0] < 8'h80))
 
 
 // --- Channel A Logic ---
-wire scc_cs_A = ~cart_num & cs;
+wire scc_cs_A  = ~cart_num & cs;
 wire scc_rdrq_A = scc_cs_A & cpu_rd & cpu_mreq;
-wire scc_wr_A = scc_cs_A & cpu_wr & cpu_mreq;
+wire scc_wr_A   = scc_cs_A & cpu_wr & cpu_mreq;
 
 // Debug: Pulse high for 1 second on ANY write to SCC registers
 reg [24:0] dbg_cnt;
@@ -45,14 +45,21 @@ always @(posedge clk) begin
 end
 assign debug_scc_wr = (dbg_cnt > 0);
 
-IKASCC_player_a #(.DELAY_LENGTH(4)) scc_wave_A
+// RDRQ/WRRQ are driven directly (combinational) so player_s registers sample
+// data at the same clk_en edge the CPU asserts cpu_wr — no 1-cycle lag.
+// RAMCTRL_ASYNC=1 makes RAM R/W use raw CS_n/WR_n signals, which is also
+// combinationally correct for a synchronous (clk_en-gated) bus.
+IKASCC_player_s #(.RAM_TYPE(1), .FAST_CLOCK(1), .RAMCTRL_ASYNC(1)) scc_wave_A
 (
    .i_EMUCLK(clk),
+   .i_MCLK_PCEN_n(~clk_en),
    .i_RST_n(~reset),
    .i_SCCREG_EN(1'b1),
-   .i_CS_n(~scc_cs_A),   
+   .i_CS_n(~scc_cs_A),
    .i_RD_n(~(cpu_rd & cpu_mreq)),
-   .i_WR_n(~(cpu_wr & cpu_mreq)),
+   .i_WR_n(~scc_wr_A),
+   .i_RDRQ(scc_rdrq_A),
+   .i_WRRQ(scc_wr_A),
    .i_ABLO(cpu_addr[7:0]),
    .i_DB(din),
    .o_DB(scc_dout_A_int),
@@ -61,18 +68,21 @@ IKASCC_player_a #(.DELAY_LENGTH(4)) scc_wave_A
 );
 
 // --- Channel B Logic ---
-wire scc_cs_B = cart_num & cs;
+wire scc_cs_B   = cart_num & cs;
 wire scc_rdrq_B = scc_cs_B & cpu_rd & cpu_mreq;
-wire scc_wr_B = scc_cs_B & cpu_wr & cpu_mreq;
+wire scc_wr_B   = scc_cs_B & cpu_wr & cpu_mreq;
 
-IKASCC_player_a #(.DELAY_LENGTH(4)) scc_wave_B
+IKASCC_player_s #(.RAM_TYPE(1), .FAST_CLOCK(1), .RAMCTRL_ASYNC(1)) scc_wave_B
 (
    .i_EMUCLK(clk),
+   .i_MCLK_PCEN_n(~clk_en),
    .i_RST_n(~reset),
    .i_SCCREG_EN(1'b1),
-   .i_CS_n(~scc_cs_B),   
+   .i_CS_n(~scc_cs_B),
    .i_RD_n(~(cpu_rd & cpu_mreq)),
-   .i_WR_n(~(cpu_wr & cpu_mreq)),
+   .i_WR_n(~scc_wr_B),
+   .i_RDRQ(scc_rdrq_B),
+   .i_WRRQ(scc_wr_B),
    .i_ABLO(cpu_addr[7:0]),
    .i_DB(din),
    .o_DB(scc_dout_B_int),

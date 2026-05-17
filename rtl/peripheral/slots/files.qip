@@ -6,6 +6,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) f
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) fm_pac.sv                          ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ascii8.sv                          ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ascii16.sv                         ]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ascii16x.sv                        ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) konami.sv                          ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) konami_scc.sv                      ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) mfrsd.sv                           ]

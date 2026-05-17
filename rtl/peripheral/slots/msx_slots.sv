@@ -57,7 +57,8 @@ module msx_slots
    //DEBUG
    output                   debug_FDC_req,
    output                   debug_sd_card,
-   output                   debug_erase
+   output                   debug_erase,
+   output                   debug_scc_wr
 );
 
 assign sound = sound_opll + scc_wave + sound_psg;
@@ -125,6 +126,7 @@ wire [26:0] mapper_addr = mem_unmaped                 ? 27'hDEAD                
                           mapper == MAPPER_HALNOTE    ? 27'(mapper_halnote_addr)    :
                           cart_ascii8                 ? 27'(mapper_ascii8_addr)     :
                           cart_ascii16                ? 27'(mapper_ascii16_addr)    :
+                          mapper == MAPPER_ASCII16X   ? 27'(mapper_ascii16x_addr)   :
                           mapper == MAPPER_GM2        ? 27'(mapper_gm2_addr)        :
                                                         27'hDEAD                    ;
 
@@ -152,6 +154,7 @@ wire mem_unmaped = mapper_konami_unmaped     |
                    mapper_mfrsd3_unmaped     | 
                    mapper_ascii8_unmaped     | 
                    mapper_ascii16_unmaped    |
+                   mapper_ascii16x_unmaped   |
                    mapper_halnote_unmaped    | 
                    mapper_rd                 | 
                    FDC_req                   |
@@ -334,6 +337,18 @@ cart_ascii16 ascii16
    .*
 );
 
+wire [24:0] mapper_ascii16x_addr;
+wire        mapper_ascii16x_unmaped;
+cart_ascii16x ascii16x
+(
+   .rom_size(25'(size) << 14),
+   .din(cpu_dout),
+   .cs(mapper == MAPPER_ASCII16X),
+   .mem_unmaped(mapper_ascii16x_unmaped),
+   .mem_addr(mapper_ascii16x_addr),
+   .*
+);
+
 wire [20:0] mapper_konami_scc_addr;
 wire        mapper_konami_scc_unmaped;
 wire        mapper_konami_scc_sccReq;
@@ -362,10 +377,11 @@ scc_sound scc_sound
    .cpu_addr(cpu_addr),
    .din(cpu_dout),
    .scc_dout(scc_sound_dout),
-   .oe(2'b11), // FORCE ENABLE TO TEST IF CART_DEVICE IS ZERO
+   .oe({|(cart_device[1] & (DEV_SCC | DEV_SCC2)), |(cart_device[0] & (DEV_SCC | DEV_SCC2))}),
    .wave(scc_wave),
    .sccPlusChip({|(cart_device[1] & DEV_SCC2), |(cart_device[0] & DEV_SCC2)}),
    .sccPlusMode(mapper_mfrdsd1_sccReq ? {1'b0,mapper_mfrdsd1_sccMode} : mapper_konami_scc_sccMode),
+   .debug_scc_wr(debug_scc_wr),
    .*
 );
 wire [24:0] mapper_gm2_addr;
