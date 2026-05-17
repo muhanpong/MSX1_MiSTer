@@ -22,7 +22,9 @@ module cart_ascii16x
     input               cs,
     input               cart_num,
     output              mem_unmaped,
-    output       [24:0] mem_addr
+    output       [24:0] mem_addr,
+    output       [22:0] flash_addr,
+    output              flash_rq
 );
 /*verilator tracing_off*/
 logic [11:0] bankRegs[2][2]; // [cart_num][bank_index]
@@ -43,5 +45,7 @@ wire [24:0] ram_addr   = 25'({bank, cpu_addr[13:0]});
 
 assign mem_addr    = ram_addr;
 assign mem_unmaped = cs & (ram_addr >= rom_size);
+assign flash_addr  = 23'(ram_addr);
+assign flash_rq    = cs;
 
 endmodule
