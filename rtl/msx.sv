@@ -77,7 +77,11 @@ module msx
    output             [7:0] d_to_sd,
    input              [7:0] d_from_sd,
    output                   sd_tx,
-   output                   sd_rx
+   output                   sd_rx,
+   // ASCII16X flash info
+   output              [1:0] flash16x_active,
+   output             [26:0] flash16x_base[2],
+   output             [15:0] flash16x_size[2]
 );
 
 //  -----------------------------------------------------------------------------
@@ -494,7 +498,10 @@ msx_slots msx_slots
    .sd_tx(sd_tx),
    .sd_rx(sd_rx),
    .d_to_sd(d_to_sd),
-   .d_from_sd(d_from_sd)
+   .d_from_sd(d_from_sd),
+   .flash16x_active(flash16x_active),
+   .flash16x_base(flash16x_base),
+   .flash16x_size(flash16x_size)
 );
 
 endmodule

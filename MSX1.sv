@@ -432,6 +432,9 @@ msx MSX
    .d_from_sd(d_from_sd),
    .sd_tx(sd_tx),
    .sd_rx(sd_rx),
+   .flash16x_active(flash16x_active),
+   .flash16x_base(flash16x_base),
+   .flash16x_size(flash16x_size),
    .*
 );
 
@@ -667,19 +670,27 @@ wire  [26:0] sdram_addr;
 wire  [24:0] dw_sdram_addr;
 wire  [26:0] flash_addr;
 wire   [7:0] sdram_dout, bram_dout, dw_sdram_din, flash_din;
+
+// SDRAM ch1: mux between ROM upload and nvram_backup SDRAM DMA
+wire  [7:0] nvbak_sdram_dout;
+wire [26:0] nvbak_sdram_addr;
+wire        nvbak_sdram_req, nvbak_sdram_rnw;
+wire  [7:0] nvbak_sdram_din;
+wire        upload_active = upload_ram_ce & upload_sdram_rq;
+
 sdram sdram
 (
    .init(~locked_sdram),
    .clk(clk_sdram),
    .doRefresh(1'd0),
-   
-   .ch1_dout(),
-   .ch1_din(upload_ram_din),
-   .ch1_addr(upload_ram_addr),
-   .ch1_req(upload_ram_ce & upload_sdram_rq),
-   .ch1_rnw(1'd0),
-   .ch1_ready(upload_ram_ready),   
-  
+
+   .ch1_dout(nvbak_sdram_dout),
+   .ch1_din (upload_active ? upload_ram_din  : nvbak_sdram_din),
+   .ch1_addr(upload_active ? upload_ram_addr : nvbak_sdram_addr),
+   .ch1_req (upload_active ? upload_active   : nvbak_sdram_req),
+   .ch1_rnw (upload_active ? 1'b0            : nvbak_sdram_rnw),
+   .ch1_ready(upload_ram_ready),
+
    .ch2_dout(sdram_dout),
    .ch2_din(ram_din),
    .ch2_addr(ram_addr),
@@ -695,7 +706,7 @@ sdram sdram
    .ch3_ready(flash_ready),
    .ch3_done(flash_done),
    .*
-);    
+);
 
 dpram #(.addr_width(18)) systemRAM
 (
@@ -711,6 +722,10 @@ dpram #(.addr_width(18)) systemRAM
 );
 
 ///////////////// NVRAM BACKUP ////////////////
+wire  [1:0] flash16x_active;
+wire [26:0] flash16x_base[2];
+wire [15:0] flash16x_size[2];
+
 wire [26:0] sram_addr;
 wire  [7:0] sram_dout;
 wire        sram_we;
@@ -728,10 +743,20 @@ nvram_backup nvram_backup
    .sd_wr(sd_wr[3:0]),
    .sd_ack(sd_ack[3:0]),
    .sd_buff_addr(sd_buff_addr),
+   .sd_buff_dout(sd_buff_dout),
    .sd_buff_din(sd_buff_din[0:3]),
    .ram_addr(sram_addr),
    .ram_dout(sram_dout),
-   .ram_we(sram_we)
+   .ram_we(sram_we),
+   .flash16x_active(flash16x_active[0]),
+   .flash16x_base(flash16x_base[0]),
+   .flash16x_size(flash16x_size[0]),
+   .sdram_req (nvbak_sdram_req),
+   .sdram_rnw (nvbak_sdram_rnw),
+   .sdram_addr(nvbak_sdram_addr),
+   .sdram_din (nvbak_sdram_din),
+   .sdram_dout(nvbak_sdram_dout),
+   .sdram_ready(upload_ram_ready)
 );
 
 ///////////////// CAS EMULATE /////////////////

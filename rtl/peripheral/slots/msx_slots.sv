@@ -58,7 +58,11 @@ module msx_slots
    output                   debug_FDC_req,
    output                   debug_sd_card,
    output                   debug_erase,
-   output                   debug_scc_wr
+   output                   debug_scc_wr,
+   // ASCII16X flash info (for SDRAM-based save/load)
+   output logic       [1:0] flash16x_active,
+   output logic      [26:0] flash16x_base[2],
+   output logic      [15:0] flash16x_size[2]
 );
 
 assign sound = sound_opll + scc_wave + sound_psg;
@@ -466,6 +470,16 @@ psg psg
    .sound(sound_psg),
    .*
 );
+
+always @(posedge clk) begin
+    if (reset) begin
+        flash16x_active <= 2'b00;
+    end else if (mapper == MAPPER_ASCII16X & cpu_mreq) begin
+        flash16x_base[cart_num]   <= base_ram;
+        flash16x_size[cart_num]   <= size;
+        flash16x_active[cart_num] <= 1'b1;
+    end
+end
 
 wire        FDC_req;
 wire  [7:0] d_to_cpu_FDC;
