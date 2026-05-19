@@ -1,3 +1,4 @@
+export PATH := /run/media/muhanpong/0eb4bebc-0644-4c2f-9a97-ddca5afcd8f3/intelFPGA_lite/17.1/quartus/bin/:$(PATH)
 ALL: build deploy
 update:
 	@git fetch

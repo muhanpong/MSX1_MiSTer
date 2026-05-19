@@ -49,7 +49,7 @@ assign cart_conf[0].typ                = typ_A;
 assign cart_conf[1].typ                = slot_B_select < CART_TYP_MFRSD ? cart_typ_t'(slot_B_select) : CART_TYP_EMPTY;
 assign cart_conf[0].selected_mapper    = rom_loaded[0] ? mapper_typ_t'(mapper_A_select == 4'd10 ? 5'(MAPPER_ASCII16X) : (mapper_A_select + 4'd2)) : MAPPER_UNUSED;
 assign cart_conf[1].selected_mapper    = rom_loaded[1] ? mapper_typ_t'(mapper_B_select == 4'd10 ? 5'(MAPPER_ASCII16X) : (mapper_B_select + 4'd2)) : MAPPER_UNUSED;
-assign cart_conf[0].selected_sram_size = typ_A == CART_TYP_ROM & mapper_A_select > 4'd1 & sram_A_select > 3'd0 & sram_A_select < 3'd7 ? (8'd1 << (sram_A_select - 1'd1)) : 8'd0;
+assign cart_conf[0].selected_sram_size = typ_A == CART_TYP_ROM & mapper_A_select > 4'd1 & mapper_A_select != 4'd10 & sram_A_select > 3'd0 & sram_A_select < 3'd7 ? (8'd1 << (sram_A_select - 1'd1)) : 8'd0;
 assign cart_conf[1].selected_sram_size = 8'd0;
 
 assign msxConfig.typ = bios_config.MSX_typ;
@@ -61,7 +61,7 @@ assign msxConfig.vdp_id = HPS_status[42];
 
 assign ROM_A_load_hide    = cart_conf[0].typ != CART_TYP_ROM;
 assign ROM_B_load_hide    = cart_conf[1].typ != CART_TYP_ROM;
-assign sram_A_select_hide = cart_conf[0].typ != CART_TYP_ROM | mapper_A_select == 4'd0; 
+assign sram_A_select_hide = cart_conf[0].typ != CART_TYP_ROM | mapper_A_select == 4'd0 | mapper_A_select == 4'd10;
 assign fdc_enabled = bios_config.use_FDC | cart_conf[0].typ == CART_TYP_FDC;
 
 

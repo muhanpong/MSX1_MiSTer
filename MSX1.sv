@@ -297,7 +297,7 @@ assign status_menumask[2] = bios_config.use_FDC;
 assign status_menumask[3] = ROM_A_load_hide;
 assign status_menumask[4] = ROM_B_load_hide;
 assign status_menumask[5] = sram_A_select_hide;
-assign status_menumask[6] = lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0;
+assign status_menumask[6] = (lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0) & (cart_conf[0].selected_mapper != MAPPER_ASCII16X);
 assign sdram_size         = sdram_sz[15] ? sdram_sz[1:0] : 2'b00;
 
 hps_io #(.CONF_STR(CONF_STR),.VDNUM(VDNUM)) hps_io
