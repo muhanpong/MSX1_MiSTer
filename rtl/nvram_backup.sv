@@ -96,8 +96,8 @@ logic  [8:0] flash_byte_ptr;
 logic [15:0] flash_sector;
 logic [15:0] flash_total_sectors;
 logic  [7:0] sector_buf[512];
-logic  [2:0] sdram_wait;
-logic [23:0] sd_wr_timeout;
+logic  [6:0] sdram_wait;
+logic [26:0] sd_wr_timeout;
 
 assign ram_we         = rd & sd_ack[num] & ~sd_buff_addr[9];
 assign ram_addr       = lookup_SRAM[num].addr + 18'({sd_lba[num],sd_buff_addr[8:0]});
@@ -171,7 +171,7 @@ always @(posedge clk) begin
          sdram_addr <= flash16x_base + 27'({flash_sector, flash_byte_ptr});
          sdram_rnw  <= 1'b1;
          sdram_req  <= 1'b1;
-         sdram_wait <= 3'd4;  // 4 clk21m cycles: ch1_ready LOW = 4 SDRAM = 1 clk21m (exact 4:1 ratio)
+         sdram_wait <= 7'd68;  // 68 clk21m wait: ~4 cycles for data validity + 64 cycles CPU bandwidth gap
          state      <= STATE_FLASH_RD_WAIT;
       end
 
@@ -186,7 +186,7 @@ always @(posedge clk) begin
                flash_byte_ptr <= 9'd0;
                sd_lba[3]      <= {16'd0, flash_sector};
                sd_wr[3]       <= 1'b1;
-               sd_wr_timeout  <= 24'd0;
+               sd_wr_timeout  <= 27'd0;
                state          <= STATE_FLASH_SD_WR;
             end else begin
                state <= STATE_FLASH_PREFETCH;
@@ -196,7 +196,7 @@ always @(posedge clk) begin
 
       STATE_FLASH_SD_WR: begin
          sd_wr_timeout <= sd_wr_timeout + 1'd1;
-         if (&sd_wr_timeout) begin  // ~0.78s timeout: abort if ARM never acks
+         if (&sd_wr_timeout) begin  // ~6.3s timeout: abort if ARM never acks
             sd_wr[3] <= 1'b0;
             done     <= 1'b1;
             state    <= STATE_SLEEP;
@@ -230,7 +230,7 @@ always @(posedge clk) begin
          sdram_rnw  <= 1'b0;
          sdram_din  <= sector_buf[flash_byte_ptr];
          sdram_req  <= 1'b1;
-         sdram_wait <= 3'd3;  // 3 clk21m cycles: safe margin for write completion
+         sdram_wait <= 7'd3;  // 3 clk21m cycles: safe margin for write completion
          state      <= STATE_FLASH_WR_WAIT;
       end
 
