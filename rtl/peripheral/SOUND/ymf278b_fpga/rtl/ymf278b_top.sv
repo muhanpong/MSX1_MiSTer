@@ -128,66 +128,40 @@ logic [7:0]  pcm_cpu_mem_rd_data;
 logic        pcm_cpu_mem_ack;
 logic        pcm_reg_rd_done;
 
-ymf278_pcm_top #(
+ymf278_pcm_engine #(
     .CLK_HZ (CLK_HZ)
 ) u_pcm (
     .clk             (clk),
     .rst_n           (rst_n),
+    
+    // CPU Register Interface
     .reg_addr        (pcm_reg_addr),
     .reg_data        (pcm_reg_data),
     .reg_wr          (pcm_reg_wr),
     .reg_rd          (pcm_reg_rd),
     .reg_dout        (pcm_reg_dout),
-    .mem_addr        (pcm_mem_addr),
-    .mem_rd_req      (pcm_mem_rd_req),
-    .mem_rd_data     (pcm_mem_rd_data_int),
-    .mem_rd_valid    (pcm_mem_rd_valid_int),
-    .cpu_mem_reg     (pcm_cpu_mem_reg),
-    .cpu_mem_data    (pcm_cpu_mem_data),
-    .cpu_mem_wr      (pcm_cpu_mem_wr),
-    .cpu_mem_rd      (pcm_cpu_mem_rd),
-    .cpu_mem_rd_data (pcm_cpu_mem_rd_data),
-    .cpu_mem_ack     (pcm_cpu_mem_ack),
-    .reg_rd_done     (pcm_reg_rd_done),
+    
+    // SDRAM Direct Port
+    .mem_addr        (mem_addr),
+    .mem_rd_en       (mem_rd_req),
+    .mem_rd_data     (mem_rd_data),
+    .mem_rd_valid    (mem_rd_valid),
+    .mem_wr_en       (mem_wr_req),
+    .mem_wr_data     (mem_wr_data),
+    
+    // Audio Output
     .pcm_left        (pcm_left),
     .pcm_right       (pcm_right),
-    .pcm_valid       (pcm_valid),
-    .keyon_count     (dbg_keyon_count),
-    .dbg_accum_cnt   (dbg_accum_cnt),
-    .dbg_env_min     (dbg_env_min),
-    .dbg_mem_nonzero (dbg_mem_nonzero),
-    .dbg_interp_nonzero()  // unused — dbg_pcm_base_set is generated in msx.sv
+    .pcm_valid       (pcm_valid)
 );
 
-// PCM memory module
-logic [7:0] pcm_mem_rd_data_int;   // u_mem → u_pcm data
-logic       pcm_mem_rd_valid_int;  // u_mem → u_pcm valid
-logic       mem_busy_int;          // internal busy from PCM memory arbiter
+assign pcm_reg_rd_done = 1'b1; // TODO: Implement CPU memory read completion in engine
 
-ymf278_pcm_memory u_mem (
-    .clk            (clk),
-    .rst_n          (rst_n),
-    .reg2_ram_wr_en (1'b1),   // TODO: tie to regs[2] bit 0
-    .reg2_mode      (1'b0),
-    .cpu_reg        (pcm_cpu_mem_reg),
-    .cpu_data_in    (pcm_cpu_mem_data),
-    .cpu_wr         (pcm_cpu_mem_wr),
-    .cpu_rd         (pcm_cpu_mem_rd),
-    .cpu_data_out   (pcm_cpu_mem_rd_data),
-    .cpu_ack        (pcm_cpu_mem_ack),
-    .pcm_addr       (pcm_mem_addr),
-    .pcm_rd_req     (pcm_mem_rd_req),
-    .pcm_rd_data    (pcm_mem_rd_data_int),
-    .pcm_rd_valid   (pcm_mem_rd_valid_int),
-    .ext_addr       (mem_addr),
-    .ext_rd_en      (mem_rd_req),
-    .ext_wr_en      (mem_wr_req),
-    .ext_wr_data    (mem_wr_data),
-    .ext_rd_data    (mem_rd_data),
-    .ext_rd_valid   (mem_rd_valid),
-    .ext_busy       (mem_busy),
-    .busy           (mem_busy_int)
-);
+// Unused legacy debug signals
+assign dbg_keyon_count = 5'd0;
+assign dbg_accum_cnt   = 5'd0;
+assign dbg_env_min     = 10'd0;
+assign dbg_mem_nonzero = 1'b0;
 
 // ─── Register decode ─────────────────────────────────────────────────
 logic busy_reg, load_busy_reg;
