@@ -98,8 +98,14 @@ always_ff @(posedge clk) begin
             vl = pan_att(pan_left_rom[pan_r]);
             vr = pan_att(pan_right_rom[pan_r]);
 
-            left_out  <= 16'(($signed(after_tl[15:0]) * $signed({1'b0, vl})) >>> 5);
-            right_out <= 16'(($signed(after_tl[15:0]) * $signed({1'b0, vr})) >>> 5);
+            // CRITICAL: do the multiplication in wider context BEFORE the
+            // shift.  Verilog evaluates the expression at the LHS width, so
+            // 16'(a * b >>> 5) truncates a*b to 16-bit (overflows!) and then
+            // shifts the truncated value.  Cast operands to 32-bit signed
+            // first so the multiplication preserves full precision, then
+            // shift, then truncate to 16-bit.
+            left_out  <= 16'((32'($signed(after_tl[15:0])) * 32'($signed({1'b0, vl}))) >>> 5);
+            right_out <= 16'((32'($signed(after_tl[15:0])) * 32'($signed({1'b0, vr}))) >>> 5);
         end
         out_valid <= 1'b1;
     end
