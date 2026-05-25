@@ -291,15 +291,32 @@ assign dbg_new2       = new2;
 //   → mixer or downstream path is broken
 //   → engine could be perfectly fine but its output never makes it out
 //
-// 19-bit counter MSB at 85.9MHz toggles every 2^18 = 262144 cycles
-// = ~3.05ms = ~328Hz (low E note, clearly audible bass-mid range).
-// Amplitude ±0x3000 (~37% full scale) — loud enough to hear over FM.
-logic [18:0] test_tone_cnt;
+// User confirmed: previous 328Hz/37% test tone filled OBS level meter
+// to "full" but was inaudible.  Capture card / OBS / HDMI receiver may be
+// muting full-amplitude square waves as "broken signal".
+//
+// New approach: low-amplitude tone with ON/OFF burst gating.
+//   - Tone: ~164Hz square wave at ±0x0400 (~3% full scale)
+//   - Burst: ~5Hz on/off (100ms beep, 100ms silence)
+//   → Unmistakable beep-pause-beep pattern, low enough to not trigger
+//     any anti-clipping circuit.
+logic [19:0] tone_cnt;     // tone period counter
+logic [23:0] burst_cnt;    // burst gate counter
 always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) test_tone_cnt <= '0;
-    else        test_tone_cnt <= test_tone_cnt + 19'd1;
+    if (!rst_n) begin
+        tone_cnt  <= '0;
+        burst_cnt <= '0;
+    end else begin
+        tone_cnt  <= tone_cnt  + 20'd1;
+        burst_cnt <= burst_cnt + 24'd1;
+    end
 end
-wire signed [15:0] test_pcm_tone = test_tone_cnt[18] ? 16'sh3000 : -16'sh3000;
+
+// tone_cnt[19] toggles every 2^19 = 524288 cycles ≈ 6.1ms → ~164Hz
+// burst_cnt[23] toggles every 2^23 = 8.4M cycles ≈ 97ms → ~5Hz beep/pause
+wire signed [15:0] test_pcm_tone =
+    burst_cnt[23] ? (tone_cnt[19] ? 16'sh0400 : -16'sh0400)
+                  : 16'sh0000;  // silence during off-burst
 
 always_ff @(posedge clk) begin
     audio_valid <= 1'b0;
