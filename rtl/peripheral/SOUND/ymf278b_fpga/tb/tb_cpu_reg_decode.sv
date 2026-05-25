@@ -51,7 +51,11 @@ module tb_cpu_reg_decode;
         .dbg_slot0_ar(dbg_slot0_ar),
         .dbg_slot0_d1r(dbg_slot0_d1r),
         .dbg_slot5_wave(dbg_slot5_wave),
-        .dbg_slot23_wave(dbg_slot23_wave)
+        .dbg_slot23_wave(dbg_slot23_wave),
+        .dbg_slot0_hdr_start(),
+        .dbg_slot0_hdr_loop(),
+        .dbg_slot0_hdr_end(),
+        .dbg_slot0_hdr_bits()
     );
 
     int passes = 0, fails = 0;

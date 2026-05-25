@@ -65,7 +65,13 @@ module ymf278_pcm_engine #(
     output logic [3:0]  dbg_slot0_ar,
     output logic [3:0]  dbg_slot0_d1r,
     output logic [8:0]  dbg_slot5_wave,
-    output logic [8:0]  dbg_slot23_wave
+    output logic [8:0]  dbg_slot23_wave,
+
+    // ram_header[0] mirror for HF FSM verification
+    output logic [21:0] dbg_slot0_hdr_start,
+    output logic [15:0] dbg_slot0_hdr_loop,
+    output logic [15:0] dbg_slot0_hdr_end,
+    output logic [1:0]  dbg_slot0_hdr_bits
 );
 
     // ════════════════════════════════════════════════════════════════════════
@@ -193,7 +199,9 @@ module ymf278_pcm_engine #(
     stage_c_pkt_t stage_c_reg;   // latched at stage_advance
 
     // ALU instance for combinational functions (calc_step, byte_addr, etc.)
-    ymf278_pcm_alu alu();
+    ymf278_pcm_alu     alu();
+    // EG step module exposes process_eg() task with ROM tables.
+    ymf278_pcm_eg_step eg();
 
     // ════════════════════════════════════════════════════════════════════════
     // Stage A — dispatch + BRAM read
@@ -307,6 +315,12 @@ module ymf278_pcm_engine #(
     logic [1:0] b_byte_idx;     // 0..3
     logic [21:0] b_addr_sel;
 
+    // Forward declaration: hf_active is asserted by HF FSM (defined below)
+    // when it owns the SDRAM bus.  Used here to gate mem_rd_valid away from
+    // Stage B's byte latch so HF's response data doesn't leak in.
+    logic hf_active;
+    wire  mem_rd_valid_b = mem_rd_valid && !hf_active;
+
     always_comb begin
         case (b_byte_idx)
             2'd0: b_addr_sel = stage_b_reg.addrs.a0;
@@ -334,7 +348,7 @@ module ymf278_pcm_engine #(
             case (b_state)
                 B_IDLE:       ;   // wait for stage_advance
                 B_ISSUE:      b_state <= B_WAIT_VALID;
-                B_WAIT_VALID: if (mem_rd_valid) b_state <= B_NEXT;
+                B_WAIT_VALID: if (mem_rd_valid_b) b_state <= B_NEXT;
                 B_NEXT: begin
                     if (b_byte_idx == 2'd3) b_state <= B_DONE;
                     else begin
@@ -366,7 +380,7 @@ module ymf278_pcm_engine #(
             stage_b_reg.next_pos <= next_pos_for_b;
             stage_b_reg.addrs    <= next_addrs;
             stage_b_reg.bytes    <= '0;
-        end else if (b_state == B_WAIT_VALID && mem_rd_valid) begin
+        end else if (b_state == B_WAIT_VALID && mem_rd_valid_b) begin
             case (b_byte_idx)
                 2'd0: stage_b_reg.bytes[0] <= mem_rd_data;
                 2'd1: stage_b_reg.bytes[1] <= mem_rd_data;
@@ -434,13 +448,36 @@ module ymf278_pcm_engine #(
     end
 
     // ════════════════════════════════════════════════════════════════════════
-    // Stage D — TODO: EG, volume, pan, accumulate, BRAM writeback
-    // Also: master output framer (pushes pcm_left/right at sample_start).
+    // Stage D — EG + vol + pan + accumulate + writeback
+    //
+    // Entered at stage_advance when stage_c_reg.valid.  In one cycle:
+    //   1. Detect key_on edge (regs.keyon & ~key_on_prev[slot])
+    //   2. process_eg → next_state, next_vol
+    //   3. calc_vol(interp, next_vol, regs.tl) → scaled signed sample
+    //   4. Pan split (placeholder: same on both channels)
+    //   5. Accumulate into master_accum_left/right
+    //   6. Writeback updated dyn (pos/stepPtr from C; env_state/env_vol new;
+    //      pos/stepPtr reset on key_on edge)
+    //   7. Update key_on_prev[slot]
+    //
+    // Master framer: at sample_start (frame end), push accum to pcm_left/right
+    // and pulse pcm_valid; reset accums.
+    //
+    // TODO: proper pan attenuation (calc_pan_att in alu is placeholder).
     // ════════════════════════════════════════════════════════════════════════
     logic signed [23:0] master_accum_left;
     logic signed [23:0] master_accum_right;
 
     always_ff @(posedge clk or negedge rst_n) begin
+        // Locals used by Stage D processing pipeline (must be declared first
+        // in a SystemVerilog always block).
+        logic [2:0]  next_eg_state;
+        logic [9:0]  next_eg_vol;
+        logic        key_on_edge;
+        logic signed [31:0] vol_sample;
+        slot_dyn_t   dyn_upd;
+        slot_dyn_t   dyn_reset;
+
         if (!rst_n) begin
             master_accum_left  <= '0;
             master_accum_right <= '0;
@@ -448,22 +485,58 @@ module ymf278_pcm_engine #(
             pcm_right <= '0;
             pcm_valid <= 1'b0;
             key_on_prev <= '0;
-            begin
-                slot_dyn_t dyn_reset;
-                dyn_reset.pos       = 16'd0;
-                dyn_reset.stepPtr   = 16'd0;
-                dyn_reset.env_vol   = 10'h280;
-                dyn_reset.env_state = 3'd0;
-                for (int i = 0; i < 24; i++) ram_dyn[i] <= dyn_reset;
-            end
+            dyn_reset.pos       = 16'd0;
+            dyn_reset.stepPtr   = 16'd0;
+            dyn_reset.env_vol   = 10'h280;
+            dyn_reset.env_state = 3'd0;
+            for (int i = 0; i < 24; i++) ram_dyn[i] <= dyn_reset;
         end else begin
             pcm_valid <= 1'b0;
 
-            // Writeback updated dyn at the boundary between Stage C/D
-            // (Stage D entry).  TODO: write the *processed* dyn from Stage D
-            // logic, not the C carry-through.
             if (stage_advance && stage_c_reg.valid) begin
-                ram_dyn[stage_c_reg.slot] <= stage_c_reg.dyn;
+                key_on_edge = stage_c_reg.regs.keyon & ~key_on_prev[stage_c_reg.slot];
+                key_on_prev[stage_c_reg.slot] <= stage_c_reg.regs.keyon;
+
+                // EG step (combinational task)
+                eg.process_eg(
+                    stage_c_reg.dyn.env_state,
+                    stage_c_reg.dyn.env_vol,
+                    stage_c_reg.regs.keyon,
+                    key_on_edge,
+                    stage_c_reg.regs.ar,
+                    stage_c_reg.regs.d1r,
+                    stage_c_reg.regs.d2r,
+                    stage_c_reg.regs.rr,
+                    stage_c_reg.regs.rc,
+                    stage_c_reg.regs.oct,
+                    stage_c_reg.regs.fn,
+                    stage_c_reg.regs.dl_idx,
+                    stage_c_reg.regs.damp,
+                    stage_c_reg.regs.prvb,
+                    eg_cnt,
+                    next_eg_state,
+                    next_eg_vol
+                );
+
+                // Vol attenuation: interp × envelope × TL
+                vol_sample = alu.calc_vol(stage_c_reg.interp,
+                                          next_eg_vol,
+                                          stage_c_reg.regs.tl);
+
+                // Pan: simple center-mix for now (TODO: implement L/R split).
+                master_accum_left  <= master_accum_left  + vol_sample[23:0];
+                master_accum_right <= master_accum_right + vol_sample[23:0];
+
+                // Writeback dyn: keep pos/stepPtr from Stage C (which Stage B
+                // computed), or reset to 0 on key-on edge.
+                dyn_upd           = stage_c_reg.dyn;
+                dyn_upd.env_state = next_eg_state;
+                dyn_upd.env_vol   = next_eg_vol;
+                if (key_on_edge) begin
+                    dyn_upd.pos       = 16'd0;
+                    dyn_upd.stepPtr   = 16'd0;
+                end
+                ram_dyn[stage_c_reg.slot] <= dyn_upd;
             end
 
             if (sample_start) begin
@@ -503,6 +576,10 @@ module ymf278_pcm_engine #(
     wire [3:0]  wr_field = (reg_addr >= 8'h08) ? 4'((reg_addr - 8'h08) / 8'd24) : 4'd0;
     wire        wr_slot_reg = reg_wr && (reg_addr >= 8'h08) && (reg_addr <= 8'hF7);
 
+    // hf_pending is driven by a dedicated always_ff (below) to avoid
+    // multi-driver between the CPU decoder (sets bit on wave write) and
+    // the HF FSM (clears bit on pickup).
+
     always_ff @(posedge clk or negedge rst_n) begin
         // Read-modify-write of the slot reg struct (iverilog rejects partial
         // bit assignment into an unpacked-array element indexed by variable).
@@ -511,7 +588,6 @@ module ymf278_pcm_engine #(
 
         if (!rst_n) begin
             wavetblhdr <= '0;
-            hf_pending <= '0;
             for (int i = 0; i < 24; i++) ram_regs[i] <= '0;
         end else begin
             if (reg_wr && reg_addr == 8'h02) begin
@@ -522,12 +598,10 @@ module ymf278_pcm_engine #(
                 case (wr_field)
                     4'd0: begin
                         reg_upd.wave[7:0] = reg_data[7:0];
-                        hf_pending[wr_snum] <= 1'b1;
                     end
                     4'd1: begin
                         reg_upd.wave[8] = reg_data[0];
                         reg_upd.fn[6:0] = reg_data[7:1];
-                        hf_pending[wr_snum] <= 1'b1;
                     end
                     4'd2: begin
                         reg_upd.fn[9:7] = reg_data[2:0];
@@ -572,9 +646,153 @@ module ymf278_pcm_engine #(
     end
 
     // ════════════════════════════════════════════════════════════════════════
-    // SDRAM port arbitration (SCSP-style priority).  Currently only Stage B
-    // drives the port; HF and CPU write FSMs will use the idle window
-    // (frame_cycle >= PIPELINE_END) once implemented.
+    // Header Fetch (HF) FSM
+    //
+    // When the CPU writes wave[7:0] or wave[8]/fn[6:0] for a slot, hf_pending
+    // bit is set.  This FSM walks the pending bits, reading the 12-byte
+    // sample header from PCM ROM and writing ram_header[slot].
+    //
+    // Address (matches openMSX YMF278.cc + legacy v1):
+    //   wave < 384 || wavetblhdr == 0:
+    //     addr = wave * 12 + byte_idx
+    //   else:
+    //     addr = (wavetblhdr << 19) + (wave - 384) * 12 + byte_idx
+    //
+    // Time budget: idle frame window = CYCLES_PER_FRAME - PIPELINE_END = 220
+    // cycles.  12 bytes × ~7 cycles (5-cycle bridge round-trip + state ovhd)
+    // = ~84 cycles for one slot's HF.  Plenty of slack.
+    //
+    // SDRAM arbitration: HF only runs when (frame_cycle >= PIPELINE_END), so
+    // Stage B sequencer is idle (B_IDLE/B_DONE).  The mem_addr/mem_rd_en mux
+    // below gives HF priority during the idle window; mem_rd_valid is gated
+    // away from Stage B while HF_WAIT is active.
+    // ════════════════════════════════════════════════════════════════════════
+    typedef enum logic [2:0] { HF_IDLE, HF_REQ, HF_WAIT, HF_STORE } hf_state_t;
+
+    hf_state_t   hf_state;
+    logic [4:0]  hf_cur_slot;
+    logic [8:0]  hf_cur_wave;
+    logic [3:0]  hf_byte_idx;
+    logic [7:0]  hf_buf [0:11];
+
+    // Combinational HF byte address (depends on cur_wave/byte_idx).
+    wire [21:0] hf_addr_comb = (hf_cur_wave < 9'd384 || wavetblhdr == 3'd0)
+        ? 22'(({13'd0, hf_cur_wave} * 22'd12) + {18'd0, hf_byte_idx})
+        : 22'({wavetblhdr, 19'd0}
+            + ({13'd0, (hf_cur_wave - 9'd384)} * 22'd12)
+            + {18'd0, hf_byte_idx});
+
+    // Priority-encode lowest-numbered hf_pending bit.
+    logic [4:0]  hf_picked;
+    logic        hf_found;
+    always_comb begin
+        hf_picked = 5'd0;
+        hf_found  = 1'b0;
+        for (int i = 0; i < 24; i++) begin
+            if (hf_pending[i] && !hf_found) begin
+                hf_picked = 5'(i);
+                hf_found  = 1'b1;
+            end
+        end
+    end
+
+    wire hf_window_open = (frame_cycle >= PIPELINE_END);
+    assign hf_active    = (hf_state == HF_REQ) || (hf_state == HF_WAIT);
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            hf_state    <= HF_IDLE;
+            hf_cur_slot <= '0;
+            // hf_cur_wave reset handled by its dedicated always_ff
+            hf_byte_idx <= '0;
+            for (int i = 0; i < 12; i++) hf_buf[i] <= '0;
+        end else begin
+            case (hf_state)
+                HF_IDLE: if (hf_window_open && hf_found) begin
+                    hf_cur_slot <= hf_picked;
+                    // hf_cur_wave is loaded by a separate always_ff (uses
+                    // hf_picked_regs intermediate due to iverilog limitation).
+                    hf_byte_idx <= 4'd0;
+                    hf_state    <= HF_REQ;
+                end
+                HF_REQ: begin
+                    // Address is driven combinationally from hf_addr_comb;
+                    // arbiter latches mem_addr/mem_rd_en this same cycle.
+                    hf_state <= HF_WAIT;
+                end
+                HF_WAIT: if (mem_rd_valid) begin
+                    hf_buf[hf_byte_idx] <= mem_rd_data;
+                    if (hf_byte_idx == 4'd11) begin
+                        hf_state <= HF_STORE;
+                    end else begin
+                        hf_byte_idx <= hf_byte_idx + 4'd1;
+                        hf_state    <= HF_REQ;
+                    end
+                end
+                HF_STORE: begin
+                    // ram_header write happens in its own always_ff (below)
+                    // because iverilog can't mix unpacked-array writes with
+                    // this FSM's RMW.  HF_STORE is just a 1-cycle marker.
+                    hf_state <= HF_IDLE;
+                end
+                default: hf_state <= HF_IDLE;
+            endcase
+        end
+    end
+
+    // Fetch wave number on HF_IDLE → HF_REQ transition (slot picked combinationally).
+    // Done via a separate always_ff that reads ram_regs[hf_picked].wave through
+    // a typed struct intermediate (iverilog limitation).
+    slot_regs_t hf_picked_regs;
+    always_comb hf_picked_regs = ram_regs[hf_picked];
+
+    // Load hf_cur_wave when entering HF_REQ (slot picked at HF_IDLE).
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) hf_cur_wave <= '0;
+        else if (hf_state == HF_IDLE && hf_window_open && hf_found)
+            hf_cur_wave <= hf_picked_regs.wave;
+    end
+
+    // ram_header write + hf_pending clear at HF_STORE.
+    slot_header_t hf_hdr_built;
+    always_comb begin
+        hf_hdr_built.bits      = hf_buf[0][7:6];
+        hf_hdr_built.startAddr = {hf_buf[0][5:0], hf_buf[1], hf_buf[2]};
+        hf_hdr_built.loopAddr  = {hf_buf[3], hf_buf[4]};
+        hf_hdr_built.endAddr   = {hf_buf[5], hf_buf[6]};
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            for (int i = 0; i < 24; i++) ram_header[i] <= '0;
+        end else if (hf_state == HF_STORE) begin
+            ram_header[hf_cur_slot] <= hf_hdr_built;
+            // TODO: also override ram_regs[hf_cur_slot] LFO/AR/D1R/DL/D2R/
+            // RC/RR/AM from hf_buf[7..11].  Skipped for v2 MVP — CPU writes
+            // typically supersede these defaults anyway.
+        end
+    end
+
+    // Consolidated hf_pending driver: CPU decoder sets bit on wave write
+    // (field 0 or 1); HF FSM clears bit when it picks the slot.  If both
+    // happen same cycle for same slot, SET wins (the new write was issued
+    // after the pick, so the pending request must persist).
+    wire wr_sets_hf = wr_slot_reg && (wr_field == 4'd0 || wr_field == 4'd1);
+    wire hf_pick_now = (hf_state == HF_IDLE) && hf_window_open && hf_found;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            hf_pending <= '0;
+        end else begin
+            if (hf_pick_now) hf_pending[hf_picked] <= 1'b0;
+            if (wr_sets_hf)  hf_pending[wr_snum]   <= 1'b1; // wins over clear
+        end
+    end
+
+    // ════════════════════════════════════════════════════════════════════════
+    // SDRAM port arbitration: HF (high prio during idle window) vs Stage B.
+    // Both sources drive a 1-cycle mem_rd_en pulse with addr; msx.sv bridge
+    // edge-detects rd_en and captures addr on rising edge.
     // ════════════════════════════════════════════════════════════════════════
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -586,15 +804,19 @@ module ymf278_pcm_engine #(
             mem_rd_en   <= 1'b0;
             mem_wr_en   <= 1'b0;
 
-            // Stage B sequencer pulse: 1 cycle of mem_rd_en when in B_ISSUE.
-            if (b_state == B_ISSUE) begin
+            if (hf_state == HF_REQ) begin
+                mem_addr  <= hf_addr_comb;
+                mem_rd_en <= 1'b1;
+            end else if (b_state == B_ISSUE) begin
                 mem_addr  <= b_addr_sel;
                 mem_rd_en <= 1'b1;
             end
-            // TODO: HF FSM drives mem_addr/mem_rd_en when frame_cycle >= PIPELINE_END.
-            // TODO: CPU write FIFO drives mem_wr_en when frame_cycle >= PIPELINE_END.
+            // TODO: CPU mem write FIFO drives mem_wr_en when idle window.
         end
     end
+
+    // (mem_rd_valid_b — the HF-gated valid signal for Stage B — is declared
+    // earlier as a forward reference near the Stage B sequencer.)
 
     // ════════════════════════════════════════════════════════════════════════
     // Debug output ports — flatten select per-slot reg fields for testbench
@@ -603,11 +825,13 @@ module ymf278_pcm_engine #(
     // iverilog quirk: can't access `.field` on an unpacked-array-of-packed-
     // struct element directly.  Stage through typed intermediate signals.
     // ════════════════════════════════════════════════════════════════════════
-    slot_regs_t dbg_slot0_struct, dbg_slot5_struct, dbg_slot23_struct;
+    slot_regs_t   dbg_slot0_struct, dbg_slot5_struct, dbg_slot23_struct;
+    slot_header_t dbg_slot0_hdr_struct;
     always_comb begin
-        dbg_slot0_struct  = ram_regs[0];
-        dbg_slot5_struct  = ram_regs[5];
-        dbg_slot23_struct = ram_regs[23];
+        dbg_slot0_struct     = ram_regs[0];
+        dbg_slot5_struct     = ram_regs[5];
+        dbg_slot23_struct    = ram_regs[23];
+        dbg_slot0_hdr_struct = ram_header[0];
     end
 
     assign dbg_wavetblhdr  = wavetblhdr;
@@ -623,6 +847,10 @@ module ymf278_pcm_engine #(
     assign dbg_slot0_d1r   = dbg_slot0_struct.d1r;
     assign dbg_slot5_wave  = dbg_slot5_struct.wave;
     assign dbg_slot23_wave = dbg_slot23_struct.wave;
+    assign dbg_slot0_hdr_start = dbg_slot0_hdr_struct.startAddr;
+    assign dbg_slot0_hdr_loop  = dbg_slot0_hdr_struct.loopAddr;
+    assign dbg_slot0_hdr_end   = dbg_slot0_hdr_struct.endAddr;
+    assign dbg_slot0_hdr_bits  = dbg_slot0_hdr_struct.bits;
 
     // ════════════════════════════════════════════════════════════════════════
     // Initial values for ram_header (simulation only — real SRAM/BRAM starts
