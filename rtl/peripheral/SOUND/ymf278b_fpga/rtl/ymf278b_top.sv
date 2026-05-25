@@ -291,14 +291,15 @@ assign dbg_new2       = new2;
 //   → mixer or downstream path is broken
 //   → engine could be perfectly fine but its output never makes it out
 //
-// 17-bit counter MSB at 85.9MHz toggles every 65536 cycles = 763us = 1311Hz
-// Amplitude ±0x1000 (~5% full scale) — clearly audible but not loud.
-logic [16:0] test_tone_cnt;
+// 19-bit counter MSB at 85.9MHz toggles every 2^18 = 262144 cycles
+// = ~3.05ms = ~328Hz (low E note, clearly audible bass-mid range).
+// Amplitude ±0x3000 (~37% full scale) — loud enough to hear over FM.
+logic [18:0] test_tone_cnt;
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) test_tone_cnt <= '0;
-    else        test_tone_cnt <= test_tone_cnt + 17'd1;
+    else        test_tone_cnt <= test_tone_cnt + 19'd1;
 end
-wire signed [15:0] test_pcm_tone = test_tone_cnt[16] ? 16'sh1000 : -16'sh1000;
+wire signed [15:0] test_pcm_tone = test_tone_cnt[18] ? 16'sh3000 : -16'sh3000;
 
 always_ff @(posedge clk) begin
     audio_valid <= 1'b0;
