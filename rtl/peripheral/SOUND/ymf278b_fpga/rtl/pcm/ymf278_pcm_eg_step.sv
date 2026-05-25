@@ -104,9 +104,9 @@ package ymf278_pcm_eg_pkg;
     endfunction
 
     function automatic logic [9:0] dl_tab_rom(input logic [3:0] idx);
-        // dl_tab[0..14] = idx * 0x20; dl_tab[15] = 0x3E0
+        // dl_tab[0..14] = idx * 0x20 (= idx << 5); dl_tab[15] = 0x3E0
         if (idx == 4'd15) dl_tab_rom = 10'h3E0;
-        else              dl_tab_rom = {3'b0, idx, 3'b0};  // idx << 5
+        else              dl_tab_rom = {1'b0, idx, 5'b00000};  // idx << 5
     endfunction
 
     // ── Helpers ────────────────────────────────────────────────────────
