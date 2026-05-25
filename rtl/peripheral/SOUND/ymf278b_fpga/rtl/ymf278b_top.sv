@@ -278,6 +278,28 @@ assign dbg_opl3_valid = opl3_sample_valid;
 assign dbg_pcm_level  = pcm_left_hold;
 assign dbg_new2       = new2;
 
+// ─── DIAGNOSTIC: PCM PATH TEST TONE ─────────────────────────────────────
+// Replace engine PCM output with a hardcoded 1311Hz square wave to verify
+// the audio mixer + output path passes PCM contributions independently of
+// the engine.
+//
+// If user hears the tone alongside FM music:
+//   → mixer + audio output path are FINE
+//   → bug is in engine producing samples (pipeline / pcm_valid / pcm_left)
+//
+// If user hears ONLY FM, no tone:
+//   → mixer or downstream path is broken
+//   → engine could be perfectly fine but its output never makes it out
+//
+// 17-bit counter MSB at 85.9MHz toggles every 65536 cycles = 763us = 1311Hz
+// Amplitude ±0x1000 (~5% full scale) — clearly audible but not loud.
+logic [16:0] test_tone_cnt;
+always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) test_tone_cnt <= '0;
+    else        test_tone_cnt <= test_tone_cnt + 17'd1;
+end
+wire signed [15:0] test_pcm_tone = test_tone_cnt[16] ? 16'sh1000 : -16'sh1000;
+
 always_ff @(posedge clk) begin
     audio_valid <= 1'b0;
     if (pcm_valid) begin
@@ -285,8 +307,9 @@ always_ff @(posedge clk) begin
         pcm_right_hold <= pcm_right;
     end
     if (opl3_sample_valid) begin
-        mix_left_tmp  = opl3_l_eff + (pcm_mute ? 17'sh0 : $signed({pcm_left_hold[15],  pcm_left_hold}));
-        mix_right_tmp = opl3_r_eff + (pcm_mute ? 17'sh0 : $signed({pcm_right_hold[15], pcm_right_hold}));
+        // DIAGNOSTIC: use test_pcm_tone instead of pcm_left_hold/pcm_right_hold
+        mix_left_tmp  = opl3_l_eff + (pcm_mute ? 17'sh0 : $signed({test_pcm_tone[15], test_pcm_tone}));
+        mix_right_tmp = opl3_r_eff + (pcm_mute ? 17'sh0 : $signed({test_pcm_tone[15], test_pcm_tone}));
         // Saturate 17-bit signed → 16-bit signed
         audio_left  <= (mix_left_tmp[16]  == mix_left_tmp[15])  ? mix_left_tmp[15:0]  : (mix_left_tmp[16]  ? 16'sh8000 : 16'sh7FFF);
         audio_right <= (mix_right_tmp[16] == mix_right_tmp[15]) ? mix_right_tmp[15:0] : (mix_right_tmp[16] ? 16'sh8000 : 16'sh7FFF);
