@@ -229,19 +229,35 @@ logic signed [16:0] opl3_l_eff, opl3_r_eff;
 assign opl3_l_eff    = fm_mute  ? 17'sh0 : $signed({opl3_left[20],  opl3_left[20:5]});
 assign opl3_r_eff    = fm_mute  ? 17'sh0 : $signed({opl3_right[20], opl3_right[20:5]});
 
-// Debug signal passthrough.
-// dbg_pcm_valid stretched to 32 clk_sdram cycles (~372ns) after each
-// pcm_valid pulse so the 21MHz CDC in debug_overlay can reliably catch
-// it.  Without stretching, a single-cycle 11.6ns pulse has only ~25%
-// capture probability per dst clock edge, which can give visually OFF
-// readings even when engine is running.  Does NOT affect audio path.
-logic [4:0] dbg_pcm_valid_cnt;
+// ─── DIAGNOSTIC MODE ────────────────────────────────────────────────────
+// User reports overlay row 2 (PCM valid) OFF on hardware even after
+// stretching dbg_pcm_valid to 32 cycles.  This means pcm_valid TRULY
+// never pulses — engine's frame_cycle counter is not reaching 1947.
+//
+// To isolate whether the problem is (a) clk_sdram/rst_n at engine input,
+// or (b) something inside the engine, route a FREE-RUNNING counter MSB
+// to dbg_pcm_valid.  This counter lives in ymf278b_top (not engine),
+// using the SAME clk and rst_n that feed the engine.
+//
+//   alive_counter[22] toggles every 2^22 / 85.9M ≈ 49ms → 10Hz blink
+//
+// Result interpretation (overlay row 2):
+//   - BRIGHT GREEN constantly  → clk + rst_n + signal path all OK
+//                                 → bug is INSIDE engine (e.g., frame_cycle
+//                                   stuck, Stage D D3 always_ff not firing,
+//                                   etc.).  TODO: deeper engine debug.
+//   - STILL OFF / dim          → clk_sdram or rst_n is not reaching
+//                                 ymf278b_top properly, or overlay path
+//                                 is broken at a level we haven't checked.
+//
+// REVERT this after diagnosis — production should drive from pcm_valid.
+logic [22:0] alive_counter;
 always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) dbg_pcm_valid_cnt <= 5'd0;
-    else if (pcm_valid) dbg_pcm_valid_cnt <= 5'd31;
-    else if (dbg_pcm_valid_cnt != 5'd0) dbg_pcm_valid_cnt <= dbg_pcm_valid_cnt - 5'd1;
+    if (!rst_n) alive_counter <= '0;
+    else        alive_counter <= alive_counter + 23'd1;
 end
-assign dbg_pcm_valid  = pcm_valid | (dbg_pcm_valid_cnt != 5'd0);
+
+assign dbg_pcm_valid  = alive_counter[22];  // 10Hz heartbeat blink
 assign dbg_opl3_valid = opl3_sample_valid;
 assign dbg_pcm_level  = pcm_left_hold;
 assign dbg_new2       = new2;
