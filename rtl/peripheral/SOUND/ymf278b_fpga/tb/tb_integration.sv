@@ -188,8 +188,13 @@ module tb_integration;
                  pcm_valid_count, max_abs_left, max_abs_left[15:0]);
         check("pcm_valid fired at least 10 times in test window",
               pcm_valid_count >= 10);
-        check("pcm_left non-zero after key_on (sample integrated)",
-              max_abs_left > 0);
+        // Quantitative check: with TL=0, env_vol=0, pan=center, and 16-bit
+        // samples at ±0x4000 in fake ROM, pcm_left peak should reach full
+        // amplitude (~0x4000).  Prior bug (master_accum[23:8] vs [15:0])
+        // divided by 256 → peak only 0x40 → silently passed the original
+        // ">0" check.  Require >0x1000 to catch >>>16x attenuation regressions.
+        check("pcm_left peak ≥ 0x1000 (no major attenuation regression)",
+              max_abs_left >= 16'h1000);
 
         $display("\n=== %0d PASS, %0d FAIL ===", passes, fails);
         if (fails == 0) $display("*** ALL TESTS PASSED ***");

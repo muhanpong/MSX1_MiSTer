@@ -16,84 +16,98 @@ package ymf278_pcm_eg_pkg;
     localparam logic [2:0] EG_DEC = 3'd3;
     localparam logic [2:0] EG_ATT = 3'd4;
 
-    // ── ROM tables (localparam arrays — Quartus-friendly) ──────────────
-    localparam logic [7:0] eg_inc_rom [0:119] = '{
-        // row 0
-        8'd0, 8'd1, 8'd0, 8'd1, 8'd0, 8'd1, 8'd0, 8'd1,
-        // row 1
-        8'd0, 8'd1, 8'd0, 8'd1, 8'd1, 8'd1, 8'd0, 8'd1,
-        // row 2
-        8'd0, 8'd1, 8'd1, 8'd1, 8'd0, 8'd1, 8'd1, 8'd1,
-        // row 3
-        8'd0, 8'd1, 8'd1, 8'd1, 8'd1, 8'd1, 8'd1, 8'd1,
-        // row 4
-        8'd1, 8'd1, 8'd1, 8'd1, 8'd1, 8'd1, 8'd1, 8'd1,
-        // row 5
-        8'd1, 8'd1, 8'd1, 8'd2, 8'd1, 8'd1, 8'd1, 8'd2,
-        // row 6
-        8'd1, 8'd2, 8'd1, 8'd2, 8'd1, 8'd2, 8'd1, 8'd2,
-        // row 7
-        8'd1, 8'd2, 8'd2, 8'd2, 8'd1, 8'd2, 8'd2, 8'd2,
-        // row 8
-        8'd2, 8'd2, 8'd2, 8'd2, 8'd2, 8'd2, 8'd2, 8'd2,
-        // row 9
-        8'd2, 8'd2, 8'd2, 8'd4, 8'd2, 8'd2, 8'd2, 8'd4,
-        // row 10
-        8'd2, 8'd4, 8'd2, 8'd4, 8'd2, 8'd4, 8'd2, 8'd4,
-        // row 11
-        8'd2, 8'd4, 8'd4, 8'd4, 8'd2, 8'd4, 8'd4, 8'd4,
-        // row 12
-        8'd4, 8'd4, 8'd4, 8'd4, 8'd4, 8'd4, 8'd4, 8'd4,
-        // row 13 (instant attack)
-        8'd8, 8'd8, 8'd8, 8'd8, 8'd8, 8'd8, 8'd8, 8'd8,
-        // row 14 (infinity / zero rate)
-        8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0, 8'd0
-    };
+    // ── ROM tables (function-based — works in both iverilog and Quartus;
+    //    iverilog doesn't support unpacked-array localparam initializers) ───
+    function automatic logic [7:0] eg_inc_rom(input logic [6:0] idx);
+        logic [3:0] row;
+        logic [2:0] ph;
+        row = idx[6:3];
+        ph  = idx[2:0];
+        case (row)
+            4'd0:  eg_inc_rom = ph[0] ? 8'd1 : 8'd0;
+            4'd1:  case (ph)
+                       3'd4, 3'd5: eg_inc_rom = 8'd1;
+                       default:    eg_inc_rom = ph[0] ? 8'd1 : 8'd0;
+                   endcase
+            4'd2:  case (ph)
+                       3'd0, 3'd4: eg_inc_rom = 8'd0;
+                       default:    eg_inc_rom = 8'd1;
+                   endcase
+            4'd3:  eg_inc_rom = (ph == 3'd0) ? 8'd0 : 8'd1;
+            4'd4:  eg_inc_rom = 8'd1;
+            4'd5:  eg_inc_rom = (ph[1:0] == 2'b11) ? 8'd2 : 8'd1;
+            4'd6:  eg_inc_rom = ph[0] ? 8'd2 : 8'd1;
+            4'd7:  case (ph)
+                       3'd0, 3'd4: eg_inc_rom = 8'd1;
+                       default:    eg_inc_rom = 8'd2;
+                   endcase
+            4'd8:  eg_inc_rom = 8'd2;
+            4'd9:  eg_inc_rom = (ph[1:0] == 2'b11) ? 8'd4 : 8'd2;
+            4'd10: eg_inc_rom = ph[0] ? 8'd4 : 8'd2;
+            4'd11: case (ph)
+                       3'd0, 3'd4: eg_inc_rom = 8'd2;
+                       default:    eg_inc_rom = 8'd4;
+                   endcase
+            4'd12: eg_inc_rom = 8'd4;
+            4'd13: eg_inc_rom = 8'd8;
+            default: eg_inc_rom = 8'd0;     // row 14: infinity / zero rate
+        endcase
+    endfunction
 
-    localparam logic [7:0] eg_rate_select_rom [0:63] = '{
-        8'd112, 8'd112, 8'd112, 8'd112,
-        8'd0,   8'd8,   8'd16,  8'd24,
-        8'd0,   8'd8,   8'd16,  8'd24,
-        8'd0,   8'd8,   8'd16,  8'd24,
-        8'd0,   8'd8,   8'd16,  8'd24,
-        8'd0,   8'd8,   8'd16,  8'd24,
-        8'd0,   8'd8,   8'd16,  8'd24,
-        8'd0,   8'd8,   8'd16,  8'd24,
-        8'd0,   8'd8,   8'd16,  8'd24,
-        8'd0,   8'd8,   8'd16,  8'd24,
-        8'd0,   8'd8,   8'd16,  8'd24,
-        8'd0,   8'd8,   8'd16,  8'd24,
-        8'd0,   8'd8,   8'd16,  8'd24,
-        8'd32,  8'd40,  8'd48,  8'd56,
-        8'd64,  8'd72,  8'd80,  8'd88,
-        8'd96,  8'd96,  8'd96,  8'd96
-    };
+    function automatic logic [7:0] eg_rate_select_rom(input logic [5:0] idx);
+        logic [3:0] row;
+        logic [1:0] ph;
+        row = idx[5:2];
+        ph  = idx[1:0];
+        case (row)
+            4'd0:  eg_rate_select_rom = 8'd112;
+            4'd13: case (ph)
+                       2'd0: eg_rate_select_rom = 8'd32;
+                       2'd1: eg_rate_select_rom = 8'd40;
+                       2'd2: eg_rate_select_rom = 8'd48;
+                       2'd3: eg_rate_select_rom = 8'd56;
+                   endcase
+            4'd14: case (ph)
+                       2'd0: eg_rate_select_rom = 8'd64;
+                       2'd1: eg_rate_select_rom = 8'd72;
+                       2'd2: eg_rate_select_rom = 8'd80;
+                       2'd3: eg_rate_select_rom = 8'd88;
+                   endcase
+            4'd15: eg_rate_select_rom = 8'd96;
+            default: // rows 1..12 all = {0, 8, 16, 24}
+                case (ph)
+                    2'd0: eg_rate_select_rom = 8'd0;
+                    2'd1: eg_rate_select_rom = 8'd8;
+                    2'd2: eg_rate_select_rom = 8'd16;
+                    2'd3: eg_rate_select_rom = 8'd24;
+                endcase
+        endcase
+    endfunction
 
-    localparam logic [7:0] eg_rate_shift_rom [0:63] = '{
-        8'd12, 8'd12, 8'd12, 8'd12,
-        8'd11, 8'd11, 8'd11, 8'd11,
-        8'd10, 8'd10, 8'd10, 8'd10,
-        8'd9,  8'd9,  8'd9,  8'd9,
-        8'd8,  8'd8,  8'd8,  8'd8,
-        8'd7,  8'd7,  8'd7,  8'd7,
-        8'd6,  8'd6,  8'd6,  8'd6,
-        8'd5,  8'd5,  8'd5,  8'd5,
-        8'd4,  8'd4,  8'd4,  8'd4,
-        8'd3,  8'd3,  8'd3,  8'd3,
-        8'd2,  8'd2,  8'd2,  8'd2,
-        8'd1,  8'd1,  8'd1,  8'd1,
-        8'd0,  8'd0,  8'd0,  8'd0,
-        8'd0,  8'd0,  8'd0,  8'd0,
-        8'd0,  8'd0,  8'd0,  8'd0,
-        8'd0,  8'd0,  8'd0,  8'd0
-    };
+    function automatic logic [7:0] eg_rate_shift_rom(input logic [5:0] idx);
+        // Decreases from 12 (idx 0..3) down by 1 per group of 4, floors at 0.
+        case (idx[5:2])
+            4'd0:  eg_rate_shift_rom = 8'd12;
+            4'd1:  eg_rate_shift_rom = 8'd11;
+            4'd2:  eg_rate_shift_rom = 8'd10;
+            4'd3:  eg_rate_shift_rom = 8'd9;
+            4'd4:  eg_rate_shift_rom = 8'd8;
+            4'd5:  eg_rate_shift_rom = 8'd7;
+            4'd6:  eg_rate_shift_rom = 8'd6;
+            4'd7:  eg_rate_shift_rom = 8'd5;
+            4'd8:  eg_rate_shift_rom = 8'd4;
+            4'd9:  eg_rate_shift_rom = 8'd3;
+            4'd10: eg_rate_shift_rom = 8'd2;
+            4'd11: eg_rate_shift_rom = 8'd1;
+            default: eg_rate_shift_rom = 8'd0;  // rows 12..15
+        endcase
+    endfunction
 
-    localparam logic [9:0] dl_tab_rom [0:15] = '{
-        10'h000, 10'h020, 10'h040, 10'h060,
-        10'h080, 10'h0A0, 10'h0C0, 10'h0E0,
-        10'h100, 10'h120, 10'h140, 10'h160,
-        10'h180, 10'h1A0, 10'h1C0, 10'h3E0
-    };
+    function automatic logic [9:0] dl_tab_rom(input logic [3:0] idx);
+        // dl_tab[0..14] = idx * 0x20; dl_tab[15] = 0x3E0
+        if (idx == 4'd15) dl_tab_rom = 10'h3E0;
+        else              dl_tab_rom = {3'b0, idx, 3'b0};  // idx << 5
+    endfunction
 
     // ── Helpers ────────────────────────────────────────────────────────
     function automatic logic eg_do_update(input logic [23:0] cnt, input logic [7:0] sh);
@@ -158,11 +172,11 @@ package ymf278_pcm_eg_pkg;
             case (cur_state)
                 EG_ATT: begin
                     rate = calc_eg_rate(ar, rc, oct, fn);
-                    shift_v = eg_rate_shift_rom[rate];
+                    shift_v = eg_rate_shift_rom(rate);
                     if (rate < 6'd63 && eg_do_update(eg_cnt, shift_v)) begin
-                        sel_v = eg_rate_select_rom[rate];
+                        sel_v = eg_rate_select_rom(rate);
                         phase_v = eg_phase(eg_cnt, shift_v);
-                        inc_v = eg_inc_rom[sel_v + {5'd0, phase_v}];
+                        inc_v = eg_inc_rom(7'(sel_v + {5'd0, phase_v}));
                         next_vol = calc_attack_step(cur_vol, inc_v);
                         if (next_vol <= MIN_ATT_INDEX) begin
                             next_vol = MIN_ATT_INDEX;
@@ -172,25 +186,25 @@ package ymf278_pcm_eg_pkg;
                 end
                 EG_DEC: begin
                     rate = calc_decay_rate(d1r, rc, damp, prvb, cur_vol, oct, fn);
-                    shift_v = eg_rate_shift_rom[rate];
+                    shift_v = eg_rate_shift_rom(rate);
                     if (eg_do_update(eg_cnt, shift_v)) begin
-                        sel_v = eg_rate_select_rom[rate];
+                        sel_v = eg_rate_select_rom(rate);
                         phase_v = eg_phase(eg_cnt, shift_v);
-                        inc_v = eg_inc_rom[sel_v + {5'd0, phase_v}];
+                        inc_v = eg_inc_rom(7'(sel_v + {5'd0, phase_v}));
                         vol_add = {1'b0, cur_vol} + {3'd0, inc_v};
                         next_vol = (vol_add > 11'h3FF) ? 10'h3FF : vol_add[9:0];
-                        if (next_vol >= dl_tab_rom[dl_idx]) begin
+                        if (next_vol >= dl_tab_rom(dl_idx)) begin
                             next_state = (next_vol < MAX_ATT_INDEX) ? EG_SUS : EG_OFF;
                         end
                     end
                 end
                 EG_SUS: begin
                     rate = calc_decay_rate(d2r, rc, damp, prvb, cur_vol, oct, fn);
-                    shift_v = eg_rate_shift_rom[rate];
+                    shift_v = eg_rate_shift_rom(rate);
                     if (eg_do_update(eg_cnt, shift_v)) begin
-                        sel_v = eg_rate_select_rom[rate];
+                        sel_v = eg_rate_select_rom(rate);
                         phase_v = eg_phase(eg_cnt, shift_v);
-                        inc_v = eg_inc_rom[sel_v + {5'd0, phase_v}];
+                        inc_v = eg_inc_rom(7'(sel_v + {5'd0, phase_v}));
                         vol_add = {1'b0, cur_vol} + {3'd0, inc_v};
                         if (vol_add >= {1'b0, MAX_ATT_INDEX}) begin
                             next_vol = MAX_ATT_INDEX;
@@ -202,11 +216,11 @@ package ymf278_pcm_eg_pkg;
                 end
                 EG_REL: begin
                     rate = calc_decay_rate(rr, rc, damp, prvb, cur_vol, oct, fn);
-                    shift_v = eg_rate_shift_rom[rate];
+                    shift_v = eg_rate_shift_rom(rate);
                     if (eg_do_update(eg_cnt, shift_v)) begin
-                        sel_v = eg_rate_select_rom[rate];
+                        sel_v = eg_rate_select_rom(rate);
                         phase_v = eg_phase(eg_cnt, shift_v);
-                        inc_v = eg_inc_rom[sel_v + {5'd0, phase_v}];
+                        inc_v = eg_inc_rom(7'(sel_v + {5'd0, phase_v}));
                         vol_add = {1'b0, cur_vol} + {3'd0, inc_v};
                         if (vol_add >= {1'b0, MAX_ATT_INDEX}) begin
                             next_vol = MAX_ATT_INDEX;
