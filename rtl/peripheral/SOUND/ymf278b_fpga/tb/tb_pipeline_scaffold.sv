@@ -115,9 +115,9 @@ module tb_pipeline_scaffold;
 
         // ─── Stage B SDRAM sequencer: count read pulses in slot 0 window ─────
         // Slot 0 Stage A: fc 0..63.  Slot 0 Stage B: fc 64..127.
-        // Sequencer issues exactly 4 mem_rd_en pulses during fc 64..127.
+        // Sequencer issues exactly 5 mem_rd_en pulses during fc 64..127
+        // (a0, a1, a2, b0, b1 — supports 12-bit format).
         @(posedge clk);
-        // Wait for next frame's slot 0 Stage B window start.
         wait (dut.frame_cycle == 11'd64);
         begin
             int rd_high_cnt = 0;
@@ -125,9 +125,9 @@ module tb_pipeline_scaffold;
                 if (mem_rd_en) rd_high_cnt++;
                 @(posedge clk);
             end
-            $display("  mem_rd_en HIGH cycles over fc 64..127: %0d (expect 4)", rd_high_cnt);
-            check("Stage B sequencer issued exactly 4 SDRAM reads in slot 0 window",
-                  rd_high_cnt == 4);
+            $display("  mem_rd_en HIGH cycles over fc 64..127: %0d (expect 5)", rd_high_cnt);
+            check("Stage B sequencer issued exactly 5 SDRAM reads in slot 0 window",
+                  rd_high_cnt == 5);
         end
 
         $display("\n=== %0d PASS, %0d FAIL ===", passes, fails);

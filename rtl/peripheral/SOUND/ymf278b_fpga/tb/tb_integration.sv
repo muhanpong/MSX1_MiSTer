@@ -159,8 +159,9 @@ module tb_integration;
         write_reg(8'h38, 8'h00);
         // slot 0 TL = 0 (no attenuation), bit 0 = 1 (load immediate)
         write_reg(8'h50, 8'h01);
-        // slot 0 pan + keyon: keyon=1, damp=0, lfo=0, mute=0, pan=8 (center)
-        write_reg(8'h68, 8'h88);
+        // slot 0 pan + keyon: keyon=1, damp=0, lfo=0, mute=0, pan=0 (center, both full)
+        // NOTE: pan=8 is MUTE per YMF278B spec (both channels silent).
+        write_reg(8'h68, 8'h80);
         // slot 0 AR=15, D1R=0 → instant attack
         write_reg(8'h98, 8'hF0);
 

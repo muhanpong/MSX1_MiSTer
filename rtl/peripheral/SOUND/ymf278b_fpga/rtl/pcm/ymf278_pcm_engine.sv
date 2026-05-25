@@ -182,7 +182,13 @@ module ymf278_pcm_engine #(
         slot_dyn_t       dyn;        // pos/stepPtr updated for current sample
         logic [15:0]     next_pos;   // for sample B interpolation
         byte_addrs_t     addrs;
-        logic [3:0][7:0] bytes;      // a0, a1, b0, b1 — filled by sequencer
+        // 5 bytes filled by sequencer: a0, a1, a2, b0, b1.
+        //   8-bit  : uses bytes[0] (sample A), bytes[3] (sample B)
+        //   12-bit : uses bytes[0,1,2] (chunk for sample A);
+        //            p odd → bytes[3,4] for sample B's NEXT chunk
+        //            p even → reuses bytes[0,1,2] (same chunk)
+        //   16-bit : uses bytes[0,1] (sample A), bytes[3,4] (sample B)
+        logic [4:0][7:0] bytes;
     } stage_b_pkt_t;
 
     typedef struct packed {
@@ -190,7 +196,7 @@ module ymf278_pcm_engine #(
         logic [4:0]      slot;
         slot_regs_t      regs;
         slot_dyn_t       dyn;       // pos/stepPtr from Stage B
-        logic [3:0][7:0] bytes;
+        logic [4:0][7:0] bytes;
         logic signed [15:0] interp;
     } stage_c_pkt_t;
 
@@ -312,7 +318,7 @@ module ymf278_pcm_engine #(
     } b_state_t;
 
     b_state_t   b_state;
-    logic [1:0] b_byte_idx;     // 0..3
+    logic [2:0] b_byte_idx;     // 0..4 (5 bytes)
     logic [21:0] b_addr_sel;
 
     // Forward declaration: hf_active is asserted by HF FSM (defined below)
@@ -323,10 +329,12 @@ module ymf278_pcm_engine #(
 
     always_comb begin
         case (b_byte_idx)
-            2'd0: b_addr_sel = stage_b_reg.addrs.a0;
-            2'd1: b_addr_sel = stage_b_reg.addrs.a1;
-            2'd2: b_addr_sel = stage_b_reg.addrs.b0;
-            2'd3: b_addr_sel = stage_b_reg.addrs.b1;
+            3'd0: b_addr_sel = stage_b_reg.addrs.a0;
+            3'd1: b_addr_sel = stage_b_reg.addrs.a1;
+            3'd2: b_addr_sel = stage_b_reg.addrs.a2;
+            3'd3: b_addr_sel = stage_b_reg.addrs.b0;
+            3'd4: b_addr_sel = stage_b_reg.addrs.b1;
+            default: b_addr_sel = '0;
         endcase
     end
 
@@ -340,7 +348,7 @@ module ymf278_pcm_engine #(
             // even if prior slot didn't finish.
             if (stage_a_reg.valid) begin
                 b_state    <= B_ISSUE;
-                b_byte_idx <= 2'd0;
+                b_byte_idx <= 3'd0;
             end else begin
                 b_state <= B_IDLE;
             end
@@ -350,9 +358,9 @@ module ymf278_pcm_engine #(
                 B_ISSUE:      b_state <= B_WAIT_VALID;
                 B_WAIT_VALID: if (mem_rd_valid_b) b_state <= B_NEXT;
                 B_NEXT: begin
-                    if (b_byte_idx == 2'd3) b_state <= B_DONE;
+                    if (b_byte_idx == 3'd4) b_state <= B_DONE;
                     else begin
-                        b_byte_idx <= b_byte_idx + 2'd1;
+                        b_byte_idx <= b_byte_idx + 3'd1;
                         b_state    <= B_ISSUE;
                     end
                 end
@@ -382,10 +390,12 @@ module ymf278_pcm_engine #(
             stage_b_reg.bytes    <= '0;
         end else if (b_state == B_WAIT_VALID && mem_rd_valid_b) begin
             case (b_byte_idx)
-                2'd0: stage_b_reg.bytes[0] <= mem_rd_data;
-                2'd1: stage_b_reg.bytes[1] <= mem_rd_data;
-                2'd2: stage_b_reg.bytes[2] <= mem_rd_data;
-                2'd3: stage_b_reg.bytes[3] <= mem_rd_data;
+                3'd0: stage_b_reg.bytes[0] <= mem_rd_data;
+                3'd1: stage_b_reg.bytes[1] <= mem_rd_data;
+                3'd2: stage_b_reg.bytes[2] <= mem_rd_data;
+                3'd3: stage_b_reg.bytes[3] <= mem_rd_data;
+                3'd4: stage_b_reg.bytes[4] <= mem_rd_data;
+                default: ;
             endcase
         end
     end
@@ -398,39 +408,61 @@ module ymf278_pcm_engine #(
     // ════════════════════════════════════════════════════════════════════════
     // Stage C — decode fetched bytes into samples A/B, linear interpolate.
     //
-    // Buffer layout (filled by Stage B sequencer):
-    //   bytes[0] = byte_addr(p,   fmt, 0)   ─┐  "sample A bytes"
-    //   bytes[1] = byte_addr(p,   fmt, 1)   ─┘
-    //   bytes[2] = byte_addr(p+1, fmt, 0)   ─┐  "sample B bytes"
-    //   bytes[3] = byte_addr(p+1, fmt, 1)   ─┘
+    // 5-byte buffer layout:
+    //   bytes[0,1,2] = chunk for sample A (3 consecutive bytes)
+    //   bytes[3,4]   = first 2 bytes of NEXT chunk (sample B if p odd)
     //
-    // alu.decode_sample(b0,b1,b2,p,fmt):
-    //   8-bit  : sample = {b0, 8'h0}            (uses b0)
-    //   12-bit : packed (uses b0,b1,b2)         ← needs 3rd byte we don't fetch
-    //   16-bit : sample = {b0, b1}              (uses b0,b1)
-    //
-    // For 8/16-bit our layout is correct.  For 12-bit, b2 input is zeroed —
-    // produces wrong nibble in samples.  TODO: fetch 3rd byte or adjust
-    // byte_addr semantics to pack 4 consecutive bytes for 12-bit chunks.
+    // Decode per format:
+    //   8-bit  : A = decode(bytes[0], ...);  B = decode(bytes[3], ...)
+    //   12-bit : A = decode(bytes[0..2], p, fmt);
+    //            B = (p odd) decode(bytes[3..4], p+1) — next chunk
+    //                (p even) decode(bytes[0..2], p+1)  — same chunk
+    //   16-bit : A = decode(bytes[0,1], ...);  B = decode(bytes[3,4], ...)
     // ════════════════════════════════════════════════════════════════════════
     logic signed [15:0] samp_a, samp_b;
     logic signed [15:0] interp_val;
 
     always_comb begin
-        samp_a = alu.decode_sample(
-            stage_b_reg.bytes[0],
-            stage_b_reg.bytes[1],
-            8'h00,                       // TODO 12-bit b2
-            stage_b_reg.dyn.pos,
-            stage_b_reg.header.bits
-        );
-        samp_b = alu.decode_sample(
-            stage_b_reg.bytes[2],
-            stage_b_reg.bytes[3],
-            8'h00,                       // TODO 12-bit b2
-            stage_b_reg.next_pos,
-            stage_b_reg.header.bits
-        );
+        case (stage_b_reg.header.bits)
+            2'd0: begin // 8-bit
+                samp_a = alu.decode_sample(stage_b_reg.bytes[0], 8'h00, 8'h00,
+                                            stage_b_reg.dyn.pos, 2'd0);
+                samp_b = alu.decode_sample(stage_b_reg.bytes[3], 8'h00, 8'h00,
+                                            stage_b_reg.next_pos, 2'd0);
+            end
+            2'd1: begin // 12-bit
+                samp_a = alu.decode_sample(stage_b_reg.bytes[0],
+                                            stage_b_reg.bytes[1],
+                                            stage_b_reg.bytes[2],
+                                            stage_b_reg.dyn.pos, 2'd1);
+                if (stage_b_reg.dyn.pos[0]) begin
+                    // p odd → p+1 even → sample B's chunk = next chunk (bytes[3,4])
+                    // decode_sample for even-pos: uses b0 + (b1<<4)&0xF0
+                    samp_b = alu.decode_sample(stage_b_reg.bytes[3],
+                                                stage_b_reg.bytes[4],
+                                                8'h00,
+                                                stage_b_reg.next_pos, 2'd1);
+                end else begin
+                    // p even → p+1 odd → sample B in SAME chunk (bytes[0..2])
+                    samp_b = alu.decode_sample(stage_b_reg.bytes[0],
+                                                stage_b_reg.bytes[1],
+                                                stage_b_reg.bytes[2],
+                                                stage_b_reg.next_pos, 2'd1);
+                end
+            end
+            2'd2: begin // 16-bit
+                samp_a = alu.decode_sample(stage_b_reg.bytes[0],
+                                            stage_b_reg.bytes[1], 8'h00,
+                                            stage_b_reg.dyn.pos, 2'd2);
+                samp_b = alu.decode_sample(stage_b_reg.bytes[3],
+                                            stage_b_reg.bytes[4], 8'h00,
+                                            stage_b_reg.next_pos, 2'd2);
+            end
+            default: begin
+                samp_a = 16'sd0;
+                samp_b = 16'sd0;
+            end
+        endcase
         interp_val = alu.calc_interp(samp_a, samp_b, stage_b_reg.dyn.stepPtr);
     end
 
@@ -475,6 +507,8 @@ module ymf278_pcm_engine #(
         logic [9:0]  next_eg_vol;
         logic        key_on_edge;
         logic signed [31:0] vol_sample;
+        logic [5:0]  pan_l_gain, pan_r_gain;
+        logic signed [23:0] left_sample, right_sample;
         slot_dyn_t   dyn_upd;
         slot_dyn_t   dyn_reset;
 
@@ -523,9 +557,15 @@ module ymf278_pcm_engine #(
                                           next_eg_vol,
                                           stage_c_reg.regs.tl);
 
-                // Pan: simple center-mix for now (TODO: implement L/R split).
-                master_accum_left  <= master_accum_left  + vol_sample[23:0];
-                master_accum_right <= master_accum_right + vol_sample[23:0];
+                // Pan: per-channel attenuation from openMSX pan tables.
+                //   gain = (vol_sample * pan_att) >>> 5
+                // pan_att is 6-bit (0x20 = full, 0 = silence).
+                pan_l_gain = alu.pan_att_left (stage_c_reg.regs.pan);
+                pan_r_gain = alu.pan_att_right(stage_c_reg.regs.pan);
+                left_sample  = 24'((vol_sample * 32'($signed({26'd0, pan_l_gain}))) >>> 5);
+                right_sample = 24'((vol_sample * 32'($signed({26'd0, pan_r_gain}))) >>> 5);
+                master_accum_left  <= master_accum_left  + left_sample;
+                master_accum_right <= master_accum_right + right_sample;
 
                 // Writeback dyn: keep pos/stepPtr from Stage C (which Stage B
                 // computed), or reset to 0 on key-on edge.

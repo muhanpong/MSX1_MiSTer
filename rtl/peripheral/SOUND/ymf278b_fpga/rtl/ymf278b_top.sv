@@ -134,13 +134,11 @@ ymf278_pcm_engine #(
     .clk             (clk),
     .rst_n           (rst_n),
     
-    // CPU Register Interface
+    // CPU Register Interface (v2: write-only; reads stubbed below)
     .reg_addr        (pcm_reg_addr),
     .reg_data        (pcm_reg_data),
     .reg_wr          (pcm_reg_wr),
-    .reg_rd          (pcm_reg_rd),
-    .reg_dout        (pcm_reg_dout),
-    
+
     // SDRAM Direct Port
     .mem_addr        (mem_addr),
     .mem_rd_en       (mem_rd_req),
@@ -174,7 +172,11 @@ ymf278_pcm_engine #(
     .dbg_slot0_hdr_bits  ()
 );
 
-assign pcm_reg_rd_done = 1'b1; // TODO: Implement CPU memory read completion in engine
+// v2 engine has no CPU register read path yet.  Return YMF278B Device ID
+// (0x20) on reg 0x02, zero elsewhere.  This matches legacy v1's minimal
+// behavior for software detection probes.
+assign pcm_reg_dout    = (pcm_reg_rd && pcm_reg_addr == 8'h02) ? 8'h20 : 8'h00;
+assign pcm_reg_rd_done = 1'b1; // TODO: Implement CPU memory read completion in v2 engine
 
 // Unused legacy debug signals
 assign dbg_keyon_count = 5'd0;

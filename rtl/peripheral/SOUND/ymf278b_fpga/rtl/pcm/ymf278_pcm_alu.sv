@@ -67,18 +67,44 @@ module ymf278_pcm_alu;
     endfunction
 
     // ========================================================================
-    // 4. Panning Attenuation
-    // Matches openMSX: pan_att = (0x20 - (p & 0x0F)) >> (p >> 4)
+    // 4. Panning Attenuation (per channel)
+    // openMSX pan tables (YMF278.cc):
+    //   pan_left  = [0, 8,16,24,32,40,48,255,255,0, 0, 0, 0, 0, 0, 0]
+    //   pan_right = [0, 0, 0, 0, 0, 0, 0, 0, 255,255,48,40,32,24,16, 8]
+    //   pan_att(p) = (p==255) ? 0 : (0x20 - (p & 0xF)) >> (p >> 4)
+    // Returns 6-bit gain: 0x20 = full (×1 after >>>5), 0 = silence.
     // ========================================================================
-    function automatic [5:0] calc_pan_att(
-        input [3:0] pan_val
-    );
-        if (pan_val == 4'd8) return 6'd0; // Center or Mute handled externally, but 8 usually implies mute/center
-        
-        // For standard 0-15 pan values (excluding 8 which is special)
-        // Simplified mapping based on openMSX translation for stereo mixer
-        // Note: Actual left/right split depends on if pan_val > 8.
-        return 6'd32; // Simplified placeholder for ALU extraction demonstration
+    function automatic [5:0] pan_att_calc(input [7:0] p);
+        if (p == 8'd255) return 6'd0;
+        return 6'((6'h20 - {2'b0, p[3:0]}) >> p[7:4]);
+    endfunction
+
+    function automatic [7:0] pan_left_rom(input [3:0] pan_val);
+        case (pan_val)
+            4'd0:  return 8'd0;    4'd1:  return 8'd8;
+            4'd2:  return 8'd16;   4'd3:  return 8'd24;
+            4'd4:  return 8'd32;   4'd5:  return 8'd40;
+            4'd6:  return 8'd48;   4'd7:  return 8'd255;
+            4'd8:  return 8'd255;  default: return 8'd0;
+        endcase
+    endfunction
+
+    function automatic [7:0] pan_right_rom(input [3:0] pan_val);
+        case (pan_val)
+            4'd8:  return 8'd255;  4'd9:  return 8'd255;
+            4'd10: return 8'd48;   4'd11: return 8'd40;
+            4'd12: return 8'd32;   4'd13: return 8'd24;
+            4'd14: return 8'd16;   4'd15: return 8'd8;
+            default: return 8'd0;
+        endcase
+    endfunction
+
+    function automatic [5:0] pan_att_left(input [3:0] pan_val);
+        return pan_att_calc(pan_left_rom(pan_val));
+    endfunction
+
+    function automatic [5:0] pan_att_right(input [3:0] pan_val);
+        return pan_att_calc(pan_right_rom(pan_val));
     endfunction
 
     // ========================================================================
