@@ -169,8 +169,11 @@ ymf278_pcm_engine #(
     .dbg_slot0_hdr_start (),
     .dbg_slot0_hdr_loop  (),
     .dbg_slot0_hdr_end   (),
-    .dbg_slot0_hdr_bits  ()
+    .dbg_slot0_hdr_bits  (),
+    .dbg_engine_alive    (engine_alive_internal)
 );
+
+logic engine_alive_internal;
 
 // v2 engine has no CPU register read path yet.  Return YMF278B Device ID
 // (0x20) on reg 0x02, zero elsewhere.  This matches legacy v1's minimal
@@ -251,13 +254,26 @@ assign opl3_r_eff    = fm_mute  ? 17'sh0 : $signed({opl3_right[20], opl3_right[2
 //                                 is broken at a level we haven't checked.
 //
 // REVERT this after diagnosis — production should drive from pcm_valid.
-logic [22:0] alive_counter;
+// User confirmed: top-level alive_counter heartbeat IS visible
+// (overlay row 2 continuously ON).  Now route ENGINE'S internal
+// heartbeat (engine_alive_internal) to dbg_pcm_valid instead.
+// This isolates whether engine's clk/rst_n are actually working
+// at the engine module level (deeper than ymf278b_top).
+//
+// Expected:
+//   - Row 2 continuously ON  → engine's clk + rst_n + always_ff alive
+//                                → bug is in pcm_valid generation logic
+//                                  (sample_start never fires, etc.)
+//   - Row 2 OFF              → engine's clk OR rst_n broken at module
+//                                boundary (route/wiring issue)
+logic [22:0] alive_counter;  // kept for future use; tied to top-level
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) alive_counter <= '0;
     else        alive_counter <= alive_counter + 23'd1;
 end
 
-assign dbg_pcm_valid  = alive_counter[22];  // 10Hz heartbeat blink
+// Heartbeat from ENGINE INTERNAL counter (not ymf278b_top's).
+assign dbg_pcm_valid  = engine_alive_internal;
 assign dbg_opl3_valid = opl3_sample_valid;
 assign dbg_pcm_level  = pcm_left_hold;
 assign dbg_new2       = new2;

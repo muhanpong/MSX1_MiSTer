@@ -76,8 +76,21 @@ module ymf278_pcm_engine #(
     output logic [21:0] dbg_slot0_hdr_start,
     output logic [15:0] dbg_slot0_hdr_loop,
     output logic [15:0] dbg_slot0_hdr_end,
-    output logic [1:0]  dbg_slot0_hdr_bits
+    output logic [1:0]  dbg_slot0_hdr_bits,
+
+    // DIAGNOSTIC: free-running counter MSB INSIDE engine (separate from
+    // any pipeline logic).  If this toggles, engine's clk and rst_n are
+    // working and synthesis is keeping the always_ff alive.
+    output logic        dbg_engine_alive
 );
+
+    // ── Engine-internal heartbeat (independent of pipeline) ────────────
+    logic [22:0] eng_alive_cnt;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) eng_alive_cnt <= '0;
+        else        eng_alive_cnt <= eng_alive_cnt + 23'd1;
+    end
+    assign dbg_engine_alive = eng_alive_cnt[22];
 
     // ════════════════════════════════════════════════════════════════════════
     // Frame and slot scheduler
