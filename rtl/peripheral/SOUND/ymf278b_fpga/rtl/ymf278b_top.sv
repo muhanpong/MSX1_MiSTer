@@ -229,8 +229,19 @@ logic signed [16:0] opl3_l_eff, opl3_r_eff;
 assign opl3_l_eff    = fm_mute  ? 17'sh0 : $signed({opl3_left[20],  opl3_left[20:5]});
 assign opl3_r_eff    = fm_mute  ? 17'sh0 : $signed({opl3_right[20], opl3_right[20:5]});
 
-// Debug signal passthrough
-assign dbg_pcm_valid  = pcm_valid;
+// Debug signal passthrough.
+// dbg_pcm_valid stretched to 32 clk_sdram cycles (~372ns) after each
+// pcm_valid pulse so the 21MHz CDC in debug_overlay can reliably catch
+// it.  Without stretching, a single-cycle 11.6ns pulse has only ~25%
+// capture probability per dst clock edge, which can give visually OFF
+// readings even when engine is running.  Does NOT affect audio path.
+logic [4:0] dbg_pcm_valid_cnt;
+always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) dbg_pcm_valid_cnt <= 5'd0;
+    else if (pcm_valid) dbg_pcm_valid_cnt <= 5'd31;
+    else if (dbg_pcm_valid_cnt != 5'd0) dbg_pcm_valid_cnt <= dbg_pcm_valid_cnt - 5'd1;
+end
+assign dbg_pcm_valid  = pcm_valid | (dbg_pcm_valid_cnt != 5'd0);
 assign dbg_opl3_valid = opl3_sample_valid;
 assign dbg_pcm_level  = pcm_left_hold;
 assign dbg_new2       = new2;
