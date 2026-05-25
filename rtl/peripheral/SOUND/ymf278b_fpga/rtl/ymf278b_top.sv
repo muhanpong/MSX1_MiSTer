@@ -152,7 +152,22 @@ ymf278_pcm_engine #(
     // Audio Output
     .pcm_left        (pcm_left),
     .pcm_right       (pcm_right),
-    .pcm_valid       (pcm_valid)
+    .pcm_valid       (pcm_valid),
+
+    // Debug observation ports (unused at top level — synthesis optimizes away)
+    .dbg_wavetblhdr  (),
+    .dbg_hf_pending  (),
+    .dbg_slot0_wave  (),
+    .dbg_slot0_fn    (),
+    .dbg_slot0_oct   (),
+    .dbg_slot0_prvb  (),
+    .dbg_slot0_keyon (),
+    .dbg_slot0_damp  (),
+    .dbg_slot0_pan   (),
+    .dbg_slot0_ar    (),
+    .dbg_slot0_d1r   (),
+    .dbg_slot5_wave  (),
+    .dbg_slot23_wave ()
 );
 
 assign pcm_reg_rd_done = 1'b1; // TODO: Implement CPU memory read completion in engine
