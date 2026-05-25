@@ -169,11 +169,8 @@ ymf278_pcm_engine #(
     .dbg_slot0_hdr_start (),
     .dbg_slot0_hdr_loop  (),
     .dbg_slot0_hdr_end   (),
-    .dbg_slot0_hdr_bits  (),
-    .dbg_engine_alive    (engine_alive_internal)
+    .dbg_slot0_hdr_bits  ()
 );
-
-logic engine_alive_internal;
 
 // v2 engine has no CPU register read path yet.  Return YMF278B Device ID
 // (0x20) on reg 0x02, zero elsewhere.  This matches legacy v1's minimal
@@ -254,69 +251,21 @@ assign opl3_r_eff    = fm_mute  ? 17'sh0 : $signed({opl3_right[20], opl3_right[2
 //                                 is broken at a level we haven't checked.
 //
 // REVERT this after diagnosis — production should drive from pcm_valid.
-// User confirmed: top-level alive_counter heartbeat IS visible
-// (overlay row 2 continuously ON).  Now route ENGINE'S internal
-// heartbeat (engine_alive_internal) to dbg_pcm_valid instead.
-// This isolates whether engine's clk/rst_n are actually working
-// at the engine module level (deeper than ymf278b_top).
-//
-// Expected:
-//   - Row 2 continuously ON  → engine's clk + rst_n + always_ff alive
-//                                → bug is in pcm_valid generation logic
-//                                  (sample_start never fires, etc.)
-//   - Row 2 OFF              → engine's clk OR rst_n broken at module
-//                                boundary (route/wiring issue)
-logic [22:0] alive_counter;  // kept for future use; tied to top-level
+// dbg_pcm_valid stretched to 32 clk_sdram cycles (~372ns) after each
+// pcm_valid pulse so the 21MHz CDC in debug_overlay can reliably catch
+// it.  Without stretching, a single-cycle 11.6ns pulse has only ~25%
+// capture probability per dst clock edge, which can give visually OFF
+// readings even when engine is running.  Does NOT affect audio path.
+logic [4:0] dbg_pcm_valid_cnt;
 always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) alive_counter <= '0;
-    else        alive_counter <= alive_counter + 23'd1;
+    if (!rst_n) dbg_pcm_valid_cnt <= 5'd0;
+    else if (pcm_valid) dbg_pcm_valid_cnt <= 5'd31;
+    else if (dbg_pcm_valid_cnt != 5'd0) dbg_pcm_valid_cnt <= dbg_pcm_valid_cnt - 5'd1;
 end
-
-// Heartbeat from ENGINE INTERNAL counter (not ymf278b_top's).
-assign dbg_pcm_valid  = engine_alive_internal;
+assign dbg_pcm_valid  = pcm_valid | (dbg_pcm_valid_cnt != 5'd0);
 assign dbg_opl3_valid = opl3_sample_valid;
 assign dbg_pcm_level  = pcm_left_hold;
 assign dbg_new2       = new2;
-
-// ─── DIAGNOSTIC: PCM PATH TEST TONE ─────────────────────────────────────
-// Replace engine PCM output with a hardcoded 1311Hz square wave to verify
-// the audio mixer + output path passes PCM contributions independently of
-// the engine.
-//
-// If user hears the tone alongside FM music:
-//   → mixer + audio output path are FINE
-//   → bug is in engine producing samples (pipeline / pcm_valid / pcm_left)
-//
-// If user hears ONLY FM, no tone:
-//   → mixer or downstream path is broken
-//   → engine could be perfectly fine but its output never makes it out
-//
-// User confirmed: previous 328Hz/37% test tone filled OBS level meter
-// to "full" but was inaudible.  Capture card / OBS / HDMI receiver may be
-// muting full-amplitude square waves as "broken signal".
-//
-// New approach: low-amplitude tone with ON/OFF burst gating.
-//   - Tone: ~164Hz square wave at ±0x0400 (~3% full scale)
-//   - Burst: ~5Hz on/off (100ms beep, 100ms silence)
-//   → Unmistakable beep-pause-beep pattern, low enough to not trigger
-//     any anti-clipping circuit.
-logic [19:0] tone_cnt;     // tone period counter
-logic [23:0] burst_cnt;    // burst gate counter
-always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-        tone_cnt  <= '0;
-        burst_cnt <= '0;
-    end else begin
-        tone_cnt  <= tone_cnt  + 20'd1;
-        burst_cnt <= burst_cnt + 24'd1;
-    end
-end
-
-// tone_cnt[19] toggles every 2^19 = 524288 cycles ≈ 6.1ms → ~164Hz
-// burst_cnt[23] toggles every 2^23 = 8.4M cycles ≈ 97ms → ~5Hz beep/pause
-wire signed [15:0] test_pcm_tone =
-    burst_cnt[23] ? (tone_cnt[19] ? 16'sh0400 : -16'sh0400)
-                  : 16'sh0000;  // silence during off-burst
 
 always_ff @(posedge clk) begin
     audio_valid <= 1'b0;
@@ -325,9 +274,8 @@ always_ff @(posedge clk) begin
         pcm_right_hold <= pcm_right;
     end
     if (opl3_sample_valid) begin
-        // DIAGNOSTIC: use test_pcm_tone instead of pcm_left_hold/pcm_right_hold
-        mix_left_tmp  = opl3_l_eff + (pcm_mute ? 17'sh0 : $signed({test_pcm_tone[15], test_pcm_tone}));
-        mix_right_tmp = opl3_r_eff + (pcm_mute ? 17'sh0 : $signed({test_pcm_tone[15], test_pcm_tone}));
+        mix_left_tmp  = opl3_l_eff + (pcm_mute ? 17'sh0 : $signed({pcm_left_hold[15],  pcm_left_hold}));
+        mix_right_tmp = opl3_r_eff + (pcm_mute ? 17'sh0 : $signed({pcm_right_hold[15], pcm_right_hold}));
         // Saturate 17-bit signed → 16-bit signed
         audio_left  <= (mix_left_tmp[16]  == mix_left_tmp[15])  ? mix_left_tmp[15:0]  : (mix_left_tmp[16]  ? 16'sh8000 : 16'sh7FFF);
         audio_right <= (mix_right_tmp[16] == mix_right_tmp[15]) ? mix_right_tmp[15:0] : (mix_right_tmp[16] ? 16'sh8000 : 16'sh7FFF);
