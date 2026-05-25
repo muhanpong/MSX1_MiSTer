@@ -703,8 +703,25 @@ module ymf278_pcm_engine #(
             end
 
             if (sample_start) begin
-                pcm_left  <= master_accum_left[23:8];
-                pcm_right <= master_accum_right[23:8];
+                // Saturate 24-bit master_accum → 16-bit signed.
+                // Per-slot post-vol/pan output is ~16-bit; with 24 slots
+                // the accumulator can reach ~20 bits.  Previous code took
+                // [23:8] which divided by 256 (single slot at full volume
+                // became -54 dB), producing inaudible noise instead of clean
+                // PCM playback.  Proper saturation preserves single-slot
+                // full amplitude while clamping multi-slot overflow.
+                if (master_accum_left[23:15] == 9'b0_0000_0000
+                 || master_accum_left[23:15] == 9'b1_1111_1111) begin
+                    pcm_left <= master_accum_left[15:0];
+                end else begin
+                    pcm_left <= master_accum_left[23] ? 16'sh8000 : 16'sh7FFF;
+                end
+                if (master_accum_right[23:15] == 9'b0_0000_0000
+                 || master_accum_right[23:15] == 9'b1_1111_1111) begin
+                    pcm_right <= master_accum_right[15:0];
+                end else begin
+                    pcm_right <= master_accum_right[23] ? 16'sh8000 : 16'sh7FFF;
+                end
                 pcm_valid <= 1'b1;
                 master_accum_left  <= '0;
                 master_accum_right <= '0;
