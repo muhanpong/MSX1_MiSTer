@@ -7,3 +7,47 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) .
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../IKASCC/src/IKASCC_modules/IKASCC_vrc_a.v      ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../IKASCC/src/IKASCC_modules/IKASCC_vrc_s.v      ]
 set_global_assignment -name QIP_FILE           [file join $::quartus(qip_path) IKAOPLL/src/Target/Quartus/IKAOPLL.qip ]
+
+# YMF278B (OPL4 MoonSound) — OPL3 package first
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/top_level/pkg/opl3_pkg.sv]
+
+# YMF278B — OPL3 core
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/clks/src/clk_div.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/clks/src/reset_sync.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/misc/src/edge_detector.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/misc/src/mem_multi_bank.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/misc/src/mem_multi_bank_reset.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/misc/src/mem_simple_dual_port.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/misc/src/mem_simple_dual_port_async_read.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/misc/src/pipeline_sr.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/misc/src/synchronizer.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/misc/src/leds.sv]
+set_global_assignment -name VERILOG_FILE       [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/misc/src/afifo.v]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/host_if/src/host_if.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/host_if/src/trick_sw_detection.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/operator/src/calc_envelope_shift.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/operator/src/calc_phase_inc.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/operator/src/calc_rhythm_phase.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/operator/src/envelope_generator.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/operator/src/ksl_add_rom.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/operator/src/operator.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/operator/src/opl3_exp_lut.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/operator/src/opl3_log_sine_lut.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/operator/src/phase_generator.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/operator/src/tremolo.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/operator/src/vibrato.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/channels/src/channels.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/channels/src/control_operators.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/channels/src/dac_prep.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/timers/src/timer.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/timers/src/timers.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/opl3/modules/top_level/src/opl3.sv]
+
+# YMF278B — PCM engine v2 (SCSP-style parallel pipeline)
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/pcm/ymf278_pcm_alu.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/pcm/ymf278_pcm_eg_step.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/pcm/ymf278_pcm_engine.sv]
+
+# YMF278B — top level
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/ymf278b_regs.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/ymf278b_top.sv]

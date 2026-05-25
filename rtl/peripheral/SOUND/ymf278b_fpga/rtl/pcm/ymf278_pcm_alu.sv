@@ -1,10 +1,9 @@
-`default_nettype none
-
 // YMF278B PCM ALU (Arithmetic Logic Unit)
-// Contains pure combinational logic extracted from the openMSX C++ emulator.
-// Completely decoupled from state machines or pipelines for 100% unit testability.
+// Package of pure combinational functions extracted from openMSX.
+// Used to be a module (callable via instance dot notation), converted to a
+// package because Quartus 17.1 doesn't support cross-module function calls.
 
-module ymf278_pcm_alu;
+package ymf278_pcm_alu_pkg;
 
     // ========================================================================
     // 1. Step Calculation (Pitch / Frequency)
@@ -205,5 +204,4 @@ module ymf278_pcm_alu;
         return result[9:0];
     endfunction
 
-endmodule
-`default_nettype wire
+endpackage

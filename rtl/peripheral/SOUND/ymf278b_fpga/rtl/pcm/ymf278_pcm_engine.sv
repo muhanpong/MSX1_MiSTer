@@ -26,6 +26,11 @@
 // SDRAM port owned by Stage B (sample fetches), HF FSM and CPU writes use
 // the port during the long idle window (cycle ~1728 onward).
 
+// Import ALU + EG packages (was instance dot calls; Quartus 17.1 doesn't
+// support cross-module function calls, so we use SV packages instead).
+import ymf278_pcm_alu_pkg::*;
+import ymf278_pcm_eg_pkg::*;
+
 module ymf278_pcm_engine #(
     parameter int CLK_HZ       = 85909090,
     parameter int SDRAM_RD_LAT = 6        // SDRAM round-trip latency (cycles)
@@ -204,10 +209,8 @@ module ymf278_pcm_engine #(
     stage_b_pkt_t stage_b_reg;   // latched at stage_advance
     stage_c_pkt_t stage_c_reg;   // latched at stage_advance
 
-    // ALU instance for combinational functions (calc_step, byte_addr, etc.)
-    ymf278_pcm_alu     alu();
-    // EG step module exposes process_eg() task with ROM tables.
-    ymf278_pcm_eg_step eg();
+    // ALU + EG functions/tasks are imported as packages above — no
+    // module instances needed.
 
     // ════════════════════════════════════════════════════════════════════════
     // Stage A — dispatch + BRAM read
@@ -267,7 +270,7 @@ module ymf278_pcm_engine #(
 
     always_comb begin
         // VIB=0 for now; TODO wire up LFO VIB output
-        next_step_full = alu.calc_step(stage_a_reg.regs.oct,
+        next_step_full = calc_step(stage_a_reg.regs.oct,
                                        stage_a_reg.regs.fn,
                                        16'sh0);
 
@@ -293,17 +296,17 @@ module ymf278_pcm_engine #(
                                        stage_a_reg.header.loopAddr);
 
         // 6 byte addresses
-        next_addrs.a0 = alu.byte_addr(stage_a_reg.header.startAddr,
+        next_addrs.a0 = byte_addr(stage_a_reg.header.startAddr,
                                        next_pos, stage_a_reg.header.bits, 2'd0);
-        next_addrs.a1 = alu.byte_addr(stage_a_reg.header.startAddr,
+        next_addrs.a1 = byte_addr(stage_a_reg.header.startAddr,
                                        next_pos, stage_a_reg.header.bits, 2'd1);
-        next_addrs.a2 = alu.byte_addr(stage_a_reg.header.startAddr,
+        next_addrs.a2 = byte_addr(stage_a_reg.header.startAddr,
                                        next_pos, stage_a_reg.header.bits, 2'd2);
-        next_addrs.b0 = alu.byte_addr(stage_a_reg.header.startAddr,
+        next_addrs.b0 = byte_addr(stage_a_reg.header.startAddr,
                                        next_pos_for_b, stage_a_reg.header.bits, 2'd0);
-        next_addrs.b1 = alu.byte_addr(stage_a_reg.header.startAddr,
+        next_addrs.b1 = byte_addr(stage_a_reg.header.startAddr,
                                        next_pos_for_b, stage_a_reg.header.bits, 2'd1);
-        next_addrs.b2 = alu.byte_addr(stage_a_reg.header.startAddr,
+        next_addrs.b2 = byte_addr(stage_a_reg.header.startAddr,
                                        next_pos_for_b, stage_a_reg.header.bits, 2'd2);
     end
 
@@ -425,36 +428,36 @@ module ymf278_pcm_engine #(
     always_comb begin
         case (stage_b_reg.header.bits)
             2'd0: begin // 8-bit
-                samp_a = alu.decode_sample(stage_b_reg.bytes[0], 8'h00, 8'h00,
+                samp_a = decode_sample(stage_b_reg.bytes[0], 8'h00, 8'h00,
                                             stage_b_reg.dyn.pos, 2'd0);
-                samp_b = alu.decode_sample(stage_b_reg.bytes[3], 8'h00, 8'h00,
+                samp_b = decode_sample(stage_b_reg.bytes[3], 8'h00, 8'h00,
                                             stage_b_reg.next_pos, 2'd0);
             end
             2'd1: begin // 12-bit
-                samp_a = alu.decode_sample(stage_b_reg.bytes[0],
+                samp_a = decode_sample(stage_b_reg.bytes[0],
                                             stage_b_reg.bytes[1],
                                             stage_b_reg.bytes[2],
                                             stage_b_reg.dyn.pos, 2'd1);
                 if (stage_b_reg.dyn.pos[0]) begin
                     // p odd → p+1 even → sample B's chunk = next chunk (bytes[3,4])
                     // decode_sample for even-pos: uses b0 + (b1<<4)&0xF0
-                    samp_b = alu.decode_sample(stage_b_reg.bytes[3],
+                    samp_b = decode_sample(stage_b_reg.bytes[3],
                                                 stage_b_reg.bytes[4],
                                                 8'h00,
                                                 stage_b_reg.next_pos, 2'd1);
                 end else begin
                     // p even → p+1 odd → sample B in SAME chunk (bytes[0..2])
-                    samp_b = alu.decode_sample(stage_b_reg.bytes[0],
+                    samp_b = decode_sample(stage_b_reg.bytes[0],
                                                 stage_b_reg.bytes[1],
                                                 stage_b_reg.bytes[2],
                                                 stage_b_reg.next_pos, 2'd1);
                 end
             end
             2'd2: begin // 16-bit
-                samp_a = alu.decode_sample(stage_b_reg.bytes[0],
+                samp_a = decode_sample(stage_b_reg.bytes[0],
                                             stage_b_reg.bytes[1], 8'h00,
                                             stage_b_reg.dyn.pos, 2'd2);
-                samp_b = alu.decode_sample(stage_b_reg.bytes[3],
+                samp_b = decode_sample(stage_b_reg.bytes[3],
                                             stage_b_reg.bytes[4], 8'h00,
                                             stage_b_reg.next_pos, 2'd2);
             end
@@ -463,7 +466,7 @@ module ymf278_pcm_engine #(
                 samp_b = 16'sd0;
             end
         endcase
-        interp_val = alu.calc_interp(samp_a, samp_b, stage_b_reg.dyn.stepPtr);
+        interp_val = calc_interp(samp_a, samp_b, stage_b_reg.dyn.stepPtr);
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -480,63 +483,84 @@ module ymf278_pcm_engine #(
     end
 
     // ════════════════════════════════════════════════════════════════════════
-    // Stage D — EG + vol + pan + accumulate + writeback
+    // Stage D — 3-cycle pipeline: EG → Vol → Pan/Accumulate
     //
-    // Entered at stage_advance when stage_c_reg.valid.  In one cycle:
-    //   1. Detect key_on edge (regs.keyon & ~key_on_prev[slot])
-    //   2. process_eg → next_state, next_vol
-    //   3. calc_vol(interp, next_vol, regs.tl) → scaled signed sample
-    //   4. Pan split (placeholder: same on both channels)
-    //   5. Accumulate into master_accum_left/right
-    //   6. Writeback updated dyn (pos/stepPtr from C; env_state/env_vol new;
-    //      pos/stepPtr reset on key_on edge)
-    //   7. Update key_on_prev[slot]
+    // The 1-cycle combinational chain (process_eg → calc_vol → pan_mul →
+    // accumulate) failed timing at 85.9MHz with -34ns slack on a Cyclone V
+    // (multipliers + barrel shifts chained = ~45ns).  Split into 3 register
+    // stages so each cycle has at most one multiplier-class operation.
     //
-    // Master framer: at sample_start (frame end), push accum to pcm_left/right
-    // and pulse pcm_valid; reset accums.
+    //   D1 (latches at stage_advance):
+    //     - key_on edge detection
+    //     - process_eg (uses calc_eg_rate / calc_attack_step ROM+mults)
+    //     - register: d1_pkt = {slot, pan, tl, interp, dyn, eg_state, eg_vol,
+    //                            key_on_edge}
     //
-    // TODO: proper pan attenuation (calc_pan_att in alu is placeholder).
+    //   D2 (1 cycle later):
+    //     - calc_vol(interp, eg_vol, tl)  (32-bit mult + barrel shift)
+    //     - register: d2_pkt = {slot, pan, dyn, eg_state, eg_vol, vol_sample,
+    //                            key_on_edge}
+    //
+    //   D3 (2 cycles later):
+    //     - pan_att_left/right + 32×6 multiplier + 24-bit accumulator
+    //     - ram_dyn writeback
+    //
+    // Master framer (also in D3 block but unconditional): at sample_start,
+    // push master_accum → pcm_left/right + pcm_valid; reset accums.
     // ════════════════════════════════════════════════════════════════════════
     logic signed [23:0] master_accum_left;
     logic signed [23:0] master_accum_right;
 
+    typedef struct packed {
+        logic                 valid;
+        logic [4:0]           slot;
+        logic [3:0]           pan;
+        logic [7:0]           tl;
+        logic signed [15:0]   interp;
+        slot_dyn_t            new_dyn;       // pos/stepPtr from Stage C
+        logic [2:0]           next_eg_state;
+        logic [9:0]           next_eg_vol;
+        logic                 key_on_edge;
+    } d1_pkt_t;
+
+    typedef struct packed {
+        logic                 valid;
+        logic [4:0]           slot;
+        logic [3:0]           pan;
+        slot_dyn_t            new_dyn;
+        logic [2:0]           eg_state;
+        logic [9:0]           eg_vol;
+        logic signed [31:0]   vol_sample;
+        logic                 key_on_edge;
+    } d2_pkt_t;
+
+    d1_pkt_t d1_pkt;
+    d2_pkt_t d2_pkt;
+
+    // ── D1: process_eg + key_on edge ────────────────────────────────────────
     always_ff @(posedge clk or negedge rst_n) begin
-        // Locals used by Stage D processing pipeline (must be declared first
-        // in a SystemVerilog always block).
-        logic [2:0]  next_eg_state;
-        logic [9:0]  next_eg_vol;
-        logic        key_on_edge;
-        logic signed [31:0] vol_sample;
-        logic [5:0]  pan_l_gain, pan_r_gain;
-        logic signed [23:0] left_sample, right_sample;
-        slot_dyn_t   dyn_upd;
-        slot_dyn_t   dyn_reset;
+        logic [2:0] new_state;
+        logic [9:0] new_vol;
+        logic       edge_now;
+
+        // Init outputs to avoid latch (process_eg outputs in particular)
+        new_state = 3'd0;
+        new_vol   = 10'd0;
 
         if (!rst_n) begin
-            master_accum_left  <= '0;
-            master_accum_right <= '0;
-            pcm_left  <= '0;
-            pcm_right <= '0;
-            pcm_valid <= 1'b0;
+            d1_pkt      <= '0;
             key_on_prev <= '0;
-            dyn_reset.pos       = 16'd0;
-            dyn_reset.stepPtr   = 16'd0;
-            dyn_reset.env_vol   = 10'h280;
-            dyn_reset.env_state = 3'd0;
-            for (int i = 0; i < 24; i++) ram_dyn[i] <= dyn_reset;
         end else begin
-            pcm_valid <= 1'b0;
-
+            d1_pkt.valid <= 1'b0;
             if (stage_advance && stage_c_reg.valid) begin
-                key_on_edge = stage_c_reg.regs.keyon & ~key_on_prev[stage_c_reg.slot];
+                edge_now = stage_c_reg.regs.keyon & ~key_on_prev[stage_c_reg.slot];
                 key_on_prev[stage_c_reg.slot] <= stage_c_reg.regs.keyon;
 
-                // EG step (combinational task)
-                eg.process_eg(
+                process_eg(
                     stage_c_reg.dyn.env_state,
                     stage_c_reg.dyn.env_vol,
                     stage_c_reg.regs.keyon,
-                    key_on_edge,
+                    edge_now,
                     stage_c_reg.regs.ar,
                     stage_c_reg.regs.d1r,
                     stage_c_reg.regs.d2r,
@@ -548,35 +572,86 @@ module ymf278_pcm_engine #(
                     stage_c_reg.regs.damp,
                     stage_c_reg.regs.prvb,
                     eg_cnt,
-                    next_eg_state,
-                    next_eg_vol
+                    new_state,
+                    new_vol
                 );
 
-                // Vol attenuation: interp × envelope × TL
-                vol_sample = alu.calc_vol(stage_c_reg.interp,
-                                          next_eg_vol,
-                                          stage_c_reg.regs.tl);
+                d1_pkt.valid         <= 1'b1;
+                d1_pkt.slot          <= stage_c_reg.slot;
+                d1_pkt.pan           <= stage_c_reg.regs.pan;
+                d1_pkt.tl            <= stage_c_reg.regs.tl;
+                d1_pkt.interp        <= stage_c_reg.interp;
+                d1_pkt.new_dyn       <= stage_c_reg.dyn;
+                d1_pkt.next_eg_state <= new_state;
+                d1_pkt.next_eg_vol   <= new_vol;
+                d1_pkt.key_on_edge   <= edge_now;
+            end
+        end
+    end
 
-                // Pan: per-channel attenuation from openMSX pan tables.
-                //   gain = (vol_sample * pan_att) >>> 5
-                // pan_att is 6-bit (0x20 = full, 0 = silence).
-                pan_l_gain = alu.pan_att_left (stage_c_reg.regs.pan);
-                pan_r_gain = alu.pan_att_right(stage_c_reg.regs.pan);
-                left_sample  = 24'((vol_sample * 32'($signed({26'd0, pan_l_gain}))) >>> 5);
-                right_sample = 24'((vol_sample * 32'($signed({26'd0, pan_r_gain}))) >>> 5);
+    // ── D2: calc_vol ────────────────────────────────────────────────────────
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            d2_pkt <= '0;
+        end else begin
+            d2_pkt.valid <= d1_pkt.valid;
+            if (d1_pkt.valid) begin
+                d2_pkt.slot        <= d1_pkt.slot;
+                d2_pkt.pan         <= d1_pkt.pan;
+                d2_pkt.new_dyn     <= d1_pkt.new_dyn;
+                d2_pkt.eg_state    <= d1_pkt.next_eg_state;
+                d2_pkt.eg_vol      <= d1_pkt.next_eg_vol;
+                d2_pkt.key_on_edge <= d1_pkt.key_on_edge;
+                d2_pkt.vol_sample  <= calc_vol(d1_pkt.interp,
+                                                d1_pkt.next_eg_vol,
+                                                d1_pkt.tl);
+            end
+        end
+    end
+
+    // ── D3: pan_mul + accumulate + ram_dyn writeback + master framer ───────
+    always_ff @(posedge clk or negedge rst_n) begin
+        logic [5:0]            pan_l_gain, pan_r_gain;
+        logic signed [23:0]    left_sample, right_sample;
+        slot_dyn_t             dyn_upd;
+        slot_dyn_t             dyn_reset;
+
+        // Init to avoid latch
+        pan_l_gain   = 6'd0;
+        pan_r_gain   = 6'd0;
+        left_sample  = 24'd0;
+        right_sample = 24'd0;
+
+        if (!rst_n) begin
+            master_accum_left  <= '0;
+            master_accum_right <= '0;
+            pcm_left  <= '0;
+            pcm_right <= '0;
+            pcm_valid <= 1'b0;
+            dyn_reset.pos       = 16'd0;
+            dyn_reset.stepPtr   = 16'd0;
+            dyn_reset.env_vol   = 10'h280;
+            dyn_reset.env_state = 3'd0;
+            for (int i = 0; i < 24; i++) ram_dyn[i] <= dyn_reset;
+        end else begin
+            pcm_valid <= 1'b0;
+
+            if (d2_pkt.valid) begin
+                pan_l_gain = pan_att_left (d2_pkt.pan);
+                pan_r_gain = pan_att_right(d2_pkt.pan);
+                left_sample  = 24'((d2_pkt.vol_sample * 32'($signed({26'd0, pan_l_gain}))) >>> 5);
+                right_sample = 24'((d2_pkt.vol_sample * 32'($signed({26'd0, pan_r_gain}))) >>> 5);
                 master_accum_left  <= master_accum_left  + left_sample;
                 master_accum_right <= master_accum_right + right_sample;
 
-                // Writeback dyn: keep pos/stepPtr from Stage C (which Stage B
-                // computed), or reset to 0 on key-on edge.
-                dyn_upd           = stage_c_reg.dyn;
-                dyn_upd.env_state = next_eg_state;
-                dyn_upd.env_vol   = next_eg_vol;
-                if (key_on_edge) begin
-                    dyn_upd.pos       = 16'd0;
-                    dyn_upd.stepPtr   = 16'd0;
+                dyn_upd            = d2_pkt.new_dyn;
+                dyn_upd.env_state  = d2_pkt.eg_state;
+                dyn_upd.env_vol    = d2_pkt.eg_vol;
+                if (d2_pkt.key_on_edge) begin
+                    dyn_upd.pos     = 16'd0;
+                    dyn_upd.stepPtr = 16'd0;
                 end
-                ram_dyn[stage_c_reg.slot] <= dyn_upd;
+                ram_dyn[d2_pkt.slot] <= dyn_upd;
             end
 
             if (sample_start) begin
@@ -843,6 +918,10 @@ module ymf278_pcm_engine #(
         end else begin
             mem_rd_en   <= 1'b0;
             mem_wr_en   <= 1'b0;
+            // CRITICAL: explicit default for mem_wr_data prevents Quartus
+            // from inferring 8 latches (one per bit) on this signal.
+            // Latches in clocked logic break timing closure catastrophically.
+            mem_wr_data <= '0;
 
             if (hf_state == HF_REQ) begin
                 mem_addr  <= hf_addr_comb;
@@ -851,7 +930,8 @@ module ymf278_pcm_engine #(
                 mem_addr  <= b_addr_sel;
                 mem_rd_en <= 1'b1;
             end
-            // TODO: CPU mem write FIFO drives mem_wr_en when idle window.
+            // TODO: CPU mem write FIFO drives mem_wr_en + mem_wr_data when
+            // idle window opens.
         end
     end
 
