@@ -35,7 +35,8 @@ module memory_upload
    output                [1:0] rom_loaded,
    output dev_typ_t            cart_device[2],
    output dev_typ_t            msx_device,
-   output                [3:0] msx_dev_ref_ram[8]
+   output                [3:0] msx_dev_ref_ram[8],
+   output logic         [26:0] pcm_rom_base
 );
    /*verilator tracing_off*/
    logic [26:0] ioctl_size [4];
@@ -126,6 +127,7 @@ module memory_upload
          lookup_SRAM[1].size   <= 16'd0;
          lookup_SRAM[2].size   <= 16'd0;
          lookup_SRAM[3].size   <= 16'd0;
+         pcm_rom_base          <= 27'h1800000;  // default, overwritten when yrw801.rom is loaded
       end
       if (ddr3_ready & ~ddr3_rd) begin
          case(state)
@@ -259,6 +261,14 @@ module memory_upload
                         sram_size                     <= 25'd0;
                         data_id                       <= ROM_ROM;
                         mode                          <= 0;
+                        // MOONSOUND: no inline ROM → search Extension firmware pack
+                        if (conf[7] == 8'd3 && {conf[5][2:0], conf[6]} == 11'd0) begin
+                           data_id   <= ROM_MOONSOUND;
+                           save_addr <= ddr3_addr;
+                           ddr3_addr <= 28'h300000;    // FW Store base
+                           ddr3_rd   <= 1'b1;
+                           state     <= STATE_FIND_ROM;
+                        end
                      end
                      CONFIG_SLOT_INTERNAL: begin
                         $display("  SLOT INTERNAL");
@@ -309,13 +319,17 @@ module memory_upload
                if (config_head_addr == 4'd7) begin
                   config_head_addr <= 4'd0;
                   if ({fw_conf[0],fw_conf[1],fw_conf[2]} == {"M","S","X"}) begin
-                     if (data_ID_t'(fw_conf[4]) == data_id) begin  
+                     if (data_ID_t'(fw_conf[4]) == data_id) begin
                         data_size <= {fw_conf[5][2:0], fw_conf[6],14'h0};
-                        ddr3_addr <= ddr3_addr + 28'd7;
+                        // Skip rest of 16-byte FW header (8 bytes already read,
+                        // 8 bytes of padding to jump). Was +7 (off-by-one →
+                        // first data byte = header pad 0, then yrw801 shifted
+                        // 1 byte → all subsequent ROM reads off by 1).
+                        ddr3_addr <= ddr3_addr + 28'd8;
                         state     <= STATE_FILL_RAM;
                         $display("        FILL FW ROM size:%X", {fw_conf[5][2:0], fw_conf[6],14'h0});
                      end else begin          
-                        if ((ddr3_addr - 28'h100000 + (28'({fw_conf[5],fw_conf[6]}) << 14) + 28'd8) >= 28'(ioctl_size[1])) begin
+                        if ((ddr3_addr - 28'h300000 + (28'({fw_conf[5],fw_conf[6]}) << 14) + 28'd8) >= 28'(ioctl_size[1])) begin
                            ddr3_addr <= save_addr;
                            state <= STATE_READ_CONF;                                                           //not find skip load
                         end else begin
@@ -331,22 +345,32 @@ module memory_upload
             end
             STATE_FILL_RAM: begin
                if (~ram_ce) begin
+                  logic [26:0] curr_ram_addr;
                   state <= STATE_FILL_RAM2;
                   if (bram_rq) sram_addr <= ram_addr;
                   sdram_rq <= 0;
                   bram_rq  <= 0;
+                  
+                  curr_ram_addr = (save_ram_addr != 27'd0) ? save_ram_addr : ram_addr;
+                  
                   if (save_ram_addr != 27'd0) begin
                      ram_addr <= save_ram_addr;
                      save_ram_addr <= 27'd0;
                   end
                   if (data_size != 25'd0) begin
                      refAdd                   <= 1'b1; // Add reference po ulozeni
-                     lookup_RAM[ref_ram].addr <= ram_addr;
+                     lookup_RAM[ref_ram].addr <= curr_ram_addr;
                      lookup_RAM[ref_ram].size <= 16'(data_size[24:14]);               
-                     $display("           FILL RAM ID:%d addr:%x size:%d kB (save:%x)",ref_ram, ram_addr, 16'(data_size[24:14])*16, save_ram_addr);
+                     $display("           FILL RAM ID:%d addr:%x size:%d kB (save:%x)",ref_ram, curr_ram_addr, 16'(data_size[24:14])*16, save_ram_addr);
                      case(data_id)
                         ROM_RAM: begin
                            lookup_RAM[ref_ram].ro   <= 1'd0;
+                        end
+                        ROM_MOONSOUND: begin
+                           lookup_RAM[ref_ram].ro   <= 1'd1;
+                           pattern                  <= 3'd0;
+                           ddr3_rd                  <= 1'd1;
+                           pcm_rom_base             <= 27'(curr_ram_addr); // Capture SDRAM base for PCM engine
                         end
                         default: begin
                            lookup_RAM[ref_ram].ro   <= 1'd1;
