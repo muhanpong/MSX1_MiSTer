@@ -530,12 +530,26 @@ module ymf278_pcm_engine #(
         slot_dyn_t            new_dyn;
         logic [2:0]           eg_state;
         logic [9:0]           eg_vol;
+        logic                 key_on_edge;
+        logic signed [15:0]   interp;        // forward to D2b
+        logic                 silent;
+        logic signed [31:0]   tmp_vol;       // (0x8000 * vol_mul) >>> vol_shift
+    } d2a_pkt_t;
+
+    typedef struct packed {
+        logic                 valid;
+        logic [4:0]           slot;
+        logic [3:0]           pan;
+        slot_dyn_t            new_dyn;
+        logic [2:0]           eg_state;
+        logic [9:0]           eg_vol;
         logic signed [31:0]   vol_sample;
         logic                 key_on_edge;
     } d2_pkt_t;
 
-    d1_pkt_t d1_pkt;
-    d2_pkt_t d2_pkt;
+    d1_pkt_t  d1_pkt;
+    d2a_pkt_t d2a_pkt;
+    d2_pkt_t  d2_pkt;
 
     // ── D1: process_eg + key_on edge ────────────────────────────────────────
     always_ff @(posedge clk or negedge rst_n) begin
@@ -589,22 +603,56 @@ module ymf278_pcm_engine #(
         end
     end
 
-    // ── D2: calc_vol ────────────────────────────────────────────────────────
+    // ── D2a: calc_vol stage 1 — compute tmp = (0x8000 * vol_mul) >>> vol_shift
+    //    Splits calc_vol's two-multiplier chain.  Originally one cycle had
+    //    32×8 mult → barrel shift → 16×32 mult → fixed shift (>>>15), which
+    //    was the critical -10ns path.  Register tmp here, do sample×tmp next.
+    always_ff @(posedge clk or negedge rst_n) begin
+        logic [10:0] total_atten;
+        logic [7:0]  vol_mul;
+        logic [4:0]  vol_shift;
+        // init for latch avoidance
+        total_atten = 11'd0;
+        vol_mul     = 8'd0;
+        vol_shift   = 5'd0;
+
+        if (!rst_n) begin
+            d2a_pkt <= '0;
+        end else begin
+            d2a_pkt.valid <= d1_pkt.valid;
+            if (d1_pkt.valid) begin
+                total_atten = {1'b0, d1_pkt.next_eg_vol} + {1'b0, d1_pkt.tl, 2'b00};
+                vol_mul     = 8'h80 - {2'b0, total_atten[5:0]};
+                vol_shift   = 5'(4'd7 + {1'b0, total_atten[9:6]});
+
+                d2a_pkt.slot        <= d1_pkt.slot;
+                d2a_pkt.pan         <= d1_pkt.pan;
+                d2a_pkt.new_dyn     <= d1_pkt.new_dyn;
+                d2a_pkt.eg_state    <= d1_pkt.next_eg_state;
+                d2a_pkt.eg_vol      <= d1_pkt.next_eg_vol;
+                d2a_pkt.key_on_edge <= d1_pkt.key_on_edge;
+                d2a_pkt.interp      <= d1_pkt.interp;
+                d2a_pkt.silent      <= (total_atten >= 11'h280);
+                d2a_pkt.tmp_vol     <= (32'sh8000 * $signed({1'b0, vol_mul})) >>> vol_shift;
+            end
+        end
+    end
+
+    // ── D2b: calc_vol stage 2 — vol_sample = (interp × tmp_vol) >>> 15
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             d2_pkt <= '0;
         end else begin
-            d2_pkt.valid <= d1_pkt.valid;
-            if (d1_pkt.valid) begin
-                d2_pkt.slot        <= d1_pkt.slot;
-                d2_pkt.pan         <= d1_pkt.pan;
-                d2_pkt.new_dyn     <= d1_pkt.new_dyn;
-                d2_pkt.eg_state    <= d1_pkt.next_eg_state;
-                d2_pkt.eg_vol      <= d1_pkt.next_eg_vol;
-                d2_pkt.key_on_edge <= d1_pkt.key_on_edge;
-                d2_pkt.vol_sample  <= calc_vol(d1_pkt.interp,
-                                                d1_pkt.next_eg_vol,
-                                                d1_pkt.tl);
+            d2_pkt.valid <= d2a_pkt.valid;
+            if (d2a_pkt.valid) begin
+                d2_pkt.slot        <= d2a_pkt.slot;
+                d2_pkt.pan         <= d2a_pkt.pan;
+                d2_pkt.new_dyn     <= d2a_pkt.new_dyn;
+                d2_pkt.eg_state    <= d2a_pkt.eg_state;
+                d2_pkt.eg_vol      <= d2a_pkt.eg_vol;
+                d2_pkt.key_on_edge <= d2a_pkt.key_on_edge;
+                d2_pkt.vol_sample  <= d2a_pkt.silent ? 32'sd0
+                    : ($signed(d2a_pkt.interp) * d2a_pkt.tmp_vol) >>> 15;
             end
         end
     end
