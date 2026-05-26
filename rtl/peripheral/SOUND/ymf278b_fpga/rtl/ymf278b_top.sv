@@ -187,9 +187,11 @@ ymf278_pcm_engine #(
 //              (e.g. mem_type=1 → readback 0x22).
 //   reg 0x06 — PCM RAM/ROM byte prefetched by the engine.
 //   others   — return 0 (write-only by spec).
-assign pcm_reg_dout    = (pcm_reg_rd && pcm_reg_addr == 8'h02) ? pcm_reg02_readback_w :
-                         (pcm_reg_rd && pcm_reg_addr == 8'h06) ? pcm_cpu_mem_rd_data_w :
-                                                                  8'h00;
+// pcm_reg_addr is stable (latched in opl4latch); pcm_reg_rd is a 1-cycle pulse
+// that doesn't line up with regs.sv's io_data_out capture, so don't gate on it.
+assign pcm_reg_dout    = (pcm_reg_addr == 8'h02) ? pcm_reg02_readback_w :
+                         (pcm_reg_addr == 8'h06) ? pcm_cpu_mem_rd_data_w :
+                                                    8'h00;
 assign pcm_reg_rd_done = 1'b1; // Engine prefetches; CPU reads return immediately.
                                // Real chip uses BUSY status (D0) — TODO if needed.
 
