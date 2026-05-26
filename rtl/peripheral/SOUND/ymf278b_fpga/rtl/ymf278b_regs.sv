@@ -162,9 +162,14 @@ always_ff @(posedge clk) begin
                 end
                 // io_ack NOT set here — set above on pcm_reg_rd_done
             end else begin
-                // Reg 0x02 device ID, or any other immediate-response reg
+                // Immediate-response PCM register read (reg 0x02 device-ID
+                // and other write-only regs that return latched state).
+                // Fall through to pcm_reg_dout — engine drives reg 0x02
+                // readback including the latched mode/type/hdr bits so
+                // software writing e.g. mem_type=1 sees 0x22.  The old
+                // hardcoded `0x20` override here masked all of that.
                 pcm_reg_rd  <= 1'b1;
-                io_data_out <= (opl4latch == 8'h02) ? 8'h20 : pcm_reg_dout;
+                io_data_out <= pcm_reg_dout;
                 io_ack      <= 1'b1;
             end
         end else if (io_port[7:2] == 6'b110001) begin
