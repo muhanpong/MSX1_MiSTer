@@ -24,6 +24,7 @@ module tb_cpu_mem;
     logic        reg_rd    = 1'b0;
     logic [7:0]  cpu_mem_rd_data;
     logic        cpu_mem_busy;
+    logic [7:0]  reg02_readback;
 
     logic [21:0] mem_addr;
     logic        mem_rd_en;
@@ -40,6 +41,7 @@ module tb_cpu_mem;
         .reg_wr(reg_wr), .reg_rd(reg_rd),
         .cpu_mem_rd_data(cpu_mem_rd_data),
         .cpu_mem_busy(cpu_mem_busy),
+        .reg02_readback(reg02_readback),
         .mem_addr(mem_addr), .mem_rd_en(mem_rd_en),
         .mem_rd_data(mem_rd_data), .mem_rd_valid(mem_rd_valid),
         .mem_wr_en(mem_wr_en), .mem_wr_data(mem_wr_data),
@@ -132,11 +134,34 @@ module tb_cpu_mem;
         rst_n = 1;
         @(posedge clk);
 
-        // -- Test 1: reg 0x02 access mode latch
+        // -- Test 1: reg 0x02 access mode latch + readback
+        // Initial readback (before any write): D5=1 (ID), others 0 → 0x20
+        check("reg02 readback after reset = 0x20", reg02_readback == 8'h20);
+
         write_reg(8'h02, 8'h01);     // bit0 = mem_access_mode = 1
         @(posedge clk);
         check("reg02_mem_access_mode latched", dut.reg02_mem_access_mode == 1'b1);
         check("reg02_mem_type stays 0",        dut.reg02_mem_type == 1'b0);
+        check("reg02 readback = 0x21 (ID + access_mode)", reg02_readback == 8'h21);
+
+        // Now write mem_type = 1 as well
+        write_reg(8'h02, 8'h03);     // bit0=1, bit1=1
+        @(posedge clk);
+        check("reg02 readback = 0x23 (ID + type + access_mode)", reg02_readback == 8'h23);
+
+        // Test reg 0x02 with mem_type only (no access mode)
+        write_reg(8'h02, 8'h02);     // bit0=0, bit1=1
+        @(posedge clk);
+        check("reg02 readback = 0x22 (ID + type only)", reg02_readback == 8'h22);
+
+        // Test wavetblhdr bits (D4-D2)
+        write_reg(8'h02, 8'h0C);     // bits[4:2] = 011 = wavetblhdr=3
+        @(posedge clk);
+        check("reg02 readback = 0x2C (ID + wavetblhdr=3)", reg02_readback == 8'h2C);
+
+        // Reset back to access_mode=1 for following tests
+        write_reg(8'h02, 8'h01);
+        @(posedge clk);
 
         // -- Test 2: address load 03/04/05 then 05 triggers prefetch
         write_reg(8'h03, 8'h00);     // adr[23:16] = 0

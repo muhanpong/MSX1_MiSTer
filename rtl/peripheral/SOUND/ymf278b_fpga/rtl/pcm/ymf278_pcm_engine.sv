@@ -45,6 +45,7 @@ module ymf278_pcm_engine #(
     input  wire        reg_rd,
     output logic [7:0] cpu_mem_rd_data,   // value returned for reg 0x06 read
     output logic       cpu_mem_busy,      // 1 while CPU mem op in flight
+    output logic [7:0] reg02_readback,    // value returned for reg 0x02 read
 
     // SDRAM Direct Port
     output logic [21:0] mem_addr,
@@ -1069,6 +1070,16 @@ module ymf278_pcm_engine #(
 
     assign cpu_mem_rd_data = cpu_mem_rd_buf;
     assign cpu_mem_busy    = cpu_rd_pend | cpu_wr_pend | cpu_rd_outstanding;
+
+    // Reg 0x02 read-back (per YMF278B datasheet page 14):
+    //   D7-D5 = device ID (3'b001 = 0x20 nibble pattern, D5=1, D6=0, D7=0)
+    //   D4-D2 = wave-table header (wavetblhdr)
+    //   D1    = memory type
+    //   D0    = memory access mode
+    // Software that wrote any non-zero mode/type/hdr value back expects to
+    // read it back here.  Hardcoding 0x20 (as we did before) made strict
+    // device-probe code fail.
+    assign reg02_readback = {3'b001, wavetblhdr, reg02_mem_type, reg02_mem_access_mode};
 
     // ════════════════════════════════════════════════════════════════════════
     // SDRAM port arbitration: HF (high prio during idle window) vs Stage B

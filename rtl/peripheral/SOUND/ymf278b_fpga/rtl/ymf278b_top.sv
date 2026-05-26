@@ -130,6 +130,7 @@ logic        pcm_reg_rd_done;
 
 wire [7:0] pcm_cpu_mem_rd_data_w;
 wire       pcm_cpu_mem_busy_w;
+wire [7:0] pcm_reg02_readback_w;
 
 ymf278_pcm_engine #(
     .CLK_HZ (CLK_HZ)
@@ -144,6 +145,7 @@ ymf278_pcm_engine #(
     .reg_rd          (pcm_reg_rd),
     .cpu_mem_rd_data (pcm_cpu_mem_rd_data_w),
     .cpu_mem_busy    (pcm_cpu_mem_busy_w),
+    .reg02_readback  (pcm_reg02_readback_w),
 
     // SDRAM Direct Port
     .mem_addr        (mem_addr),
@@ -178,10 +180,14 @@ ymf278_pcm_engine #(
     .dbg_slot0_hdr_bits  ()
 );
 
-// CPU register read mux.  reg 0x02 returns Device ID (0x20).  reg 0x06 returns
-// the PCM RAM/ROM byte that the engine prefetched into cpu_mem_rd_data.  All
-// other PCM register reads return 0 (write-only by spec).
-assign pcm_reg_dout    = (pcm_reg_rd && pcm_reg_addr == 8'h02) ? 8'h20 :
+// CPU register read mux.
+//   reg 0x02 — Device ID (D7-D5 = 3'b001 = 0x20) OR'd with the latched write
+//              bits (wavetblhdr / mem_type / mem_access_mode).  Some software
+//              writes those bits then reads back expecting them reflected
+//              (e.g. mem_type=1 → readback 0x22).
+//   reg 0x06 — PCM RAM/ROM byte prefetched by the engine.
+//   others   — return 0 (write-only by spec).
+assign pcm_reg_dout    = (pcm_reg_rd && pcm_reg_addr == 8'h02) ? pcm_reg02_readback_w :
                          (pcm_reg_rd && pcm_reg_addr == 8'h06) ? pcm_cpu_mem_rd_data_w :
                                                                   8'h00;
 assign pcm_reg_rd_done = 1'b1; // Engine prefetches; CPU reads return immediately.
