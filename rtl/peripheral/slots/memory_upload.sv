@@ -321,11 +321,17 @@ module memory_upload
                   if ({fw_conf[0],fw_conf[1],fw_conf[2]} == {"M","S","X"}) begin
                      if (data_ID_t'(fw_conf[4]) == data_id) begin
                         data_size <= {fw_conf[5][2:0], fw_conf[6],14'h0};
-                        // Skip rest of 16-byte FW header (8 bytes already read,
-                        // 8 bytes of padding to jump). Was +7 (off-by-one →
-                        // first data byte = header pad 0, then yrw801 shifted
-                        // 1 byte → all subsequent ROM reads off by 1).
-                        ddr3_addr <= ddr3_addr + 28'd8;
+                        // Skip rest of 16-byte FW header.  +7 (NOT +8): the
+                        // state machine itself is gated on (ddr3_ready & ~ddr3_rd),
+                        // so STATE_FILL_RAM consumes one extra DDR3 read between
+                        // here and the first FILL_RAM2 byte-write.  +7 lands us
+                        // on the last header-pad byte; STATE_FILL_RAM's prefetch
+                        // then advances to the actual data byte 0 (= yrw801[0])
+                        // which STATE_FILL_RAM2 captures into SDRAM.  Verified
+                        // by BASIC dump showing 40 18 .. at SDRAM[0..] (yrw801
+                        // first bytes) with +7, and 18 00 .. (shifted by 1)
+                        // with +8.
+                        ddr3_addr <= ddr3_addr + 28'd7;
                         state     <= STATE_FILL_RAM;
                         $display("        FILL FW ROM size:%X", {fw_conf[5][2:0], fw_conf[6],14'h0});
                      end else begin          
