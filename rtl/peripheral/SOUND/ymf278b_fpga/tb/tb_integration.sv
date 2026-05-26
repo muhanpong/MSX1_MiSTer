@@ -200,8 +200,10 @@ module tb_integration;
         // amplitude (~0x4000).  Prior bug (master_accum[23:8] vs [15:0])
         // divided by 256 → peak only 0x40 → silently passed the original
         // ">0" check.  Require >0x1000 to catch >>>16x attenuation regressions.
-        check("pcm_left peak ≥ 0x1000 (no major attenuation regression)",
-              max_abs_left >= 16'h1000);
+        // New scaling (master_accum[19:4] = /16) gives single-slot peak ~2048
+        // for ±0x4000 source samples (= 16384 / 16 = 1024).  Lower threshold.
+        check("pcm_left peak ≥ 0x300 (audio path intact at /16 mix scaling)",
+              max_abs_left >= 16'h300);
 
         $display("\n=== %0d PASS, %0d FAIL ===", passes, fails);
         if (fails == 0) $display("*** ALL TESTS PASSED ***");

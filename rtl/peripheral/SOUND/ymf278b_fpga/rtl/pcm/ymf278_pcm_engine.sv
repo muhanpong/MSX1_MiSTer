@@ -709,22 +709,26 @@ module ymf278_pcm_engine #(
             end
 
             if (sample_start) begin
-                // Saturate 24-bit master_accum → 16-bit signed.
-                // Per-slot post-vol/pan output is ~16-bit; with 24 slots
-                // the accumulator can reach ~20 bits.  Previous code took
-                // [23:8] which divided by 256 (single slot at full volume
-                // became -54 dB), producing inaudible noise instead of clean
-                // PCM playback.  Proper saturation preserves single-slot
-                // full amplitude while clamping multi-slot overflow.
-                if (master_accum_left[23:15] == 9'b0_0000_0000
-                 || master_accum_left[23:15] == 9'b1_1111_1111) begin
-                    pcm_left <= master_accum_left[15:0];
+                // Master_accum is 24-bit signed.  Per-slot post-vol/pan
+                // output is ~16-bit signed (~±32767).  With 24 slots the
+                // accumulator can reach ~±786432 = ~20-bit.
+                //
+                // Taking [15:0] (no scaling) saturates as soon as 2 slots
+                // play at full volume — exactly what we observed on hw
+                // (peak 0 dBFS distortion).
+                //
+                // Take [19:4] = master_accum >>> 4: single slot peak ≈
+                // -24 dB, 8 simultaneous slots ≈ -6 dB, 16 slots ≈ 0 dB
+                // (graceful saturation only beyond that).
+                if (master_accum_left[23:19] == 5'b00000
+                 || master_accum_left[23:19] == 5'b11111) begin
+                    pcm_left <= master_accum_left[19:4];
                 end else begin
                     pcm_left <= master_accum_left[23] ? 16'sh8000 : 16'sh7FFF;
                 end
-                if (master_accum_right[23:15] == 9'b0_0000_0000
-                 || master_accum_right[23:15] == 9'b1_1111_1111) begin
-                    pcm_right <= master_accum_right[15:0];
+                if (master_accum_right[23:19] == 5'b00000
+                 || master_accum_right[23:19] == 5'b11111) begin
+                    pcm_right <= master_accum_right[19:4];
                 end else begin
                     pcm_right <= master_accum_right[23] ? 16'sh8000 : 16'sh7FFF;
                 end

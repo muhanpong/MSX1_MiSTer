@@ -59,6 +59,14 @@ logic [DELAY_W-1:0] load_cnt;
 logic [7:0] opl4latch;   // PCM register latch
 logic [8:0] opl3latch;   // OPL3 register latch (includes bank bit)
 
+// YMF278B device-ID one-shot per datasheet page 10:
+//   When status is read after NEW2 was set to 1, 02H is output.  After
+//   reading, this bit is reset.  However, 02H is read only once after
+//   initialization.  Software (e.g. MoonBlaster) uses this to detect OPL4
+//   vs plain OPL3.
+logic       new2_prev;
+logic       new2_signature_pending;
+
 // Wait state for PCM memory reads (regs 3-6 read via SDRAM).
 // Holds io_ack low until pcm_reg_rd_done pulses so the CPU latches
 // the fresh pcm_reg_dout instead of a stale value.
@@ -86,7 +94,12 @@ always_ff @(posedge clk) begin
         opl4latch   <= 8'd0;
         opl3latch   <= 9'd0;
         pcm_rd_wait <= 1'b0;
+        new2_prev   <= 1'b0;
+        new2_signature_pending <= 1'b0;
     end else begin
+        // Detect NEW2 rising edge to arm the YMF278B device-ID signature
+        new2_prev <= new2;
+        if (new2 && !new2_prev) new2_signature_pending <= 1'b1;
         // If waiting for PCM memory read to finish, hold io_ack low until
         // pcm_reg_rd_done pulses, then deliver the data and ack the CPU.
         if (pcm_rd_wait) begin
@@ -177,7 +190,14 @@ always_ff @(posedge clk) begin
             case (io_port[1:0])
                 2'd0, 2'd2: begin  // status
                     opl3_status_rd <= 1'b1;
-                    io_data_out    <= opl3_status | {6'd0, load_busy, busy};
+                    // Layer YMF278B signature 0x02 (D1=1) on the first status
+                    // read after NEW2 rises — one-shot, cleared on this read.
+                    if (new2_signature_pending) begin
+                        io_data_out <= opl3_status | {6'd0, load_busy, busy} | 8'h02;
+                        new2_signature_pending <= 1'b0;
+                    end else begin
+                        io_data_out <= opl3_status | {6'd0, load_busy, busy};
+                    end
                 end
                 2'd1, 2'd3: begin  // FM register read
                     opl3_reg_rd <= 1'b1;
