@@ -1019,14 +1019,21 @@ module ymf278_pcm_engine #(
         end
     end
 
+    // cpu_mem_adr — 24-bit address.
+    //   reads: increment at the 06H reg_rd (pipelined — returns the OLD
+    //          buffered byte; next prefetch reads the NEW address).
+    //   writes: increment AT ISSUE time (cpu_wr_issue_now), not at 06H reg_wr,
+    //          so that mem_addr at issue still equals the address the CPU
+    //          intended.  Incrementing at reg_wr would push the write a byte
+    //          past the target.
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) cpu_mem_adr <= '0;
         else begin
             if (reg_wr && reg_addr == 8'h03) cpu_mem_adr[23:16] <= reg_data;
             if (reg_wr && reg_addr == 8'h04) cpu_mem_adr[15:8]  <= reg_data;
             if (cpu_adr_set_l)               cpu_mem_adr[7:0]   <= reg_data;
-            if ((cpu_rd_06 || cpu_wr_06) && !cpu_adr_set_l)
-                cpu_mem_adr <= cpu_mem_adr + 24'd1;
+            if (cpu_rd_06 && !cpu_adr_set_l)        cpu_mem_adr <= cpu_mem_adr + 24'd1;
+            if (cpu_wr_issue_now && !cpu_adr_set_l) cpu_mem_adr <= cpu_mem_adr + 24'd1;
         end
     end
 
@@ -1076,12 +1083,17 @@ module ymf278_pcm_engine #(
             mem_wr_en   <= 1'b0;
             mem_wr_data <= '0;
         end else begin
+            // mem_rd_en/mem_wr_en pulse 1 cycle.  mem_addr/mem_wr_data
+            // HOLD until the next issue — this is essential because the
+            // msx.sv bridge transitions IDLE→state1 one cycle after seeing
+            // ms_mem_wr_req, and the SDRAM controller then samples ch4_din
+            // one more cycle later (on its own ch4_req edge detect).  By
+            // that point the engine has long dropped the rd/wr enable, so
+            // the address and data must remain stable.
+            // (Comment above the wr_data default — "latch inference" — was
+            //  inaccurate; always_ff cannot infer latches.  Removed.)
             mem_rd_en   <= 1'b0;
             mem_wr_en   <= 1'b0;
-            // CRITICAL: explicit default for mem_wr_data prevents Quartus
-            // from inferring 8 latches (one per bit) on this signal.
-            // Latches in clocked logic break timing closure catastrophically.
-            mem_wr_data <= '0;
 
             if (hf_state == HF_REQ) begin
                 mem_addr  <= hf_addr_comb;

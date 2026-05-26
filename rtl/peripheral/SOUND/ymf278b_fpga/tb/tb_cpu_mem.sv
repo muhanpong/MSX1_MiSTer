@@ -64,6 +64,9 @@ module tb_cpu_mem;
         rom[9]  = 8'h00; rom[10] = 8'h0F; rom[11] = 8'h00;
     end
 
+    // Fake SDRAM model: 5-cycle read latency, 1-cycle write.  Writes update
+    // the rom[] array so subsequent reads at the same address return the
+    // updated byte — exactly the behaviour BASIC's write+readback test needs.
     logic [3:0]  fake_lat;
     logic [21:0] fake_addr;
     always_ff @(posedge clk) begin
@@ -73,6 +76,10 @@ module tb_cpu_mem;
             mem_rd_data  <= '0;
         end else begin
             mem_rd_valid <= 1'b0;
+            if (mem_wr_en) begin
+                // Capture write — emulates SDRAM latching ch4_din on req edge.
+                rom[mem_addr[11:0]] <= mem_wr_data;
+            end
             if (mem_rd_en) begin
                 fake_lat  <= 4'd5;
                 fake_addr <= mem_addr;
@@ -107,13 +114,16 @@ module tb_cpu_mem;
     endtask
 
     // Wait until cpu_mem_busy clears (prefetch complete + buf updated).
+    // CPU mem ops only fire in HF idle window (frame_cycle >= 1728); idle
+    // window is ~220 cycles out of 1948 per frame, so worst-case ~1730
+    // cycles wait until next idle window opens.  Guard is 10× that.
     task wait_cpu_idle;
         int guard = 0;
-        while (cpu_mem_busy && guard < 3000) begin
+        while (cpu_mem_busy && guard < 20000) begin
             @(posedge clk);
             guard++;
         end
-        if (guard >= 3000) $display("  [warn] cpu_mem_busy stuck");
+        if (guard >= 20000) $display("  [warn] cpu_mem_busy stuck");
     endtask
 
     initial begin
@@ -182,6 +192,51 @@ module tb_cpu_mem;
         check("cpu_mem_adr == 0x000100", dut.cpu_mem_adr == 24'h000100);
         wait_cpu_idle();
         check("prefetch at 0x100 = 0x00", cpu_mem_rd_buf_eq(8'h00));
+
+        // -- Test 8: WRITE path — write 0xAB at 0x000200, read it back.
+        // This exercises the engine→bridge→SDRAM write timing that BASIC
+        // showed broken (any byte→0x56 with stale-data bug).
+        write_reg(8'h03, 8'h00);
+        write_reg(8'h04, 8'h02);
+        write_reg(8'h05, 8'h00);      // adr = 0x000200
+        @(posedge clk);
+        wait_cpu_idle();              // prefetch of original byte
+        // Now write 0xAB to that address
+        write_reg(8'h06, 8'hAB);
+        @(posedge clk);
+        wait_cpu_idle();              // wait for engine to issue write + auto-inc + next prefetch
+        // adr has been incremented to 0x000201 after the write.
+        // Re-set address back to 0x000200 to read it back
+        write_reg(8'h03, 8'h00);
+        write_reg(8'h04, 8'h02);
+        write_reg(8'h05, 8'h00);
+        @(posedge clk);
+        wait_cpu_idle();
+        check("write 0xAB → readback 0xAB", cpu_mem_rd_buf_eq(8'hAB));
+
+        // -- Test 9: multiple sequential writes + auto-increment
+        write_reg(8'h03, 8'h00);
+        write_reg(8'h04, 8'h03);
+        write_reg(8'h05, 8'h00);      // adr = 0x000300
+        @(posedge clk);
+        wait_cpu_idle();
+        write_reg(8'h06, 8'h11); wait_cpu_idle();   // 0x300
+        write_reg(8'h06, 8'h22); wait_cpu_idle();   // 0x301
+        write_reg(8'h06, 8'h33); wait_cpu_idle();   // 0x302
+        write_reg(8'h06, 8'h44); wait_cpu_idle();   // 0x303
+        // Re-read from 0x300
+        write_reg(8'h03, 8'h00);
+        write_reg(8'h04, 8'h03);
+        write_reg(8'h05, 8'h00);
+        @(posedge clk);
+        wait_cpu_idle();
+        check("seq write[0x300] = 0x11", cpu_mem_rd_buf_eq(8'h11));
+        read_reg(8'h06); wait_cpu_idle();
+        check("seq write[0x301] = 0x22", cpu_mem_rd_buf_eq(8'h22));
+        read_reg(8'h06); wait_cpu_idle();
+        check("seq write[0x302] = 0x33", cpu_mem_rd_buf_eq(8'h33));
+        read_reg(8'h06); wait_cpu_idle();
+        check("seq write[0x303] = 0x44", cpu_mem_rd_buf_eq(8'h44));
 
         $display("\n=== %0d PASS, %0d FAIL ===", passes, fails);
         if (fails == 0) $display("*** ALL TESTS PASSED ***");
