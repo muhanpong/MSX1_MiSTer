@@ -42,6 +42,9 @@ module ymf278_pcm_engine #(
     input  wire [7:0]  reg_addr,
     input  wire [7:0]  reg_data,
     input  wire        reg_wr,
+    input  wire        reg_rd,
+    output logic [7:0] cpu_mem_rd_data,   // value returned for reg 0x06 read
+    output logic       cpu_mem_busy,      // 1 while CPU mem op in flight
 
     // SDRAM Direct Port
     output logic [21:0] mem_addr,
@@ -327,8 +330,10 @@ module ymf278_pcm_engine #(
     // Forward declaration: hf_active is asserted by HF FSM (defined below)
     // when it owns the SDRAM bus.  Used here to gate mem_rd_valid away from
     // Stage B's byte latch so HF's response data doesn't leak in.
+    // Likewise, cpu_rd_outstanding gates Stage B away from CPU-bound valids.
     logic hf_active;
-    wire  mem_rd_valid_b = mem_rd_valid && !hf_active;
+    logic cpu_rd_outstanding;   // forward decl; driven in CPU mem block below
+    wire  mem_rd_valid_b = mem_rd_valid && !hf_active && !cpu_rd_outstanding;
 
     always_comb begin
         case (b_byte_idx)
@@ -888,7 +893,7 @@ module ymf278_pcm_engine #(
             for (int i = 0; i < 12; i++) hf_buf[i] <= '0;
         end else begin
             case (hf_state)
-                HF_IDLE: if (hf_window_open && hf_found) begin
+                HF_IDLE: if (hf_window_open && hf_found && !cpu_rd_outstanding) begin
                     hf_cur_slot <= hf_picked;
                     // hf_cur_wave is loaded by a separate always_ff (uses
                     // hf_picked_regs intermediate due to iverilog limitation).
@@ -970,7 +975,97 @@ module ymf278_pcm_engine #(
     end
 
     // ════════════════════════════════════════════════════════════════════════
-    // SDRAM port arbitration: HF (high prio during idle window) vs Stage B.
+    // CPU memory access (registers 0x02 mode/type, 0x03-0x05 address, 0x06 data)
+    //
+    // Per YMF278B spec:
+    //   - reg 0x02 [0] = memory_access_mode (1 = CPU mem access; channels stop)
+    //   - reg 0x02 [1] = memory_type (0 = ROM only, 1 = SRAM + ROM)
+    //   - reg 0x03/04/05 latch a 24-bit memory address (high → mid → low)
+    //   - reg 0x05 write completes address setting + triggers initial prefetch
+    //   - reg 0x06 read returns the prefetched byte and starts the next prefetch
+    //   - reg 0x06 write queues a write to that address
+    //   - The address auto-increments after each 0x06 access
+    //
+    // Implementation: a low-priority requester on the SDRAM port, scheduled
+    // only when HF FSM and Stage B sequencer are both idle.
+    // cpu_rd_outstanding declared earlier near mem_rd_valid_b.
+    // ════════════════════════════════════════════════════════════════════════
+    logic        reg02_mem_access_mode;
+    logic        reg02_mem_type;
+    logic [23:0] cpu_mem_adr;
+    logic        cpu_rd_pend;
+    logic        cpu_wr_pend;
+    logic [7:0]  cpu_wr_data_latch;
+    logic [7:0]  cpu_mem_rd_buf;
+
+    wire cpu_adr_set_l = reg_wr && (reg_addr == 8'h05);
+    wire cpu_rd_06     = reg_rd && (reg_addr == 8'h06);
+    wire cpu_wr_06     = reg_wr && (reg_addr == 8'h06);
+
+    wire cpu_issue_ok = hf_window_open
+                     && (hf_state == HF_IDLE)
+                     && (b_state == B_IDLE || b_state == B_DONE)
+                     && !cpu_rd_outstanding;
+    wire cpu_rd_issue_now = cpu_rd_pend && cpu_issue_ok;
+    wire cpu_wr_issue_now = cpu_wr_pend && cpu_issue_ok && !cpu_rd_pend; // RD prio
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            reg02_mem_access_mode <= 1'b0;
+            reg02_mem_type        <= 1'b0;
+        end else if (reg_wr && reg_addr == 8'h02) begin
+            reg02_mem_access_mode <= reg_data[0];
+            reg02_mem_type        <= reg_data[1];
+        end
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) cpu_mem_adr <= '0;
+        else begin
+            if (reg_wr && reg_addr == 8'h03) cpu_mem_adr[23:16] <= reg_data;
+            if (reg_wr && reg_addr == 8'h04) cpu_mem_adr[15:8]  <= reg_data;
+            if (cpu_adr_set_l)               cpu_mem_adr[7:0]   <= reg_data;
+            if ((cpu_rd_06 || cpu_wr_06) && !cpu_adr_set_l)
+                cpu_mem_adr <= cpu_mem_adr + 24'd1;
+        end
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) cpu_wr_data_latch <= '0;
+        else if (cpu_wr_06) cpu_wr_data_latch <= reg_data;
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            cpu_rd_pend <= 1'b0;
+            cpu_wr_pend <= 1'b0;
+        end else begin
+            if (cpu_rd_issue_now) cpu_rd_pend <= 1'b0;
+            if (cpu_adr_set_l || cpu_rd_06) cpu_rd_pend <= 1'b1;
+            if (cpu_wr_issue_now) cpu_wr_pend <= 1'b0;
+            if (cpu_wr_06) cpu_wr_pend <= 1'b1;
+        end
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) cpu_rd_outstanding <= 1'b0;
+        else begin
+            if (cpu_rd_issue_now) cpu_rd_outstanding <= 1'b1;
+            else if (mem_rd_valid && cpu_rd_outstanding) cpu_rd_outstanding <= 1'b0;
+        end
+    end
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) cpu_mem_rd_buf <= '0;
+        else if (mem_rd_valid && cpu_rd_outstanding) cpu_mem_rd_buf <= mem_rd_data;
+    end
+
+    assign cpu_mem_rd_data = cpu_mem_rd_buf;
+    assign cpu_mem_busy    = cpu_rd_pend | cpu_wr_pend | cpu_rd_outstanding;
+
+    // ════════════════════════════════════════════════════════════════════════
+    // SDRAM port arbitration: HF (high prio during idle window) vs Stage B
+    // vs CPU mem access (lowest).
     // Both sources drive a 1-cycle mem_rd_en pulse with addr; msx.sv bridge
     // edge-detects rd_en and captures addr on rising edge.
     // ════════════════════════════════════════════════════════════════════════
@@ -994,9 +1089,14 @@ module ymf278_pcm_engine #(
             end else if (b_state == B_ISSUE) begin
                 mem_addr  <= b_addr_sel;
                 mem_rd_en <= 1'b1;
+            end else if (cpu_wr_issue_now) begin
+                mem_addr    <= cpu_mem_adr[21:0];
+                mem_wr_en   <= 1'b1;
+                mem_wr_data <= cpu_wr_data_latch;
+            end else if (cpu_rd_issue_now) begin
+                mem_addr  <= cpu_mem_adr[21:0];
+                mem_rd_en <= 1'b1;
             end
-            // TODO: CPU mem write FIFO drives mem_wr_en + mem_wr_data when
-            // idle window opens.
         end
     end
 

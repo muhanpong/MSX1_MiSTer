@@ -128,16 +128,22 @@ logic [7:0]  pcm_cpu_mem_rd_data;
 logic        pcm_cpu_mem_ack;
 logic        pcm_reg_rd_done;
 
+wire [7:0] pcm_cpu_mem_rd_data_w;
+wire       pcm_cpu_mem_busy_w;
+
 ymf278_pcm_engine #(
     .CLK_HZ (CLK_HZ)
 ) u_pcm (
     .clk             (clk),
     .rst_n           (rst_n),
-    
-    // CPU Register Interface (v2: write-only; reads stubbed below)
+
+    // CPU Register Interface — reg 0x06 read path now wired through to engine
     .reg_addr        (pcm_reg_addr),
     .reg_data        (pcm_reg_data),
     .reg_wr          (pcm_reg_wr),
+    .reg_rd          (pcm_reg_rd),
+    .cpu_mem_rd_data (pcm_cpu_mem_rd_data_w),
+    .cpu_mem_busy    (pcm_cpu_mem_busy_w),
 
     // SDRAM Direct Port
     .mem_addr        (mem_addr),
@@ -146,7 +152,7 @@ ymf278_pcm_engine #(
     .mem_rd_valid    (mem_rd_valid),
     .mem_wr_en       (mem_wr_req),
     .mem_wr_data     (mem_wr_data),
-    
+
     // Audio Output
     .pcm_left        (pcm_left),
     .pcm_right       (pcm_right),
@@ -172,11 +178,14 @@ ymf278_pcm_engine #(
     .dbg_slot0_hdr_bits  ()
 );
 
-// v2 engine has no CPU register read path yet.  Return YMF278B Device ID
-// (0x20) on reg 0x02, zero elsewhere.  This matches legacy v1's minimal
-// behavior for software detection probes.
-assign pcm_reg_dout    = (pcm_reg_rd && pcm_reg_addr == 8'h02) ? 8'h20 : 8'h00;
-assign pcm_reg_rd_done = 1'b1; // TODO: Implement CPU memory read completion in v2 engine
+// CPU register read mux.  reg 0x02 returns Device ID (0x20).  reg 0x06 returns
+// the PCM RAM/ROM byte that the engine prefetched into cpu_mem_rd_data.  All
+// other PCM register reads return 0 (write-only by spec).
+assign pcm_reg_dout    = (pcm_reg_rd && pcm_reg_addr == 8'h02) ? 8'h20 :
+                         (pcm_reg_rd && pcm_reg_addr == 8'h06) ? pcm_cpu_mem_rd_data_w :
+                                                                  8'h00;
+assign pcm_reg_rd_done = 1'b1; // Engine prefetches; CPU reads return immediately.
+                               // Real chip uses BUSY status (D0) — TODO if needed.
 
 // Unused legacy debug signals
 assign dbg_keyon_count = 5'd0;
