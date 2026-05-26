@@ -334,7 +334,14 @@ module ymf278_pcm_engine #(
     // Likewise, cpu_rd_outstanding gates Stage B away from CPU-bound valids.
     logic hf_active;
     logic cpu_rd_outstanding;   // forward decl; driven in CPU mem block below
-    wire  mem_rd_valid_b = mem_rd_valid && !hf_active && !cpu_rd_outstanding;
+    // drop_next_valid: when stage_advance fires while previous slot was still
+    // in B_WAIT_VALID, the SDRAM controller may return that previous slot's
+    // byte AFTER stage_advance — corrupting bytes[0] of the new slot.  Set
+    // this flag at stage_advance if a read was outstanding, and use it to
+    // drop the FIRST mem_rd_valid that arrives in the new slot's window.
+    logic drop_next_valid;
+    wire  mem_rd_valid_b = mem_rd_valid && !hf_active && !cpu_rd_outstanding
+                                       && !drop_next_valid;
 
     always_comb begin
         case (b_byte_idx)
@@ -351,10 +358,15 @@ module ymf278_pcm_engine #(
         if (!rst_n) begin
             b_state    <= B_IDLE;
             b_byte_idx <= '0;
+            drop_next_valid <= 1'b0;
         end else if (stage_advance) begin
             // New slot enters Stage B every stage_advance.  Restart sequencer
             // regardless of previous state — this guarantees forward progress
             // even if prior slot didn't finish.
+            // If the previous slot left an outstanding SDRAM read (was in
+            // B_WAIT_VALID), arm drop_next_valid so the stale response gets
+            // discarded instead of overwriting our new bytes[0].
+            if (b_state == B_WAIT_VALID) drop_next_valid <= 1'b1;
             if (stage_a_reg.valid) begin
                 b_state    <= B_ISSUE;
                 b_byte_idx <= 3'd0;
@@ -362,6 +374,9 @@ module ymf278_pcm_engine #(
                 b_state <= B_IDLE;
             end
         end else begin
+            // Consume drop_next_valid on first raw valid we see.
+            if (drop_next_valid && mem_rd_valid && !hf_active && !cpu_rd_outstanding)
+                drop_next_valid <= 1'b0;
             case (b_state)
                 B_IDLE:       ;   // wait for stage_advance
                 B_ISSUE:      b_state <= B_WAIT_VALID;
@@ -857,7 +872,15 @@ module ymf278_pcm_engine #(
             // LD=1" rule).  Different slot — both writes commit (memory).
             if (hf_state == HF_STORE) begin
                 slot_regs_t hf_upd;
-                hf_upd = ram_regs[hf_cur_slot];
+                // If a CPU write to this same slot lands this cycle, pick up
+                // its just-modified blocking value (`reg_upd`) so that wave/
+                // fn/oct/pan/keyon/tl set by the CPU on this cycle are NOT
+                // lost when the HF NBA to `ram_regs[hf_cur_slot]` fires after
+                // the CPU NBA.  Otherwise read the latched value as before.
+                if (wr_slot_reg && wr_snum == hf_cur_slot)
+                    hf_upd = reg_upd;
+                else
+                    hf_upd = ram_regs[hf_cur_slot];
                 hf_upd.lfo_speed = hf_buf[7][5:3];
                 hf_upd.vib       = hf_buf[7][2:0];
                 hf_upd.ar        = hf_buf[8][7:4];
