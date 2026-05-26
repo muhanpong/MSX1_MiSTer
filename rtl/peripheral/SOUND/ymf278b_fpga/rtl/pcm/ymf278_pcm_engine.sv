@@ -758,6 +758,16 @@ module ymf278_pcm_engine #(
     logic [2:0]  wavetblhdr;
     logic [23:0] hf_pending;
 
+    // Forward declarations for HF FSM signals (defined fully later) so the
+    // CPU register decoder can reference hf_state/hf_cur_slot/hf_buf when
+    // implementing the auto-backfill of slot regs at HF_STORE time.
+    typedef enum logic [2:0] { HF_IDLE, HF_REQ, HF_WAIT, HF_STORE } hf_state_t;
+    hf_state_t   hf_state;
+    logic [4:0]  hf_cur_slot;
+    logic [8:0]  hf_cur_wave;
+    logic [3:0]  hf_byte_idx;
+    logic [7:0]  hf_buf [0:11];
+
     wire [4:0]  wr_snum  = (reg_addr >= 8'h08) ? 5'((reg_addr - 8'h08) % 8'd24) : 5'd0;
     wire [3:0]  wr_field = (reg_addr >= 8'h08) ? 4'((reg_addr - 8'h08) / 8'd24) : 4'd0;
     wire        wr_slot_reg = reg_wr && (reg_addr >= 8'h08) && (reg_addr <= 8'hF7);
@@ -828,6 +838,33 @@ module ymf278_pcm_engine #(
                 endcase
                 ram_regs[wr_snum] <= reg_upd;
             end
+
+            // ────────────────────────────────────────────────────────────
+            // Header auto-backfill on HF_STORE (chip spec behavior).
+            // Per YMF278B datasheet + openMSX YMF278.cc:610-614: writing a
+            // wave number triggers the chip to load the 12-byte header from
+            // external memory, and bytes 7..11 are auto-written back into
+            // the slot's LFO/VIB/AR/D1R/DL/D2R/RC/RR/AM registers.  MB and
+            // most yrw801-using software rely on these header defaults and
+            // don't write those fields from the CPU side.
+            //
+            // If a CPU write to the same slot's fields lands in the same
+            // cycle, the HF backfill wins (matches "do not access during
+            // LD=1" rule).  Different slot — both writes commit (memory).
+            if (hf_state == HF_STORE) begin
+                slot_regs_t hf_upd;
+                hf_upd = ram_regs[hf_cur_slot];
+                hf_upd.lfo_speed = hf_buf[7][5:3];
+                hf_upd.vib       = hf_buf[7][2:0];
+                hf_upd.ar        = hf_buf[8][7:4];
+                hf_upd.d1r       = hf_buf[8][3:0];
+                hf_upd.dl_idx    = hf_buf[9][7:4];
+                hf_upd.d2r       = hf_buf[9][3:0];
+                hf_upd.rc        = hf_buf[10][7:4];
+                hf_upd.rr        = hf_buf[10][3:0];
+                hf_upd.am        = hf_buf[11][2:0];
+                ram_regs[hf_cur_slot] <= hf_upd;
+            end
         end
     end
 
@@ -853,13 +890,8 @@ module ymf278_pcm_engine #(
     // below gives HF priority during the idle window; mem_rd_valid is gated
     // away from Stage B while HF_WAIT is active.
     // ════════════════════════════════════════════════════════════════════════
-    typedef enum logic [2:0] { HF_IDLE, HF_REQ, HF_WAIT, HF_STORE } hf_state_t;
-
-    hf_state_t   hf_state;
-    logic [4:0]  hf_cur_slot;
-    logic [8:0]  hf_cur_wave;
-    logic [3:0]  hf_byte_idx;
-    logic [7:0]  hf_buf [0:11];
+    // (hf_state, hf_cur_slot, hf_cur_wave, hf_byte_idx, hf_buf declared
+    //  earlier near wavetblhdr — needed by CPU decoder for HF backfill.)
 
     // Combinational HF byte address (depends on cur_wave/byte_idx).
     wire [21:0] hf_addr_comb = (hf_cur_wave < 9'd384 || wavetblhdr == 3'd0)

@@ -84,6 +84,13 @@ module tb_integration;
         rom[60] = 8'h80; rom[61] = 8'h00; rom[62] = 8'h80; // bits=10, start=0x80
         rom[63] = 8'h00; rom[64] = 8'h00;                  // loop = 0
         rom[65] = 8'hFF; rom[66] = 8'hF0;                  // end (signed-ish)
+        // bytes 7..11 = LFO/AR/D1R/DL/D2R/RC/RR/AM (chip auto-backfills these
+        // from header into slot regs).  Put AR=15 / D1R=0 for fast attack.
+        rom[67] = 8'h00;   // LFO_SPEED=0, VIB=0
+        rom[68] = 8'hF0;   // AR=15 (instant attack), D1R=0
+        rom[69] = 8'h00;   // DL=0, D2R=0
+        rom[70] = 8'h00;   // RC=0, RR=0
+        rom[71] = 8'h00;   // AM=0
         // Sample data (16-bit big-endian)
         for (int i = 0; i < 32; i++) begin
             if (i[0]) begin // odd index → negative

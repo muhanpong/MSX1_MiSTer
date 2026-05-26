@@ -111,6 +111,12 @@ module tb_bridge_realism;
         rom[60] = 8'h80; rom[61] = 8'h00; rom[62] = 8'h80; // bits=10, start=0x80
         rom[63] = 8'h00; rom[64] = 8'h00;
         rom[65] = 8'hFF; rom[66] = 8'hF0;
+        // bytes 7..11 backfilled by HF_STORE into slot LFO/AR/D1R/DL/D2R/RC/RR/AM
+        rom[67] = 8'h00;
+        rom[68] = 8'hF0;   // AR=15 (instant attack), D1R=0
+        rom[69] = 8'h00;
+        rom[70] = 8'h00;
+        rom[71] = 8'h00;
         // Alternating ±0x4000 samples (16-bit big-endian) at base 0x80
         for (int i = 0; i < 32; i++) begin
             if (i[0]) begin
