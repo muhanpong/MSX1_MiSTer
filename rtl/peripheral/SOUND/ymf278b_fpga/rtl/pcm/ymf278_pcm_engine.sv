@@ -283,12 +283,38 @@ module ymf278_pcm_engine #(
         return p2[15:0];
     endfunction
 
-    // Combinational computation off stage_a_reg
+    // Combinational computation off stage_a_reg — Stage A → Stage B inputs
+    // (calc_step + step accumulation + next_pos_calc).  The byte_addr
+    // multiplies that previously chained off these signals are moved one
+    // cycle later via next_pos_r / next_pos_for_b_r below; without this
+    // pipelining the full chain failed clk_sdram (86 MHz) timing by ~11 ns
+    // (worst path: stage_a_reg.regs.oct → ... → stage_b_reg.addrs.b1).
     logic [31:0]      next_step_full;
     logic [15:0]      next_stepPtr;
     logic [15:0]      next_pos;
     logic [15:0]      next_pos_for_b;
     byte_addrs_t      next_addrs;
+
+    // Registered intermediates — second pipeline stage of Stage A→B.  These
+    // shadow the combinational results above with 1-cycle delay; byte_addr
+    // below reads from them so the multiplier chain starts at a register
+    // boundary.  Settles within 2 cycles of dispatch_now, long before
+    // stage_advance at slot_phase 63.
+    logic [15:0]      next_pos_r;
+    logic [15:0]      next_pos_for_b_r;
+    logic [15:0]      next_stepPtr_r;
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            next_pos_r       <= '0;
+            next_pos_for_b_r <= '0;
+            next_stepPtr_r   <= '0;
+        end else begin
+            next_pos_r       <= next_pos;
+            next_pos_for_b_r <= next_pos_for_b;
+            next_stepPtr_r   <= next_stepPtr;
+        end
+    end
 
     always_comb begin
         // VIB=0 for now; TODO wire up LFO VIB output
@@ -317,19 +343,22 @@ module ymf278_pcm_engine #(
                                        stage_a_reg.header.endAddr,
                                        stage_a_reg.header.loopAddr);
 
-        // 6 byte addresses
+        // 6 byte addresses — driven from REGISTERED next_pos_r /
+        // next_pos_for_b_r (Stage A→B split second cycle).  startAddr and
+        // bits stay combinational from stage_a_reg (short paths into the
+        // final base+offset add inside byte_addr).
         next_addrs.a0 = byte_addr(stage_a_reg.header.startAddr,
-                                       next_pos, stage_a_reg.header.bits, 2'd0);
+                                       next_pos_r, stage_a_reg.header.bits, 2'd0);
         next_addrs.a1 = byte_addr(stage_a_reg.header.startAddr,
-                                       next_pos, stage_a_reg.header.bits, 2'd1);
+                                       next_pos_r, stage_a_reg.header.bits, 2'd1);
         next_addrs.a2 = byte_addr(stage_a_reg.header.startAddr,
-                                       next_pos, stage_a_reg.header.bits, 2'd2);
+                                       next_pos_r, stage_a_reg.header.bits, 2'd2);
         next_addrs.b0 = byte_addr(stage_a_reg.header.startAddr,
-                                       next_pos_for_b, stage_a_reg.header.bits, 2'd0);
+                                       next_pos_for_b_r, stage_a_reg.header.bits, 2'd0);
         next_addrs.b1 = byte_addr(stage_a_reg.header.startAddr,
-                                       next_pos_for_b, stage_a_reg.header.bits, 2'd1);
+                                       next_pos_for_b_r, stage_a_reg.header.bits, 2'd1);
         next_addrs.b2 = byte_addr(stage_a_reg.header.startAddr,
-                                       next_pos_for_b, stage_a_reg.header.bits, 2'd2);
+                                       next_pos_for_b_r, stage_a_reg.header.bits, 2'd2);
     end
 
     // ────────────────────────────────────────────────────────────────────────
@@ -412,11 +441,13 @@ module ymf278_pcm_engine #(
             stage_b_reg.slot     <= stage_a_reg.slot;
             stage_b_reg.regs     <= stage_a_reg.regs;
             stage_b_reg.header   <= stage_a_reg.header;
-            stage_b_reg.dyn.pos       <= next_pos;
-            stage_b_reg.dyn.stepPtr   <= next_stepPtr;
+            // Use registered intermediates (Stage A→B split): matches
+            // next_addrs above so position-and-address pair are consistent.
+            stage_b_reg.dyn.pos       <= next_pos_r;
+            stage_b_reg.dyn.stepPtr   <= next_stepPtr_r;
             stage_b_reg.dyn.env_vol   <= stage_a_reg.dyn.env_vol;
             stage_b_reg.dyn.env_state <= stage_a_reg.dyn.env_state;
-            stage_b_reg.next_pos <= next_pos_for_b;
+            stage_b_reg.next_pos <= next_pos_for_b_r;
             stage_b_reg.addrs    <= next_addrs;
             stage_b_reg.bytes    <= '0;
         end else if (b_state == B_WAIT_VALID && mem_rd_valid_b) begin
