@@ -85,7 +85,20 @@ module ymf278_pcm_engine #(
     output logic [21:0] dbg_slot0_hdr_start,
     output logic [15:0] dbg_slot0_hdr_loop,
     output logic [15:0] dbg_slot0_hdr_end,
-    output logic [1:0]  dbg_slot0_hdr_bits
+    output logic [1:0]  dbg_slot0_hdr_bits,
+
+    // ram_dyn[0] mirror — for tb_long_run / overlay diagnostics.  Flat (not
+    // struct) so external testbenches can read individual fields without
+    // hierarchical struct-array references (iverilog limitation).
+    output logic [15:0] dbg_slot0_dyn_pos,
+    output logic [15:0] dbg_slot0_dyn_stepPtr,
+    output logic [9:0]  dbg_slot0_dyn_env_vol,
+    output logic [2:0]  dbg_slot0_dyn_env_state,
+    // stage_b_bytes_done success indicator (high during slot's window after
+    // all 5 bytes latched).  Useful for H6 timing-budget counter in tb.
+    output logic        dbg_stage_b_bytes_done,
+    output logic        dbg_stage_advance,
+    output logic        dbg_stage_b_valid
 );
 
     // ════════════════════════════════════════════════════════════════════════
@@ -526,6 +539,26 @@ module ymf278_pcm_engine #(
     logic signed [23:0] master_accum_left;
     logic signed [23:0] master_accum_right;
 
+    // D1a packet: process_eg's deep combinational chain is split here.  D1a
+    // pre-computes rate / shift_v / sel_v / do_update so D1b only does the
+    // final phase/inc/vol update.  Required for clk_sdram (86 MHz) timing
+    // closure — the original single-cycle process_eg call is ~15-20 LUT
+    // levels + DSP, way over the 11.6 ns budget.
+    typedef struct packed {
+        logic                 valid;
+        logic [4:0]           slot;
+        slot_regs_t           regs;          // forwarded to D1b
+        logic [2:0]           cur_state;     // env_state at D1a entry
+        logic [9:0]           cur_vol;       // env_vol  at D1a entry
+        slot_dyn_t            new_dyn;       // forwarded to d1_pkt
+        logic signed [15:0]   interp;        // forwarded to d1_pkt
+        logic [5:0]           rate;          // pre-computed: state-dispatched rate
+        logic [7:0]           shift_v;       // pre-computed: eg_rate_shift_rom(rate)
+        logic [7:0]           sel_v;         // pre-computed: eg_rate_select_rom(rate)
+        logic                 do_update;     // pre-computed: eg_do_update(eg_cnt, shift_v)
+        logic                 key_on_edge;
+    } d1a_pkt_t;
+
     typedef struct packed {
         logic                 valid;
         logic [4:0]           slot;
@@ -562,58 +595,187 @@ module ymf278_pcm_engine #(
         logic                 key_on_edge;
     } d2_pkt_t;
 
+    d1a_pkt_t d1a_pkt;
     d1_pkt_t  d1_pkt;
     d2a_pkt_t d2a_pkt;
     d2_pkt_t  d2_pkt;
 
-    // ── D1: process_eg + key_on edge ────────────────────────────────────────
+    // ── D1a: rate selection + first ROM lookups + do_update ─────────────────
+    // Splits process_eg's combinational chain.  D1a does the rate/shift/sel
+    // computations (deeper chain due to calc_eg_rate / calc_decay_rate
+    // multiplies and ROM lookups), D1b does phase + inc + final vol update.
     always_ff @(posedge clk or negedge rst_n) begin
-        logic [2:0] new_state;
-        logic [9:0] new_vol;
-        logic       edge_now;
+        logic [5:0]  rate_v;
+        logic [7:0]  shift_vv, sel_vv;
+        logic        du_v;
+        logic        edge_now;
 
-        // Init outputs to avoid latch (process_eg outputs in particular)
-        new_state = 3'd0;
-        new_vol   = 10'd0;
+        rate_v   = 6'd0;
+        shift_vv = 8'd0;
+        sel_vv   = 8'd0;
+        du_v     = 1'b0;
+        edge_now = 1'b0;
 
         if (!rst_n) begin
-            d1_pkt      <= '0;
+            d1a_pkt     <= '0;
             key_on_prev <= '0;
         end else begin
-            d1_pkt.valid <= 1'b0;
+            d1a_pkt.valid <= 1'b0;
             if (stage_advance && stage_c_reg.valid) begin
                 edge_now = stage_c_reg.regs.keyon & ~key_on_prev[stage_c_reg.slot];
                 key_on_prev[stage_c_reg.slot] <= stage_c_reg.regs.keyon;
 
-                process_eg(
-                    stage_c_reg.dyn.env_state,
-                    stage_c_reg.dyn.env_vol,
-                    stage_c_reg.regs.keyon,
-                    edge_now,
-                    stage_c_reg.regs.ar,
-                    stage_c_reg.regs.d1r,
-                    stage_c_reg.regs.d2r,
-                    stage_c_reg.regs.rr,
-                    stage_c_reg.regs.rc,
-                    stage_c_reg.regs.oct,
-                    stage_c_reg.regs.fn,
-                    stage_c_reg.regs.dl_idx,
-                    stage_c_reg.regs.damp,
-                    stage_c_reg.regs.prvb,
-                    eg_cnt,
-                    new_state,
-                    new_vol
-                );
+                // State-dispatched rate selection (matches process_eg's prologue).
+                // Attack rate is also used for the "key_on edge from EG_OFF" path.
+                if (edge_now && stage_c_reg.dyn.env_state == EG_OFF) begin
+                    rate_v = calc_eg_rate(stage_c_reg.regs.ar,
+                                          stage_c_reg.regs.rc,
+                                          stage_c_reg.regs.oct,
+                                          stage_c_reg.regs.fn);
+                end else begin
+                    case (stage_c_reg.dyn.env_state)
+                        EG_ATT: rate_v = calc_eg_rate(
+                                    stage_c_reg.regs.ar,  stage_c_reg.regs.rc,
+                                    stage_c_reg.regs.oct, stage_c_reg.regs.fn);
+                        EG_DEC: rate_v = calc_decay_rate(
+                                    stage_c_reg.regs.d1r, stage_c_reg.regs.rc,
+                                    stage_c_reg.regs.damp, stage_c_reg.regs.prvb,
+                                    stage_c_reg.dyn.env_vol,
+                                    stage_c_reg.regs.oct, stage_c_reg.regs.fn);
+                        EG_SUS: rate_v = calc_decay_rate(
+                                    stage_c_reg.regs.d2r, stage_c_reg.regs.rc,
+                                    stage_c_reg.regs.damp, stage_c_reg.regs.prvb,
+                                    stage_c_reg.dyn.env_vol,
+                                    stage_c_reg.regs.oct, stage_c_reg.regs.fn);
+                        EG_REL: rate_v = calc_decay_rate(
+                                    stage_c_reg.regs.rr,  stage_c_reg.regs.rc,
+                                    stage_c_reg.regs.damp, stage_c_reg.regs.prvb,
+                                    stage_c_reg.dyn.env_vol,
+                                    stage_c_reg.regs.oct, stage_c_reg.regs.fn);
+                        default: rate_v = 6'd0;
+                    endcase
+                end
+
+                shift_vv = eg_rate_shift_rom(rate_v);
+                sel_vv   = eg_rate_select_rom(rate_v);
+                du_v     = eg_do_update(eg_cnt, shift_vv);
+
+                d1a_pkt.valid       <= 1'b1;
+                d1a_pkt.slot        <= stage_c_reg.slot;
+                d1a_pkt.regs        <= stage_c_reg.regs;
+                d1a_pkt.cur_state   <= stage_c_reg.dyn.env_state;
+                d1a_pkt.cur_vol     <= stage_c_reg.dyn.env_vol;
+                d1a_pkt.new_dyn     <= stage_c_reg.dyn;
+                d1a_pkt.interp      <= stage_c_reg.interp;
+                d1a_pkt.rate        <= rate_v;
+                d1a_pkt.shift_v     <= shift_vv;
+                d1a_pkt.sel_v       <= sel_vv;
+                d1a_pkt.do_update   <= du_v;
+                d1a_pkt.key_on_edge <= edge_now;
+            end
+        end
+    end
+
+    // ── D1b: phase + inc + final vol/state update ───────────────────────────
+    always_ff @(posedge clk or negedge rst_n) begin
+        logic [2:0]  phase_v;
+        logic [7:0]  inc_v;
+        logic [10:0] vol_add;
+        logic [9:0]  new_vol;
+        logic [2:0]  new_state;
+
+        phase_v   = 3'd0;
+        inc_v     = 8'd0;
+        vol_add   = 11'd0;
+        new_vol   = 10'd0;
+        new_state = 3'd0;
+
+        if (!rst_n) begin
+            d1_pkt <= '0;
+        end else begin
+            d1_pkt.valid <= 1'b0;
+            if (d1a_pkt.valid) begin
+                // Defaults: hold prior state if no update path taken
+                new_vol   = d1a_pkt.cur_vol;
+                new_state = d1a_pkt.cur_state;
+
+                if (d1a_pkt.key_on_edge && d1a_pkt.cur_state == EG_OFF) begin
+                    // Start of note: jump to attack (or skip straight to SUS/DEC
+                    // if rate==63 means instant attack).
+                    new_vol = MAX_ATT_INDEX;
+                    if (d1a_pkt.rate < 6'd63) new_state = EG_ATT;
+                    else begin
+                        new_vol = MIN_ATT_INDEX;
+                        new_state = (d1a_pkt.regs.dl_idx != 4'h0) ? EG_DEC : EG_SUS;
+                    end
+                end else if (!d1a_pkt.regs.keyon && d1a_pkt.cur_state != EG_OFF) begin
+                    new_state = EG_REL;
+                end else begin
+                    case (d1a_pkt.cur_state)
+                        EG_ATT: begin
+                            if (d1a_pkt.rate < 6'd63 && d1a_pkt.do_update) begin
+                                phase_v = eg_phase(eg_cnt, d1a_pkt.shift_v);
+                                inc_v   = eg_inc_rom(7'(d1a_pkt.sel_v
+                                                        + {5'd0, phase_v}));
+                                new_vol = calc_attack_step(d1a_pkt.cur_vol, inc_v);
+                                if (new_vol <= MIN_ATT_INDEX) begin
+                                    new_vol   = MIN_ATT_INDEX;
+                                    new_state = (d1a_pkt.regs.dl_idx != 4'h0)
+                                              ? EG_DEC : EG_SUS;
+                                end
+                            end
+                        end
+                        EG_DEC: begin
+                            if (d1a_pkt.do_update) begin
+                                phase_v = eg_phase(eg_cnt, d1a_pkt.shift_v);
+                                inc_v   = eg_inc_rom(7'(d1a_pkt.sel_v
+                                                        + {5'd0, phase_v}));
+                                vol_add = {1'b0, d1a_pkt.cur_vol} + {3'd0, inc_v};
+                                new_vol = (vol_add > 11'h3FF) ? 10'h3FF
+                                                              : vol_add[9:0];
+                                if (new_vol >= dl_tab_rom(d1a_pkt.regs.dl_idx)) begin
+                                    new_state = (new_vol < MAX_ATT_INDEX)
+                                              ? EG_SUS : EG_OFF;
+                                end
+                            end
+                        end
+                        EG_SUS: begin
+                            if (d1a_pkt.do_update) begin
+                                phase_v = eg_phase(eg_cnt, d1a_pkt.shift_v);
+                                inc_v   = eg_inc_rom(7'(d1a_pkt.sel_v
+                                                        + {5'd0, phase_v}));
+                                vol_add = {1'b0, d1a_pkt.cur_vol} + {3'd0, inc_v};
+                                if (vol_add >= {1'b0, MAX_ATT_INDEX}) begin
+                                    new_vol   = MAX_ATT_INDEX;
+                                    new_state = EG_OFF;
+                                end else new_vol = vol_add[9:0];
+                            end
+                        end
+                        EG_REL: begin
+                            if (d1a_pkt.do_update) begin
+                                phase_v = eg_phase(eg_cnt, d1a_pkt.shift_v);
+                                inc_v   = eg_inc_rom(7'(d1a_pkt.sel_v
+                                                        + {5'd0, phase_v}));
+                                vol_add = {1'b0, d1a_pkt.cur_vol} + {3'd0, inc_v};
+                                if (vol_add >= {1'b0, MAX_ATT_INDEX}) begin
+                                    new_vol   = MAX_ATT_INDEX;
+                                    new_state = EG_OFF;
+                                end else new_vol = vol_add[9:0];
+                            end
+                        end
+                        default: ;
+                    endcase
+                end
 
                 d1_pkt.valid         <= 1'b1;
-                d1_pkt.slot          <= stage_c_reg.slot;
-                d1_pkt.pan           <= stage_c_reg.regs.pan;
-                d1_pkt.tl            <= stage_c_reg.regs.tl;
-                d1_pkt.interp        <= stage_c_reg.interp;
-                d1_pkt.new_dyn       <= stage_c_reg.dyn;
+                d1_pkt.slot          <= d1a_pkt.slot;
+                d1_pkt.pan           <= d1a_pkt.regs.pan;
+                d1_pkt.tl            <= d1a_pkt.regs.tl;
+                d1_pkt.interp        <= d1a_pkt.interp;
+                d1_pkt.new_dyn       <= d1a_pkt.new_dyn;
                 d1_pkt.next_eg_state <= new_state;
                 d1_pkt.next_eg_vol   <= new_vol;
-                d1_pkt.key_on_edge   <= edge_now;
+                d1_pkt.key_on_edge   <= d1a_pkt.key_on_edge;
             end
         end
     end
@@ -1191,11 +1353,13 @@ module ymf278_pcm_engine #(
     // ════════════════════════════════════════════════════════════════════════
     slot_regs_t   dbg_slot0_struct, dbg_slot5_struct, dbg_slot23_struct;
     slot_header_t dbg_slot0_hdr_struct;
+    slot_dyn_t    dbg_slot0_dyn_struct;
     always_comb begin
         dbg_slot0_struct     = ram_regs[0];
         dbg_slot5_struct     = ram_regs[5];
         dbg_slot23_struct    = ram_regs[23];
         dbg_slot0_hdr_struct = ram_header[0];
+        dbg_slot0_dyn_struct = ram_dyn[0];
     end
 
     assign dbg_wavetblhdr  = wavetblhdr;
@@ -1215,6 +1379,13 @@ module ymf278_pcm_engine #(
     assign dbg_slot0_hdr_loop  = dbg_slot0_hdr_struct.loopAddr;
     assign dbg_slot0_hdr_end   = dbg_slot0_hdr_struct.endAddr;
     assign dbg_slot0_hdr_bits  = dbg_slot0_hdr_struct.bits;
+    assign dbg_slot0_dyn_pos       = dbg_slot0_dyn_struct.pos;
+    assign dbg_slot0_dyn_stepPtr   = dbg_slot0_dyn_struct.stepPtr;
+    assign dbg_slot0_dyn_env_vol   = dbg_slot0_dyn_struct.env_vol;
+    assign dbg_slot0_dyn_env_state = dbg_slot0_dyn_struct.env_state;
+    assign dbg_stage_b_bytes_done  = stage_b_bytes_done;
+    assign dbg_stage_advance       = stage_advance;
+    assign dbg_stage_b_valid       = stage_b_reg.valid;
 
     // ════════════════════════════════════════════════════════════════════════
     // Initial values for ram_header (simulation only — real SRAM/BRAM starts
