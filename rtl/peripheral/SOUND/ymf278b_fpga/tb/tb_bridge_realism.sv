@@ -33,6 +33,7 @@ module tb_bridge_realism;
     logic        mem_rd_valid;
     logic        mem_wr_en;
     logic [7:0]  mem_wr_data;
+    logic        mem_busy;
     logic signed [15:0] pcm_left, pcm_right;
     logic        pcm_valid;
 
@@ -55,6 +56,7 @@ module tb_bridge_realism;
         .mem_addr(mem_addr), .mem_rd_en(mem_rd_en),
         .mem_rd_data(mem_rd_data), .mem_rd_valid(mem_rd_valid),
         .mem_wr_en(mem_wr_en), .mem_wr_data(mem_wr_data),
+        .mem_busy(mem_busy),
         .pcm_left(pcm_left), .pcm_right(pcm_right), .pcm_valid(pcm_valid),
         .dbg_wavetblhdr(dbg_wavetblhdr), .dbg_hf_pending(dbg_hf_pending),
         .dbg_slot0_wave(dbg_slot0_wave), .dbg_slot0_fn(dbg_slot0_fn),
@@ -100,6 +102,8 @@ module tb_bridge_realism;
 
     assign mem_rd_data  = ch4_dout;
     assign mem_rd_valid = (pcm_state == 2'd3);
+    // mem_busy mirrors msx.sv ms_mem_busy: high while bridge is non-IDLE.
+    assign mem_busy     = (pcm_state != 2'd0);
 
     // ── SDRAM ch4 model (mimics edge-triggered req/ready) ──────────────────
     logic [3:0] sdram_lat;

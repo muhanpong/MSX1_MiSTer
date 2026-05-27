@@ -44,6 +44,7 @@ module tb_integration;
         .mem_addr(mem_addr), .mem_rd_en(mem_rd_en),
         .mem_rd_data(mem_rd_data), .mem_rd_valid(mem_rd_valid),
         .mem_wr_en(mem_wr_en), .mem_wr_data(mem_wr_data),
+        .mem_busy(1'b0),
         .pcm_left(pcm_left), .pcm_right(pcm_right), .pcm_valid(pcm_valid),
         .dbg_wavetblhdr(dbg_wavetblhdr),
         .dbg_hf_pending(dbg_hf_pending),

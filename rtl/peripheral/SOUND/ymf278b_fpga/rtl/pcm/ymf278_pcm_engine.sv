@@ -54,6 +54,11 @@ module ymf278_pcm_engine #(
     input  wire         mem_rd_valid,
     output logic        mem_wr_en,
     output logic [7:0]  mem_wr_data,
+    // High while the msx.sv ch4 bridge has a transaction in flight.  Stage B
+    // gates its mem_rd_en pulse on !mem_busy so the bridge (which edge-detects
+    // on IDLE only) does not silently drop a new slot's request when the
+    // previous slot's read is still outstanding.
+    input  wire         mem_busy,
 
     // Audio Output
     output logic signed [15:0] pcm_left,
@@ -364,7 +369,11 @@ module ymf278_pcm_engine #(
         end else begin
             case (b_state)
                 B_IDLE:       ;   // wait for stage_advance
-                B_ISSUE:      b_state <= B_WAIT_VALID;
+                // Hold B_ISSUE until the ch4 bridge is idle.  If we transition
+                // while mem_busy is high, the arbiter has been suppressing
+                // mem_rd_en — so the bridge never saw a rising edge for this
+                // slot, and B_WAIT_VALID would wait forever (deadlock).
+                B_ISSUE:      if (!mem_busy) b_state <= B_WAIT_VALID;
                 B_WAIT_VALID: if (mem_rd_valid_b) b_state <= B_NEXT;
                 B_NEXT: begin
                     if (b_byte_idx == 3'd4) b_state <= B_DONE;
@@ -1153,7 +1162,10 @@ module ymf278_pcm_engine #(
             if (hf_state == HF_REQ) begin
                 mem_addr  <= hf_addr_comb;
                 mem_rd_en <= 1'b1;
-            end else if (b_state == B_ISSUE) begin
+            end else if (b_state == B_ISSUE && !mem_busy) begin
+                // mem_busy guard: if the ch4 bridge is still processing the
+                // previous read (state 1/2/3), edge-detect on IDLE would
+                // silently drop our pulse.  Hold until bridge returns to IDLE.
                 mem_addr  <= b_addr_sel;
                 mem_rd_en <= 1'b1;
             end else if (cpu_wr_issue_now) begin

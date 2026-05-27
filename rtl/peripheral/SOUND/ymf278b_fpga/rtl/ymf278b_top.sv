@@ -154,6 +154,7 @@ ymf278_pcm_engine #(
     .mem_rd_valid    (mem_rd_valid),
     .mem_wr_en       (mem_wr_req),
     .mem_wr_data     (mem_wr_data),
+    .mem_busy        (mem_busy),
 
     // Audio Output
     .pcm_left        (pcm_left),
