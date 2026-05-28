@@ -56,16 +56,36 @@ sdram|ch2_addr_1[26]            target register
 `ch2_addr_1`은 sdram 내부에서 `ch2_req` rising edge에 `ch2_addr`를 latch.
 그 입력 `ch2_addr` ← `msx_slots.ram_addr` (조합 출력) ← 18-level 체인.
 
-### 추가 split 옵션 (모두 functional 영향)
+### Critical path 시간 분배
 
-| 옵션 | 변경 위치 | 영향 범위 |
+| 구간 | 누적 | 비중 |
 |---|---|---|
-| A | `msx_slots`에서 ram_addr register stage 추가 | Z80 read path 1 cycle 지연.  wait state/마퍼 동작 광범위 영향. risky |
-| B | `sdram.sv`에서 ch2_addr input register 한 단계 추가 | 비교적 작은 범위.  ch2 bandwidth 약간 감소 |
-| C | `msx_slots` 내부 27-bit Add만 register stage로 분리 | mapper 결과 1 cycle 지연.  Z80 timing 영향 가능성 |
+| T80 IR[6] → opcode decode (Equal4 + NoRead) | 2.75 ns | 14% |
+| Z80 A[14] + slot select | 1.29 ns | 7% |
+| msx_slots Mux19 + Mux29 (4단 mux) | 4.90 ns | 25% |
+| mapper~7 + mapper[4]~57/116 | 3.00 ns | 15% |
+| cart_ascii8 + ascii8.LessThan2 | 2.09 ns | 11% |
+| mem_unmaped~12, ~13 | 2.04 ns | 10% |
+| Add2 (27-bit carry chain, ~14 cells) | 3.15 ns | 16% |
+| ch2_addr_1 setup | 0.26 ns | 1% |
+| **합계** | **19.48 ns** (slack -9.11 ns) | |
+
+### 추가 split 옵션 (정량 분석)
+
+`clk_sdram` 11.6 ns 주기.  "1 cycle 지연"은 모두 11.6 ns (SDRAM access 한 번에
+대한 read latency 증가).  Z80은 `sdram_ready` 대기하므로 functional 영향 미미.
+
+| 옵션 | 변경 위치 | 예상 slack 회복 | functional 영향 | 평가 |
+|---|---|---|---|---|
+| A | `msx_slots` 출력 `ram_addr` 전체 register | **~8–9 ns** (slack 거의 0) | Z80 SDRAM read +11.6 ns. 매퍼/카트리지 광범위 | 효과 크지만 가장 risky |
+| B | `sdram.sv` 내부에 ch2_addr input register 한 단계 추가 | **≈ 0 ns** | sdram FSM이 1 cycle 늦게 ch2_addr 사용 | ❌ **timing 거짓 약속.** 18-level chain 끝점만 옮길 뿐 자르지 못함 |
+| C | `msx_slots` 내부 mapper/mem_unmaped 출력 직후 register | **~3–6 ns** (위치에 따라) | mapper 결과 1 cycle 지연 (SDRAM access만) | ✅ 합리적 절충.  Add 자체보다 앞 mapper 체인 자르는 게 효과 큼 |
+
+옵션 B는 register만 추가하고 chain은 그대로라 무의미.  진짜 효과를 보려면 chain
+중간 (옵션 C) 또는 source 직후 (옵션 A)에 register 끼워야 함.
 
 이번 세션에서는 모두 보류.  -9.1 ns에서 더 줄여봤자 PCM 잡음과 무관 (확인됨)이고
-Z80 read path 회귀 위험만 큼.  잡음 진짜 원인 추적이 우선순위 높음.
+잡음 진짜 원인 추적이 우선순위 높음.
 
 ## 가설 갱신
 
@@ -90,8 +110,10 @@ Z80 read path 회귀 위험만 큼.  잡음 진짜 원인 추적이 우선순위
 
 ### 트랙 A 잔여 (선택, 다음 다음 세션)
 
-- 옵션 B (sdram.sv ch2_addr input register) — 가장 낮은 risk, 다음 timing
-  closure 시 첫 후보
+- **옵션 C 우선** — msx_slots 내부 mapper/mem_unmaped 출력 직후 register stage.
+  3–6 ns slack 회복, functional 영향 좁음 (SDRAM read만 11.6 ns 추가).
+- 그래도 부족하면 옵션 A로 ram_addr 전체 register (~8–9 ns, slack ≈ 0).
+- 옵션 B는 효과 없음 — 추진하지 말 것.
 - `output_files/MSX1.timing_summary.txt` 자동 비교용 grep 추가도 좋음
 
 ## 참조
