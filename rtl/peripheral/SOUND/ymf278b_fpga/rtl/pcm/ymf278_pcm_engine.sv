@@ -51,6 +51,12 @@ module ymf278_pcm_engine #(
     output logic [21:0] mem_addr,
     output logic        mem_rd_en,
     input  wire  [7:0]  mem_rd_data,
+    // Full 16-bit SDRAM word for the address issued (the controller always
+    // reads a 16-bit word; mem_rd_data is just one byte of it).  Stage B uses
+    // this to fetch 2 bytes per transaction (burst-via-word), cutting the
+    // per-slot SDRAM reads from 5 single bytes to 3 words.  Layout for an
+    // even byte address A:  [7:0]=mem[A], [15:8]=mem[A+1].
+    input  wire  [15:0] mem_rd_data16,
     input  wire         mem_rd_valid,
     output logic        mem_wr_en,
     output logic [7:0]  mem_wr_data,
@@ -370,18 +376,33 @@ module ymf278_pcm_engine #(
     end
 
     // ────────────────────────────────────────────────────────────────────────
-    // Stage B serial SDRAM sequencer.
+    // Stage B serial SDRAM sequencer (burst-via-word).
     // States: IDLE → ISSUE → WAIT_VALID → NEXT (latch) → ISSUE / DONE.
-    // Issues a 1-cycle mem_rd_en pulse (msx.sv bridge uses edge detection),
-    // waits for mem_rd_valid, latches into stage_b_reg.bytes[idx], advances.
+    //
+    // The 5 logical bytes a0,a1,a2,b0,b1 always live inside a small window
+    // [a0 .. a0+4] (a1=a0+1, a2=a0+2; b0/b1 reach a0+3/a0+4 only for 12-bit
+    // odd-pos, equal-or-less otherwise).  Reading three consecutive 16-bit
+    // words at the word-aligned base WB = a0 & ~1 yields raw[0..5] = mem[WB
+    // .. WB+5], covering every byte.  Each logical byte is then selected from
+    // raw[] by its offset (addr - WB) ∈ [0..5], so decode_sample below is
+    // unchanged.  3 word reads instead of 5 byte reads → per-slot SDRAM round
+    // trips drop from 5 to 3, tripling the tolerable per-read latency.
     // ────────────────────────────────────────────────────────────────────────
     typedef enum logic [2:0] {
         B_IDLE, B_ISSUE, B_WAIT_VALID, B_NEXT, B_DONE
     } b_state_t;
 
     b_state_t   b_state;
-    logic [2:0] b_byte_idx;     // 0..4 (5 bytes)
+    logic [1:0] b_word_idx;     // 0..2 (3 words = 6 bytes)
     logic [21:0] b_addr_sel;
+
+    // raw[0..5] = mem[WB .. WB+5], filled 2 bytes per word read.
+    logic [7:0]  b_raw [0:5];
+    // Word-aligned base + per-byte offsets into raw[], latched at stage_advance.
+    logic [21:0] sb_wb;
+    logic [2:0]  sb_off_a0;   // a1,a2 = a0+1, a0+2
+    logic [2:0]  sb_off_b0;
+    logic [2:0]  sb_off_b1;
 
     // Forward declaration: hf_active is asserted by HF FSM (defined below)
     // when it owns the SDRAM bus.  Used here to gate mem_rd_valid away from
@@ -391,28 +412,22 @@ module ymf278_pcm_engine #(
     logic cpu_rd_outstanding;   // forward decl; driven in CPU mem block below
     wire  mem_rd_valid_b = mem_rd_valid && !hf_active && !cpu_rd_outstanding;
 
+    // Word read address: WB + {0,2,4}
     always_comb begin
-        case (b_byte_idx)
-            3'd0: b_addr_sel = stage_b_reg.addrs.a0;
-            3'd1: b_addr_sel = stage_b_reg.addrs.a1;
-            3'd2: b_addr_sel = stage_b_reg.addrs.a2;
-            3'd3: b_addr_sel = stage_b_reg.addrs.b0;
-            3'd4: b_addr_sel = stage_b_reg.addrs.b1;
-            default: b_addr_sel = '0;
-        endcase
+        b_addr_sel = sb_wb + {19'd0, b_word_idx, 1'b0};
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             b_state    <= B_IDLE;
-            b_byte_idx <= '0;
+            b_word_idx <= '0;
         end else if (stage_advance) begin
             // New slot enters Stage B every stage_advance.  Restart sequencer
             // regardless of previous state — this guarantees forward progress
             // even if prior slot didn't finish.
             if (stage_a_reg.valid) begin
                 b_state    <= B_ISSUE;
-                b_byte_idx <= 3'd0;
+                b_word_idx <= 2'd0;
             end else begin
                 b_state <= B_IDLE;
             end
@@ -426,9 +441,9 @@ module ymf278_pcm_engine #(
                 B_ISSUE:      if (!mem_busy) b_state <= B_WAIT_VALID;
                 B_WAIT_VALID: if (mem_rd_valid_b) b_state <= B_NEXT;
                 B_NEXT: begin
-                    if (b_byte_idx == 3'd4) b_state <= B_DONE;
+                    if (b_word_idx == 2'd2) b_state <= B_DONE;
                     else begin
-                        b_byte_idx <= b_byte_idx + 3'd1;
+                        b_word_idx <= b_word_idx + 2'd1;
                         b_state    <= B_ISSUE;
                     end
                 end
@@ -457,16 +472,19 @@ module ymf278_pcm_engine #(
             stage_b_reg.dyn.env_state <= stage_a_reg.dyn.env_state;
             stage_b_reg.next_pos <= next_pos_for_b_r;
             stage_b_reg.addrs    <= next_addrs;
-            stage_b_reg.bytes    <= '0;
+            stage_b_reg.bytes    <= '0;   // unused now; decode reads b_raw
+            // Latch word-aligned base + per-byte offsets for this slot's
+            // 3-word burst.  WB = a0 & ~1; offsets = addr - WB ∈ [0..5].
+            sb_wb     <= {next_addrs.a0[21:1], 1'b0};
+            sb_off_a0 <= {2'd0, next_addrs.a0[0]};
+            sb_off_b0 <= 3'(next_addrs.b0 - {next_addrs.a0[21:1], 1'b0});
+            sb_off_b1 <= 3'(next_addrs.b1 - {next_addrs.a0[21:1], 1'b0});
         end else if (b_state == B_WAIT_VALID && mem_rd_valid_b) begin
-            case (b_byte_idx)
-                3'd0: stage_b_reg.bytes[0] <= mem_rd_data;
-                3'd1: stage_b_reg.bytes[1] <= mem_rd_data;
-                3'd2: stage_b_reg.bytes[2] <= mem_rd_data;
-                3'd3: stage_b_reg.bytes[3] <= mem_rd_data;
-                3'd4: stage_b_reg.bytes[4] <= mem_rd_data;
-                default: ;
-            endcase
+            // Each word read returns 2 consecutive bytes:
+            //   [7:0]  = mem[WB + 2*idx]      (even byte)
+            //   [15:8] = mem[WB + 2*idx + 1]  (odd byte)
+            b_raw[{b_word_idx, 1'b0}] <= mem_rd_data16[7:0];
+            b_raw[{b_word_idx, 1'b1}] <= mem_rd_data16[15:8];
         end
     end
 
@@ -492,40 +510,41 @@ module ymf278_pcm_engine #(
     logic signed [15:0] samp_a, samp_b;
     logic signed [15:0] interp_val;
 
+    // Reconstruct the 5 logical bytes from the 3-word burst buffer.  Offsets
+    // were latched at stage_advance; a1,a2 follow a0.  Identical semantics to
+    // the old stage_b_reg.bytes[0..4], so the decode below is unchanged.
+    wire [7:0] sbb0 = b_raw[sb_off_a0];
+    wire [7:0] sbb1 = b_raw[3'(sb_off_a0 + 3'd1)];
+    wire [7:0] sbb2 = b_raw[3'(sb_off_a0 + 3'd2)];
+    wire [7:0] sbb3 = b_raw[sb_off_b0];
+    wire [7:0] sbb4 = b_raw[sb_off_b1];
+
     always_comb begin
         case (stage_b_reg.header.bits)
             2'd0: begin // 8-bit
-                samp_a = decode_sample(stage_b_reg.bytes[0], 8'h00, 8'h00,
+                samp_a = decode_sample(sbb0, 8'h00, 8'h00,
                                             stage_b_reg.dyn.pos, 2'd0);
-                samp_b = decode_sample(stage_b_reg.bytes[3], 8'h00, 8'h00,
+                samp_b = decode_sample(sbb3, 8'h00, 8'h00,
                                             stage_b_reg.next_pos, 2'd0);
             end
             2'd1: begin // 12-bit
-                samp_a = decode_sample(stage_b_reg.bytes[0],
-                                            stage_b_reg.bytes[1],
-                                            stage_b_reg.bytes[2],
+                samp_a = decode_sample(sbb0, sbb1, sbb2,
                                             stage_b_reg.dyn.pos, 2'd1);
                 if (stage_b_reg.dyn.pos[0]) begin
                     // p odd → p+1 even → sample B's chunk = next chunk (bytes[3,4])
                     // decode_sample for even-pos: uses b0 + (b1<<4)&0xF0
-                    samp_b = decode_sample(stage_b_reg.bytes[3],
-                                                stage_b_reg.bytes[4],
-                                                8'h00,
+                    samp_b = decode_sample(sbb3, sbb4, 8'h00,
                                                 stage_b_reg.next_pos, 2'd1);
                 end else begin
                     // p even → p+1 odd → sample B in SAME chunk (bytes[0..2])
-                    samp_b = decode_sample(stage_b_reg.bytes[0],
-                                                stage_b_reg.bytes[1],
-                                                stage_b_reg.bytes[2],
+                    samp_b = decode_sample(sbb0, sbb1, sbb2,
                                                 stage_b_reg.next_pos, 2'd1);
                 end
             end
             2'd2: begin // 16-bit
-                samp_a = decode_sample(stage_b_reg.bytes[0],
-                                            stage_b_reg.bytes[1], 8'h00,
+                samp_a = decode_sample(sbb0, sbb1, 8'h00,
                                             stage_b_reg.dyn.pos, 2'd2);
-                samp_b = decode_sample(stage_b_reg.bytes[3],
-                                            stage_b_reg.bytes[4], 8'h00,
+                samp_b = decode_sample(sbb3, sbb4, 8'h00,
                                             stage_b_reg.next_pos, 2'd2);
             end
             default: begin

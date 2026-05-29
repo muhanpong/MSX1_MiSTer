@@ -28,6 +28,7 @@ module tb_pipeline_scaffold;
         .mem_addr    (mem_addr),
         .mem_rd_en   (mem_rd_en),
         .mem_rd_data (mem_rd_data),
+        .mem_rd_data16({mem_rd_data, mem_rd_data}),
         .mem_rd_valid(mem_rd_valid),
         .mem_wr_en   (mem_wr_en),
         .mem_wr_data (mem_wr_data),
@@ -116,8 +117,9 @@ module tb_pipeline_scaffold;
 
         // ─── Stage B SDRAM sequencer: count read pulses in slot 0 window ─────
         // Slot 0 Stage A: fc 0..63.  Slot 0 Stage B: fc 64..127.
-        // Sequencer issues exactly 5 mem_rd_en pulses during fc 64..127
-        // (a0, a1, a2, b0, b1 — supports 12-bit format).
+        // Sequencer issues exactly 3 mem_rd_en pulses during fc 64..127
+        // (burst-via-word: 3 consecutive 16-bit words cover the 5 logical
+        // bytes a0,a1,a2,b0,b1).
         @(posedge clk);
         wait (dut.frame_cycle == 11'd64);
         begin
@@ -126,9 +128,9 @@ module tb_pipeline_scaffold;
                 if (mem_rd_en) rd_high_cnt++;
                 @(posedge clk);
             end
-            $display("  mem_rd_en HIGH cycles over fc 64..127: %0d (expect 5)", rd_high_cnt);
-            check("Stage B sequencer issued exactly 5 SDRAM reads in slot 0 window",
-                  rd_high_cnt == 5);
+            $display("  mem_rd_en HIGH cycles over fc 64..127: %0d (expect 3)", rd_high_cnt);
+            check("Stage B sequencer issued exactly 3 SDRAM word reads in slot 0 window",
+                  rd_high_cnt == 3);
         end
 
         $display("\n=== %0d PASS, %0d FAIL ===", passes, fails);

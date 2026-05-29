@@ -31,6 +31,7 @@ module tb_decode_12bit;
     logic [21:0] mem_addr;
     logic        mem_rd_en;
     logic [7:0]  mem_rd_data = '0;
+    logic [15:0] mem_rd_data16 = '0;
     logic        mem_rd_valid = 1'b0;
     logic        mem_wr_en;
     logic [7:0]  mem_wr_data;
@@ -54,7 +55,8 @@ module tb_decode_12bit;
         .clk(clk), .rst_n(rst_n),
         .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr),
         .mem_addr(mem_addr), .mem_rd_en(mem_rd_en),
-        .mem_rd_data(mem_rd_data), .mem_rd_valid(mem_rd_valid),
+        .mem_rd_data(mem_rd_data), .mem_rd_data16(mem_rd_data16),
+        .mem_rd_valid(mem_rd_valid),
         .mem_wr_en(mem_wr_en), .mem_wr_data(mem_wr_data),
         .mem_busy(1'b0),
         .pcm_left(pcm_left), .pcm_right(pcm_right), .pcm_valid(pcm_valid),
@@ -111,6 +113,7 @@ module tb_decode_12bit;
                 if (fake_lat == 4'd1) begin
                     mem_rd_valid <= 1'b1;
                     mem_rd_data  <= rom[fake_addr[9:0]];
+                    mem_rd_data16 <= {rom[{fake_addr[9:1],1'b1}], rom[{fake_addr[9:1],1'b0}]};
                 end
             end
         end
@@ -129,15 +132,14 @@ module tb_decode_12bit;
         reg_wr = 1'b0;
     endtask
 
-    // Track all 5 bytes fetched in slot 0's first Stage B window after HF.
-    logic [7:0] captured_bytes [0:4];
-    int         capture_idx = 0;
+    // Burst-via-word: Stage B fetches 3 consecutive 16-bit words into the
+    // engine's b_raw[0..5] buffer.  Count word-read pulses; the raw buffer is
+    // checked directly via hierarchical reference after the window.
+    int         word_reads = 0;
     logic       capturing = 1'b0;
     always_ff @(posedge clk) begin
-        if (capturing && mem_rd_valid && capture_idx < 5) begin
-            captured_bytes[capture_idx] <= mem_rd_data;
-            capture_idx <= capture_idx + 1;
-        end
+        if (capturing && mem_rd_valid)
+            word_reads <= word_reads + 1;
     end
 
     initial begin
@@ -162,33 +164,28 @@ module tb_decode_12bit;
         check("Header: bits=01 (12-bit)", dbg_slot0_hdr_bits == 2'b01);
         check("Header: start=0x80",       dbg_slot0_hdr_start == 22'h80);
 
-        // Capture Stage B's 5 byte fetches for slot 0 in the upcoming frame.
-        // Wait for slot 0 dispatch (frame_cycle == 0), then Stage B window
-        // begins at fc 64.  Enable capture from fc 64 onward.
+        // Stage B for slot 0 begins at fc 64.  Enable read counting from there
+        // and wait for the 3-word burst to complete (b_state == B_DONE).
         wait (dut.frame_cycle == 11'd64);
         capturing = 1'b1;
-        wait (capture_idx == 5);
+        wait (word_reads == 3);
+        @(posedge clk);          // let the 3rd word latch into b_raw
         capturing = 1'b0;
 
-        $display("  [info] 5 bytes fetched: %h %h %h %h %h",
-                 captured_bytes[0], captured_bytes[1], captured_bytes[2],
-                 captured_bytes[3], captured_bytes[4]);
+        $display("  [info] word reads=%0d  b_raw=%h %h %h %h %h %h",
+                 word_reads, dut.b_raw[0], dut.b_raw[1], dut.b_raw[2],
+                 dut.b_raw[3], dut.b_raw[4], dut.b_raw[5]);
 
-        // For pos=0, 12-bit: a0/a1/a2 = chunk0 = 0x12, 0x34, 0x56
-        //                    b0/b1    = chunk1 (since p+1=1 is odd → SAME chunk
-        //                              but byte_addr returns base + 0,1 of (p+1)/2=0 chunk)
-        //                              = 0x12, 0x34 (duplicate of a0,a1)
-        //
-        // Wait — for p=0 even, (p+1)/2 = 0 → b0,b1 point to byte 0,1 of same chunk.
-        // So bytes[3,4] are duplicates of bytes[0,1].  That's expected: for even
-        // p, sample B decoded from the same chunk's b1+b2 (so we use bytes[0..2]).
-        check("a0 byte = 0x12", captured_bytes[0] == 8'h12);
-        check("a1 byte = 0x34", captured_bytes[1] == 8'h34);
-        check("a2 byte = 0x56", captured_bytes[2] == 8'h56);
-        // For p=0 even, b0/b1 redundantly fetch chunk0 bytes 0,1 again.
-        // For p=1 odd they would fetch chunk1.  Test with p=0 first.
-        check("b0 byte = 0x12 (same chunk for p=0 even)", captured_bytes[3] == 8'h12);
-        check("b1 byte = 0x34 (same chunk for p=0 even)", captured_bytes[4] == 8'h34);
+        // Burst-via-word: 3 word reads cover the 6-byte window.  For pos=0,
+        // 12-bit, start=0x80 (even) → WB=0x80, off_a0=0, so b_raw[0..5] =
+        // rom[0x80..0x85] = 0x12,0x34,0x56,0x78,0x9A,0xBC.  The decode then
+        // selects a0/a1/a2 = b_raw[0,1,2] = 0x12,0x34,0x56 (chunk 0).
+        check("3 word reads issued", word_reads == 3);
+        check("b_raw[0] = 0x12 (a0)", dut.b_raw[0] == 8'h12);
+        check("b_raw[1] = 0x34 (a1)", dut.b_raw[1] == 8'h34);
+        check("b_raw[2] = 0x56 (a2)", dut.b_raw[2] == 8'h56);
+        check("b_raw[3] = 0x78 (next chunk)", dut.b_raw[3] == 8'h78);
+        check("b_raw[4] = 0x9A (next chunk)", dut.b_raw[4] == 8'h9A);
 
         // Let several frames play; verify audio integrates non-zero
         repeat (8 * 1948) @(posedge clk);

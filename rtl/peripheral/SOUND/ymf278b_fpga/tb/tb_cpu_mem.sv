@@ -29,6 +29,7 @@ module tb_cpu_mem;
     logic [21:0] mem_addr;
     logic        mem_rd_en;
     logic [7:0]  mem_rd_data = '0;
+    logic [15:0] mem_rd_data16 = '0;
     logic        mem_rd_valid = 1'b0;
     logic        mem_wr_en;
     logic [7:0]  mem_wr_data;
@@ -43,7 +44,8 @@ module tb_cpu_mem;
         .cpu_mem_busy(cpu_mem_busy),
         .reg02_readback(reg02_readback),
         .mem_addr(mem_addr), .mem_rd_en(mem_rd_en),
-        .mem_rd_data(mem_rd_data), .mem_rd_valid(mem_rd_valid),
+        .mem_rd_data(mem_rd_data), .mem_rd_data16(mem_rd_data16),
+        .mem_rd_valid(mem_rd_valid),
         .mem_wr_en(mem_wr_en), .mem_wr_data(mem_wr_data),
         .mem_busy(1'b0),
         .pcm_left(pcm_left), .pcm_right(pcm_right), .pcm_valid(pcm_valid),

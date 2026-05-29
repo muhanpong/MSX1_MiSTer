@@ -47,6 +47,7 @@ module tb_long_run;
     logic [21:0] mem_addr;
     logic        mem_rd_en;
     logic [7:0]  mem_rd_data;
+    logic [15:0] mem_rd_data16;
     logic        mem_rd_valid;
     logic        mem_wr_en;
     logic [7:0]  mem_wr_data;
@@ -77,7 +78,8 @@ module tb_long_run;
         .clk(clk), .rst_n(rst_n),
         .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr),
         .mem_addr(mem_addr), .mem_rd_en(mem_rd_en),
-        .mem_rd_data(mem_rd_data), .mem_rd_valid(mem_rd_valid),
+        .mem_rd_data(mem_rd_data), .mem_rd_data16(mem_rd_data16),
+        .mem_rd_valid(mem_rd_valid),
         .mem_wr_en(mem_wr_en), .mem_wr_data(mem_wr_data),
         .mem_busy(mem_busy),
         .pcm_left(pcm_left), .pcm_right(pcm_right), .pcm_valid(pcm_valid),
@@ -131,7 +133,9 @@ module tb_long_run;
         end
     end
 
+    logic [15:0] ch4_dout16;
     assign mem_rd_data  = ch4_dout;
+    assign mem_rd_data16 = ch4_dout16;
     assign mem_rd_valid = (pcm_state == 2'd3);
 
     // ── SDRAM ch4 model + wave 5 header ────────────────────────────────────
@@ -172,6 +176,7 @@ module tb_long_run;
                 if (sdram_lat == 4'd1) begin
                     ch4_ready <= 1'b1;
                     ch4_dout  <= rom[ch4_addr[9:0]];
+                    ch4_dout16 <= {rom[{ch4_addr[9:1],1'b1}], rom[{ch4_addr[9:1],1'b0}]};
                 end
             end
         end

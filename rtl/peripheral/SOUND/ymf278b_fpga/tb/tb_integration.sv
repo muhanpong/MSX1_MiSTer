@@ -19,6 +19,7 @@ module tb_integration;
     logic [21:0] mem_addr;
     logic        mem_rd_en;
     logic [7:0]  mem_rd_data = '0;
+    logic [15:0] mem_rd_data16 = '0;
     logic        mem_rd_valid = 1'b0;
     logic        mem_wr_en;
     logic [7:0]  mem_wr_data;
@@ -42,7 +43,8 @@ module tb_integration;
         .clk(clk), .rst_n(rst_n),
         .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr),
         .mem_addr(mem_addr), .mem_rd_en(mem_rd_en),
-        .mem_rd_data(mem_rd_data), .mem_rd_valid(mem_rd_valid),
+        .mem_rd_data(mem_rd_data), .mem_rd_data16(mem_rd_data16),
+        .mem_rd_valid(mem_rd_valid),
         .mem_wr_en(mem_wr_en), .mem_wr_data(mem_wr_data),
         .mem_busy(1'b0),
         .pcm_left(pcm_left), .pcm_right(pcm_right), .pcm_valid(pcm_valid),
@@ -111,6 +113,7 @@ module tb_integration;
             fake_lat     <= '0;
             mem_rd_valid <= 1'b0;
             mem_rd_data  <= '0;
+            mem_rd_data16 <= '0;
         end else begin
             mem_rd_valid <= 1'b0;
             if (mem_rd_en) begin
@@ -121,6 +124,7 @@ module tb_integration;
                 if (fake_lat == 4'd1) begin
                     mem_rd_valid <= 1'b1;
                     mem_rd_data  <= rom[fake_addr[9:0]];
+                    mem_rd_data16 <= {rom[{fake_addr[9:1],1'b1}], rom[{fake_addr[9:1],1'b0}]};
                 end
             end
         end
