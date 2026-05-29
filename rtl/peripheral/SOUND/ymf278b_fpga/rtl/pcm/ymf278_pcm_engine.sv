@@ -338,8 +338,16 @@ module ymf278_pcm_engine #(
             next_pos = stage_a_reg.dyn.pos;
         end
 
-        // next_pos_for_b = next_pos + 1 (with loop wrap)
-        next_pos_for_b = next_pos_calc(next_pos, 16'd1,
+        // next_pos_for_b = next_pos + 1 (with loop wrap).
+        // Use REGISTERED next_pos_r as source to break the long carry chain:
+        // the original chain (oct → calc_step → Add5 → Add7 → Add8 (next_pos)
+        // → Add11 (next_pos_for_b) → next_pos_for_b_r) was 11 logic levels
+        // and missed timing by ~5 ns.  By sourcing from next_pos_r the
+        // Add11 chain starts at a register boundary, so this combinational
+        // result settles in 1 cycle instead of being chained.  next_pos_for_b_r
+        // is thus 2 cycles after stage_a_reg latch (was 1), well within the
+        // 64-cycle slot window before stage_advance consumes it.
+        next_pos_for_b = next_pos_calc(next_pos_r, 16'd1,
                                        stage_a_reg.header.endAddr,
                                        stage_a_reg.header.loopAddr);
 

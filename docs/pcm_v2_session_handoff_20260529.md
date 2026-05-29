@@ -1,32 +1,36 @@
 # YMF278B PCM v2 — Session handoff (2026-05-29)
 
-Continuation of `pcm_v2_session_handoff_20260528.md`.  이 세션은 두 단계로 진행:
+Continuation of `pcm_v2_session_handoff_20260528.md`.  이 세션은 세 단계로 진행:
 1. `fb8ed1d` 빌드 + 하드웨어 검증 + 새 worst path 분석
-2. **Multi-cycle SDC** 적용으로 T80→SDRAM 경로 추가 해소 (4 ns 회복)
+2. **Multi-cycle SDC** 적용으로 T80→SDRAM 경로 해소 (4 ns 회복)
+3. **PCM next_pos_for_b 추가 split** (2.5 ns 추가 회복)
 
 ## TL;DR
 
 - `fb8ed1d` 빌드: worst slack **-11.343 → -9.113 ns** (Stage A→B split 효과)
 - **Multi-cycle SDC** 적용: **-9.113 → -5.119 ns** (T80 → SDRAM ch2 완전 해소)
-- 하드웨어 검증 (양쪽 빌드):
+- **PCM next_pos_for_b split**: **-5.119 → -2.629 ns** (Add11 chain register 경계로 이동)
+- 하드웨어 검증 (세 빌드 모두):
   - **OSD/부팅/키보드 둔화 = timing 실패가 원인 ✅ 확정.**  단계마다 체감 개선.
-  - **PCM 잡음 = timing metastability 가설 ❌ 기각.**  잡음 그대로.
+  - **PCM 잡음 = timing 무관 ✅ 강하게 확정.**  PCM 엔진 자체 split도 잡음에 영향 없음.
   - **카트리지 (ASCII16X, SCC) 정상 동작 ✅** — multi-cycle SDC functional 회귀 없음.
-- 남은 worst는 PCM 엔진 내부 (`stage_a.oct → next_pos_for_b_r`) — RTL 변경 필요.
-- 다음 세션은 PCM 잡음 root cause로 트랙 전환 권장 (timing은 충분).
+  - **PCM 시뮬 360 PASS / 0 FAIL** — functional 등가성 보장.
+- 남은 worst는 OPL4 register write 경로 (`opl4latch → ram_regs.fn`) — multi-cycle 후보.
+- 다음 세션은 **PCM 잡음 root cause**로 트랙 전환 (timing은 충분).
 
 ## 빌드 결과
 
 ```
-빌드          Worst slack   변화
-5/23 base     -28.760 ns    (baseline)
-5/27 P0+P1    -10.966 ns
-5/28          -11.343 ns    (process_eg split + SDC false_path)
-5/29 fb8ed1d  -9.113 ns     (Stage A→B split) — T80→SDRAM worst
-5/29 + SDC    -5.119 ns     (multi-cycle path) ← 현재. PCM 엔진 내부 worst
+빌드               Worst slack   변화
+5/23 base          -28.760 ns    (baseline)
+5/27 P0+P1         -10.966 ns
+5/28               -11.343 ns    (process_eg split + SDC false_path)
+5/29 fb8ed1d       -9.113 ns     (Stage A→B split) — T80→SDRAM worst
+5/29 + SDC         -5.119 ns     (multi-cycle path) — PCM 엔진 내부 worst
+5/29 + PCM split   -2.629 ns     (next_pos_for_b ← next_pos_r) ← 현재
 ```
 
-총 23.6 ns 회복 (baseline 대비).
+총 26.1 ns 회복 (baseline 대비).  남은 -2.6 ns는 closing 직전.
 
 ## 새 worst path 분석 (T80 → SDRAM ch2_addr)
 
@@ -124,22 +128,38 @@ PCM 엔진 내부로 이동.  카트리지 (ASCII16X, SCC) 정상 동작 확인 
 5. **하드웨어에서 BASIC 정적 노트 시나리오** — 시뮬과 하드웨어 동작 차이 격리
    확인.  시뮬은 PASS, 하드웨어는 잡음인 시나리오를 구체적으로 reproducer.
 
+### PCM next_pos_for_b split (3단계 후 적용)
+
+11 logic levels chain:
+```
+oct → calc_step (ShiftLeft + Add5) → next_stepPtr (Add7)
+    → overflow check (LessThan2) → next_pos_calc (Add8 12-cell carry)
+    → next_pos_calc again (Add11) → next_pos_for_b_r
+```
+
+`next_pos_for_b`가 `next_pos`를 또 한 번 `next_pos_calc`에 통과시켜 Add11 chain
+생성.  단 **한 줄 변경**: `next_pos_calc(next_pos, ...)` → `next_pos_calc(next_pos_r, ...)`.
+
+Add11 chain이 register 경계 (next_pos_r)에서 시작 → cycle 1에서 빠짐.  결과:
+- Cycle 1: oct → ... → Add8 → next_pos → next_pos_r register
+- Cycle 2: next_pos_r → Add11 → next_pos_for_b → next_pos_for_b_r register
+
+next_pos_for_b_r이 1 cycle 늦어지나 stage_advance까지 64-cycle window 충분.
+시뮬 360 PASS, 하드웨어에서 PCM 음원/카트리지 회귀 없음 확인.
+
 ### 트랙 A 잔여 (선택, 다음 다음 세션)
 
-남은 worst path는 **PCM 엔진 내부**:
+남은 worst (-2.6 ns):
 ```
-pcm_engine.stage_a_reg.oct[0..1] → next_pos_for_b_r[10..15]
-slack -5.119 ns
+ymf278b_regs.opl4latch[4..5] → pcm_engine.ram_regs[6/16].fn[8]
 ```
 
-`fb8ed1d`에서 만든 `next_pos_for_b_r` 향하는 chain.  octave (4-bit) → step
-계산 → next_pos 곱셈.  multi-cycle 아님 (PCM은 매 clk_sdram cycle 동작).
+CPU OPL4 register write → PCM 내부 register 갱신 경로.  CPU 갱신은 ce_3m58
+budget 기반이라 **multi-cycle 후보 또 하나**.  -2.6 ns에서 closing 직전이라
+적용하면 slack ≥ 0 가능성.
 
-추가 split 후보:
-- octave → step lookup 사이에 intermediate register
-- next_pos 곱셈 chain 분할 (이미 `next_pos_r` 있는데 oct 경로는 추가 분리 안 됨)
-
-이건 옵션 C와 비슷한 RTL 변경.  PCM 잡음과 무관이라 우선순위 낮음.
+근데 PCM 잡음과 무관임 더욱 확정됐고, OSD/키보드는 이미 충분히 좋아짐.  추가
+최적화는 우선순위 낮음.
 
 ## 참조
 
