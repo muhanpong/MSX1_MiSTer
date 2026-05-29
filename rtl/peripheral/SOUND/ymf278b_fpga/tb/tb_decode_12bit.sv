@@ -176,16 +176,16 @@ module tb_decode_12bit;
                  word_reads, dut.b_raw[0], dut.b_raw[1], dut.b_raw[2],
                  dut.b_raw[3], dut.b_raw[4], dut.b_raw[5]);
 
-        // Burst-via-word: 3 word reads cover the 6-byte window.  For pos=0,
-        // 12-bit, start=0x80 (even) → WB=0x80, off_a0=0, so b_raw[0..5] =
-        // rom[0x80..0x85] = 0x12,0x34,0x56,0x78,0x9A,0xBC.  The decode then
-        // selects a0/a1/a2 = b_raw[0,1,2] = 0x12,0x34,0x56 (chunk 0).
-        check("3 word reads issued", word_reads == 3);
+        // Adaptive burst, contiguous (common) case: pos=0, 12-bit, start=0x80,
+        // next_pos=1 → b0=0x80 ∈ A-window → non-split → 3 word reads cover
+        // raw[0..5] = rom[0x80..0x85] = 0x12,0x34,0x56,0x78,0x9A,0xBC.
+        // decode selects a0/a1/a2 = raw[0,1,2] = 0x12,0x34,0x56.
+        check("3 word reads issued (contiguous)", word_reads == 3);
         check("b_raw[0] = 0x12 (a0)", dut.b_raw[0] == 8'h12);
         check("b_raw[1] = 0x34 (a1)", dut.b_raw[1] == 8'h34);
         check("b_raw[2] = 0x56 (a2)", dut.b_raw[2] == 8'h56);
-        check("b_raw[3] = 0x78 (next chunk)", dut.b_raw[3] == 8'h78);
-        check("b_raw[4] = 0x9A (next chunk)", dut.b_raw[4] == 8'h9A);
+        check("b_raw[3] = 0x78", dut.b_raw[3] == 8'h78);
+        check("b_raw[4] = 0x9A", dut.b_raw[4] == 8'h9A);
 
         // Let several frames play; verify audio integrates non-zero
         repeat (8 * 1948) @(posedge clk);

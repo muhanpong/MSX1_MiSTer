@@ -376,33 +376,42 @@ module ymf278_pcm_engine #(
     end
 
     // ────────────────────────────────────────────────────────────────────────
-    // Stage B serial SDRAM sequencer (burst-via-word).
+    // Stage B serial SDRAM sequencer (burst-via-word, adaptive).
     // States: IDLE → ISSUE → WAIT_VALID → NEXT (latch) → ISSUE / DONE.
     //
-    // The 5 logical bytes a0,a1,a2,b0,b1 always live inside a small window
-    // [a0 .. a0+4] (a1=a0+1, a2=a0+2; b0/b1 reach a0+3/a0+4 only for 12-bit
-    // odd-pos, equal-or-less otherwise).  Reading three consecutive 16-bit
-    // words at the word-aligned base WB = a0 & ~1 yields raw[0..5] = mem[WB
-    // .. WB+5], covering every byte.  Each logical byte is then selected from
-    // raw[] by its offset (addr - WB) ∈ [0..5], so decode_sample below is
-    // unchanged.  3 word reads instead of 5 byte reads → per-slot SDRAM round
-    // trips drop from 5 to 3, tripling the tolerable per-read latency.
+    // Sample A needs 3 consecutive bytes a0,a1,a2 (12-bit chunk); sample B
+    // needs b0,b1.  The SDRAM already returns a full 16-bit word per access,
+    // so we read words, not single bytes.
+    //
+    //   Common case (next_pos = pos+1): b0,b1 sit within 5 bytes of a0, so a
+    //   single 3-word window [WB .. WB+5], WB = a0 & ~1, covers all five
+    //   logical bytes → 3 reads.
+    //   Loop wrap: next_pos jumps to loopAddr, so b0,b1 are far from a0.  We
+    //   detect this (sb_split) and fetch sample B as its own 1 extra word pair
+    //   into raw[4..7] → 4 reads.  Without this the sample straddling the loop
+    //   point was corrupted (audible as a buzz/"damped string" on sustained,
+    //   short-loop instruments).
+    //
+    // Each logical byte is selected from raw[] by a precomputed index, so
+    // decode_sample below is unchanged.  3 reads (vs 5 single bytes) in the
+    // common case keeps the SDRAM-latency headroom; 4 only at loop wraps.
     // ────────────────────────────────────────────────────────────────────────
     typedef enum logic [2:0] {
         B_IDLE, B_ISSUE, B_WAIT_VALID, B_NEXT, B_DONE
     } b_state_t;
 
     b_state_t   b_state;
-    logic [1:0] b_word_idx;     // 0..2 (3 words = 6 bytes)
+    logic [1:0] b_word_idx;     // 0..3
     logic [21:0] b_addr_sel;
 
-    // raw[0..5] = mem[WB .. WB+5], filled 2 bytes per word read.
-    logic [7:0]  b_raw [0:5];
-    // Word-aligned base + per-byte offsets into raw[], latched at stage_advance.
-    logic [21:0] sb_wb;
-    logic [2:0]  sb_off_a0;   // a1,a2 = a0+1, a0+2
-    logic [2:0]  sb_off_b0;
-    logic [2:0]  sb_off_b1;
+    // raw[0..5] = A-window mem[WB..WB+5]; raw[6..7] = extra B-window word pair
+    // (only when sb_split).  b bytes live at raw[sb_b_idx]/[sb_b_idx+1].
+    logic [7:0]  b_raw [0:7];
+    logic [21:0] sb_wb;        // a0 & ~1  (A-window base)
+    logic [21:0] sb_wbb;       // b0 & ~1  (B-window base, used when split)
+    logic        sb_off_a0;    // a0 & 1   (a1,a2 = +1,+2)
+    logic [2:0]  sb_b_idx;     // raw[] index of b0  (b1 = +1)
+    logic        sb_split;     // sample B not contiguous with A (loop wrap)
 
     // Forward declaration: hf_active is asserted by HF FSM (defined below)
     // when it owns the SDRAM bus.  Used here to gate mem_rd_valid away from
@@ -412,9 +421,17 @@ module ymf278_pcm_engine #(
     logic cpu_rd_outstanding;   // forward decl; driven in CPU mem block below
     wire  mem_rd_valid_b = mem_rd_valid && !hf_active && !cpu_rd_outstanding;
 
-    // Word read address: WB + {0,2,4}
+    // Word read address:
+    //   idx 0,1,2 → A-window  WB + {0,2,4}
+    //   idx 3     → B-window  WBb + 2   (idx 2 already issued WBb when split)
+    // When split, idx 2 reads WBb (not WB+4) so raw[4,5] hold the B word pair.
     always_comb begin
-        b_addr_sel = sb_wb + {19'd0, b_word_idx, 1'b0};
+        case (b_word_idx)
+            2'd0:    b_addr_sel = sb_wb;
+            2'd1:    b_addr_sel = sb_wb + 22'd2;
+            2'd2:    b_addr_sel = sb_split ? sb_wbb : (sb_wb + 22'd4);
+            default: b_addr_sel = sb_wbb + 22'd2;   // idx 3 (split only)
+        endcase
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -441,7 +458,8 @@ module ymf278_pcm_engine #(
                 B_ISSUE:      if (!mem_busy) b_state <= B_WAIT_VALID;
                 B_WAIT_VALID: if (mem_rd_valid_b) b_state <= B_NEXT;
                 B_NEXT: begin
-                    if (b_word_idx == 2'd2) b_state <= B_DONE;
+                    // 3 words normally; 4 when sample B is split off (loop wrap).
+                    if (b_word_idx == (sb_split ? 2'd3 : 2'd2)) b_state <= B_DONE;
                     else begin
                         b_word_idx <= b_word_idx + 2'd1;
                         b_state    <= B_ISSUE;
@@ -473,16 +491,27 @@ module ymf278_pcm_engine #(
             stage_b_reg.next_pos <= next_pos_for_b_r;
             stage_b_reg.addrs    <= next_addrs;
             stage_b_reg.bytes    <= '0;   // unused now; decode reads b_raw
-            // Latch word-aligned base + per-byte offsets for this slot's
-            // 3-word burst.  WB = a0 & ~1; offsets = addr - WB ∈ [0..5].
+            // Latch A-window base + offsets, and decide split for sample B.
+            //   WB = a0 & ~1; off_a0 = a0 & 1; a1,a2 follow.
+            //   contiguous when b0 ∈ [WB, WB+5] → b at raw[b0-WB].
+            //   else split → B fetched into raw[4..7], b at raw[4 + (b0&1)].
             sb_wb     <= {next_addrs.a0[21:1], 1'b0};
-            sb_off_a0 <= {2'd0, next_addrs.a0[0]};
-            sb_off_b0 <= 3'(next_addrs.b0 - {next_addrs.a0[21:1], 1'b0});
-            sb_off_b1 <= 3'(next_addrs.b1 - {next_addrs.a0[21:1], 1'b0});
+            sb_wbb    <= {next_addrs.b0[21:1], 1'b0};
+            sb_off_a0 <= next_addrs.a0[0];
+            if (next_addrs.b0 >= {next_addrs.a0[21:1], 1'b0} &&
+                (next_addrs.b0 - {next_addrs.a0[21:1], 1'b0}) <= 22'd5) begin
+                sb_split <= 1'b0;
+                sb_b_idx <= 3'(next_addrs.b0 - {next_addrs.a0[21:1], 1'b0});
+            end else begin
+                sb_split <= 1'b1;
+                sb_b_idx <= 3'd4 + {2'd0, next_addrs.b0[0]};
+            end
         end else if (b_state == B_WAIT_VALID && mem_rd_valid_b) begin
             // Each word read returns 2 consecutive bytes:
-            //   [7:0]  = mem[WB + 2*idx]      (even byte)
-            //   [15:8] = mem[WB + 2*idx + 1]  (odd byte)
+            //   [7:0]  = mem[base + 2*k]      (even byte)
+            //   [15:8] = mem[base + 2*k + 1]  (odd byte)
+            // idx 0,1,2 fill raw[0..5] (A-window, or raw[4,5]=B-window word0
+            // when split); idx 3 fills raw[6,7] (B-window word1, split only).
             b_raw[{b_word_idx, 1'b0}] <= mem_rd_data16[7:0];
             b_raw[{b_word_idx, 1'b1}] <= mem_rd_data16[15:8];
         end
@@ -510,14 +539,16 @@ module ymf278_pcm_engine #(
     logic signed [15:0] samp_a, samp_b;
     logic signed [15:0] interp_val;
 
-    // Reconstruct the 5 logical bytes from the 3-word burst buffer.  Offsets
-    // were latched at stage_advance; a1,a2 follow a0.  Identical semantics to
-    // the old stage_b_reg.bytes[0..4], so the decode below is unchanged.
-    wire [7:0] sbb0 = b_raw[sb_off_a0];
-    wire [7:0] sbb1 = b_raw[3'(sb_off_a0 + 3'd1)];
-    wire [7:0] sbb2 = b_raw[3'(sb_off_a0 + 3'd2)];
-    wire [7:0] sbb3 = b_raw[sb_off_b0];
-    wire [7:0] sbb4 = b_raw[sb_off_b1];
+    // Reconstruct the 5 logical bytes from the burst buffer.  a0,a1,a2 live in
+    // the A-window at offset off_a0; b0,b1 at the precomputed sb_b_idx (either
+    // inside the A-window when contiguous, or in raw[4..7] when split).
+    // Identical semantics to the old stage_b_reg.bytes[0..4], so the decode
+    // below is unchanged.
+    wire [7:0] sbb0 = b_raw[{2'd0, sb_off_a0}];
+    wire [7:0] sbb1 = b_raw[3'(sb_off_a0) + 3'd1];
+    wire [7:0] sbb2 = b_raw[3'(sb_off_a0) + 3'd2];
+    wire [7:0] sbb3 = b_raw[sb_b_idx];
+    wire [7:0] sbb4 = b_raw[sb_b_idx + 3'd1];
 
     always_comb begin
         case (stage_b_reg.header.bits)
