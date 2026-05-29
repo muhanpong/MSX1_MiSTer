@@ -38,3 +38,22 @@ set_false_path -from [get_clocks {pll_audio|pll_audio_inst|altera_pll_i|*|divclk
 # budget is safe for it too.
 set_multicycle_path -setup -end 6 -to [get_registers {*sdram*ch2_*}]
 set_multicycle_path -hold  -end 5 -to [get_registers {*sdram*ch2_*}]
+
+# OPL4 CPU register write path (opl4latch → pcm_engine decode registers).
+# CPU writes the OPL4 latch on ce_3m58_p ticks; address decode goes through
+# a deep chain (Add + Divider op_5..op_8 + Decoder + reg_upd + hf_upd) before
+# reaching the CPU-config registers (ram_regs[slot].fn, reg_upd.tl, etc.).
+# Same multi-cycle reasoning as ch2.
+#
+# IMPORTANT: -from is restricted to opl4latch.  Every register reachable
+# from opl4latch inside the PCM engine is CPU-config data (wave/fn/oct/tl/
+# pan/ar/...) that only changes at ce_3m58 cadence, so relaxing the whole
+# pcm_engine -to set is safe — the engine's own per-cycle state updates
+# (EG, dyn, accum) have different launch registers and stay single-cycle.
+# Broad -to avoids the worst path hopping between ram_regs → reg_upd → ...
+set_multicycle_path -setup -end 6 \
+    -from [get_registers {*ymf278b_regs*opl4latch*}] \
+    -to   [get_registers {*pcm_engine*}]
+set_multicycle_path -hold  -end 5 \
+    -from [get_registers {*ymf278b_regs*opl4latch*}] \
+    -to   [get_registers {*pcm_engine*}]
