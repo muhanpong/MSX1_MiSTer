@@ -595,6 +595,7 @@ module ymf278_pcm_engine #(
         logic [7:0]           shift_v;       // pre-computed: eg_rate_shift_rom(rate)
         logic [7:0]           sel_v;         // pre-computed: eg_rate_select_rom(rate)
         logic                 do_update;     // pre-computed: eg_do_update(eg_cnt, shift_v)
+        logic [7:0]           inc_v;         // pre-computed: eg_inc_rom(sel + phase)
         logic                 key_on_edge;
     } d1a_pkt_t;
 
@@ -648,12 +649,16 @@ module ymf278_pcm_engine #(
         logic [7:0]  shift_vv, sel_vv;
         logic        du_v;
         logic        edge_now;
+        logic [2:0]  phase_vv;
+        logic [7:0]  inc_vv;
 
         rate_v   = 6'd0;
         shift_vv = 8'd0;
         sel_vv   = 8'd0;
         du_v     = 1'b0;
         edge_now = 1'b0;
+        phase_vv = 3'd0;
+        inc_vv   = 8'd0;
 
         if (!rst_n) begin
             d1a_pkt     <= '0;
@@ -698,6 +703,10 @@ module ymf278_pcm_engine #(
                 shift_vv = eg_rate_shift_rom(rate_v);
                 sel_vv   = eg_rate_select_rom(rate_v);
                 du_v     = eg_do_update(eg_cnt, shift_vv);
+                // Pre-compute phase + ROM lookup so D1b's critical chain
+                // starts at d1a_pkt.inc_v instead of eg_cnt → shift → ROM.
+                phase_vv = eg_phase(eg_cnt, shift_vv);
+                inc_vv   = eg_inc_rom(7'(sel_vv + {5'd0, phase_vv}));
 
                 d1a_pkt.valid       <= 1'b1;
                 d1a_pkt.slot        <= stage_c_reg.slot;
@@ -710,21 +719,20 @@ module ymf278_pcm_engine #(
                 d1a_pkt.shift_v     <= shift_vv;
                 d1a_pkt.sel_v       <= sel_vv;
                 d1a_pkt.do_update   <= du_v;
+                d1a_pkt.inc_v       <= inc_vv;
                 d1a_pkt.key_on_edge <= edge_now;
             end
         end
     end
 
-    // ── D1b: phase + inc + final vol/state update ───────────────────────────
+    // ── D1b: final vol/state update ─────────────────────────────────────────
+    // phase + eg_inc_rom moved into D1a (registered as d1a_pkt.inc_v) to
+    // cut the deep eg_cnt → ShiftRight → ROM → Mult chain.
     always_ff @(posedge clk or negedge rst_n) begin
-        logic [2:0]  phase_v;
-        logic [7:0]  inc_v;
         logic [10:0] vol_add;
         logic [9:0]  new_vol;
         logic [2:0]  new_state;
 
-        phase_v   = 3'd0;
-        inc_v     = 8'd0;
         vol_add   = 11'd0;
         new_vol   = 10'd0;
         new_state = 3'd0;
@@ -753,10 +761,7 @@ module ymf278_pcm_engine #(
                     case (d1a_pkt.cur_state)
                         EG_ATT: begin
                             if (d1a_pkt.rate < 6'd63 && d1a_pkt.do_update) begin
-                                phase_v = eg_phase(eg_cnt, d1a_pkt.shift_v);
-                                inc_v   = eg_inc_rom(7'(d1a_pkt.sel_v
-                                                        + {5'd0, phase_v}));
-                                new_vol = calc_attack_step(d1a_pkt.cur_vol, inc_v);
+                                new_vol = calc_attack_step(d1a_pkt.cur_vol, d1a_pkt.inc_v);
                                 if (new_vol <= MIN_ATT_INDEX) begin
                                     new_vol   = MIN_ATT_INDEX;
                                     new_state = (d1a_pkt.regs.dl_idx != 4'h0)
@@ -766,10 +771,7 @@ module ymf278_pcm_engine #(
                         end
                         EG_DEC: begin
                             if (d1a_pkt.do_update) begin
-                                phase_v = eg_phase(eg_cnt, d1a_pkt.shift_v);
-                                inc_v   = eg_inc_rom(7'(d1a_pkt.sel_v
-                                                        + {5'd0, phase_v}));
-                                vol_add = {1'b0, d1a_pkt.cur_vol} + {3'd0, inc_v};
+                                vol_add = {1'b0, d1a_pkt.cur_vol} + {3'd0, d1a_pkt.inc_v};
                                 new_vol = (vol_add > 11'h3FF) ? 10'h3FF
                                                               : vol_add[9:0];
                                 if (new_vol >= dl_tab_rom(d1a_pkt.regs.dl_idx)) begin
@@ -780,10 +782,7 @@ module ymf278_pcm_engine #(
                         end
                         EG_SUS: begin
                             if (d1a_pkt.do_update) begin
-                                phase_v = eg_phase(eg_cnt, d1a_pkt.shift_v);
-                                inc_v   = eg_inc_rom(7'(d1a_pkt.sel_v
-                                                        + {5'd0, phase_v}));
-                                vol_add = {1'b0, d1a_pkt.cur_vol} + {3'd0, inc_v};
+                                vol_add = {1'b0, d1a_pkt.cur_vol} + {3'd0, d1a_pkt.inc_v};
                                 if (vol_add >= {1'b0, MAX_ATT_INDEX}) begin
                                     new_vol   = MAX_ATT_INDEX;
                                     new_state = EG_OFF;
@@ -792,10 +791,7 @@ module ymf278_pcm_engine #(
                         end
                         EG_REL: begin
                             if (d1a_pkt.do_update) begin
-                                phase_v = eg_phase(eg_cnt, d1a_pkt.shift_v);
-                                inc_v   = eg_inc_rom(7'(d1a_pkt.sel_v
-                                                        + {5'd0, phase_v}));
-                                vol_add = {1'b0, d1a_pkt.cur_vol} + {3'd0, inc_v};
+                                vol_add = {1'b0, d1a_pkt.cur_vol} + {3'd0, d1a_pkt.inc_v};
                                 if (vol_add >= {1'b0, MAX_ATT_INDEX}) begin
                                     new_vol   = MAX_ATT_INDEX;
                                     new_state = EG_OFF;
