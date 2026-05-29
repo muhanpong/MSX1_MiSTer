@@ -116,7 +116,7 @@ module tb_trace_wave;
     // ── Monitors ────────────────────────────────────────────────────────────
     logic [15:0] pos_min, pos_max; int loop_wraps; logic [15:0] prev_pos;
     int    pcm_nz_recent;  // nonzero pcm samples in the current measurement window
-    int    pcm_cnt;
+    int    pcm_cnt; int frame_ticks; int pcm_x;
     logic [21:0] max_mem_addr, min_mem_addr;
     int slot0_c_valid, slot0_c_total; logic signed [15:0] slot0_interp;
     always_ff @(posedge clk) begin
@@ -137,7 +137,9 @@ module tb_trace_wave;
             // a wrap = pos decreased significantly (loop back)
             if (prev_pos > 16'd8 && dbg_slot0_dyn_pos < (prev_pos - 16'd4)) loop_wraps<=loop_wraps+1;
             prev_pos<=dbg_slot0_dyn_pos;
-            if (pcm_valid) begin
+            if (dut.frame_cycle==11'd1947) frame_ticks<=frame_ticks+1;
+            if (pcm_valid===1'bx) pcm_x<=pcm_x+1;
+            if (pcm_valid===1'b1) begin
                 pcm_cnt<=pcm_cnt+1;
                 if (pcm_left!=0 || pcm_right!=0) pcm_nz_recent<=pcm_nz_recent+1;
             end
@@ -150,9 +152,9 @@ module tb_trace_wave;
         @(negedge clk); reg_addr=a; reg_data=d; reg_wr=1; @(negedge clk); reg_wr=0;
     endtask
     task frames(input int n); repeat (n*1948) @(posedge clk); endtask
-    task reset_mon(); pos_min=16'hFFFF; pos_max=0; loop_wraps=0; pcm_nz_recent=0; pcm_cnt=0; max_mem_addr=0; min_mem_addr=22'h3FFFFF; slot0_c_valid=0; slot0_c_total=0; endtask
+    task reset_mon(); pos_min=16'hFFFF; pos_max=0; loop_wraps=0; pcm_nz_recent=0; pcm_cnt=0; max_mem_addr=0; min_mem_addr=22'h3FFFFF; slot0_c_valid=0; slot0_c_total=0; frame_ticks=0; pcm_x=0; endtask
 
-    task play_wave(input [7:0] wv, input string label);
+    task play_wave(input [7:0] wv, input int nframes, input string label);
         // Full reset so each wave starts clean.
         rst_n=0; repeat(8) @(posedge clk); rst_n=1; repeat(4) @(posedge clk);
         // Trace sequence: key off, fn lo / wave8 = 0, wave = wv, key on.
@@ -166,16 +168,22 @@ module tb_trace_wave;
         $display("  [%s wv=%0d] hdr bits=%b start=%h loop=%h end=%h  AR=%0d",
                  label, wv, dbg_slot0_hdr_bits, dbg_slot0_hdr_start,
                  dbg_slot0_hdr_loop, dbg_slot0_hdr_end, dbg_slot0_ar);
-        // settle, then measure over a long window
-        frames(20);
+        // settle, then measure over a long window (must reach loop point!)
+        frames(10);
         reset_mon();
-        frames(80);
+        // periodic progression trace
+        for (int k=0; k<6; k++) begin
+            frames(nframes/6);
+            $display("    .. [%s] t=%0d/6  pos=%0d stepPtr=%h env=%0d hf_pend0=%b pcm_cnt=%0d",
+                     label, k+1, dbg_slot0_dyn_pos, dbg_slot0_dyn_stepPtr,
+                     dbg_slot0_dyn_env_state, dbg_hf_pending[0], pcm_cnt);
+        end
         $display("  [%s wv=%0d] pos[min..max]=%0d..%0d wraps=%0d  env_state=%0d env_vol=%h  pcm nz=%0d/%0d",
                  label, wv, pos_min, pos_max, loop_wraps,
                  dbg_slot0_dyn_env_state, dbg_slot0_dyn_env_vol, pcm_nz_recent, pcm_cnt);
         $display("  [%s wv=%0d] mem_addr[min..max]=%h..%h  slot0 stageC valid=%0d/%0d  last_interp=%h",
                  label, wv, min_mem_addr, max_mem_addr,
-                 slot0_c_valid, slot0_c_total, slot0_interp);
+                 slot0_c_valid, slot0_c_total, slot0_interp); $display("  [%s wv=%0d] frame_ticks=%0d pcm_valid_ones=%0d pcm_valid_X=%0d", label, wv, frame_ticks, pcm_cnt, pcm_x);
         // Sustain criteria: still producing nonzero audio late in the window,
         // and the position is looping (wrapped at least once).
         check($sformatf("%s: audio still alive (nonzero late)", label), pcm_nz_recent > 0);
@@ -184,8 +192,10 @@ module tb_trace_wave;
     endtask
 
     initial begin
-        play_wave(8'd0, "WAVE0");
-        play_wave(8'd3, "WAVE3");
+        // oct=0 → pos advances ~0.5 sample/frame.  wave0 loop=42 (wraps in
+        // ~84 frames); wave3 loop=301 (needs ~620 frames to reach + wrap).
+        play_wave(8'd0, 200, "WAVE0");
+        play_wave(8'd3, 900, "WAVE3");
         $display("\n=== %0d PASS, %0d FAIL ===", passes, fails);
         if (fails==0) $display("*** ALL TESTS PASSED ***");
         else          $display("!!! %0d FAILS (sustain bug reproduced) !!!", fails);
