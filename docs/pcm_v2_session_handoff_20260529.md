@@ -1,35 +1,32 @@
 # YMF278B PCM v2 — Session handoff (2026-05-29)
 
-Continuation of `pcm_v2_session_handoff_20260528.md`.  이 세션은 `fb8ed1d`
-(Stage A→B split) 빌드 + 하드웨어 검증 + 새 worst path 분석으로 마무리.
+Continuation of `pcm_v2_session_handoff_20260528.md`.  이 세션은 두 단계로 진행:
+1. `fb8ed1d` 빌드 + 하드웨어 검증 + 새 worst path 분석
+2. **Multi-cycle SDC** 적용으로 T80→SDRAM 경로 추가 해소 (4 ns 회복)
 
 ## TL;DR
 
-- `fb8ed1d` 빌드 성공.  Worst slack **-11.343 → -9.113 ns** (약 2.2 ns 회복).
-- 하드웨어 검증 결과:
-  - **OSD/부팅/키보드 둔화 = timing 실패가 원인 ✅ 확정.**  체감 개선 분명.
-  - **PCM 잡음 = timing metastability 가설 ❌ 기각.**  잡음 그대로, 볼륨만 살짝.
-- 새 worst path가 PCM 엔진에서 빠지고 **T80 → SDRAM ch2_addr_1** 경로로 이동.
-- 추가 timing split은 functional risk가 커서 보류.  다음 세션은 PCM 잡음 root
-  cause로 트랙 전환 권장.
+- `fb8ed1d` 빌드: worst slack **-11.343 → -9.113 ns** (Stage A→B split 효과)
+- **Multi-cycle SDC** 적용: **-9.113 → -5.119 ns** (T80 → SDRAM ch2 완전 해소)
+- 하드웨어 검증 (양쪽 빌드):
+  - **OSD/부팅/키보드 둔화 = timing 실패가 원인 ✅ 확정.**  단계마다 체감 개선.
+  - **PCM 잡음 = timing metastability 가설 ❌ 기각.**  잡음 그대로.
+  - **카트리지 (ASCII16X, SCC) 정상 동작 ✅** — multi-cycle SDC functional 회귀 없음.
+- 남은 worst는 PCM 엔진 내부 (`stage_a.oct → next_pos_for_b_r`) — RTL 변경 필요.
+- 다음 세션은 PCM 잡음 root cause로 트랙 전환 권장 (timing은 충분).
 
 ## 빌드 결과
 
 ```
-빌드        Worst slack   변화
-5/23 base   -28.760 ns    (baseline)
-5/27 P0+P1  -10.966 ns
-5/28        -11.343 ns    (process_eg split + SDC false_path)
-5/29        -9.113 ns     (Stage A→B split, fb8ed1d) ← 현재
+빌드          Worst slack   변화
+5/23 base     -28.760 ns    (baseline)
+5/27 P0+P1    -10.966 ns
+5/28          -11.343 ns    (process_eg split + SDC false_path)
+5/29 fb8ed1d  -9.113 ns     (Stage A→B split) — T80→SDRAM worst
+5/29 + SDC    -5.119 ns     (multi-cycle path) ← 현재. PCM 엔진 내부 worst
 ```
 
-Top 10 path 전체가 같은 패턴:
-```
-From: T80:u0|IR[6]~DUPLICATE  (또는 MCycle[1])
-To:   sdram|ch2_addr_1[26]
-```
-
-PCM 엔진은 worst 10 밖.  Stage A→B split 성공.
+총 23.6 ns 회복 (baseline 대비).
 
 ## 새 worst path 분석 (T80 → SDRAM ch2_addr)
 
@@ -84,8 +81,27 @@ sdram|ch2_addr_1[26]            target register
 옵션 B는 register만 추가하고 chain은 그대로라 무의미.  진짜 효과를 보려면 chain
 중간 (옵션 C) 또는 source 직후 (옵션 A)에 register 끼워야 함.
 
-이번 세션에서는 모두 보류.  -9.1 ns에서 더 줄여봤자 PCM 잡음과 무관 (확인됨)이고
-잡음 진짜 원인 추적이 우선순위 높음.
+### 채택한 접근 — Multi-cycle SDC
+
+옵션 A/C 모두 RTL 변경.  그런데 본질을 다시 보면:
+
+- T80 IR/MCycle/A 등은 `clk21m + ce_3m58_p` enable로 갱신
+- ce_3m58_p = clk21m / 6 → IR은 24 clk_sdram cycle마다 한 번 변경
+- 즉 T80 → SDRAM 경로는 **실제로 multi-cycle path** (24+ cycles)
+- Quartus 기본은 1 cycle setup → false -9.1 ns
+
+`MSX1.sdc`에 `set_multicycle_path -setup 6 -hold 5` 추가:
+```tcl
+set_multicycle_path -setup -end 6 -to [get_registers {*sdram*ch2_*}]
+set_multicycle_path -hold  -end 5 -to [get_registers {*sdram*ch2_*}]
+```
+
+`ch2_*` 패턴으로 captured 신호 (addr_1, rnw_1, din_1, rq, req_1) 한 번에.
+RTL 변경 없음 — 본질이 그대로 multi-cycle인 path임을 SDC에 명시한 것.
+
+**결과**: -9.113 → -5.119 ns (4 ns 회복).  worst path가 T80→SDRAM에서
+PCM 엔진 내부로 이동.  카트리지 (ASCII16X, SCC) 정상 동작 확인 — multi-cycle
+적용에 functional 회귀 없음.
 
 ## 가설 갱신
 
@@ -110,11 +126,20 @@ sdram|ch2_addr_1[26]            target register
 
 ### 트랙 A 잔여 (선택, 다음 다음 세션)
 
-- **옵션 C 우선** — msx_slots 내부 mapper/mem_unmaped 출력 직후 register stage.
-  3–6 ns slack 회복, functional 영향 좁음 (SDRAM read만 11.6 ns 추가).
-- 그래도 부족하면 옵션 A로 ram_addr 전체 register (~8–9 ns, slack ≈ 0).
-- 옵션 B는 효과 없음 — 추진하지 말 것.
-- `output_files/MSX1.timing_summary.txt` 자동 비교용 grep 추가도 좋음
+남은 worst path는 **PCM 엔진 내부**:
+```
+pcm_engine.stage_a_reg.oct[0..1] → next_pos_for_b_r[10..15]
+slack -5.119 ns
+```
+
+`fb8ed1d`에서 만든 `next_pos_for_b_r` 향하는 chain.  octave (4-bit) → step
+계산 → next_pos 곱셈.  multi-cycle 아님 (PCM은 매 clk_sdram cycle 동작).
+
+추가 split 후보:
+- octave → step lookup 사이에 intermediate register
+- next_pos 곱셈 chain 분할 (이미 `next_pos_r` 있는데 oct 경로는 추가 분리 안 됨)
+
+이건 옵션 C와 비슷한 RTL 변경.  PCM 잡음과 무관이라 우선순위 낮음.
 
 ## 참조
 
