@@ -56,6 +56,13 @@ localparam int DELAY_W = $clog2(LOAD_DELAY + 1);
 logic [DELAY_W-1:0] busy_cnt;
 logic [DELAY_W-1:0] load_cnt;
 
+// FM register write-back shadow.  The gtaylormb OPL3 core does not support
+// register readback (a read returns status/0xFF), but the YMF278B FM data
+// port returns the written register value — MoonSound software detects the
+// chip by writing a byte to an FM register (e.g. 0xA0=0x43) and reading it
+// back.  Shadow every FM register write and return it on an FM register read.
+logic [7:0] fm_shadow [0:511];
+
 logic [7:0] opl4latch;   // PCM register latch
 logic [8:0] opl3latch;   // OPL3 register latch (includes bank bit)
 
@@ -153,6 +160,7 @@ always_ff @(posedge clk) begin
                     opl3_reg_addr  <= opl3latch;
                     opl3_reg_data  <= io_data_in;
                     opl3_reg_wr    <= 1'b1;
+                    fm_shadow[opl3latch] <= io_data_in;  // for readback (chip detect)
                 end
             endcase
             io_ack <= 1'b1;
@@ -199,9 +207,9 @@ always_ff @(posedge clk) begin
                         io_data_out <= opl3_status | {6'd0, load_busy, busy};
                     end
                 end
-                2'd1, 2'd3: begin  // FM register read
+                2'd1, 2'd3: begin  // FM register read → return shadowed value
                     opl3_reg_rd <= 1'b1;
-                    io_data_out <= opl3_reg_dout;
+                    io_data_out <= fm_shadow[opl3latch];
                 end
             endcase
             io_ack <= 1'b1;
