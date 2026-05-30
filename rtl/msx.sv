@@ -144,7 +144,12 @@ t80pa #(.Mode(0)) T80
    .CEN_p(ce_3m58_p),
    .CEN_n(ce_3m58_n),
    .WAIT_n(wait_n),
-   .INT_n(vdp_int_n),
+   // Z80 /INT is shared (wired-AND, active-low) between the VDP and the
+   // MoonSound (YMF278B/OPL4) Timer-1 IRQ.  MoonSound music players (e.g.
+   // MBwave) drive their playback tick from the OPL Timer-1 overflow
+   // interrupt, so its irq line must reach the CPU.  ms_irq_n is in the
+   // clk_opl3 domain → 2-FF synchronized to clk21m below.
+   .INT_n(vdp_int_n & ms_irq_n_sync),
    .NMI_n(1),
    .BUSRQ_n(1),
    .M1_n(m1_n),
@@ -686,6 +691,13 @@ wire        ms_io_ack;
 wire  [7:0] ms_io_dout_raw;
 wire signed [15:0] ms_out_l, ms_out_r;
 wire        ms_audio_valid;
+wire        ms_irq_n;      // MoonSound OPL Timer-1 IRQ (active-low) → Z80 /INT
+// 2-FF CDC sync of the OPL irq (clk_opl3 domain) into clk21m (Z80 domain).
+(* preserve *) reg ms_irq_n_s1 = 1'b1, ms_irq_n_sync = 1'b1;
+always @(posedge clk21m) begin
+    ms_irq_n_s1   <= ms_irq_n;
+    ms_irq_n_sync <= ms_irq_n_s1;
+end
 
 ymf278b_top #(
     .CLK_HZ   (85909090),
@@ -711,7 +723,7 @@ ymf278b_top #(
     .audio_left   (ms_out_l),
     .audio_right  (ms_out_r),
     .audio_valid  (ms_audio_valid),
-    .irq_n        (),
+    .irq_n        (ms_irq_n),
     .pcm_mute       (pcm_mute),
     .fm_mute        (fm_mute),
     .dbg_pcm_valid  (dbg_pcm_valid),
