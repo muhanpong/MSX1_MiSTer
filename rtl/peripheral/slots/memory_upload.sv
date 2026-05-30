@@ -102,9 +102,18 @@ module memory_upload
       logic [26:0] save_ram_addr;
       logic  [3:0] cart_slot_expander_en;
       logic        external;
+      logic        ms_reserve_pending;   // after yrw801 fill, skip allocator to base+4MB (reserve 2MB custom-wave RAM)
       ddr3_wr   <= 1'b0;
       load_sram <= 1'b0;
-      if (ram_ce)               begin ram_ce  <= 1'b0; ram_addr  <= ram_addr + 1'd1; end
+      if (ram_ce) begin
+         ram_ce <= 1'b0;
+         // MoonSound: after the yrw801 ROM (2MB) is written, jump the allocator past
+         // the full 4MB YMF278 wave map (ROM 0..0x1FFFFF + custom RAM 0x200000..0x3FFFFF)
+         // so subsequent uploads don't land on the custom-wave region the PCM engine
+         // writes at pcm_rom_base + ms_mem_addr.
+         if (ms_reserve_pending) begin ram_addr <= pcm_rom_base + 27'h400000; ms_reserve_pending <= 1'b0; end
+         else                          ram_addr <= ram_addr + 1'd1;
+      end
       if (ddr3_ready & ddr3_rd) begin ddr3_rd <= 1'b0; ddr3_addr <= ddr3_addr + 1'd1; end
       if (load) begin
          state <= STATE_CLEAN;
@@ -128,6 +137,7 @@ module memory_upload
          lookup_SRAM[2].size   <= 16'd0;
          lookup_SRAM[3].size   <= 16'd0;
          pcm_rom_base          <= 27'h1800000;  // default, overwritten when yrw801.rom is loaded
+         ms_reserve_pending    <= 1'b0;
       end
       if (ddr3_ready & ~ddr3_rd) begin
          case(state)
@@ -407,6 +417,8 @@ module memory_upload
                   ram_ce     <= 1;
                   if (data_size == 25'd1) begin
                      state    <= STATE_FILL_RAM;
+                     // yrw801 done → reserve the 2MB custom-wave RAM above it (consumed by ram_ce bump)
+                     if (data_id == ROM_MOONSOUND) ms_reserve_pending <= 1'b1;
                      if (save_addr > 0) begin
                         ddr3_addr <= save_addr; //restore
                         save_addr <= 28'd0;
