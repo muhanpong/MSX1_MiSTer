@@ -110,8 +110,20 @@ opl3 u_opl3 (
     .sample_l     (opl3_left),
     .sample_r     (opl3_right),
     .led          (),
-    .irq_n        (irq_n)
+    .irq_n        (irq_n),
+    .status_o     (opl3_status_raw)
 );
+
+// OPL3 status (timer1/2 overflow + IRQ) crosses from the OPL3 clock domain
+// (clk_opl3) to clk (clk_sdram), where ymf278b_regs serves the CPU status
+// read.  2-FF synchronizer; the status changes slowly (timer rates) and the
+// CPU polls it repeatedly, so a rare incoherent multi-bit sample is harmless.
+logic [7:0] opl3_status_raw;
+logic [7:0] opl3_status_s1, opl3_status_s2;
+always_ff @(posedge clk) begin
+    opl3_status_s1 <= opl3_status_raw;
+    opl3_status_s2 <= opl3_status_s1;
+end
 
 // ─── PCM wave engine ─────────────────────────────────────────────────
 logic [7:0]  pcm_reg_addr, pcm_reg_data;
@@ -236,8 +248,9 @@ ymf278b_regs #(
     .load_busy      (load_busy_reg)
 );
 
-// Stub OPL3 status for now
-assign opl3_status = 8'h00;
+// Real OPL3 status (synchronized) — replaces the old 0x00 stub that broke
+// timer-based chip detection in MoonSound software (e.g. MBwave).
+assign opl3_status = opl3_status_s2;
 
 // ─── Audio mixing ─────────────────────────────────────────────────────
 // OPL3 at ~49.7kHz drives the output rate; latest PCM sample is held and added.
