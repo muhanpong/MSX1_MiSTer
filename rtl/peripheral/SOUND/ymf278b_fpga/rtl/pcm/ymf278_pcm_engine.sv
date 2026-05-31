@@ -443,6 +443,27 @@ module ymf278_pcm_engine #(
     logic [1:0] b_word_idx;     // 0..3
     logic [21:0] b_addr_sel;
 
+    // ── Per-slot decoded-sample cache (cuts SDRAM bandwidth) ────────────────
+    // Many voices are low-pitched, so pos advances <1 sample for several frames
+    // → the same word window is re-read every frame.  Cache each slot's decoded
+    // (samp_a, samp_b) keyed by (startAddr, pos): identical key ⇒ identical
+    // decoded samples, so on a hit we skip the SDRAM reads entirely and reuse
+    // the cached pair (only re-interpolating with the current stepPtr).  This
+    // pulls the aggregate read count under the per-frame budget so fewer slots
+    // miss their window (the dropped-voice / sustain-loss symptom).
+    logic [21:0] cache_sa  [0:23];          // cached startAddr
+    logic [15:0] cache_pos [0:23];          // cached integer position
+    logic [7:0]  cache_raw [0:23][0:7];     // cached burst bytes for that window
+    logic        cache_vld [0:23];
+    logic        b_use_cache;               // this slot hit the cache (reads skipped)
+
+    // Cache hit for the slot entering Stage B this stage_advance: same wave
+    // (startAddr) and same integer position as last time ⇒ identical window.
+    wire b_cache_hit = stage_a_reg.valid
+                    && cache_vld[stage_a_reg.slot]
+                    && cache_sa [stage_a_reg.slot] == stage_a_reg.header.startAddr
+                    && cache_pos[stage_a_reg.slot] == next_pos_r;
+
     // Stage-B busy (mid-read) — drives the scheduler carryover stall above.
     // B_IDLE = no slot / nothing to read; B_DONE = reads finished.  Anything
     // else means the sequencer is still fetching this slot's words.
@@ -487,10 +508,19 @@ module ymf278_pcm_engine #(
             // regardless of previous state — this guarantees forward progress
             // even if prior slot didn't finish.
             if (stage_a_reg.valid) begin
-                b_state    <= B_ISSUE;
-                b_word_idx <= 2'd0;
+                if (b_cache_hit) begin
+                    // Cache hit: same window as last frame → skip the SDRAM reads
+                    // (b_raw is loaded from the cache in the burst-buffer block).
+                    b_state     <= B_DONE;
+                    b_use_cache <= 1'b1;
+                end else begin
+                    b_state     <= B_ISSUE;
+                    b_word_idx  <= 2'd0;
+                    b_use_cache <= 1'b0;
+                end
             end else begin
-                b_state <= B_IDLE;
+                b_state     <= B_IDLE;
+                b_use_cache <= 1'b0;
             end
         end else begin
             case (b_state)
@@ -550,6 +580,10 @@ module ymf278_pcm_engine #(
                 sb_split <= 1'b1;
                 sb_b_idx <= 3'd4 + {2'd0, next_addrs.b0[0]};
             end
+            // Cache hit: load the burst buffer from the cache (reg→reg, off the
+            // decode path) so the normal decode reconstructs this slot's samples.
+            if (b_cache_hit)
+                for (int k = 0; k < 8; k++) b_raw[k] <= cache_raw[stage_a_reg.slot][k];
         end else if (b_state == B_WAIT_VALID && mem_rd_valid_b) begin
             // Each word read returns 2 consecutive bytes:
             //   [7:0]  = mem[base + 2*k]      (even byte)
@@ -627,6 +661,10 @@ module ymf278_pcm_engine #(
                 samp_b = 16'sd0;
             end
         endcase
+        // Decode→interp is unchanged by the cache: on a hit b_raw already holds
+        // the cached bytes (loaded in the burst-buffer block), so the normal
+        // decode path reconstructs the same samples with no extra mux on this
+        // (timing-critical) multiply path.
         interp_val = calc_interp(samp_a, samp_b, stage_b_reg.dyn.stepPtr);
     end
 
@@ -641,6 +679,7 @@ module ymf278_pcm_engine #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             stage_c_reg <= '0;
+            for (int i = 0; i < 24; i++) cache_vld[i] <= 1'b0;
         end else if (stage_advance) begin
             // Keep a dispatched slot contributing even if its read missed; only
             // a genuinely inactive slot (valid=0) stays silent.  On a miss reuse
@@ -653,6 +692,14 @@ module ymf278_pcm_engine #(
             stage_c_reg.bytes  <= stage_b_reg.bytes;
             stage_c_reg.interp <= stage_b_bytes_done ? interp_val
                                                      : last_interp[stage_b_reg.slot];
+            // Cache the burst bytes on a completed read (miss path) so the next
+            // same-window frame can skip the SDRAM reads.
+            if (stage_b_reg.valid && !b_use_cache && stage_b_bytes_done) begin
+                cache_sa [stage_b_reg.slot] <= stage_b_reg.header.startAddr;
+                cache_pos[stage_b_reg.slot] <= stage_b_reg.dyn.pos;
+                for (int k = 0; k < 8; k++) cache_raw[stage_b_reg.slot][k] <= b_raw[k];
+                cache_vld[stage_b_reg.slot] <= 1'b1;
+            end
         end
     end
 

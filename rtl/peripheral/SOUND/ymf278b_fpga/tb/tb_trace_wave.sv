@@ -47,6 +47,7 @@ module tb_trace_wave;
         .mem_rd_data(mem_rd_data), .mem_rd_data16(mem_rd_data16),
         .mem_rd_valid(mem_rd_valid),
         .mem_wr_en(mem_wr_en), .mem_wr_data(mem_wr_data), .mem_busy(mem_busy),
+        .pcm_vol(2'd1),
         .pcm_left(pcm_left), .pcm_right(pcm_right), .pcm_valid(pcm_valid),
         .dbg_wavetblhdr(dbg_wavetblhdr), .dbg_hf_pending(dbg_hf_pending),
         .dbg_slot0_wave(dbg_slot0_wave), .dbg_slot0_fn(dbg_slot0_fn),
@@ -95,19 +96,92 @@ module tb_trace_wave;
     logic [7:0] rom [0:22'h11_2000];
     initial $readmemh("/tmp/yrw801_win.hex", rom);
 
-    logic [3:0] sdram_lat;
+    // Latency model.  Three modes (plusargs):
+    //   default     : fixed `maxlat` cycles per read (original; maxlat=6).
+    //   +varlat     : jitter [4..maxlat] per read.
+    //   +contention : arbiter model — ch2 (Z80) competes for the bus and ch4
+    //                 is lowest priority, EXCEPT during a burst-priority hold
+    //                 (+hold=N, mirrors sdram.sv CH4_HOLD).  This reproduces
+    //                 the real "first read of a slot pays the queue, rest are
+    //                 cheap when hold>0" behavior, so it tests the actual fix
+    //                 end-to-end through the engine.  +ch2load=P sets ch2's
+    //                 per-cycle bus-demand probability in percent.
+    localparam int TXN = 7;          // single SDRAM transaction length (cycles)
+    logic [7:0] sdram_lat;
+    int         MAXLAT = 6;
+    logic       VARLAT = 1'b0;
+    logic       CONTEND = 1'b0;
+    int         CH2LOAD = 70;        // percent
+    int         HOLD = 0;            // ch4 burst-priority hold (0 = off/original)
+    logic [7:0] rnd_lat;
+    initial begin
+        if ($value$plusargs("maxlat=%d", MAXLAT)) ;
+        if ($value$plusargs("ch2load=%d", CH2LOAD)) ;
+        if ($value$plusargs("hold=%d", HOLD)) ;
+        if ($test$plusargs("varlat"))  VARLAT = 1'b1;
+        if ($test$plusargs("contention")) CONTEND = 1'b1;
+    end
+
+    // ── Contention arbiter model state ──
+    int   bus_txn   = 0;   // cycles left in current bus transaction (any channel)
+    int   bus_owner = 0;   // 4=ch4, 2=ch2
+    logic ch4_pending = 0; // ch4 read requested, not yet delivered
+    int   ch4_hold   = 0;  // mirrors sdram.sv ch4_hold_cnt
+    int   ch4_wait   = 0;  // measured queue wait for current ch4 read (debug)
+    int   ch4_lat_sum=0, ch4_lat_n=0, ch4_lat_max=0;
     logic ch4_req_prev;
+
     always_ff @(posedge clk) begin
-        if (!rst_n) begin ch4_ready<=1; sdram_lat<=0; ch4_req_prev<=0; ch4_dout<=0; ch4_dout16<=0; end
-        else begin
+        if (!rst_n) begin
+            ch4_ready<=1; sdram_lat<=0; ch4_req_prev<=0; ch4_dout<=0; ch4_dout16<=0;
+            bus_txn<=0; bus_owner<=0; ch4_pending<=0; ch4_hold<=0; ch4_wait<=0;
+            ch4_lat_sum<=0; ch4_lat_n<=0; ch4_lat_max<=0;
+        end else if (!CONTEND) begin
+            // ── original simple/varlat model ──
             ch4_req_prev<=ch4_req;
-            if (ch4_req && !ch4_req_prev) begin ch4_ready<=0; sdram_lat<=4'd6; end
+            if (ch4_req && !ch4_req_prev) begin
+                rnd_lat = VARLAT ? 8'(4 + ($unsigned($random) % (MAXLAT-3))) : 8'(MAXLAT);
+                ch4_ready<=0; sdram_lat<=rnd_lat;
+            end
             else if (sdram_lat!=0) begin
-                sdram_lat<=sdram_lat-4'd1;
-                if (sdram_lat==4'd1) begin
+                sdram_lat<=sdram_lat-8'd1;
+                if (sdram_lat==8'd1) begin
                     ch4_ready<=1;
                     ch4_dout  <= rom[ch4_addr];
                     ch4_dout16 <= {rom[{ch4_addr[21:1],1'b1}], rom[{ch4_addr[21:1],1'b0}]};
+                end
+            end
+        end else begin
+            // ── contention arbiter model ──
+            ch4_req_prev<=ch4_req;
+            if (ch4_hold != 0) ch4_hold <= ch4_hold - 1;
+            // latch a new ch4 read request
+            if (ch4_req && !ch4_req_prev) begin
+                ch4_pending<=1; ch4_ready<=0; ch4_wait<=0;
+            end
+            if (ch4_pending && bus_owner!=4) ch4_wait <= ch4_wait + 1;
+
+            if (bus_txn > 1) begin
+                bus_txn <= bus_txn - 1;
+            end else if (bus_txn == 1) begin
+                bus_txn <= 0;
+                if (bus_owner==4) begin
+                    ch4_ready<=1; ch4_pending<=0;
+                    ch4_dout  <= rom[ch4_addr];
+                    ch4_dout16 <= {rom[{ch4_addr[21:1],1'b1}], rom[{ch4_addr[21:1],1'b0}]};
+                    ch4_lat_sum<=ch4_lat_sum+ch4_wait+TXN; ch4_lat_n<=ch4_lat_n+1;
+                    if (ch4_wait+TXN>ch4_lat_max) ch4_lat_max<=ch4_wait+TXN;
+                end
+                bus_owner<=0;
+            end else begin
+                // bus free → arbitrate this cycle
+                logic ch2_demand; logic ch4_pri;
+                ch2_demand = ($unsigned($random)%100) < CH2LOAD;
+                ch4_pri    = (ch4_hold != 0) && ch4_pending;
+                if (ch4_pending && (ch4_pri || !ch2_demand)) begin
+                    bus_txn<=TXN; bus_owner<=4; ch4_hold<=HOLD;   // grant ch4
+                end else if (ch2_demand) begin
+                    bus_txn<=TXN; bus_owner<=2;                   // grant ch2
                 end
             end
         end
@@ -184,6 +258,8 @@ module tb_trace_wave;
         $display("  [%s wv=%0d] mem_addr[min..max]=%h..%h  slot0 stageC valid=%0d/%0d  last_interp=%h",
                  label, wv, min_mem_addr, max_mem_addr,
                  slot0_c_valid, slot0_c_total, slot0_interp); $display("  [%s wv=%0d] frame_ticks=%0d pcm_valid_ones=%0d pcm_valid_X=%0d", label, wv, frame_ticks, pcm_cnt, pcm_x);
+        if (CONTEND) $display("  [%s wv=%0d] CONTEND ch2load=%0d hold=%0d  ch4 read lat avg/max=%0.1f/%0d (n=%0d)",
+                 label, wv, CH2LOAD, HOLD, ch4_lat_n?1.0*ch4_lat_sum/ch4_lat_n:0.0, ch4_lat_max, ch4_lat_n);
         // Sustain criteria: still producing nonzero audio late in the window,
         // and the position is looping (wrapped at least once).
         check($sformatf("%s: audio still alive (nonzero late)", label), pcm_nz_recent > 0);
