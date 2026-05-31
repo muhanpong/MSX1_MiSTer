@@ -66,6 +66,10 @@ module ymf278_pcm_engine #(
     // previous slot's read is still outstanding.
     input  wire         mem_busy,
 
+    // Master output gain select (OSD): 0→+6dB, 1→+12dB, 2→+18dB, 3→+24dB
+    // (shift = 3 - pcm_vol applied to the 24-bit accumulator before saturate).
+    input  wire  [1:0]         pcm_vol,
+
     // Audio Output
     output logic signed [15:0] pcm_left,
     output logic signed [15:0] pcm_right,
@@ -959,6 +963,8 @@ module ymf278_pcm_engine #(
     always_ff @(posedge clk or negedge rst_n) begin
         logic [5:0]            pan_l_gain, pan_r_gain;
         logic signed [23:0]    left_sample, right_sample;
+        logic signed [23:0]    acc_l_sh, acc_r_sh;
+        logic [1:0]            pcm_shift;
         slot_dyn_t             dyn_upd;
         slot_dyn_t             dyn_reset;
 
@@ -967,6 +973,9 @@ module ymf278_pcm_engine #(
         pan_r_gain   = 6'd0;
         left_sample  = 24'd0;
         right_sample = 24'd0;
+        pcm_shift    = 2'd3 - pcm_vol;   // pcm_vol 0..3 → shift 3..0 (+6..+24 dB)
+        acc_l_sh     = master_accum_left  >>> pcm_shift;
+        acc_r_sh     = master_accum_right >>> pcm_shift;
 
         if (!rst_n) begin
             master_accum_left  <= '0;
@@ -1009,21 +1018,14 @@ module ymf278_pcm_engine #(
                 // play at full volume — exactly what we observed on hw
                 // (peak 0 dBFS distortion).
                 //
-                // Take [19:4] = master_accum >>> 4: single slot peak ≈
-                // -24 dB, 8 simultaneous slots ≈ -6 dB, 16 slots ≈ 0 dB
-                // (graceful saturation only beyond that).
-                if (master_accum_left[23:19] == 5'b00000
-                 || master_accum_left[23:19] == 5'b11111) begin
-                    pcm_left <= master_accum_left[19:4];
-                end else begin
-                    pcm_left <= master_accum_left[23] ? 16'sh8000 : 16'sh7FFF;
-                end
-                if (master_accum_right[23:19] == 5'b00000
-                 || master_accum_right[23:19] == 5'b11111) begin
-                    pcm_right <= master_accum_right[19:4];
-                end else begin
-                    pcm_right <= master_accum_right[23] ? 16'sh8000 : 16'sh7FFF;
-                end
+                // master_accum >>> pcm_shift (OSD-selectable, shift 3..0).
+                // shift 4 (the old fixed value) put a single slot at -24 dB —
+                // far too quiet vs the reference (single slot ≈ full scale).
+                // Now +6..+24 dB selectable; saturate the shifted result to 16-bit.
+                pcm_left  <= (acc_l_sh > 24'sd32767)  ? 16'sh7FFF :
+                             (acc_l_sh < -24'sd32768) ? 16'sh8000 : acc_l_sh[15:0];
+                pcm_right <= (acc_r_sh > 24'sd32767)  ? 16'sh7FFF :
+                             (acc_r_sh < -24'sd32768) ? 16'sh8000 : acc_r_sh[15:0];
                 pcm_valid <= 1'b1;
                 master_accum_left  <= '0;
                 master_accum_right <= '0;

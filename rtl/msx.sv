@@ -98,6 +98,7 @@ module msx
    // MoonSound audio mute (debug)
    input                     pcm_mute,
    input                     fm_mute,
+   input               [1:0] pcm_vol,
 
    // MoonSound debug outputs (clk_sdram domain)
    output wire               dbg_pcm_valid,
@@ -726,6 +727,7 @@ ymf278b_top #(
     .irq_n        (ms_irq_n),
     .pcm_mute       (pcm_mute),
     .fm_mute        (fm_mute),
+    .pcm_vol        (pcm_vol),
     .dbg_pcm_valid  (dbg_pcm_valid),
     .dbg_opl3_valid (dbg_opl3_valid),
     .dbg_pcm_level  (dbg_pcm_level),

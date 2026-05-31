@@ -40,6 +40,7 @@ module ymf278b_top #(
     // Audio mute controls (for debugging)
     input  wire        pcm_mute,
     input  wire        fm_mute,
+    input  wire  [1:0] pcm_vol,    // OSD master PCM gain select
 
     // Debug outputs (clk_sdram domain)
     output wire        dbg_pcm_valid,
@@ -171,6 +172,7 @@ ymf278_pcm_engine #(
     .mem_busy        (mem_busy),
 
     // Audio Output
+    .pcm_vol         (pcm_vol),
     .pcm_left        (pcm_left),
     .pcm_right       (pcm_right),
     .pcm_valid       (pcm_valid),

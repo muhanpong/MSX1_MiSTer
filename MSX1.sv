@@ -289,6 +289,7 @@ localparam CONF_STR = {
    "O[45],MoonSound,Off,On;",
    "O[46],PCM Mute,Off,On;",
    "O[47],FM Mute,Off,On;",
+   "O[50:49],PCM Volume,+6dB,+12dB,+18dB,+24dB;",
    "O[48],Debug Overlay,Off,On;",
    "-;",
    "T[0],Reset;",
@@ -480,6 +481,7 @@ msx MSX
    // MoonSound mute / debug
    .pcm_mute       (status[46]),
    .fm_mute        (status[47]),
+   .pcm_vol        (status[50:49]),
    .dbg_pcm_valid  (dbg_pcm_valid),
    .dbg_opl3_valid (dbg_opl3_valid),
    .dbg_pcm_level  (dbg_pcm_level),
