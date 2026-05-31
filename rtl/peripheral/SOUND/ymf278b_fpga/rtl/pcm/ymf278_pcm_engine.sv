@@ -126,10 +126,14 @@ module ymf278_pcm_engine #(
     logic [23:0] eg_cnt;
 
     // Forward decl: reg 0x02 bit0 (memory-access mode).  Driven in the CPU mem
-    // block far below.  Per YMF278B spec the channels stop while this is set so
-    // the CPU has the full sample-memory bandwidth for upload — we halt slot
-    // dispatch and open the SDRAM access window continuously while it is high.
+    // block far below.  The CPU needs the full sample-memory bandwidth to upload
+    // custom waves, so we halt slot dispatch + open the SDRAM window — but ONLY
+    // while a CPU mem transfer is actually in flight (cpu_mem_active), not for
+    // the whole time the mode bit is set.  The reference (openMSX) never stops
+    // channels here, so halting for the full mode-bit duration silenced voices
+    // whenever a player left the bit set during playback.
     logic        reg02_mem_access_mode;
+    logic        cpu_mem_active;   // reg02 mem-access mode AND a CPU op in flight
 
     // Stage-B carryover: if a slot's SDRAM reads aren't finished by the end of
     // its 64-cycle window, stall the pipeline (hold slot_phase at 63) until
@@ -181,10 +185,10 @@ module ymf278_pcm_engine #(
     wire in_dispatch_window = (frame_cycle < SLOT_DISPATCH_CYCLES);
     wire in_pipeline_window = (frame_cycle < PIPELINE_END);
     wire sample_start       = (frame_cycle == CYCLES_PER_FRAME - 1);
-    // dispatch_now: a new slot enters Stage A.  Suppressed while the CPU is in
-    // memory-access mode (channels stop per spec) so Stage B drains to B_IDLE
-    // and frees the SDRAM bus for CPU upload.
-    wire dispatch_now       = (slot_phase == 6'd0) && in_dispatch_window && !reg02_mem_access_mode;
+    // dispatch_now: a new slot enters Stage A.  Suppressed only while a CPU mem
+    // transfer is actually in flight (frees the SDRAM bus for the upload); normal
+    // playback continues even if the mem-access mode bit stays set.
+    wire dispatch_now       = (slot_phase == 6'd0) && in_dispatch_window && !cpu_mem_active;
     // stage_advance: pulses at the end of every 64-cycle window, including the
     // drain windows after dispatch is done (so in-flight slots finish).
     // Suppressed after pipeline drain so HF/CPU FSMs can use SDRAM uninterrupted.
@@ -1221,10 +1225,10 @@ module ymf278_pcm_engine #(
     end
 
     // Normally the CPU/HF SDRAM window is the frame tail [PIPELINE_END, end).
-    // In memory-access mode the audio pipeline is halted (dispatch suppressed),
-    // so the bus is free the whole frame — open the window continuously so CPU
-    // reg 0x06 uploads issue immediately and none are lost between frame tails.
-    wire hf_window_open = (frame_cycle >= PIPELINE_END) || reg02_mem_access_mode;
+    // While a CPU mem transfer is in flight the audio pipeline is halted
+    // (dispatch suppressed), so the bus is free — open the window continuously
+    // so reg 0x06 uploads issue immediately and none are lost between frame tails.
+    wire hf_window_open = (frame_cycle >= PIPELINE_END) || cpu_mem_active;
     assign hf_active    = (hf_state == HF_REQ) || (hf_state == HF_WAIT);
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -1411,6 +1415,8 @@ module ymf278_pcm_engine #(
 
     assign cpu_mem_rd_data = cpu_mem_rd_buf;
     assign cpu_mem_busy    = cpu_rd_pend | cpu_wr_pend | cpu_rd_outstanding;
+    // Halt dispatch / open the SDRAM window only during an actual transfer.
+    assign cpu_mem_active  = reg02_mem_access_mode & cpu_mem_busy;
 
     // Reg 0x02 read-back (per YMF278B datasheet page 14):
     //   D7-D5 = device ID (3'b001 = 0x20 nibble pattern, D5=1, D6=0, D7=0)

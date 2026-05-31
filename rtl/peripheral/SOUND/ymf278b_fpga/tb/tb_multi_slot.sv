@@ -59,6 +59,7 @@ module tb_multi_slot;
         .mem_rd_valid(mem_rd_valid),
         .mem_wr_en(mem_wr_en), .mem_wr_data(mem_wr_data),
         .mem_busy(mem_busy),
+        .pcm_vol(2'd1),
         .pcm_left(pcm_left), .pcm_right(pcm_right), .pcm_valid(pcm_valid),
         .dbg_wavetblhdr(dbg_wavetblhdr), .dbg_hf_pending(dbg_hf_pending),
         .dbg_slot0_wave(dbg_slot0_wave), .dbg_slot0_fn(dbg_slot0_fn),
