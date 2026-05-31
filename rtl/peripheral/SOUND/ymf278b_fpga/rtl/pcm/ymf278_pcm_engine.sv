@@ -1036,20 +1036,36 @@ module ymf278_pcm_engine #(
         end
     end
 
-    // ── D3: pan_mul + accumulate + ram_dyn writeback + master framer ───────
+    // ── D3a: pan multiply (split out of D3 so the accumulator add is its own
+    //         cycle — pan_att+mult+24-bit-add in one cycle was the chronic
+    //         -0.8ns d2_pkt.pan→master_accum violator).  One extra pipeline
+    //         stage is free: a slot is processed once per 64-cycle window.
+    logic signed [23:0] d3_left, d3_right;
+    logic               d3_valid;
     always_ff @(posedge clk or negedge rst_n) begin
-        logic [5:0]            pan_l_gain, pan_r_gain;
-        logic signed [23:0]    left_sample, right_sample;
+        logic [5:0] pl_gain, pr_gain;
+        pl_gain = 6'd0; pr_gain = 6'd0;
+        if (!rst_n) begin
+            d3_left <= '0; d3_right <= '0; d3_valid <= 1'b0;
+        end else begin
+            d3_valid <= d2_pkt.valid;
+            if (d2_pkt.valid) begin
+                pl_gain = pan_att_left (d2_pkt.pan);
+                pr_gain = pan_att_right(d2_pkt.pan);
+                d3_left  <= 24'((d2_pkt.vol_sample * 32'($signed({26'd0, pl_gain}))) >>> 5);
+                d3_right <= 24'((d2_pkt.vol_sample * 32'($signed({26'd0, pr_gain}))) >>> 5);
+            end
+        end
+    end
+
+    // ── D3: accumulate + ram_dyn writeback + master framer ─────────────────
+    always_ff @(posedge clk or negedge rst_n) begin
         logic signed [23:0]    acc_l_sh, acc_r_sh;
         logic [1:0]            pcm_shift;
         slot_dyn_t             dyn_upd;
         slot_dyn_t             dyn_reset;
 
         // Init to avoid latch
-        pan_l_gain   = 6'd0;
-        pan_r_gain   = 6'd0;
-        left_sample  = 24'd0;
-        right_sample = 24'd0;
         pcm_shift    = 2'd3 - pcm_vol;   // pcm_vol 0..3 → shift 3..0 (+6..+24 dB)
         acc_l_sh     = master_accum_left  >>> pcm_shift;
         acc_r_sh     = master_accum_right >>> pcm_shift;
@@ -1068,14 +1084,8 @@ module ymf278_pcm_engine #(
         end else begin
             pcm_valid <= 1'b0;
 
+            // ram_dyn writeback stays D2-aligned (not on the accum critical path).
             if (d2_pkt.valid) begin
-                pan_l_gain = pan_att_left (d2_pkt.pan);
-                pan_r_gain = pan_att_right(d2_pkt.pan);
-                left_sample  = 24'((d2_pkt.vol_sample * 32'($signed({26'd0, pan_l_gain}))) >>> 5);
-                right_sample = 24'((d2_pkt.vol_sample * 32'($signed({26'd0, pan_r_gain}))) >>> 5);
-                master_accum_left  <= master_accum_left  + left_sample;
-                master_accum_right <= master_accum_right + right_sample;
-
                 dyn_upd            = d2_pkt.new_dyn;
                 dyn_upd.env_state  = d2_pkt.eg_state;
                 dyn_upd.env_vol    = d2_pkt.eg_vol;
@@ -1084,6 +1094,11 @@ module ymf278_pcm_engine #(
                     dyn_upd.stepPtr = 16'd0;
                 end
                 ram_dyn[d2_pkt.slot] <= dyn_upd;
+            end
+            // Accumulate the pan-weighted samples registered by D3a (1 cycle later).
+            if (d3_valid) begin
+                master_accum_left  <= master_accum_left  + d3_left;
+                master_accum_right <= master_accum_right + d3_right;
             end
 
             if (sample_start) begin
