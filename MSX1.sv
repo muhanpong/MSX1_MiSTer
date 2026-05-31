@@ -396,6 +396,8 @@ wire [4:0]  dbg_accum_cnt;
 wire [9:0]  dbg_env_min;
 wire        dbg_mem_nonzero;
 wire        dbg_pcm_base_set;
+wire [23:0] dbg_slot_keyon;
+wire [23:0] dbg_slot_active;
 wire [15:0] cpu_addr;
 wire signed [15:0] audio_l, audio_r;
 wire        hsync, vsync, blank_n, hblank, vblank, ce_pix;
@@ -625,7 +627,9 @@ debug_overlay u_overlay (
    .dbg_new2       (dbg_new2),
    .dbg_keyon_count(dbg_keyon_count),
    .dbg_accum_cnt  (dbg_accum_cnt),
-   .dbg_env_min    (dbg_env_min)
+   .dbg_env_min    (dbg_env_min),
+   .dbg_slot_keyon (dbg_slot_keyon),
+   .dbg_slot_active(dbg_slot_active)
 );
 
 video_mixer #(.GAMMA(0)) video_mixer

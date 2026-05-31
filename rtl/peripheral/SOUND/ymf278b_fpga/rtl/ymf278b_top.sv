@@ -51,7 +51,9 @@ module ymf278b_top #(
     output wire [4:0]  dbg_accum_cnt,
     output wire [9:0]  dbg_env_min,
     output wire        dbg_mem_nonzero,
-    output wire        dbg_pcm_base_set
+    output wire        dbg_pcm_base_set,
+    output wire [23:0] dbg_slot_keyon,
+    output wire [23:0] dbg_slot_active
 );
 
 // ─── OPL3 core (gtaylormb opl3.sv) ───────────────────────────────────
@@ -194,7 +196,9 @@ ymf278_pcm_engine #(
     .dbg_slot0_hdr_start (),
     .dbg_slot0_hdr_loop  (),
     .dbg_slot0_hdr_end   (),
-    .dbg_slot0_hdr_bits  ()
+    .dbg_slot0_hdr_bits  (),
+    .dbg_slot_keyon  (dbg_slot_keyon),
+    .dbg_slot_active (dbg_slot_active)
 );
 
 // CPU register read mux.

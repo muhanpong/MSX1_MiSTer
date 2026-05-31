@@ -109,7 +109,9 @@ module msx
    output wire [4:0]         dbg_accum_cnt,
    output wire [9:0]         dbg_env_min,
    output wire               dbg_mem_nonzero,
-   output wire               dbg_pcm_base_set  // 1 if pcm_rom_base != default
+   output wire               dbg_pcm_base_set,  // 1 if pcm_rom_base != default
+   output wire        [23:0] dbg_slot_keyon,
+   output wire        [23:0] dbg_slot_active
 );
 
 //  -----------------------------------------------------------------------------
@@ -736,7 +738,9 @@ ymf278b_top #(
     .dbg_accum_cnt  (dbg_accum_cnt),
     .dbg_env_min    (dbg_env_min),
     .dbg_mem_nonzero(dbg_mem_nonzero),
-    .dbg_pcm_base_set()  // generated locally via assign
+    .dbg_pcm_base_set(),  // generated locally via assign
+    .dbg_slot_keyon (dbg_slot_keyon),
+    .dbg_slot_active(dbg_slot_active)
 );
 
 // Gate audio to zero when MoonSound disabled

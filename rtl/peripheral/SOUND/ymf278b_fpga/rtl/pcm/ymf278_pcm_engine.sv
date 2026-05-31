@@ -108,7 +108,15 @@ module ymf278_pcm_engine #(
     // all 5 bytes latched).  Useful for H6 timing-budget counter in tb.
     output logic        dbg_stage_b_bytes_done,
     output logic        dbg_stage_advance,
-    output logic        dbg_stage_b_valid
+    output logic        dbg_stage_b_valid,
+
+    // Per-slot observability for the debug overlay: which of the 24 slots the
+    // host has keyed on, vs which are actually producing audio (envelope not
+    // OFF).  Comparing the two on hardware distinguishes "register write never
+    // arrived" (keyon bit clear) from "configured but silent" (keyon set,
+    // active clear).
+    output logic [23:0] dbg_slot_keyon,
+    output logic [23:0] dbg_slot_active
 );
 
     // ════════════════════════════════════════════════════════════════════════
@@ -1606,6 +1614,27 @@ module ymf278_pcm_engine #(
     assign dbg_stage_b_bytes_done  = stage_b_bytes_done;
     assign dbg_stage_advance       = stage_advance;
     assign dbg_stage_b_valid       = stage_b_reg.valid;
+
+    // ── Per-slot observability ─────────────────────────────────────────────
+    // keyon: the host's key-on bit per slot (staged through a temp to dodge the
+    // iverilog unpacked-array-of-struct .field limitation).
+    always_comb begin
+        slot_regs_t r;
+        for (int i = 0; i < 24; i++) begin
+            r = ram_regs[i];
+            dbg_slot_keyon[i] = r.keyon;
+        end
+    end
+    // active: slot's envelope is running (not EG_OFF) at some point in the frame.
+    logic [23:0] active_acc;
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin active_acc <= '0; dbg_slot_active <= '0; end
+        else begin
+            if (sample_start) begin dbg_slot_active <= active_acc; active_acc <= '0; end
+            else if (d2_pkt.valid && d2_pkt.eg_state != EG_OFF)
+                active_acc[d2_pkt.slot] <= 1'b1;
+        end
+    end
 
     // ════════════════════════════════════════════════════════════════════════
     // Initial values for ram_header (simulation only — real SRAM/BRAM starts

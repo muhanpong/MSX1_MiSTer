@@ -18,7 +18,9 @@ module debug_overlay (
     input  wire        dbg_new2,
     input  wire [4:0]  dbg_keyon_count,       // Unused legacy
     input  wire [4:0]  dbg_accum_cnt,         // Unused legacy
-    input  wire [9:0]  dbg_env_min            // Unused legacy
+    input  wire [9:0]  dbg_env_min,           // Unused legacy
+    input  wire [23:0] dbg_slot_keyon,        // per-slot host key-on
+    input  wire [23:0] dbg_slot_active        // per-slot envelope running
 );
 
 // ─── CDC sync ───────────────────────────────────────────────────────────────────────
@@ -32,6 +34,13 @@ always_ff @(posedge CLK_VIDEO) begin
     new2_sync     <= {new2_sync[0],  dbg_new2};
     base_sync     <= {base_sync[0],  dbg_interp_nonzero}; // base_set
     lvl_sync1   <= dbg_pcm_level;   lvl_sync2   <= lvl_sync1;
+end
+
+// Per-slot masks (slow-changing) — 2-FF CDC into the video clock.
+logic [23:0] keyon_s1, keyon_s2, active_s1, active_s2;
+always_ff @(posedge CLK_VIDEO) begin
+    keyon_s1  <= dbg_slot_keyon;   keyon_s2  <= keyon_s1;
+    active_s1 <= dbg_slot_active;  active_s2 <= active_s1;
 end
 
 // ─── Hold counters (8/frame decay) ───────────────────────────────────────────
@@ -72,11 +81,14 @@ end
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 localparam PW = 11'd66;
-localparam PH = 8'd34;  // 4 rows × 8px + 2 border
+localparam PH = 8'd50;  // 6 rows × 8px + 2 border  (rows 5,6 = per-slot maps)
 wire in_panel = en && !hblank && !vblank && (h_cnt < PW) && (v_cnt < PH) && !drew_this_line;
 wire border   = (h_cnt == 11'd0) || (h_cnt == PW-1) || (v_cnt == 8'd0) || (v_cnt == PH-1);
 wire [7:0] px = h_cnt[7:0] - 8'd1;
 wire [7:0] py = v_cnt       - 8'd1;
+// per-slot rows use 2px per slot → 24 slots = 48px (fits in PW-2).
+wire [4:0] slot_idx = px[5:1];        // px/2 → slot 0..23
+wire       slot_ok  = (px < 8'd48);
 
 always_comb begin
     R_out = R_in; G_out = G_in; B_out = B_in;
@@ -94,10 +106,18 @@ always_comb begin
             end else if (py < 8'd24) begin // PCM level — yellow bar
                 if (px < {2'd0, level_bar}) begin R_out=8'hFF; G_out=8'hE0; B_out=8'h00; end
                 else begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
-            end else begin                // NEW2 — cyan
+            end else if (py < 8'd32) begin // NEW2 — cyan
                 R_out = 8'h00;
                 G_out = new2_sync[1] ? 8'hFF : 8'h30;
                 B_out = new2_sync[1] ? 8'hFF : 8'h30;
+            end else if (py < 8'd40) begin // KEYON map — 24 slots, green=keyon
+                if (slot_ok && keyon_s2[slot_idx]) begin R_out=8'h00; G_out=8'hFF; B_out=8'h00; end
+                else if (slot_ok)                  begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
+            end else begin                 // ACTIVE map — 24 slots, cyan=producing
+                // keyon-but-not-active shows RED (the "configured but silent" case)
+                if (slot_ok && active_s2[slot_idx])      begin R_out=8'h00; G_out=8'hFF; B_out=8'hFF; end
+                else if (slot_ok && keyon_s2[slot_idx])  begin R_out=8'hFF; G_out=8'h00; B_out=8'h00; end
+                else if (slot_ok)                        begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
             end
         end
     end
