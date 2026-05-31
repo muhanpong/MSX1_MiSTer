@@ -36,6 +36,7 @@ module ymf278b_regs #(
     output logic       pcm_reg_rd,
     input  wire  [7:0] pcm_reg_dout,
     input  wire        pcm_reg_rd_done,    // pulses when CPU mem read completes
+    input  wire        pcm_cpu_mem_busy,   // engine: CPU mem op (reg 0x06) still in flight
 
     // BUSY/LOAD status
     output logic       busy,
@@ -82,7 +83,13 @@ logic pcm_rd_wait;
 assign pcm_reg_addr = opl4latch;
 
 // Busy / Load counters
-assign busy      = (busy_cnt != '0);
+// CPU mem (reg 0x03-0x06) access: the fixed MEM_*_DELAY only bridges the first
+// cycles; the engine issues the SDRAM op opportunistically (HF/Stage B must be
+// idle) so it can take far longer than the fixed delay during playback.  OR in
+// the engine's actual in-flight flag so the CPU's BUSY poll waits for the op to
+// truly complete — otherwise cpu_wr_data_latch/cpu_mem_adr get overwritten by
+// the next byte before the previous write issues (custom-wave corruption).
+assign busy      = (busy_cnt != '0) | pcm_cpu_mem_busy;
 assign load_busy = (load_cnt != '0);
 
 // Merged: busy/load counters + I/O port decode (single driver per signal)

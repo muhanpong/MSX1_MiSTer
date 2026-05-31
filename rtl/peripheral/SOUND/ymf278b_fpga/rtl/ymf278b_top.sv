@@ -244,6 +244,7 @@ ymf278b_regs #(
     .pcm_reg_rd     (pcm_reg_rd),
     .pcm_reg_dout   (pcm_reg_dout),
     .pcm_reg_rd_done(pcm_reg_rd_done),
+    .pcm_cpu_mem_busy(pcm_cpu_mem_busy_w),
     .busy           (busy_reg),
     .load_busy      (load_busy_reg)
 );
