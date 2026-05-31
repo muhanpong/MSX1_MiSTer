@@ -57,3 +57,23 @@ set_multicycle_path -setup -end 6 \
 set_multicycle_path -hold  -end 5 \
     -from [get_registers {*ymf278b_regs*opl4latch*}] \
     -to   [get_registers {*pcm_engine*}]
+
+# OPL4 PCM position/step datapath (stage_a_reg -> next_pos_r / next_stepPtr_r /
+# next_pos_for_b_r).  stage_a_reg latches a slot's regs ONCE per 64-cycle slot
+# window (at dispatch, slot_phase==0) and holds; next_*_r feed next_addrs which
+# is only consumed at the next stage_advance (slot_phase==63), ~63 cycles later.
+# So the whole window is available and the single-cycle setup is pessimistic.
+# These are the chronic oct/fn -> next_pos setup violators on this clock.
+set_multicycle_path -setup -end 4 \
+    -from [get_registers {*u_pcm|stage_a_reg*}] \
+    -to   [get_registers {*u_pcm|next_pos_r* *u_pcm|next_stepPtr_r* *u_pcm|next_pos_for_b_r*}]
+set_multicycle_path -hold  -end 3 \
+    -from [get_registers {*u_pcm|stage_a_reg*}] \
+    -to   [get_registers {*u_pcm|next_pos_r* *u_pcm|next_stepPtr_r* *u_pcm|next_pos_for_b_r*}]
+# next_pos_for_b_r is chained off the (window-stable) next_pos_r.
+set_multicycle_path -setup -end 4 \
+    -from [get_registers {*u_pcm|next_pos_r*}] \
+    -to   [get_registers {*u_pcm|next_pos_for_b_r*}]
+set_multicycle_path -hold  -end 3 \
+    -from [get_registers {*u_pcm|next_pos_r*}] \
+    -to   [get_registers {*u_pcm|next_pos_for_b_r*}]
