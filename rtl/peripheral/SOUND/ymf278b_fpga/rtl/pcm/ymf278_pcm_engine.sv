@@ -630,16 +630,42 @@ module ymf278_pcm_engine #(
         interp_val = calc_interp(samp_a, samp_b, stage_b_reg.dyn.stepPtr);
     end
 
+    // Per-slot last good interpolated sample — for graceful degradation when a
+    // slot's SDRAM reads don't finish in its window (multi-slot budget cliff).
+    // Instead of dropping the slot to silence (valid=0) or feeding the partial/
+    // stale burst buffer (garbage = the "찌그러짐"/cut-out symptom), we re-use
+    // the slot's previous sample.  The envelope/vol stages still apply, so a
+    // held voice sustains/decays naturally instead of glitching or vanishing.
+    logic signed [15:0] last_interp [0:23];
+
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             stage_c_reg <= '0;
         end else if (stage_advance) begin
-            stage_c_reg.valid  <= stage_b_reg.valid && stage_b_bytes_done;
+            // Keep a dispatched slot contributing even if its read missed; only
+            // a genuinely inactive slot (valid=0) stays silent.  On a miss reuse
+            // the slot's last good sample (read mux, registered source) instead
+            // of the partial/garbage burst buffer.
+            stage_c_reg.valid  <= stage_b_reg.valid;
             stage_c_reg.slot   <= stage_b_reg.slot;
             stage_c_reg.regs   <= stage_b_reg.regs;
             stage_c_reg.dyn    <= stage_b_reg.dyn;
             stage_c_reg.bytes  <= stage_b_reg.bytes;
-            stage_c_reg.interp <= interp_val;
+            stage_c_reg.interp <= stage_b_bytes_done ? interp_val
+                                                     : last_interp[stage_b_reg.slot];
+        end
+    end
+
+    // Remember each slot's most recent sample, sourced from the REGISTERED
+    // stage_c output (not the combinational interp_val) so the indexed array
+    // write stays off the decode→interp critical path.  When the read missed,
+    // stage_c_reg.interp already equals last_interp[slot], so re-storing is a
+    // no-op; when fresh it captures the new sample.
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            for (int i = 0; i < 24; i++) last_interp[i] <= '0;
+        end else if (stage_c_reg.valid) begin
+            last_interp[stage_c_reg.slot] <= stage_c_reg.interp;
         end
     end
 
