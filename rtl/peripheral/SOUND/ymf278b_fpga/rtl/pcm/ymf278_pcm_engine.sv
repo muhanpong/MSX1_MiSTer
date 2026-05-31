@@ -1630,14 +1630,26 @@ module ymf278_pcm_engine #(
             dbg_slot_keyon[i] = r.keyon;
         end
     end
-    // active: slot's envelope is running (not EG_OFF) at some point in the frame.
+    // active: PEAK-HELD per-slot output activity.  A slot's bit is set if its
+    // post-volume sample was non-zero at any point in a ~0.37s window (16384
+    // frames @ 44.1kHz), then latched and the accumulator cleared.  This is
+    // robust to zero-crossings, attack transients and release tails — a slot
+    // that is keyed on but never produces output for the whole window is a
+    // genuinely dead voice (shown red on the overlay).
     logic [23:0] active_acc;
+    logic [13:0] act_frames;
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin active_acc <= '0; dbg_slot_active <= '0; end
+        if (!rst_n) begin active_acc <= '0; dbg_slot_active <= '0; act_frames <= '0; end
         else begin
-            if (sample_start) begin dbg_slot_active <= active_acc; active_acc <= '0; end
-            else if (d2_pkt.valid && d2_pkt.eg_state != EG_OFF)
+            if (d2_pkt.valid && d2_pkt.vol_sample != 32'sd0)
                 active_acc[d2_pkt.slot] <= 1'b1;
+            if (sample_start) begin
+                act_frames <= act_frames + 14'd1;
+                if (act_frames == 14'h3FFF) begin
+                    dbg_slot_active <= active_acc;
+                    active_acc      <= '0;
+                end
+            end
         end
     end
 

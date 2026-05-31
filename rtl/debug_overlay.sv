@@ -86,18 +86,17 @@ wire in_panel = en && !hblank && !vblank && (h_cnt < PW) && (v_cnt < PH) && !dre
 wire border   = (h_cnt == 11'd0) || (h_cnt == PW-1) || (v_cnt == 8'd0) || (v_cnt == PH-1);
 wire [7:0] px = h_cnt[7:0] - 8'd1;
 wire [7:0] py = v_cnt       - 8'd1;
-// Counts of keyon / active slots → bar length (×2 px, max 24 slots = 48px).
+wire [4:0] slot_idx = px[5:1];   // 2px per slot → slot 0..23
+wire       slot_ok  = (px < 8'd48);
+// Dead voices = keyed-on but produced no output in the last window.
+wire [23:0] dead_mask = keyon_s2 & ~active_s2;
 // Manual popcount ($countones isn't synthesizable in Quartus 17.1).
-logic [5:0] keyon_cnt, active_cnt;
+logic [5:0] dead_cnt;
 always_comb begin
-    keyon_cnt = 6'd0; active_cnt = 6'd0;
-    for (int i = 0; i < 24; i++) begin
-        keyon_cnt  = keyon_cnt  + {5'd0, keyon_s2[i]};
-        active_cnt = active_cnt + {5'd0, active_s2[i]};
-    end
+    dead_cnt = 6'd0;
+    for (int i = 0; i < 24; i++) dead_cnt = dead_cnt + {5'd0, dead_mask[i]};
 end
-wire [7:0] keyon_w    = {1'b0, keyon_cnt, 1'b0};   // count*2
-wire [7:0] active_w   = {1'b0, active_cnt, 1'b0};
+wire [7:0] dead_w = {1'b0, dead_cnt, 1'b0};   // dead count * 2 px
 
 always_comb begin
     R_out = R_in; G_out = G_in; B_out = B_in;
@@ -119,13 +118,14 @@ always_comb begin
                 R_out = 8'h00;
                 G_out = new2_sync[1] ? 8'hFF : 8'h30;
                 B_out = new2_sync[1] ? 8'hFF : 8'h30;
-            end else if (py < 8'd40) begin // KEYON COUNT — green bar (length = #keyon)
-                if (px < keyon_w)  begin R_out=8'h00; G_out=8'hFF; B_out=8'h00; end
-                else               begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
-            end else begin                 // ACTIVE COUNT — cyan bar (length = #active)
-                // If shorter than the keyon bar above → keyon-but-silent voices.
-                if (px < active_w) begin R_out=8'h00; G_out=8'hFF; B_out=8'hFF; end
-                else               begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
+            end else if (py < 8'd40) begin // PER-SLOT voice map (peak-held):
+                // green = keyon & producing, RED = keyon & DEAD, gray = off.
+                if (slot_ok && dead_mask[slot_idx])      begin R_out=8'hFF; G_out=8'h00; B_out=8'h00; end
+                else if (slot_ok && keyon_s2[slot_idx])  begin R_out=8'h00; G_out=8'hFF; B_out=8'h00; end
+                else if (slot_ok)                        begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
+            end else begin                 // DEAD-VOICE COUNT — red bar (length = #dead)
+                if (px < dead_w) begin R_out=8'hFF; G_out=8'h00; B_out=8'h00; end
+                else             begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
             end
         end
     end
