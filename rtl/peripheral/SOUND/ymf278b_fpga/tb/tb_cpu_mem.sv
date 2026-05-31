@@ -266,6 +266,37 @@ module tb_cpu_mem;
         read_reg(8'h06); wait_cpu_idle();
         check("seq write[0x303] = 0x44", cpu_mem_rd_buf_eq(8'h44));
 
+        // -- Test 10: NON-POLLING back-to-back writes (the real custom-wave case)
+        // A driver that doesn't poll BUSY blasts reg 0x06 at Z80 speed.  Pre-fix,
+        // the CPU window is only the 220-cyc frame tail, so writes issued during
+        // the closed window overwrite cpu_wr_data_latch (and don't advance the
+        // address) before the engine drains them → only ~1 byte/frame survives.
+        // With mem_access_mode halting dispatch + opening the window, every write
+        // issues before the next arrives → all bytes land.
+        write_reg(8'h02, 8'h01);          // mem_access_mode = 1
+        write_reg(8'h03, 8'h00);
+        write_reg(8'h04, 8'h05);
+        write_reg(8'h05, 8'h00);          // adr = 0x000500
+        @(posedge clk);
+        wait_cpu_idle();
+        for (int i = 0; i < 16; i++) begin
+            write_reg(8'h06, 8'(8'hC0 + i));   // values C0..CF, NO busy poll
+            repeat (60) @(posedge clk);        // Z80-OUT-like spacing
+        end
+        wait_cpu_idle();
+        // Read back all 16
+        write_reg(8'h03, 8'h00);
+        write_reg(8'h04, 8'h05);
+        write_reg(8'h05, 8'h00);
+        @(posedge clk);
+        wait_cpu_idle();
+        check("blast[0x500] = 0xC0", cpu_mem_rd_buf_eq(8'hC0));
+        for (int i = 1; i < 16; i++) begin
+            read_reg(8'h06); wait_cpu_idle();
+            check($sformatf("blast[0x%03h] = 0x%02h", 12'h500 + i[11:0], 8'(8'hC0 + i)),
+                  cpu_mem_rd_buf_eq(8'(8'hC0 + i)));
+        end
+
         $display("\n=== %0d PASS, %0d FAIL ===", passes, fails);
         if (fails == 0) $display("*** ALL TESTS PASSED ***");
         $finish;

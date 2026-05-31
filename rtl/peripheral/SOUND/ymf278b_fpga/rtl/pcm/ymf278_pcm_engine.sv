@@ -121,23 +121,52 @@ module ymf278_pcm_engine #(
     logic [5:0]  slot_phase;
     logic [23:0] eg_cnt;
 
+    // Forward decl: reg 0x02 bit0 (memory-access mode).  Driven in the CPU mem
+    // block far below.  Per YMF278B spec the channels stop while this is set so
+    // the CPU has the full sample-memory bandwidth for upload — we halt slot
+    // dispatch and open the SDRAM access window continuously while it is high.
+    logic        reg02_mem_access_mode;
+
+    // Stage-B carryover: if a slot's SDRAM reads aren't finished by the end of
+    // its 64-cycle window, stall the pipeline (hold slot_phase at 63) until
+    // they complete instead of force-restarting and discarding them.  Slow
+    // slots borrow time from the frame's slack + idle/fast slots; the hard
+    // 64-cycle per-slot deadline (the sustain "budget cliff") is removed.
+    // b_busy: Stage B sequencer is mid-read (declared/driven after b_state).
+    // stall_cnt caps the stall as an anti-deadlock guard (stuck bridge) →
+    // force-advance like the original behavior.
+    logic        b_busy;
+    logic [6:0]  stall_cnt;
+    localparam int MAX_STALL = 127;
+    wire         pipe_advance = (!b_busy) || (stall_cnt >= MAX_STALL);
+
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             frame_cycle <= '0;
             cur_slot    <= '0;
             slot_phase  <= '0;
             eg_cnt      <= '0;
+            stall_cnt   <= '0;
         end else begin
             if (frame_cycle == CYCLES_PER_FRAME - 1) begin
                 frame_cycle <= '0;
                 cur_slot    <= '0;
                 slot_phase  <= '0;
+                stall_cnt   <= '0;
                 eg_cnt      <= eg_cnt + 24'd1;
             end else begin
                 frame_cycle <= frame_cycle + 11'd1;
                 if (slot_phase == 6'd63) begin
-                    slot_phase <= '0;
-                    if (cur_slot != 5'd23) cur_slot <= cur_slot + 5'd1;
+                    // End of slot window: advance only when Stage B has
+                    // finished this slot's reads (or the stall guard fires).
+                    // Otherwise hold here (stall) and let the reads complete.
+                    if (pipe_advance) begin
+                        slot_phase <= '0;
+                        stall_cnt  <= '0;
+                        if (cur_slot != 5'd23) cur_slot <= cur_slot + 5'd1;
+                    end else begin
+                        stall_cnt <= stall_cnt + 7'd1;
+                    end
                 end else begin
                     slot_phase <= slot_phase + 6'd1;
                 end
@@ -148,12 +177,14 @@ module ymf278_pcm_engine #(
     wire in_dispatch_window = (frame_cycle < SLOT_DISPATCH_CYCLES);
     wire in_pipeline_window = (frame_cycle < PIPELINE_END);
     wire sample_start       = (frame_cycle == CYCLES_PER_FRAME - 1);
-    // dispatch_now: a new slot enters Stage A
-    wire dispatch_now       = (slot_phase == 6'd0) && in_dispatch_window;
+    // dispatch_now: a new slot enters Stage A.  Suppressed while the CPU is in
+    // memory-access mode (channels stop per spec) so Stage B drains to B_IDLE
+    // and frees the SDRAM bus for CPU upload.
+    wire dispatch_now       = (slot_phase == 6'd0) && in_dispatch_window && !reg02_mem_access_mode;
     // stage_advance: pulses at the end of every 64-cycle window, including the
     // drain windows after dispatch is done (so in-flight slots finish).
     // Suppressed after pipeline drain so HF/CPU FSMs can use SDRAM uninterrupted.
-    wire stage_advance      = (slot_phase == 6'd63) && in_pipeline_window;
+    wire stage_advance      = (slot_phase == 6'd63) && pipe_advance && in_pipeline_window;
 
     // ════════════════════════════════════════════════════════════════════════
     // Per-slot state RAMs
@@ -403,6 +434,11 @@ module ymf278_pcm_engine #(
     b_state_t   b_state;
     logic [1:0] b_word_idx;     // 0..3
     logic [21:0] b_addr_sel;
+
+    // Stage-B busy (mid-read) — drives the scheduler carryover stall above.
+    // B_IDLE = no slot / nothing to read; B_DONE = reads finished.  Anything
+    // else means the sequencer is still fetching this slot's words.
+    always_comb b_busy = (b_state != B_IDLE) && (b_state != B_DONE);
 
     // raw[0..5] = A-window mem[WB..WB+5]; raw[6..7] = extra B-window word pair
     // (only when sb_split).  b bytes live at raw[sb_b_idx]/[sb_b_idx+1].
@@ -1182,7 +1218,11 @@ module ymf278_pcm_engine #(
         end
     end
 
-    wire hf_window_open = (frame_cycle >= PIPELINE_END);
+    // Normally the CPU/HF SDRAM window is the frame tail [PIPELINE_END, end).
+    // In memory-access mode the audio pipeline is halted (dispatch suppressed),
+    // so the bus is free the whole frame — open the window continuously so CPU
+    // reg 0x06 uploads issue immediately and none are lost between frame tails.
+    wire hf_window_open = (frame_cycle >= PIPELINE_END) || reg02_mem_access_mode;
     assign hf_active    = (hf_state == HF_REQ) || (hf_state == HF_WAIT);
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -1291,7 +1331,6 @@ module ymf278_pcm_engine #(
     // only when HF FSM and Stage B sequencer are both idle.
     // cpu_rd_outstanding declared earlier near mem_rd_valid_b.
     // ════════════════════════════════════════════════════════════════════════
-    logic        reg02_mem_access_mode;
     logic        reg02_mem_type;
     logic [23:0] cpu_mem_adr;
     logic        cpu_rd_pend;
