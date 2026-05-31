@@ -153,7 +153,12 @@ module ymf278_pcm_engine #(
     // force-advance like the original behavior.
     logic        b_busy;
     logic [6:0]  stall_cnt;
-    localparam int MAX_STALL = 127;
+    // 0 = never stall the slot scheduler: every one of the 24 slots is
+    // dispatched each frame so its key-on edge / envelope always advances (a
+    // stalled slot's voice would never start → silent "red" on the overlay).
+    // Slow SDRAM reads fall back to the last-sample hold instead of borrowing
+    // window time from later slots.
+    localparam int MAX_STALL = 0;
     wire         pipe_advance = (!b_busy) || (stall_cnt >= MAX_STALL);
 
     always_ff @(posedge clk or negedge rst_n) begin
