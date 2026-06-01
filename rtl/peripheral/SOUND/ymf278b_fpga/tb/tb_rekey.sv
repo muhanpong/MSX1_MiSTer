@@ -312,6 +312,22 @@ module tb_rekey;
         rekey(3,  30, "rekey gap=3");
         rekey(6,  30, "rekey gap=6");
 
+        // ── Standalone KEY-OFF must release ALL the way to EG_OFF (silence).
+        // (MBwave stop symptom: some channels keep ringing — release frozen.)
+        write_reg(8'h68, 8'h80);                 // ensure keyed on
+        frames(40);                               // settle into SUS
+        $display("  [keyoff] before: state=%0d vol=%h", dbg_slot0_dyn_env_state, dbg_slot0_dyn_env_vol);
+        write_reg(8'h68, 8'h00);                 // KEY OFF (held off — no re-key)
+        for (int k=0;k<10;k++) begin
+            frames(20);
+            $display("    keyoff t=%0d state=%0d vol=%h", k, dbg_slot0_dyn_env_state, dbg_slot0_dyn_env_vol);
+        end
+        reset_mon(); frames(20);
+        $display("  [keyoff] after: state=%0d vol=%h pcm_nz=%0d/%0d",
+                 dbg_slot0_dyn_env_state, dbg_slot0_dyn_env_vol, pcm_nz_recent, pcm_cnt);
+        check("key-off releases to EG_OFF (not frozen)", dbg_slot0_dyn_env_state == EG_OFF);
+        check("key-off silences audio", pcm_nz_recent == 0);
+
         $display("\n=== %0d PASS, %0d FAIL ===", passes, fails);
         if (fails==0) $display("*** ALL TESTS PASSED ***");
         else          $display("!!! %0d FAILS (re-key toggle bug reproduced) !!!", fails);

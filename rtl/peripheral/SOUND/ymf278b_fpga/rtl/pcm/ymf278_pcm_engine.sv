@@ -813,8 +813,8 @@ module ymf278_pcm_engine #(
         logic [9:0]           eg_vol;
         logic                 key_on_edge;
         logic signed [15:0]   interp;        // forward to D2b
-        logic                 silent;
-        logic signed [31:0]   tmp_vol;       // (0x8000 * vol_mul) >>> vol_shift
+        logic signed [31:0]   gain_e;        // ENV vol_factor gain (0..0x8000); 0 if env clipped
+        logic signed [31:0]   gain_t;        // TL  vol_factor gain (0..0x8000); 0 if TL  clipped
     } d2a_pkt_t;
 
     typedef struct packed {
@@ -824,14 +824,27 @@ module ymf278_pcm_engine #(
         slot_dyn_t            new_dyn;
         logic [2:0]           eg_state;
         logic [9:0]           eg_vol;
-        logic signed [31:0]   vol_sample;
         logic                 key_on_edge;
+        logic signed [31:0]   inner;         // (interp * gain_e) >>> 15  — ENV applied
+        logic signed [31:0]   gain_t;        // forwarded TL gain for D2c
     } d2_pkt_t;
+
+    typedef struct packed {
+        logic                 valid;
+        logic [4:0]           slot;
+        logic [3:0]           pan;
+        slot_dyn_t            new_dyn;
+        logic [2:0]           eg_state;
+        logic [9:0]           eg_vol;
+        logic signed [31:0]   vol_sample;    // (inner * gain_t) >>> 15 — TL applied
+        logic                 key_on_edge;
+    } d2c_pkt_t;
 
     d1a_pkt_t d1a_pkt;
     d1_pkt_t  d1_pkt;
     d2a_pkt_t d2a_pkt;
     d2_pkt_t  d2_pkt;
+    d2c_pkt_t d2c_pkt;
 
     // ── D1a: rate selection + first ROM lookups + do_update ─────────────────
     // Splits process_eg's combinational chain.  D1a does the rate/shift/sel
@@ -956,7 +969,12 @@ module ymf278_pcm_engine #(
                         new_vol = MIN_ATT_INDEX;
                         new_state = (d1a_pkt.regs.dl_idx != 4'h0) ? EG_DEC : EG_SUS;
                     end
-                end else if (!d1a_pkt.regs.keyon && d1a_pkt.cur_state != EG_OFF) begin
+                end else if (!d1a_pkt.regs.keyon && d1a_pkt.cur_state != EG_OFF
+                                                 && d1a_pkt.cur_state != EG_REL) begin
+                    // Key-off transition: ATT/DEC/SUS -> REL.  Must EXCLUDE EG_REL,
+                    // else (keyon=0 holds) this branch re-asserts EG_REL every frame
+                    // and the EG_REL advance below never runs → release freezes at
+                    // its current volume → note rings forever (MBwave "won't stop").
                     new_state = EG_REL;
                 end else begin
                     case (d1a_pkt.cur_state)
@@ -1020,23 +1038,29 @@ module ymf278_pcm_engine #(
     //    Splits calc_vol's two-multiplier chain.  Originally one cycle had
     //    32×8 mult → barrel shift → 16×32 mult → fixed shift (>>>15), which
     //    was the critical -10ns path.  Register tmp here, do sample×tmp next.
+    //    Reference applies env and TL as TWO INDEPENDENT vol_factor stages, each
+    //    clipped to silence at index>=0x280 — NOT one clip on the summed index.
+    //    Compute both gains here (off the sample path); the cascaded sample
+    //    multiplies happen in D2b (env) and D2c (TL).
     always_ff @(posedge clk or negedge rst_n) begin
-        logic [10:0] total_atten;
-        logic [7:0]  vol_mul;
-        logic [4:0]  vol_shift;
-        // init for latch avoidance
-        total_atten = 11'd0;
-        vol_mul     = 8'd0;
-        vol_shift   = 5'd0;
+        logic [9:0]  env_idx, tl_idx;
+        logic [7:0]  vmul_e, vmul_t;
+        logic [4:0]  vsh_e, vsh_t;
+        env_idx = 10'd0; tl_idx = 10'd0;
+        vmul_e  = 8'd0;  vmul_t = 8'd0;
+        vsh_e   = 5'd0;  vsh_t  = 5'd0;
 
         if (!rst_n) begin
             d2a_pkt <= '0;
         end else begin
             d2a_pkt.valid <= d1_pkt.valid;
             if (d1_pkt.valid) begin
-                total_atten = {1'b0, d1_pkt.next_eg_vol} + {1'b0, d1_pkt.tl, 2'b00};
-                vol_mul     = 8'h80 - {2'b0, total_atten[5:0]};
-                vol_shift   = 5'(4'd7 + {1'b0, total_atten[9:6]});
+                env_idx = d1_pkt.next_eg_vol;        // envelope attenuation 0..0x280
+                tl_idx  = {d1_pkt.tl, 2'b00};        // TL << 2
+                vmul_e  = 8'h80 - {2'b0, env_idx[5:0]};
+                vsh_e   = 5'(4'd7 + {1'b0, env_idx[9:6]});
+                vmul_t  = 8'h80 - {2'b0, tl_idx[5:0]};
+                vsh_t   = 5'(4'd7 + {1'b0, tl_idx[9:6]});
 
                 d2a_pkt.slot        <= d1_pkt.slot;
                 d2a_pkt.pan         <= d1_pkt.pan;
@@ -1045,18 +1069,16 @@ module ymf278_pcm_engine #(
                 d2a_pkt.eg_vol      <= d1_pkt.next_eg_vol;
                 d2a_pkt.key_on_edge <= d1_pkt.key_on_edge;
                 d2a_pkt.interp      <= d1_pkt.interp;
-                d2a_pkt.silent      <= (total_atten >= 11'h280);
-                // Fold the silent (atten>=0x280) mute into tmp_vol here, where
-                // the d1->d2a path has slack.  This keeps the D2b multiply a
-                // clean DSP with no SCLR/silent LUT in front of it — that LUT
-                // was the -0.062ns setup violator on interp->vol_sample.
-                d2a_pkt.tmp_vol     <= (total_atten >= 11'h280) ? 32'sd0
-                                     : ((32'sh8000 * $signed({1'b0, vol_mul})) >>> vol_shift);
+                // vol_factor gain; clip to 0 when that factor alone reaches -60dB.
+                d2a_pkt.gain_e      <= (env_idx >= 10'h280) ? 32'sd0
+                                     : ((32'sh8000 * $signed({1'b0, vmul_e})) >>> vsh_e);
+                d2a_pkt.gain_t      <= (tl_idx  >= 10'h280) ? 32'sd0
+                                     : ((32'sh8000 * $signed({1'b0, vmul_t})) >>> vsh_t);
             end
         end
     end
 
-    // ── D2b: calc_vol stage 2 — vol_sample = (interp × tmp_vol) >>> 15
+    // ── D2b: vol_factor stage 1 — inner = (interp × gain_e) >>> 15  (ENV applied)
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             d2_pkt <= '0;
@@ -1069,9 +1091,29 @@ module ymf278_pcm_engine #(
                 d2_pkt.eg_state    <= d2a_pkt.eg_state;
                 d2_pkt.eg_vol      <= d2a_pkt.eg_vol;
                 d2_pkt.key_on_edge <= d2a_pkt.key_on_edge;
-                // tmp_vol is already 0 when silent (folded in D2a), so this is a
-                // clean multiply — no silent mux/SCLR LUT in the DSP's data path.
-                d2_pkt.vol_sample  <= ($signed(d2a_pkt.interp) * d2a_pkt.tmp_vol) >>> 15;
+                d2_pkt.gain_t      <= d2a_pkt.gain_t;
+                // gain_e is already 0 when env clipped → clean DSP multiply.
+                d2_pkt.inner       <= ($signed(d2a_pkt.interp) * d2a_pkt.gain_e) >>> 15;
+            end
+        end
+    end
+
+    // ── D2c: vol_factor stage 2 — vol_sample = (inner × gain_t) >>> 15 (TL applied)
+    //    Reference nests: smplOut = vol_factor(vol_factor(sample, env), TL<<2).
+    //    Second cascaded multiply gets its own cycle (free in the 64-cyc window).
+    always_ff @(posedge clk or negedge rst_n) begin
+        if (!rst_n) begin
+            d2c_pkt <= '0;
+        end else begin
+            d2c_pkt.valid <= d2_pkt.valid;
+            if (d2_pkt.valid) begin
+                d2c_pkt.slot        <= d2_pkt.slot;
+                d2c_pkt.pan         <= d2_pkt.pan;
+                d2c_pkt.new_dyn     <= d2_pkt.new_dyn;
+                d2c_pkt.eg_state    <= d2_pkt.eg_state;
+                d2c_pkt.eg_vol      <= d2_pkt.eg_vol;
+                d2c_pkt.key_on_edge <= d2_pkt.key_on_edge;
+                d2c_pkt.vol_sample  <= (d2_pkt.inner * d2_pkt.gain_t) >>> 15;
             end
         end
     end
@@ -1088,12 +1130,12 @@ module ymf278_pcm_engine #(
         if (!rst_n) begin
             d3_left <= '0; d3_right <= '0; d3_valid <= 1'b0;
         end else begin
-            d3_valid <= d2_pkt.valid;
-            if (d2_pkt.valid) begin
-                pl_gain = pan_att_left (d2_pkt.pan);
-                pr_gain = pan_att_right(d2_pkt.pan);
-                d3_left  <= 24'((d2_pkt.vol_sample * 32'($signed({26'd0, pl_gain}))) >>> 5);
-                d3_right <= 24'((d2_pkt.vol_sample * 32'($signed({26'd0, pr_gain}))) >>> 5);
+            d3_valid <= d2c_pkt.valid;
+            if (d2c_pkt.valid) begin
+                pl_gain = pan_att_left (d2c_pkt.pan);
+                pr_gain = pan_att_right(d2c_pkt.pan);
+                d3_left  <= 24'((d2c_pkt.vol_sample * 32'($signed({26'd0, pl_gain}))) >>> 5);
+                d3_right <= 24'((d2c_pkt.vol_sample * 32'($signed({26'd0, pr_gain}))) >>> 5);
             end
         end
     end
@@ -1125,15 +1167,15 @@ module ymf278_pcm_engine #(
             pcm_valid <= 1'b0;
 
             // ram_dyn writeback stays D2-aligned (not on the accum critical path).
-            if (d2_pkt.valid) begin
-                dyn_upd            = d2_pkt.new_dyn;
-                dyn_upd.env_state  = d2_pkt.eg_state;
-                dyn_upd.env_vol    = d2_pkt.eg_vol;
-                if (d2_pkt.key_on_edge) begin
+            if (d2c_pkt.valid) begin
+                dyn_upd            = d2c_pkt.new_dyn;
+                dyn_upd.env_state  = d2c_pkt.eg_state;
+                dyn_upd.env_vol    = d2c_pkt.eg_vol;
+                if (d2c_pkt.key_on_edge) begin
                     dyn_upd.pos     = 16'd0;
                     dyn_upd.stepPtr = 16'd0;
                 end
-                ram_dyn[d2_pkt.slot] <= dyn_upd;
+                ram_dyn[d2c_pkt.slot] <= dyn_upd;
             end
             // Accumulate the pan-weighted samples registered by D3a (1 cycle later).
             if (d3_valid) begin
@@ -1668,8 +1710,8 @@ module ymf278_pcm_engine #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin active_acc <= '0; dbg_slot_active <= '0; act_frames <= '0; end
         else begin
-            if (d2_pkt.valid && d2_pkt.vol_sample != 32'sd0)
-                active_acc[d2_pkt.slot] <= 1'b1;
+            if (d2c_pkt.valid && d2c_pkt.vol_sample != 32'sd0)
+                active_acc[d2c_pkt.slot] <= 1'b1;
             if (sample_start) begin
                 act_frames <= act_frames + 14'd1;
                 if (act_frames == 14'h3FFF) begin
