@@ -1038,7 +1038,12 @@ module ymf278_pcm_engine #(
                 d2a_pkt.key_on_edge <= d1_pkt.key_on_edge;
                 d2a_pkt.interp      <= d1_pkt.interp;
                 d2a_pkt.silent      <= (total_atten >= 11'h280);
-                d2a_pkt.tmp_vol     <= (32'sh8000 * $signed({1'b0, vol_mul})) >>> vol_shift;
+                // Fold the silent (atten>=0x280) mute into tmp_vol here, where
+                // the d1->d2a path has slack.  This keeps the D2b multiply a
+                // clean DSP with no SCLR/silent LUT in front of it — that LUT
+                // was the -0.062ns setup violator on interp->vol_sample.
+                d2a_pkt.tmp_vol     <= (total_atten >= 11'h280) ? 32'sd0
+                                     : ((32'sh8000 * $signed({1'b0, vol_mul})) >>> vol_shift);
             end
         end
     end
@@ -1056,8 +1061,9 @@ module ymf278_pcm_engine #(
                 d2_pkt.eg_state    <= d2a_pkt.eg_state;
                 d2_pkt.eg_vol      <= d2a_pkt.eg_vol;
                 d2_pkt.key_on_edge <= d2a_pkt.key_on_edge;
-                d2_pkt.vol_sample  <= d2a_pkt.silent ? 32'sd0
-                    : ($signed(d2a_pkt.interp) * d2a_pkt.tmp_vol) >>> 15;
+                // tmp_vol is already 0 when silent (folded in D2a), so this is a
+                // clean multiply — no silent mux/SCLR LUT in the DSP's data path.
+                d2_pkt.vol_sample  <= ($signed(d2a_pkt.interp) * d2a_pkt.tmp_vol) >>> 15;
             end
         end
     end
