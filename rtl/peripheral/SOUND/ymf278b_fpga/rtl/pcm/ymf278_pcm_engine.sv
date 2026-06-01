@@ -640,6 +640,10 @@ module ymf278_pcm_engine #(
     wire [7:0] sbb2 = b_raw[3'(sb_off_a0) + 3'd2];
     wire [7:0] sbb3 = b_raw[sb_b_idx];
     wire [7:0] sbb4 = b_raw[sb_b_idx + 3'd1];
+    // 3rd byte of the B-window chunk — needed to decode an ODD-position 12-bit
+    // sample B at a loop seam (split).  raw[4..7] are fetched in the split read,
+    // so sbb5 is valid whenever sb_split; unused (and don't-care) when contiguous.
+    wire [7:0] sbb5 = b_raw[sb_b_idx + 3'd2];
 
     always_comb begin
         case (stage_b_reg.header.bits)
@@ -652,13 +656,22 @@ module ymf278_pcm_engine #(
             2'd1: begin // 12-bit
                 samp_a = decode_sample(sbb0, sbb1, sbb2,
                                             stage_b_reg.dyn.pos, 2'd1);
-                if (stage_b_reg.dyn.pos[0]) begin
-                    // p odd → p+1 even → sample B's chunk = next chunk (bytes[3,4])
-                    // decode_sample for even-pos: uses b0 + (b1<<4)&0xF0
+                if (sb_split) begin
+                    // LOOP SEAM: sample B is the (far) loop-start chunk fetched
+                    // into the separate B-window (sbb3=b0, sbb4=b1, sbb5=b2).
+                    // Decode it by B's OWN (next_pos) parity — NOT sample A's.
+                    // The old code branched on A's parity assuming B=A+1, which
+                    // at an odd-length loop wrap (A even) wrongly re-decoded A's
+                    // own chunk and ignored the loop-start bytes → per-loop seam
+                    // corruption / sustain failure on odd-loop 12-bit waves.
+                    samp_b = decode_sample(sbb3, sbb4, sbb5,
+                                                stage_b_reg.next_pos, 2'd1);
+                end else if (stage_b_reg.dyn.pos[0]) begin
+                    // contiguous, A odd → B=A+1 even → next chunk (bytes[3,4])
                     samp_b = decode_sample(sbb3, sbb4, 8'h00,
                                                 stage_b_reg.next_pos, 2'd1);
                 end else begin
-                    // p even → p+1 odd → sample B in SAME chunk (bytes[0..2])
+                    // contiguous, A even → B=A+1 odd → same chunk (bytes[0..2])
                     samp_b = decode_sample(sbb0, sbb1, sbb2,
                                                 stage_b_reg.next_pos, 2'd1);
                 end
