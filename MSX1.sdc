@@ -77,3 +77,16 @@ set_multicycle_path -setup -end 4 \
 set_multicycle_path -hold  -end 3 \
     -from [get_registers {*u_pcm|next_pos_r*}] \
     -to   [get_registers {*u_pcm|next_pos_for_b_r*}]
+
+# OPL4 PCM Stage B -> Stage C sample decode/interpolation.  stage_b_reg, sb_split
+# and sb_b_idx all latch at stage_advance (slot_phase==63) and hold for the whole
+# 64-cycle window; stage_c_reg samples the decode result at the NEXT stage_advance,
+# ~64 cycles later.  The 12-bit loop-seam fix added an sb_split branch to this
+# combinational decode, pushing stage_b_reg/sb_split -> stage_c_reg.interp to
+# -0.418ns under single-cycle analysis — pessimistic, since the window is free.
+set_multicycle_path -setup -end 4 \
+    -from [get_registers {*u_pcm|stage_b_reg* *u_pcm|sb_split* *u_pcm|sb_b_idx*}] \
+    -to   [get_registers {*u_pcm|stage_c_reg*}]
+set_multicycle_path -hold  -end 3 \
+    -from [get_registers {*u_pcm|stage_b_reg* *u_pcm|sb_split* *u_pcm|sb_b_idx*}] \
+    -to   [get_registers {*u_pcm|stage_c_reg*}]
