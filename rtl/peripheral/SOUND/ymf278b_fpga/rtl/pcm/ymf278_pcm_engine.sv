@@ -863,8 +863,12 @@ module ymf278_pcm_engine #(
                 key_on_prev[stage_c_reg.slot] <= stage_c_reg.regs.keyon;
 
                 // State-dispatched rate selection (matches process_eg's prologue).
-                // Attack rate is also used for the "key_on edge from EG_OFF" path.
-                if (edge_now && stage_c_reg.dyn.env_state == EG_OFF) begin
+                // A key-on edge ALWAYS restarts the note (ref keyOnHelper: env is
+                // reset because the sample restarts) — so use the attack rate for
+                // ANY key-on edge, not only when the slot was already EG_OFF.
+                // Gating on EG_OFF made a re-key of a still-releasing/sustaining
+                // slot reset pos (line ~1124) but NOT env → silent "toggle".
+                if (edge_now) begin
                     rate_v = calc_eg_rate(stage_c_reg.regs.ar,
                                           stage_c_reg.regs.rc,
                                           stage_c_reg.regs.oct,
@@ -939,9 +943,13 @@ module ymf278_pcm_engine #(
                 new_vol   = d1a_pkt.cur_vol;
                 new_state = d1a_pkt.cur_state;
 
-                if (d1a_pkt.key_on_edge && d1a_pkt.cur_state == EG_OFF) begin
-                    // Start of note: jump to attack (or skip straight to SUS/DEC
-                    // if rate==63 means instant attack).
+                if (d1a_pkt.key_on_edge) begin
+                    // Key-on edge ALWAYS restarts the envelope (ref keyOnHelper),
+                    // matching the unconditional pos/stepPtr reset at key_on_edge.
+                    // Jump to attack (or skip straight to SUS/DEC if rate==63 =
+                    // instant attack).  Was gated on cur_state==EG_OFF, which left
+                    // a re-keyed releasing/sustaining slot at its decayed volume
+                    // (sample restarted, env did not) → silent on/off toggle.
                     new_vol = MAX_ATT_INDEX;
                     if (d1a_pkt.rate < 6'd63) new_state = EG_ATT;
                     else begin
