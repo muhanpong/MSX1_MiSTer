@@ -244,6 +244,16 @@ module ymf278_pcm_engine #(
     slot_dyn_t    ram_dyn    [0:23];
 
     logic [23:0] key_on_prev;
+    // Per-slot key-on re-trigger latch.  The dispatch-sampled edge detector
+    // (keyon & ~key_on_prev, evaluated once per frame at d1a) MISSES a
+    // key-off→key-on that the CPU issues within a single frame — exactly what a
+    // wave change does (keyoff; fn; wave#; keyon — all back-to-back, <1 frame).
+    // The intermediate keyon=0 is never sampled, so no edge fires and pos/env
+    // are NOT reset → the new wave plays from the previous wave's position/data
+    // ("방향 의존성").  openMSX resets on every keyoff→keyon because it processes
+    // each write immediately.  We mirror that by latching the edge at WRITE time
+    // (key-on write while the slot's current keyon==0) and consuming it at d1a.
+    logic [23:0] key_retrig;
 
     // ════════════════════════════════════════════════════════════════════════
     // Pipeline registers between stages
@@ -889,7 +899,11 @@ module ymf278_pcm_engine #(
         end else begin
             d1a_pkt.valid <= 1'b0;
             if (stage_advance && stage_c_reg.valid) begin
-                edge_now = stage_c_reg.regs.keyon & ~key_on_prev[stage_c_reg.slot];
+                // Edge = dispatch-sampled rising edge OR a write-time re-trigger
+                // latch (catches intra-frame keyoff→keyon that the per-frame
+                // sample misses — the wave-change "방향 의존성" root cause).
+                edge_now = (stage_c_reg.regs.keyon & ~key_on_prev[stage_c_reg.slot])
+                         | key_retrig[stage_c_reg.slot];
                 key_on_prev[stage_c_reg.slot] <= stage_c_reg.regs.keyon;
 
                 // State-dispatched rate selection (matches process_eg's prologue).
@@ -1532,6 +1546,29 @@ module ymf278_pcm_engine #(
         end else begin
             if (hf_pick_now) hf_pending[hf_picked] <= 1'b0;
             if (wr_sets_hf)  hf_pending[wr_snum]   <= 1'b1; // wins over clear
+        end
+    end
+
+    // Consolidated key_retrig driver (mirror of hf_pending): the CPU decoder
+    // sets the bit on a key-on write edge (field 4 bit7=1 while the slot's
+    // *current* keyon is 0 — i.e. ref's `if (!slot.keyon)`); d1a clears it when
+    // it consumes the slot.  SET wins on a same-cycle same-slot collision so a
+    // re-key issued right as the slot is processed is never dropped.
+    wire        retrig_consume = stage_advance && stage_c_reg.valid;
+    wire [4:0]  retrig_slot     = stage_c_reg.slot;   // local wire: iverilog can't
+                                                       // bit-select with a struct member index
+
+    always_ff @(posedge clk or negedge rst_n) begin
+        slot_regs_t cur_r;
+        logic       wr_key_on_edge;
+        cur_r = ram_regs[wr_snum];   // whole-struct read (member-on-index needs this)
+        wr_key_on_edge = wr_slot_reg && (wr_field == 4'd4)
+                      && reg_data[7] && !cur_r.keyon;
+        if (!rst_n) begin
+            key_retrig <= '0;
+        end else begin
+            if (retrig_consume) key_retrig[retrig_slot] <= 1'b0;
+            if (wr_key_on_edge) key_retrig[wr_snum]     <= 1'b1; // wins
         end
     end
 

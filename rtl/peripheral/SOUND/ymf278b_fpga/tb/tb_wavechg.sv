@@ -220,6 +220,15 @@ module tb_wavechg;
         end
     end
 
+    // Latch any slot-0 key-on edge seen at d1a (recompute the engine's edge_now).
+    logic s0_edge_seen; logic clr_edge=0;
+    always_ff @(posedge clk) begin
+        if (!rst_n || clr_edge) s0_edge_seen <= 1'b0;
+        else if (dut.stage_advance && dut.stage_c_reg.valid && dut.stage_c_reg.slot==5'd0
+                 && ((dut.stage_c_reg.regs.keyon & ~dut.key_on_prev[0]) | dut.key_retrig[0]))
+            s0_edge_seen <= 1'b1;
+    end
+
     int passes=0, fails=0;
     task check(string n, logic ok); if(ok)begin $display("PASS: %s",n);passes++;end else begin $display("FAIL: %s",n);fails++;end endtask
     task write_reg(input [7:0] a, input [7:0] d);
@@ -290,7 +299,52 @@ module tb_wavechg;
         $display("  [TRUTH wv=%0d] start=%h loop=%h end=%h bits=%b AR=%0d", wv, hs, hl, he, hb, har);
     endtask
 
+    // Transient probe: switch prev->new with gap=0 (keyon immediately after the
+    // wave write, same as the real trace), then watch dbg_slot0_hdr_start +
+    // pos + mem_addr region every frame for N frames.  A STALE header (== prev
+    // wave's start) while the slot is already keyed-on means the slot plays the
+    // PREVIOUS wave's sample data until the frame-tail HF finally backfills.
+    task transient_probe(input [8:0] prev_wv, input [21:0] prev_start,
+                         input [8:0] new_wv,  input [21:0] new_start,
+                         input string label);
+        int stale_frames; logic [21:0] hs0;
+        rst_n=0; repeat(8) @(posedge clk); rst_n=1; repeat(4) @(posedge clk);
+        // establish + advance prev wave
+        write_reg(8'h68, 8'h00); write_reg(8'h20, {7'd0, prev_wv[8]});
+        write_reg(8'h08, prev_wv[7:0]); write_reg(8'h68, 8'h80);
+        frames(60);
+        @(negedge clk) clr_edge=1; @(negedge clk) clr_edge=0;  // isolate the switch edge
+        // gap=0 switch: keyoff, fn, wave#, keyon — all back-to-back (no frame gap)
+        write_reg(8'h68, 8'h00); write_reg(8'h20, {7'd0, new_wv[8]});
+        write_reg(8'h08, new_wv[7:0]); write_reg(8'h68, 8'h80);
+        $display("  --- [%s] %0d->%0d gap0: prev_start=%h new_start=%h ---",
+                 label, prev_wv, new_wv, prev_start, new_start);
+        stale_frames = 0;
+        for (int f = 0; f < 12; f++) begin
+            hs0 = dbg_slot0_hdr_start;
+            $display("    f=%0d hdr_start=%h %s  pos=%0d env=%0d hf_pend0=%b keyon=%b retrig0=%b s0edge=%b",
+                     f, hs0,
+                     (hs0==prev_start)?"STALE(prev!)":(hs0==new_start)?"ok(new)":"?",
+                     dbg_slot0_dyn_pos, dbg_slot0_dyn_env_state, dbg_hf_pending[0],
+                     dbg_slot0_keyon, dut.key_retrig[0], s0_edge_seen);
+            if (hs0 == prev_start) stale_frames++;
+            frames(1);
+        end
+        $display("  --- [%s] stale_frames(keyon w/ prev header) = %0d ---", label, stale_frames);
+        // The intra-frame keyoff->keyon (gap0) MUST be detected as a key-on edge
+        // and reset pos to 0 (then it re-advances slowly).  Pre-fix, pos stayed
+        // at the previous wave's value (~29) → new wave played from a stale
+        // position = the "방향 의존성" symptom.  After 12 frames a freshly-reset
+        // slow voice is still well under 16.
+        check({label, ": re-key edge detected (s0_edge_seen)"}, s0_edge_seen);
+        check({label, ": pos reset to 0 on gap0 re-key (pos<16)"}, dbg_slot0_dyn_pos < 16'd16);
+    endtask
+
     initial begin
+        // ── Transient (gap=0) probes for the direction-dependency hypothesis ──
+        transient_probe(9'd122, 22'h0c6ac5, 9'd123, 22'h0cbc46, "122->123");
+        transient_probe(9'd124, 22'h0cc771, 9'd123, 22'h0cbc46, "124->123");
+
         truth(9'd123);                            // ground truth for wave 123
         // 122 -> 123 with a SHORT gap (race): is the header stale (122's)?
         rst_n=0; repeat(8) @(posedge clk); rst_n=1; repeat(4) @(posedge clk);
