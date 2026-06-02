@@ -77,6 +77,26 @@ set_multicycle_path -setup -end 4 \
 set_multicycle_path -hold  -end 3 \
     -from [get_registers {*u_pcm|next_pos_r*}] \
     -to   [get_registers {*u_pcm|next_pos_for_b_r*}]
+# OPL4 PCM LFO vibrato ([14]).  vib_off_r = compute_vib(stage_a_reg.dyn.lfo_cnt):
+# triangle fold + multiply + signed /12 — a deep combinational cloud (~45 ns,
+# single-cycle slack -33.9 ns).  lfo_cnt is part of stage_a_reg, latched once
+# per 64-cycle slot window and held; vib_off_r is only consumed (via calc_step ->
+# next_pos_r) at the next stage_advance.  Window is free → multicycle (6 covers
+# the /12 with margin).
+set_multicycle_path -setup -end 6 \
+    -from [get_registers {*u_pcm|stage_a_reg*}] \
+    -to   [get_registers {*u_pcm|vib_off_r*}]
+set_multicycle_path -hold  -end 5 \
+    -from [get_registers {*u_pcm|stage_a_reg*}] \
+    -to   [get_registers {*u_pcm|vib_off_r*}]
+# vib_off_r feeds calc_step -> next_pos_r / next_stepPtr_r (same window-stable
+# datapath as the oct/fn paths above).
+set_multicycle_path -setup -end 4 \
+    -from [get_registers {*u_pcm|vib_off_r*}] \
+    -to   [get_registers {*u_pcm|next_pos_r* *u_pcm|next_stepPtr_r*}]
+set_multicycle_path -hold  -end 3 \
+    -from [get_registers {*u_pcm|vib_off_r*}] \
+    -to   [get_registers {*u_pcm|next_pos_r* *u_pcm|next_stepPtr_r*}]
 
 # OPL4 PCM Stage B -> Stage C sample decode/interpolation.  stage_b_reg, sb_split
 # and sb_b_idx all latch at stage_advance (slot_phase==63) and hold for the whole
