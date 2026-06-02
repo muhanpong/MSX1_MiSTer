@@ -23,6 +23,77 @@ package ymf278_pcm_alu_pkg;
     endfunction
 
     // ========================================================================
+    // 1b. LFO — vibrato (pitch) and tremolo (amplitude)
+    // Matches openMSX YMF278.cc compute_vib() / compute_am() and the
+    // lfo_period / vib_depth / am_depth tables.  LFO_PERIOD = 1<<18.
+    //   compute_vib: lfo_cnt -> triangle in [-0xF..+0xF] -> *vib_depth/12
+    //                returns a signed F-Num offset fed into calc_step().
+    //   compute_am : lfo_cnt -> triangle in [0..0x7F] -> *am_depth>>7
+    //                returns a 0..0x7F attenuation ADDED to env_vol (clip 0x280).
+    // ========================================================================
+    function automatic [5:0] vib_depth_rom(input [2:0] v);
+        case (v)
+            3'd0: return 6'd0;   3'd1: return 6'd2;
+            3'd2: return 6'd3;   3'd3: return 6'd4;
+            3'd4: return 6'd6;   3'd5: return 6'd12;
+            3'd6: return 6'd24;  3'd7: return 6'd48;
+            default: return 6'd0;
+        endcase
+    endfunction
+
+    function automatic [7:0] am_depth_rom(input [2:0] a);
+        case (a)
+            3'd0: return 8'h00;  3'd1: return 8'h14;
+            3'd2: return 8'h20;  3'd3: return 8'h28;
+            3'd4: return 8'h30;  3'd5: return 8'h40;
+            3'd6: return 8'h50;  3'd7: return 8'h80;
+            default: return 8'h00;
+        endcase
+    endfunction
+
+    function automatic [5:0] lfo_period_rom(input [2:0] s);
+        // increments per sample (period 262144..6242 samples)
+        case (s)
+            3'd0: return 6'd1;   3'd1: return 6'd12;
+            3'd2: return 6'd19;  3'd3: return 6'd25;
+            3'd4: return 6'd31;  3'd5: return 6'd35;
+            3'd6: return 6'd37;  3'd7: return 6'd42;
+            default: return 6'd1;
+        endcase
+    endfunction
+
+    // Vibrato F-Num offset.  lfo_cnt is the 18-bit per-slot LFO counter.
+    function automatic signed [15:0] compute_vib(
+        input [17:0] lfo_cnt,
+        input [2:0]  vib
+    );
+        logic signed [15:0] lfo_fm;
+        logic signed [15:0] depth;
+        logic signed [31:0] prod;
+        // lfo_cnt / (LFO_PERIOD/0x40) = lfo_cnt >> 12  -> 0..63
+        lfo_fm = $signed({10'd0, lfo_cnt[17:12]});
+        if (lfo_fm & 16'sh0010) lfo_fm = lfo_fm ^ 16'sh001F;
+        if (lfo_fm & 16'sh0020) lfo_fm = -(lfo_fm & 16'sh000F);
+        depth = $signed({10'd0, vib_depth_rom(vib)});
+        prod  = lfo_fm * depth;            // -720..+720
+        return 16'(prod / 32'sd12);        // truncates toward zero (matches C++)
+    endfunction
+
+    // Tremolo attenuation added to env_vol (0..0x7F).
+    function automatic [8:0] compute_am(
+        input [17:0] lfo_cnt,
+        input [2:0]  am
+    );
+        logic [7:0]  lfo_am;
+        logic [15:0] prod;
+        // lfo_cnt / (LFO_PERIOD/0x100) = lfo_cnt >> 10  -> 0..255
+        lfo_am = lfo_cnt[17:10];
+        if (lfo_am[7]) lfo_am = lfo_am ^ 8'hFF;   // triangle -> 0..127
+        prod = lfo_am * am_depth_rom(am);
+        return 9'(prod >> 7);
+    endfunction
+
+    // ========================================================================
     // 2. Linear Interpolation
     // Matches openMSX: sample = samp_a + ((samp_b - samp_a) * stepPtr) >> 16
     // ========================================================================

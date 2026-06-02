@@ -219,6 +219,7 @@ module ymf278_pcm_engine #(
         logic        keyon;
         logic [3:0]  ar, d1r, d2r, rc, rr;
         logic [2:0]  am, vib, lfo_speed;
+        logic        lfo_active;     // reg field 4 bit5: 0=active, 1=reset/off
         logic [3:0]  dl_idx;
         logic        damp, prvb;
     } slot_regs_t;
@@ -235,6 +236,7 @@ module ymf278_pcm_engine #(
         logic [15:0] stepPtr;
         logic [9:0]  env_vol;
         logic [2:0]  env_state;
+        logic [17:0] lfo_cnt;       // per-slot LFO phase (LFO_PERIOD = 1<<18)
     } slot_dyn_t;
 
     slot_regs_t   ram_regs   [0:23];
@@ -362,23 +364,36 @@ module ymf278_pcm_engine #(
     logic [15:0]      next_pos_for_b_r;
     logic [15:0]      next_stepPtr_r;
 
+    // LFO vibrato F-Num offset for the dispatched slot.  Computed combinationally
+    // from the slot's current lfo_cnt, then registered (vib_off_r) so the
+    // compute_vib mult/div is out of the calc_step→next_pos carry chain.  Like
+    // next_pos_r, it settles within 2 cycles of dispatch — long before
+    // stage_advance (slot_phase 63) consumes the step.
+    logic signed [15:0] vib_off;
+    logic signed [15:0] vib_off_r;
+
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             next_pos_r       <= '0;
             next_pos_for_b_r <= '0;
             next_stepPtr_r   <= '0;
+            vib_off_r        <= '0;
         end else begin
             next_pos_r       <= next_pos;
             next_pos_for_b_r <= next_pos_for_b;
             next_stepPtr_r   <= next_stepPtr;
+            vib_off_r        <= vib_off;
         end
     end
 
     always_comb begin
-        // VIB=0 for now; TODO wire up LFO VIB output
+        // LFO vibrato: gate on lfo_active && vib!=0 (ref generateChannels).
+        vib_off = (stage_a_reg.regs.lfo_active && stage_a_reg.regs.vib != 3'd0)
+                ? compute_vib(stage_a_reg.dyn.lfo_cnt, stage_a_reg.regs.vib)
+                : 16'sd0;
         next_step_full = calc_step(stage_a_reg.regs.oct,
                                        stage_a_reg.regs.fn,
-                                       16'sh0);
+                                       vib_off_r);
 
         // Step accumulation: pos advances when stepPtr overflows.
         // For 16-bit stepPtr with step[15:0] increment.
@@ -575,6 +590,7 @@ module ymf278_pcm_engine #(
             stage_b_reg.dyn.stepPtr   <= next_stepPtr_r;
             stage_b_reg.dyn.env_vol   <= stage_a_reg.dyn.env_vol;
             stage_b_reg.dyn.env_state <= stage_a_reg.dyn.env_state;
+            stage_b_reg.dyn.lfo_cnt   <= stage_a_reg.dyn.lfo_cnt;
             stage_b_reg.next_pos <= next_pos_for_b_r;
             stage_b_reg.addrs    <= next_addrs;
             stage_b_reg.bytes    <= '0;   // unused now; decode reads b_raw
@@ -798,9 +814,10 @@ module ymf278_pcm_engine #(
         logic [3:0]           pan;
         logic [7:0]           tl;
         logic signed [15:0]   interp;
-        slot_dyn_t            new_dyn;       // pos/stepPtr from Stage C
+        slot_dyn_t            new_dyn;       // pos/stepPtr from Stage C; lfo_cnt advanced
         logic [2:0]           next_eg_state;
         logic [9:0]           next_eg_vol;
+        logic [8:0]           am_off;        // LFO tremolo atten (0..0x7F), added at D2a
         logic                 key_on_edge;
     } d1_pkt_t;
 
@@ -942,10 +959,14 @@ module ymf278_pcm_engine #(
         logic [10:0] vol_add;
         logic [9:0]  new_vol;
         logic [2:0]  new_state;
+        logic [8:0]  am_off_v;
+        slot_dyn_t   nd;
 
         vol_add   = 11'd0;
         new_vol   = 10'd0;
         new_state = 3'd0;
+        am_off_v  = 9'd0;
+        nd        = '0;
 
         if (!rst_n) begin
             d1_pkt <= '0;
@@ -1021,14 +1042,31 @@ module ymf278_pcm_engine #(
                     endcase
                 end
 
+                // LFO tremolo offset — uses the CURRENT (pre-advance) lfo_cnt,
+                // matching the reference (compute_am runs before advance()).
+                am_off_v = (d1a_pkt.regs.lfo_active && d1a_pkt.regs.am != 3'd0)
+                         ? compute_am(d1a_pkt.new_dyn.lfo_cnt, d1a_pkt.regs.am)
+                         : 9'd0;
+                // Advance the per-slot LFO phase for next sample (ref advance():
+                // lfo_cnt += lfo_period[lfo] when active).  Force 0 while inactive
+                // so a LFO reset (field4 bit5=1) zeroes the phase and reactivation
+                // restarts from 0 — no second ram_dyn writer needed.
+                nd = d1a_pkt.new_dyn;
+                nd.lfo_cnt = d1a_pkt.regs.lfo_active
+                           ? ((d1a_pkt.new_dyn.lfo_cnt
+                               + {12'd0, lfo_period_rom(d1a_pkt.regs.lfo_speed)})
+                              & 18'h3FFFF)
+                           : 18'd0;
+
                 d1_pkt.valid         <= 1'b1;
                 d1_pkt.slot          <= d1a_pkt.slot;
                 d1_pkt.pan           <= d1a_pkt.regs.pan;
                 d1_pkt.tl            <= d1a_pkt.regs.tl;
                 d1_pkt.interp        <= d1a_pkt.interp;
-                d1_pkt.new_dyn       <= d1a_pkt.new_dyn;
+                d1_pkt.new_dyn       <= nd;
                 d1_pkt.next_eg_state <= new_state;
                 d1_pkt.next_eg_vol   <= new_vol;
+                d1_pkt.am_off        <= am_off_v;
                 d1_pkt.key_on_edge   <= d1a_pkt.key_on_edge;
             end
         end
@@ -1043,10 +1081,11 @@ module ymf278_pcm_engine #(
     //    Compute both gains here (off the sample path); the cascaded sample
     //    multiplies happen in D2b (env) and D2c (TL).
     always_ff @(posedge clk or negedge rst_n) begin
-        logic [9:0]  env_idx, tl_idx;
+        logic [10:0] env_idx;
+        logic [9:0]  tl_idx;
         logic [7:0]  vmul_e, vmul_t;
         logic [4:0]  vsh_e, vsh_t;
-        env_idx = 10'd0; tl_idx = 10'd0;
+        env_idx = 11'd0; tl_idx = 10'd0;
         vmul_e  = 8'd0;  vmul_t = 8'd0;
         vsh_e   = 5'd0;  vsh_t  = 5'd0;
 
@@ -1055,7 +1094,9 @@ module ymf278_pcm_engine #(
         end else begin
             d2a_pkt.valid <= d1_pkt.valid;
             if (d1_pkt.valid) begin
-                env_idx = d1_pkt.next_eg_vol;        // envelope attenuation 0..0x280
+                // envVol = min(env_vol + LFO tremolo, 0x280)  (ref generateChannels)
+                env_idx = {1'b0, d1_pkt.next_eg_vol} + {2'd0, d1_pkt.am_off};
+                if (env_idx > 11'h280) env_idx = 11'h280;
                 tl_idx  = {d1_pkt.tl, 2'b00};        // TL << 2
                 vmul_e  = 8'h80 - {2'b0, env_idx[5:0]};
                 vsh_e   = 5'(4'd7 + {1'b0, env_idx[9:6]});
@@ -1070,7 +1111,7 @@ module ymf278_pcm_engine #(
                 d2a_pkt.key_on_edge <= d1_pkt.key_on_edge;
                 d2a_pkt.interp      <= d1_pkt.interp;
                 // vol_factor gain; clip to 0 when that factor alone reaches -60dB.
-                d2a_pkt.gain_e      <= (env_idx >= 10'h280) ? 32'sd0
+                d2a_pkt.gain_e      <= (env_idx >= 11'h280) ? 32'sd0
                                      : ((32'sh8000 * $signed({1'b0, vmul_e})) >>> vsh_e);
                 d2a_pkt.gain_t      <= (tl_idx  >= 10'h280) ? 32'sd0
                                      : ((32'sh8000 * $signed({1'b0, vmul_t})) >>> vsh_t);
@@ -1162,6 +1203,7 @@ module ymf278_pcm_engine #(
             dyn_reset.stepPtr   = 16'd0;
             dyn_reset.env_vol   = 10'h280;
             dyn_reset.env_state = 3'd0;
+            dyn_reset.lfo_cnt   = 18'd0;
             for (int i = 0; i < 24; i++) ram_dyn[i] <= dyn_reset;
         end else begin
             pcm_valid <= 1'b0;
@@ -1287,7 +1329,9 @@ module ymf278_pcm_engine #(
                         reg_upd.pan   = reg_data[4] ? 4'd8 : reg_data[3:0];
                         reg_upd.damp  = reg_data[6];
                         reg_upd.keyon = reg_data[7];
-                        // TODO: lfo_active/lfo_reset (reg_data[5]) needs LFO engine
+                        // bit5: 1 = LFO reset (inactive, lfo_cnt held at 0 by the
+                        // writeback advance), 0 = LFO active.  Ref YMF278.cc case 4.
+                        reg_upd.lfo_active = ~reg_data[5];
                     end
                     4'd5: begin
                         reg_upd.lfo_speed = reg_data[5:3];
