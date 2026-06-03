@@ -132,6 +132,14 @@ module ymf278_pcm_engine #(
     logic [4:0]  cur_slot;
     logic [5:0]  slot_phase;
     logic [23:0] eg_cnt;
+    // TL (Total Level) volume-interpolation phase, advanced once per sample with
+    // eg_cnt.  Ref YMF278.cc:335-337: tl_int_cnt = eg_cnt%9, tl_int_step =
+    // (eg_cnt/9)%3.  Maintained incrementally here to avoid a 24-bit %9 // /9.
+    logic [3:0]  tl_int_cnt;    // 0..8
+    logic [1:0]  tl_int_step;   // 0..2
+    // Per-slot current TL, ramped toward the CPU-written target (ram_regs.tl).
+    logic [7:0]  tl_cur [0:23];
+    logic [23:0] tl_load;       // field-3 bit0=1: load TL immediately (no ramp)
 
     // Forward decl: reg 0x02 bit0 (memory-access mode).  Driven in the CPU mem
     // block far below.  The CPU needs the full sample-memory bandwidth to upload
@@ -167,6 +175,8 @@ module ymf278_pcm_engine #(
             cur_slot    <= '0;
             slot_phase  <= '0;
             eg_cnt      <= '0;
+            tl_int_cnt  <= '0;
+            tl_int_step <= '0;
             stall_cnt   <= '0;
         end else begin
             if (frame_cycle == CYCLES_PER_FRAME - 1) begin
@@ -175,6 +185,13 @@ module ymf278_pcm_engine #(
                 slot_phase  <= '0;
                 stall_cnt   <= '0;
                 eg_cnt      <= eg_cnt + 24'd1;
+                // tl_int_cnt = eg_cnt%9 ; tl_int_step = (eg_cnt/9)%3
+                if (tl_int_cnt == 4'd8) begin
+                    tl_int_cnt  <= 4'd0;
+                    tl_int_step <= (tl_int_step == 2'd2) ? 2'd0 : tl_int_step + 2'd1;
+                end else begin
+                    tl_int_cnt <= tl_int_cnt + 4'd1;
+                end
             end else begin
                 frame_cycle <= frame_cycle + 11'd1;
                 if (slot_phase == 6'd63) begin
@@ -1139,9 +1156,11 @@ module ymf278_pcm_engine #(
         logic [9:0]  tl_idx;
         logic [7:0]  vmul_e, vmul_t;
         logic [4:0]  vsh_e, vsh_t;
+        logic [4:0]  d2a_slot;
         env_idx = 11'd0; tl_idx = 10'd0;
         vmul_e  = 8'd0;  vmul_t = 8'd0;
         vsh_e   = 5'd0;  vsh_t  = 5'd0;
+        d2a_slot = 5'd0;
 
         if (!rst_n) begin
             d2a_pkt <= '0;
@@ -1151,7 +1170,10 @@ module ymf278_pcm_engine #(
                 // envVol = min(env_vol + LFO tremolo, 0x280)  (ref generateChannels)
                 env_idx = {1'b0, d1_pkt.next_eg_vol} + {2'd0, d1_pkt.am_off};
                 if (env_idx > 11'h280) env_idx = 11'h280;
-                tl_idx  = {d1_pkt.tl, 2'b00};        // TL << 2
+                // Use the RAMPED TL (tl_cur), not the raw target — gives the
+                // openMSX TL volume glide instead of an instant step.
+                d2a_slot = d1_pkt.slot;
+                tl_idx  = {tl_cur[d2a_slot], 2'b00};  // TL << 2
                 vmul_e  = 8'h80 - {2'b0, env_idx[5:0]};
                 vsh_e   = 5'(4'd7 + {1'b0, env_idx[9:6]});
                 vmul_t  = 8'h80 - {2'b0, tl_idx[5:0]};
@@ -1638,6 +1660,38 @@ module ymf278_pcm_engine #(
         end else begin
             if (retrig_consume) key_retrig[retrig_slot] <= 1'b0;
             if (wr_retrig)      key_retrig[wr_snum]     <= 1'b1; // wins
+        end
+    end
+
+    // ── TL (Total Level) volume ramp ────────────────────────────────────────
+    // openMSX advance() interpolates TL toward TLdest (YMF278.cc:340-349): every
+    // 9 samples, step 0 → TL++ (toward a quieter target, slow), steps 1/2 → TL--
+    // (toward a louder target, faster).  A field-3 write with bit0=1 loads TL
+    // immediately.  The FPGA previously loaded TL instantly always (no glide).
+    // ram_regs.tl is the TARGET (TLdest, CPU-written); tl_cur is the per-slot
+    // ramped value the volume stage uses.  One step per slot-dispatch (= once
+    // per frame per slot), gated by the global tl_int phase.
+    wire wr_tl_load = wr_slot_reg && (wr_field == 4'd3) && reg_data[0];
+    always_ff @(posedge clk or negedge rst_n) begin
+        slot_regs_t r_tl;
+        r_tl = ram_regs[cur_slot];        // whole-struct read (member-on-index)
+        if (!rst_n) begin
+            for (int i = 0; i < 24; i++) tl_cur[i] <= 8'd0;
+            tl_load <= '0;
+        end else begin
+            if (dispatch_now) begin
+                if (tl_load[cur_slot]) begin
+                    tl_cur[cur_slot] <= r_tl.tl;                 // load immediate
+                end else if (tl_int_cnt == 4'd0) begin
+                    if (tl_int_step == 2'd0) begin
+                        if (tl_cur[cur_slot] < r_tl.tl) tl_cur[cur_slot] <= tl_cur[cur_slot] + 8'd1;
+                    end else begin
+                        if (tl_cur[cur_slot] > r_tl.tl) tl_cur[cur_slot] <= tl_cur[cur_slot] - 8'd1;
+                    end
+                end
+                tl_load[cur_slot] <= 1'b0;                       // consume
+            end
+            if (wr_tl_load) tl_load[wr_snum] <= 1'b1;            // CPU set (wins)
         end
     end
 
