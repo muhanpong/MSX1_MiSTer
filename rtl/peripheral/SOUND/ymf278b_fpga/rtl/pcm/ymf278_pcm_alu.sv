@@ -105,6 +105,27 @@ package ymf278_pcm_alu_pkg;
     endfunction
 
     // ========================================================================
+    // 1c. PCM mix level (reg 0xF9) — openMSX setMixLevel level table:
+    //     {1, 0.75, 0.5, 0.375, 0.25, 0.1875, 0.125, 0}
+    //   = {1, 3/4, 1/2, 3/8, 1/4, 3/16, 1/8, 0}.  Per-channel gain on the master
+    //   PCM output.  idx 0 = unity (the reset default).
+    // ========================================================================
+    function automatic signed [23:0] pcm_mix_gain(input [2:0] idx, input signed [23:0] x);
+        logic signed [27:0] x3;
+        x3 = $signed(x) * 28'sd3;
+        case (idx)
+            3'd0: return x;                 // ×1
+            3'd1: return 24'(x3 >>> 2);     // ×3/4
+            3'd2: return x >>> 1;           // ×1/2
+            3'd3: return 24'(x3 >>> 3);     // ×3/8
+            3'd4: return x >>> 2;           // ×1/4
+            3'd5: return 24'(x3 >>> 4);     // ×3/16
+            3'd6: return x >>> 3;           // ×1/8
+            default: return 24'sd0;         // ×0 (mute)
+        endcase
+    endfunction
+
+    // ========================================================================
     // 2. Linear Interpolation
     // Matches openMSX: sample = samp_a + ((samp_b - samp_a) * stepPtr) >> 16
     // ========================================================================

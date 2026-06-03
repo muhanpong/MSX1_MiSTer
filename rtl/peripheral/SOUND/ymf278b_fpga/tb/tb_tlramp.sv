@@ -6,6 +6,7 @@
 `default_nettype none
 
 module tb_tlramp;
+    import ymf278_pcm_alu_pkg::*;
     localparam real CLK = 1e9/85909090.0;
     logic clk=0, rst_n; always #(CLK/2.0) clk=~clk;
 
@@ -86,6 +87,17 @@ module tb_tlramp;
         wr(F3, 8'hFF);
         frames(1);
         chk("TL 0x7f -> 0xff immediate", dut.tl_cur[0]==8'hFF);
+
+        // --- PCM mix level (reg 0xF9): L=mute(7), R=half(2) ---
+        //   data = (R<<3)|L = (2<<3)|7 = 0x17
+        wr(8'hF9, 8'h17);
+        frames(1);
+        chk("mix 0xF9: pcm_mix_l = 7 (mute)", dut.pcm_mix_l==3'd7);
+        chk("mix 0xF9: pcm_mix_r = 2 (half)", dut.pcm_mix_r==3'd2);
+        chk("mix gain idx7 = 0",       pcm_mix_gain(3'd7, 24'sd1000)==24'sd0);
+        chk("mix gain idx0 = unity",   pcm_mix_gain(3'd0, 24'sd1000)==24'sd1000);
+        chk("mix gain idx1 = *3/4",    pcm_mix_gain(3'd1, 24'sd1000)==24'sd750);
+        chk("mix gain idx2 = *1/2",    pcm_mix_gain(3'd2, 24'sd1000)==24'sd500);
 
         $display("\n=== %0d PASS, %0d FAIL ===", passes, fails);
         if (fails==0) $display("*** ALL TESTS PASSED ***");

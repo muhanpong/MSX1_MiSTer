@@ -140,6 +140,11 @@ module ymf278_pcm_engine #(
     // Per-slot current TL, ramped toward the CPU-written target (ram_regs.tl).
     logic [7:0]  tl_cur [0:23];
     logic [23:0] tl_load;       // field-3 bit0=1: load TL immediately (no ramp)
+    // reg 0xF9 — PCM (wave) mix level.  L=data[2:0], R=data[5:3], each a level
+    // index into {1,3/4,1/2,3/8,1/4,3/16,1/8,0} (ref YMF278B.cc:166-167 →
+    // ymf278.setMixLevel).  Applied to the master PCM output; default 0 = unity.
+    // (reg 0xF8 = FM mix level — OPL3/top, not here.)
+    logic [2:0]  pcm_mix_l, pcm_mix_r;
 
     // Forward decl: reg 0x02 bit0 (memory-access mode).  Driven in the CPU mem
     // block far below.  The CPU needs the full sample-memory bandwidth to upload
@@ -1277,10 +1282,11 @@ module ymf278_pcm_engine #(
         slot_dyn_t             dyn_upd;
         slot_dyn_t             dyn_reset;
 
-        // Init to avoid latch
+        // Init to avoid latch.  Apply the OSD gain (pcm_shift) then the software
+        // PCM mix level (reg 0xF9, per-channel).  Mix idx 0 (reset default) = ×1.
         pcm_shift    = 2'd3 - pcm_vol;   // pcm_vol 0..3 → shift 3..0 (+6..+24 dB)
-        acc_l_sh     = master_accum_left  >>> pcm_shift;
-        acc_r_sh     = master_accum_right >>> pcm_shift;
+        acc_l_sh     = pcm_mix_gain(pcm_mix_l, master_accum_left  >>> pcm_shift);
+        acc_r_sh     = pcm_mix_gain(pcm_mix_r, master_accum_right >>> pcm_shift);
 
         if (!rst_n) begin
             master_accum_left  <= '0;
@@ -1386,10 +1392,16 @@ module ymf278_pcm_engine #(
 
         if (!rst_n) begin
             wavetblhdr <= '0;
+            pcm_mix_l  <= 3'd0;   // unity
+            pcm_mix_r  <= 3'd0;
             for (int i = 0; i < 24; i++) ram_regs[i] <= '0;
         end else begin
             if (reg_wr && reg_addr == 8'h02) begin
                 wavetblhdr <= reg_data[4:2];
+            end
+            if (reg_wr && reg_addr == 8'hF9) begin
+                pcm_mix_l <= reg_data[2:0];
+                pcm_mix_r <= reg_data[5:3];
             end
             if (wr_slot_reg) begin
                 reg_upd = ram_regs[wr_snum];
