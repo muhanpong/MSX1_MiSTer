@@ -63,20 +63,31 @@ package ymf278_pcm_alu_pkg;
     endfunction
 
     // Vibrato F-Num offset.  lfo_cnt is the 18-bit per-slot LFO counter.
+    // openMSX: (lfo_fm * vib_depth) / 12 with lfo_fm a triangle in [-0xF..+0xF].
+    // We avoid a signed constant divider (huge LUT cloud, perturbs placement) by
+    // doing the divide on the unsigned magnitude with the exact reciprocal
+    // 43691/2^19 (= ceil(2^19/12)/2^19): floor(m*43691>>19) == floor(m/12) for
+    // all m in [0..720] (max |lfo_fm|*depth = 15*48), then re-apply the sign —
+    // identical to C++ truncate-toward-zero.
     function automatic signed [15:0] compute_vib(
         input [17:0] lfo_cnt,
         input [2:0]  vib
     );
-        logic signed [15:0] lfo_fm;
-        logic signed [15:0] depth;
-        logic signed [31:0] prod;
+        logic [5:0]  fm6;
+        logic        neg;
+        logic [4:0]  mag_fm;      // |lfo_fm|, 0..15
+        logic [9:0]  mag;         // |lfo_fm|*depth, 0..720
+        logic [25:0] scaled;      // mag*43691, fits 26 bits
+        logic [9:0]  q;           // floor(mag/12), 0..60
         // lfo_cnt / (LFO_PERIOD/0x40) = lfo_cnt >> 12  -> 0..63
-        lfo_fm = $signed({10'd0, lfo_cnt[17:12]});
-        if (lfo_fm & 16'sh0010) lfo_fm = lfo_fm ^ 16'sh001F;
-        if (lfo_fm & 16'sh0020) lfo_fm = -(lfo_fm & 16'sh000F);
-        depth = $signed({10'd0, vib_depth_rom(vib)});
-        prod  = lfo_fm * depth;            // -720..+720
-        return 16'(prod / 32'sd12);        // truncates toward zero (matches C++)
+        fm6 = lfo_cnt[17:12];
+        if (fm6[4]) fm6 = fm6 ^ 6'h1F;       // triangle fold (bit 0x10)
+        neg = fm6[5];                         // second half = negative
+        mag_fm = neg ? (5'(fm6 & 6'h0F)) : {1'b0, fm6[3:0]};
+        mag    = 10'(mag_fm * vib_depth_rom(vib));
+        scaled = mag * 26'd43691;
+        q      = scaled[25:16] >> 3;          // >>19 total ( >>16 then >>3 )
+        return neg ? -$signed({6'd0, q}) : $signed({6'd0, q});
     endfunction
 
     // Tremolo attenuation added to env_vol (0..0x7F).
