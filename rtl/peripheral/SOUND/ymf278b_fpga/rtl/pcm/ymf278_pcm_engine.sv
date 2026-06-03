@@ -1576,15 +1576,28 @@ module ymf278_pcm_engine #(
 
     always_ff @(posedge clk or negedge rst_n) begin
         slot_regs_t cur_r;
-        logic       wr_key_on_edge;
+        logic       wr_retrig;
         cur_r = ram_regs[wr_snum];   // whole-struct read (member-on-index needs this)
-        wr_key_on_edge = wr_slot_reg && (wr_field == 4'd4)
-                      && reg_data[7] && !cur_r.keyon;
+        // Two re-trigger sources, both matching openMSX writeRegDirect:
+        //  (a) field-4 key-on write while current keyon==0  (case 4 `if(!keyon)`,
+        //      YMF278.cc:669-673) — the keyoff→keyon / first key-on edge.
+        //  (b) field-0 wave-number write while current keyon==1  (case 0
+        //      `if(slot.keyon) keyOnHelper`, YMF278.cc:616-621) — a BARE wave
+        //      overwrite with the key still held re-attacks the note (env_vol
+        //      reset, pos=0).  The FPGA previously only did (a), so changing the
+        //      wave without a keyoff→keyon cycle left the new wave playing from
+        //      the PREVIOUS note's mid-decayed envelope/position → "dead"/decayed
+        //      channels + wave-change direction dependency.  key_retrig drives the
+        //      same d1a edge_now → env restart ([07]) + pos reset.
+        wr_retrig = wr_slot_reg && (
+                        ((wr_field == 4'd4) && reg_data[7] && !cur_r.keyon)
+                     || ((wr_field == 4'd0) && cur_r.keyon)
+                    );
         if (!rst_n) begin
             key_retrig <= '0;
         end else begin
             if (retrig_consume) key_retrig[retrig_slot] <= 1'b0;
-            if (wr_key_on_edge) key_retrig[wr_snum]     <= 1'b1; // wins
+            if (wr_retrig)      key_retrig[wr_snum]     <= 1'b1; // wins
         end
     end
 

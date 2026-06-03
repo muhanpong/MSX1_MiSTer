@@ -340,7 +340,29 @@ module tb_wavechg;
         check({label, ": pos reset to 0 on gap0 re-key (pos<16)"}, dbg_slot0_dyn_pos < 16'd16);
     endtask
 
+    // Bare wave-number overwrite WHILE keyon is held high (no keyoff→keyon).
+    // openMSX writeRegDirect case 0 calls keyOnHelper here (env+pos re-trigger);
+    // the FPGA must do the same via key_retrig.  Pre-fix: pos kept advancing from
+    // the prev note and env kept decaying.  Post-fix: pos resets, env re-attacks.
+    task automatic bare_overwrite(input [8:0] prev_wv, input [8:0] new_wv,
+                                  input string label);
+        rst_n=0; repeat(8) @(posedge clk); rst_n=1; repeat(4) @(posedge clk);
+        write_reg(8'h68, 8'h00); write_reg(8'h20, {7'd0, prev_wv[8]});
+        write_reg(8'h08, prev_wv[7:0]); write_reg(8'h68, 8'h80);   // key ON prev
+        frames(60);                                                 // let it advance
+        @(negedge clk) clr_edge=1; @(negedge clk) clr_edge=0;
+        // BARE overwrite: write the new wave number only — keyon stays 1.
+        write_reg(8'h08, new_wv[7:0]);
+        frames(8);
+        $display("  [%s] bare overwrite %0d->%0d (keyon held): pos=%0d env=%0d s0edge=%b",
+                 label, prev_wv, new_wv, dbg_slot0_dyn_pos, dbg_slot0_dyn_env_state, s0_edge_seen);
+        check({label, ": bare wave overwrite re-triggers (s0_edge_seen)"}, s0_edge_seen);
+        check({label, ": bare overwrite resets pos (<16)"}, dbg_slot0_dyn_pos < 16'd16);
+    endtask
+
     initial begin
+        // ── Bare-overwrite re-trigger (openMSX case0 keyOnHelper) ──
+        bare_overwrite(9'd122, 9'd123, "bare 122->123");
         // ── Transient (gap=0) probes for the direction-dependency hypothesis ──
         transient_probe(9'd122, 22'h0c6ac5, 9'd123, 22'h0cbc46, "122->123");
         transient_probe(9'd124, 22'h0cc771, 9'd123, 22'h0cbc46, "124->123");
