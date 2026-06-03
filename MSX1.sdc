@@ -110,3 +110,16 @@ set_multicycle_path -setup -end 4 \
 set_multicycle_path -hold  -end 3 \
     -from [get_registers {*u_pcm|stage_b_reg* *u_pcm|sb_split* *u_pcm|sb_b_idx*}] \
     -to   [get_registers {*u_pcm|stage_c_reg*}]
+
+# OPL4 PCM EG-rate datapath: stage_c_reg latches at stage_advance and HOLDS for
+# the whole 64-cycle window; d1a_pkt is latched at the NEXT stage_advance from it.
+# So the deep calc_eg_rate/calc_decay_rate -> eg_rate_shift_rom -> eg_inc_rom chain
+# (stage_c_reg.regs.rc/oct/fn -> d1a_pkt.inc_v) has the full window, not 1 cycle.
+# Same window-stable pattern as the stage_a/stage_b paths above; without it this
+# path swings to ~-1 ns on placement churn.
+set_multicycle_path -setup -end 4 \
+    -from [get_registers {*u_pcm|stage_c_reg*}] \
+    -to   [get_registers {*u_pcm|d1a_pkt*}]
+set_multicycle_path -hold  -end 3 \
+    -from [get_registers {*u_pcm|stage_c_reg*}] \
+    -to   [get_registers {*u_pcm|d1a_pkt*}]
