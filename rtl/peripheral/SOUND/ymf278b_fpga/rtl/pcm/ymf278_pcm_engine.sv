@@ -555,9 +555,21 @@ module ymf278_pcm_engine #(
                     // (b_raw is loaded from the cache in the burst-buffer block).
                     b_state     <= B_DONE;
                     b_use_cache <= 1'b1;
-                end else begin
+                end else if ((stage_a_reg.dyn.env_state != EG_OFF)
+                             || key_retrig[stage_a_reg.slot]) begin
                     b_state     <= B_ISSUE;
                     b_word_idx  <= 2'd0;
+                    b_use_cache <= 1'b0;
+                end else begin
+                    // EG_OFF slot with no pending re-trigger contributes silence
+                    // (env_vol clips to 0) — skip its SDRAM reads entirely, exactly
+                    // like openMSX `if (state == EG_OFF) continue` (YMF278.cc:518).
+                    // Otherwise EVERY slot reads each frame: a "single-channel"
+                    // test still issues 24 ch4 read streams (1 active + 23 reset/
+                    // EG_OFF), starving the active slot's reads → read-misses →
+                    // the read-miss-driven wave-change direction dependency and
+                    // multi-voice dropouts.  Freeing the bus is the real fix.
+                    b_state     <= B_DONE;
                     b_use_cache <= 1'b0;
                 end
             end else begin
