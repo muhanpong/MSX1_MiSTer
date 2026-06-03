@@ -906,8 +906,19 @@ module ymf278_pcm_engine #(
                 // Edge = dispatch-sampled rising edge OR a write-time re-trigger
                 // latch (catches intra-frame keyoff→keyon that the per-frame
                 // sample misses — the wave-change "방향 의존성" root cause).
-                edge_now = (stage_c_reg.regs.keyon & ~key_on_prev[stage_c_reg.slot])
-                         | key_retrig[stage_c_reg.slot];
+                // DEFERRED while hf_pending: openMSX loads the wave header +
+                // backfills the slot's envelope regs (ar/d1r/dl/d2r/rc/rr) BEFORE
+                // running keyOnHelper (YMF278.cc:610-621), so the re-attack uses
+                // the NEW wave's envelope.  The FPGA backfills only at HF_STORE
+                // (frame tail).  Firing the re-trigger before that would re-attack
+                // with the PREVIOUS wave's stale envelope regs → the residual
+                // direction dependency (correct only after an ESC keyoff→keyon
+                // re-key, when the header is already loaded).  key_retrig persists
+                // (its consume is also gated on !hf_pending) and fires once HF
+                // has reloaded the regs.
+                edge_now = ((stage_c_reg.regs.keyon & ~key_on_prev[stage_c_reg.slot])
+                          | key_retrig[stage_c_reg.slot])
+                         & ~hf_pending[stage_c_reg.slot];
                 key_on_prev[stage_c_reg.slot] <= stage_c_reg.regs.keyon;
 
                 // State-dispatched rate selection (matches process_eg's prologue).
@@ -1570,9 +1581,13 @@ module ymf278_pcm_engine #(
     // *current* keyon is 0 — i.e. ref's `if (!slot.keyon)`); d1a clears it when
     // it consumes the slot.  SET wins on a same-cycle same-slot collision so a
     // re-key issued right as the slot is processed is never dropped.
-    wire        retrig_consume = stage_advance && stage_c_reg.valid;
     wire [4:0]  retrig_slot     = stage_c_reg.slot;   // local wire: iverilog can't
                                                        // bit-select with a struct member index
+    // Consume (clear) the re-trigger latch only once the header fetch has
+    // completed for this slot — so a re-trigger requested during a wave change
+    // survives the ~1-frame HF load and fires (in d1a) with the NEW envelope.
+    wire        retrig_consume = stage_advance && stage_c_reg.valid
+                              && !hf_pending[retrig_slot];
 
     always_ff @(posedge clk or negedge rst_n) begin
         slot_regs_t cur_r;
