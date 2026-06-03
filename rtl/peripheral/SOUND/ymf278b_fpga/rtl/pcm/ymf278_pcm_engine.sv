@@ -254,6 +254,10 @@ module ymf278_pcm_engine #(
     // each write immediately.  We mirror that by latching the edge at WRITE time
     // (key-on write while the slot's current keyon==0) and consuming it at d1a.
     logic [23:0] key_retrig;
+    // Per-slot header-fetch pending (set on wave write, cleared when HF reloads
+    // the slot's header).  Declared here (used by the D3a stale-header gate which
+    // precedes the HF/CPU-decode block where it is driven).
+    logic [23:0] hf_pending;
 
     // ════════════════════════════════════════════════════════════════════════
     // Pipeline registers between stages
@@ -1180,8 +1184,11 @@ module ymf278_pcm_engine #(
     logic signed [23:0] d3_left, d3_right;
     logic               d3_valid;
     always_ff @(posedge clk or negedge rst_n) begin
-        logic [5:0] pl_gain, pr_gain;
+        logic [5:0]  pl_gain, pr_gain;
+        logic [4:0]  d2c_slot;
+        logic signed [31:0] vs_gated;
         pl_gain = 6'd0; pr_gain = 6'd0;
+        d2c_slot = 5'd0; vs_gated = 32'sd0;
         if (!rst_n) begin
             d3_left <= '0; d3_right <= '0; d3_valid <= 1'b0;
         end else begin
@@ -1189,8 +1196,18 @@ module ymf278_pcm_engine #(
             if (d2c_pkt.valid) begin
                 pl_gain = pan_att_left (d2c_pkt.pan);
                 pr_gain = pan_att_right(d2c_pkt.pan);
-                d3_left  <= 24'((d2c_pkt.vol_sample * 32'($signed({26'd0, pl_gain}))) >>> 5);
-                d3_right <= 24'((d2c_pkt.vol_sample * 32'($signed({26'd0, pr_gain}))) >>> 5);
+                // Stale-header gate: while a slot's header fetch is pending
+                // (wave just rewritten, HF hasn't reloaded startAddr/loop/bits
+                // yet), the sample was decoded with the PREVIOUS wave's header.
+                // Output silence for it instead of the stale sample — matches the
+                // chip's load-busy behaviour and removes the prev-wave-dependent
+                // onset artifact (the wave-change "방향 의존성" residual: pos is
+                // reset by key_retrig, but the first sample still used the old
+                // header).  HF clears hf_pending within ~1 frame per slot.
+                d2c_slot = d2c_pkt.slot;
+                vs_gated = hf_pending[d2c_slot] ? 32'sd0 : d2c_pkt.vol_sample;
+                d3_left  <= 24'((vs_gated * 32'($signed({26'd0, pl_gain}))) >>> 5);
+                d3_right <= 24'((vs_gated * 32'($signed({26'd0, pr_gain}))) >>> 5);
             end
         end
     end
@@ -1284,7 +1301,6 @@ module ymf278_pcm_engine #(
     //     field 9  : am[2:0]
     // ════════════════════════════════════════════════════════════════════════
     logic [2:0]  wavetblhdr;
-    logic [23:0] hf_pending;
 
     // Forward declarations for HF FSM signals (defined fully later) so the
     // CPU register decoder can reference hf_state/hf_cur_slot/hf_buf when
