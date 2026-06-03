@@ -746,8 +746,16 @@ module ymf278_pcm_engine #(
             stage_c_reg.regs   <= stage_b_reg.regs;
             stage_c_reg.dyn    <= stage_b_reg.dyn;
             stage_c_reg.bytes  <= stage_b_reg.bytes;
+            // On a read-miss the graceful-degradation hold normally reuses the
+            // slot's previous sample.  But right after a wave change (re-trigger
+            // pending, or header still loading) that previous sample belongs to
+            // the OLD wave — holding it leaks the prior note's residual, which is
+            // direction-dependent (prev wave 'far' vs 'near' in SDRAM → its first
+            // reads row-miss → hold the old sample).  In that window use silence.
             stage_c_reg.interp <= stage_b_bytes_done ? interp_val
-                                                     : last_interp[stage_b_reg.slot];
+                                : (key_retrig[stage_b_reg.slot]
+                                   | hf_pending[stage_b_reg.slot]) ? 16'sd0
+                                : last_interp[stage_b_reg.slot];
             // Cache the burst bytes on a completed read (miss path) so the next
             // same-window frame can skip the SDRAM reads.
             if (stage_b_reg.valid && !b_use_cache && stage_b_bytes_done) begin
@@ -768,7 +776,12 @@ module ymf278_pcm_engine #(
         if (!rst_n) begin
             for (int i = 0; i < 24; i++) last_interp[i] <= '0;
         end else if (stage_c_reg.valid) begin
-            last_interp[stage_c_reg.slot] <= stage_c_reg.interp;
+            // Don't latch a stale (prev-wave) sample while re-triggering / loading
+            // the new header — otherwise a later miss would hold the old note.
+            if (key_retrig[stage_c_reg.slot] | hf_pending[stage_c_reg.slot])
+                last_interp[stage_c_reg.slot] <= 16'sd0;
+            else
+                last_interp[stage_c_reg.slot] <= stage_c_reg.interp;
         end
     end
 
