@@ -360,7 +360,51 @@ module tb_wavechg;
         check({label, ": bare overwrite resets pos (<16)"}, dbg_slot0_dyn_pos < 16'd16);
     endtask
 
+    // Faithful reproduction of the user's BASIC "ROM instrument test":
+    //   line100 KEYOFF(0x68=0) ; delay ; line40 wave(0x20=hi,0x08=lo) ; delay ;
+    //   line41 KEYON(0x68=0x80).  Capture the 123-playback output sample stream
+    //   after switching from prev_wv, to compare 122->123 vs 124->123 at the
+    //   ACTUAL OUTPUT level (not just pos/header).
+    logic signed [15:0] cap [0:255];
+    logic signed [15:0] cap_a [0:255], cap_b [0:255];
+    task automatic basic_set(input [8:0] wv);
+        write_reg(8'h68, 8'h00);                 // line100 KEYOFF
+        repeat(4) frames(1);                     // delay (FOR J=0 TO 20 ~ a few frames)
+        write_reg(8'h20, {7'd0, wv[8]});         // line40 OUT 0x20 = I>>8 (field1)
+        write_reg(8'h08, wv[7:0]);               // line40 OUT 0x08 = I&255 (field0)
+        repeat(4) frames(1);                     // delay before keyon
+        write_reg(8'h68, 8'h80);                 // line41 KEYON
+    endtask
+    task automatic capture_123(input [8:0] prev_wv);
+        int k;
+        rst_n=0; repeat(8) @(posedge clk); rst_n=1; repeat(4) @(posedge clk);
+        basic_set(prev_wv); frames(50);          // play prev for a while (loops)
+        basic_set(9'd123);  frames(30);          // change to 123, let HF+keyon settle
+        k = 0;
+        while (k < 256) begin
+            @(posedge clk);
+            if (pcm_valid===1'b1) begin cap[k] = pcm_left; k++; end
+        end
+    endtask
+
     initial begin
+        // ── Faithful BASIC repro: compare 122->123 vs 124->123 OUTPUT streams ──
+        capture_123(9'd122); for (int i=0;i<256;i++) cap_a[i]=cap[i];
+        capture_123(9'd124); for (int i=0;i<256;i++) cap_b[i]=cap[i];
+        begin
+            int diff, firstd; diff=0; firstd=-1;
+            for (int i=0;i<256;i++) if (cap_a[i] !== cap_b[i]) begin
+                diff++; if (firstd<0) firstd=i;
+            end
+            $display("=== BASIC repro: 122->123 vs 124->123 output: %0d/256 samples differ (first @ %0d) ===",
+                     diff, firstd);
+            if (diff==0) $display("    IDENTICAL → sim cannot reproduce the direction dependency (=> hardware-domain).");
+            else begin
+                $display("    DIFFERENT → reproduced in sim!  a[%0d]=%0d b[%0d]=%0d",
+                         firstd, cap_a[firstd], firstd, cap_b[firstd]);
+                check("direction dependency reproduced in sim", 1'b0); // mark for attention
+            end
+        end
         // ── Bare-overwrite re-trigger (openMSX case0 keyOnHelper) ──
         bare_overwrite(9'd122, 9'd123, "bare 122->123");
         // ── Transient (gap=0) probes for the direction-dependency hypothesis ──
