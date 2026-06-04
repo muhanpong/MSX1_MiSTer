@@ -102,7 +102,8 @@ module memory_upload
       logic [26:0] save_ram_addr;
       logic  [3:0] cart_slot_expander_en;
       logic        external;
-      logic        ms_reserve_pending;   // after yrw801 fill, skip allocator to base+4MB (reserve 2MB custom-wave RAM)
+      logic        ms_reserve_pending;   // (legacy, unused) — replaced by ms_zerofill_active below
+      logic        ms_zerofill_active;   // after yrw801, fill the 2MB custom-wave RAM with 0x00 (match openMSX clearRam: empty slots = silent, not garbage)
       ddr3_wr   <= 1'b0;
       load_sram <= 1'b0;
       if (ram_ce) begin
@@ -138,6 +139,7 @@ module memory_upload
          lookup_SRAM[3].size   <= 16'd0;
          pcm_rom_base          <= 27'h1800000;  // default, overwritten when yrw801.rom is loaded
          ms_reserve_pending    <= 1'b0;
+         ms_zerofill_active    <= 1'b0;
       end
       if (ddr3_ready & ~ddr3_rd) begin
          case(state)
@@ -415,10 +417,23 @@ module memory_upload
                if (sdram_ready & ~ram_ce) begin
                   data_size  <= data_size - 25'd1;
                   ram_ce     <= 1;
-                  if (data_size == 25'd1) begin
+                  if (data_size == 25'd1 && data_id == ROM_MOONSOUND && ~ms_zerofill_active) begin
+                     // yrw801 (2MB ROM) just finished.  Instead of skipping the 2MB
+                     // custom-wave RAM above it, FILL it with 0x00 so empty/unloaded
+                     // custom slots read as silence — matching openMSX powerUp()
+                     // clearRam() (ram.clear(0)).  Without this the custom RAM holds
+                     // leftover SDRAM garbage, so unused custom waves (and ROM-region
+                     // junk headers whose startAddr lands in custom RAM) play noise on
+                     // hardware while openMSX is silent.  Stay in FILL_RAM2: ram_addr
+                     // keeps advancing through the next 0x200000 bytes to base+0x400000.
+                     data_size          <= 25'h200000;   // 2MB
+                     pattern            <= 3'd2;          // 0x00
+                     data_id            <= ROM_RAM;       // → no ddr3 prefetch during fill
+                     ms_zerofill_active <= 1'b1;
+                  end else if (data_size == 25'd1) begin
+                     // End of fill (a normal ROM/RAM fill, or the custom-RAM zero-fill).
                      state    <= STATE_FILL_RAM;
-                     // yrw801 done → reserve the 2MB custom-wave RAM above it (consumed by ram_ce bump)
-                     if (data_id == ROM_MOONSOUND) ms_reserve_pending <= 1'b1;
+                     ms_zerofill_active <= 1'b0;
                      if (save_addr > 0) begin
                         ddr3_addr <= save_addr; //restore
                         save_addr <= 28'd0;
