@@ -8,11 +8,12 @@ ROM_DIR = 'ROM'
 XML_DIR_COMP = 'Computer'
 XML_DIR_FW = 'Extension'
 EXTENSIONS  =  ["NONE"          , "ROM"           , "RAM"          , "FDC"              , 
-                "FM_PAC"        , "MEGA_FLASH_ROM", "GM2"          , "EMPTY"             ]
+                "FM_PAC"        , "MEGA_FLASH_ROM", "GM2"          , "EMPTY"            ,
+                "MOONSOUND"     ]
 
 MEM_DEVICE  =  ["NONE"          , "ROM"           , "RAM"          , "FDC"               ]
 
-DEVICE_TYPES = ["NONE"          , "KANJI"         , "OPL3"         , "RESET_STATUS"      ]
+DEVICE_TYPES = ["NONE"          , "KANJI"         , "OPL3"         , "RESET_STATUS"      , "MOONSOUND"     ]
 
 CONFIG_TYPES = ["NONE"          , "FDC"           , "SLOT_A"       , "SLOT_B"           ,
                 "SLOT_INTERNAL" , "KBD_LAYOUT"    , "CONFIG"       , "DEVICE"            ]

@@ -16,4 +16,8 @@
     <filename>mfrsd.ROM</filename>
     <SHA1>1621f623b834dc57cb2983f30b36bcc3ac56cafd</SHA1>
   </fw>
+  <fw name="MOONSOUND">
+    <filename>yrw801.rom</filename>
+    <SHA1>32760893ce06dbe3930627755ba065cc3d8ec6ca</SHA1>
+  </fw>
 </fwConfig>
