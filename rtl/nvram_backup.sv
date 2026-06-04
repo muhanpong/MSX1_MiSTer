@@ -1,6 +1,7 @@
 module nvram_backup
 (
    input                      clk,
+   input                      reset,
    input MSX::lookup_SRAM_t   lookup_SRAM[4],
    input                      load_req,
    input                      save_req,
@@ -30,7 +31,9 @@ module nvram_backup
    output logic               sdram_rnw   = 1'b0,
    output logic         [7:0] sdram_din   = 8'h0,
    input                [7:0] sdram_dout,
-   input                      sdram_ready
+   input                      sdram_ready,
+   // Hold CPU via WAIT_n while flash DMA uses SDRAM ch1
+   output                     dma_active
 );
 
 logic [63:0] image_size[4], new_size;
@@ -49,28 +52,39 @@ logic [3:0] request_load = 4'b0, request_save = 4'b0;
 logic [1:0] num          = 2'd0;
 logic       wr           = 1'b0, rd = 1'b0;
 
+logic last_load_req = 1'b0;
+logic last_save_req = 1'b0;
 always @(posedge clk) begin
-   logic last_load_req, last_save_req;
-   if (~last_load_req & load_req) request_load <= 4'b1111;
-   if (~last_save_req & save_req) request_save <= 4'b1111;
-   if (done) begin
-      wr <= 1'b0;
-      rd <= 1'b0;
-      if (wr) request_save[num] <= 1'b0;
-      if (rd) request_load[num] <= 1'b0;
-   end
-   if (~wr & ~rd) begin
-      if (request_save[num]) begin
-         wr <= 1'b1;
-      end else if (request_load[num]) begin
-         rd <= 1'b1;
-      end else begin
-         if (num == 3) num <= 0;
-         else num <= num + 2'b1;
+   if (reset) begin
+      request_load   <= 4'b0;
+      request_save   <= 4'b0;
+      wr             <= 1'b0;
+      rd             <= 1'b0;
+      num            <= 2'd0;
+      last_load_req  <= 1'b0;
+      last_save_req  <= 1'b0;
+   end else begin
+      if (~last_load_req & load_req) request_load <= 4'b1111;
+      if (~last_save_req & save_req) request_save <= 4'b1111;
+      if (done) begin
+         wr <= 1'b0;
+         rd <= 1'b0;
+         if (wr) request_save[num] <= 1'b0;
+         if (rd) request_load[num] <= 1'b0;
       end
+      if (~wr & ~rd) begin
+         if (request_save[num]) begin
+            wr <= 1'b1;
+         end else if (request_load[num]) begin
+            rd <= 1'b1;
+         end else begin
+            if (num == 3) num <= 0;
+            else num <= num + 2'b1;
+         end
+      end
+      last_load_req <= load_req;
+      last_save_req <= save_req;
    end
-   last_load_req <= load_req;
-   last_save_req <= save_req;
 end
 
 typedef enum logic [3:0] {
@@ -101,37 +115,49 @@ logic [26:0] sd_wr_timeout;
 
 assign ram_we         = rd & sd_ack[num] & ~sd_buff_addr[9];
 assign ram_addr       = lookup_SRAM[num].addr + 18'({sd_lba[num],sd_buff_addr[8:0]});
-assign sd_buff_din[0] = ram_dout;
+assign sd_buff_din[0] = (state == STATE_FLASH_SD_WR) ? sector_buf[sd_buff_addr[8:0]] : ram_dout;
 assign sd_buff_din[1] = ram_dout;
 assign sd_buff_din[2] = ram_dout;
-assign sd_buff_din[3] = (state == STATE_FLASH_SD_WR) ? sector_buf[sd_buff_addr[8:0]] : ram_dout;
+assign sd_buff_din[3] = ram_dout;
 
-logic last_ack;
-state_t state;
+logic last_ack = 1'b0;
+state_t state = STATE_SLEEP;
 
-initial begin
-   last_ack = 1'b0;
-end
+// Hold CPU for the ENTIRE flash save/load operation (avoid rapid WAIT_n toggling)
+assign dma_active = (state == STATE_FLASH_PREFETCH)
+                  | (state == STATE_FLASH_RD_WAIT)
+                  | (state == STATE_FLASH_SD_WR)
+                  | (state == STATE_FLASH_SD_RD)
+                  | (state == STATE_FLASH_SDRAM_WR)
+                  | (state == STATE_FLASH_WR_WAIT);
 
 always @(posedge clk) begin
    done           <= 1'b0;
    store_new_size <= 1'b0;
 
+   if (reset) begin
+      state     <= STATE_SLEEP;
+      sd_rd     <= 4'b0;
+      sd_wr     <= 4'b0;
+      sdram_req <= 1'b0;
+   end else
    case (state)
       // -----------------------------------------------------------------------
       STATE_SLEEP: begin
          if ((rd | wr) & ~done) begin
-            if (num == 2'd3 & flash16x_active
-                & (wr | (rd & image_mounted[3] & (image_size[3] > 0)))) begin
-               // ASCII16X flash: use SDRAM DMA path
+            // ASCII16X flash save DISABLED: SDRAM ch1 DMA corrupts SDRAM controller
+            // after sustained read traffic. Requires future Flash FSM + BRAM mirror.
+            if (1'b0 & num == 2'd0 & flash16x_active & image_mounted[0]
+                & (wr | (rd & (image_size[0] > 0)))) begin
+               // ASCII16X flash: use SDRAM DMA path via VD0 (Slot A ROM companion)
                flash_sector        <= 16'd0;
                flash_total_sectors <= 16'(flash16x_size) << 5;  // * 32 sectors per 16 kB
                flash_byte_ptr      <= 9'd0;
-               sd_lba[3]           <= 32'd0;
+               sd_lba[0]           <= 32'd0;
                if (wr) begin
                   state <= STATE_FLASH_PREFETCH;
                end else begin
-                  sd_rd[3] <= 1'b1;
+                  sd_rd[0] <= 1'b1;
                   state    <= STATE_FLASH_SD_RD;
                end
             end else if (lookup_SRAM[num].size > 16'h00 & image_mounted[num]
@@ -171,7 +197,7 @@ always @(posedge clk) begin
          sdram_addr <= flash16x_base + 27'({flash_sector, flash_byte_ptr});
          sdram_rnw  <= 1'b1;
          sdram_req  <= 1'b1;
-         sdram_wait <= 7'd68;  // 68 clk21m wait: ~4 cycles for data validity + 64 cycles CPU bandwidth gap
+         sdram_wait <= 7'd68;  // Bandwidth throttle: ch1 takes ~1.5% SDRAM time
          state      <= STATE_FLASH_RD_WAIT;
       end
 
@@ -184,8 +210,8 @@ always @(posedge clk) begin
             flash_byte_ptr             <= flash_byte_ptr + 1'd1;
             if (flash_byte_ptr == 9'd511) begin
                flash_byte_ptr <= 9'd0;
-               sd_lba[3]      <= {16'd0, flash_sector};
-               sd_wr[3]       <= 1'b1;
+               sd_lba[0]      <= {16'd0, flash_sector};
+               sd_wr[0]       <= 1'b1;
                sd_wr_timeout  <= 27'd0;
                state          <= STATE_FLASH_SD_WR;
             end else begin
@@ -197,11 +223,11 @@ always @(posedge clk) begin
       STATE_FLASH_SD_WR: begin
          sd_wr_timeout <= sd_wr_timeout + 1'd1;
          if (&sd_wr_timeout) begin  // ~6.3s timeout: abort if ARM never acks
-            sd_wr[3] <= 1'b0;
+            sd_wr[0] <= 1'b0;
             done     <= 1'b1;
             state    <= STATE_SLEEP;
-         end else if (~sd_ack[3] & last_ack) begin
-            sd_wr[3]      <= 1'b0;
+         end else if (~sd_ack[0] & last_ack) begin
+            sd_wr[0]      <= 1'b0;
             flash_sector  <= flash_sector + 1'd1;
             if (flash_sector + 1'd1 < flash_total_sectors) begin
                flash_byte_ptr <= 9'd0;
@@ -216,10 +242,10 @@ always @(posedge clk) begin
       // -----------------------------------------------------------------------
       // Flash load: SD -> sector_buf -> SDRAM
       STATE_FLASH_SD_RD: begin
-         if (sd_ack[3])
+         if (sd_ack[0])
             sector_buf[sd_buff_addr[8:0]] <= sd_buff_dout;
-         if (~sd_ack[3] & last_ack) begin
-            sd_rd[3]       <= 1'b0;
+         if (~sd_ack[0] & last_ack) begin
+            sd_rd[0]       <= 1'b0;
             flash_byte_ptr <= 9'd0;
             state          <= STATE_FLASH_SDRAM_WR;
          end
@@ -243,8 +269,8 @@ always @(posedge clk) begin
             if (flash_byte_ptr == 9'd511) begin
                flash_sector <= flash_sector + 1'd1;
                if (flash_sector + 1'd1 < flash_total_sectors) begin
-                  sd_lba[3] <= {16'd0, flash_sector + 1'd1};
-                  sd_rd[3]  <= 1'b1;
+                  sd_lba[0] <= {16'd0, flash_sector + 1'd1};
+                  sd_rd[0]  <= 1'b1;
                   state     <= STATE_FLASH_SD_RD;
                end else begin
                   done  <= 1'b1;
