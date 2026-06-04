@@ -235,8 +235,8 @@ module memory_upload
                                  pattern   <= 3'd1;       
                               end
                               default: begin
-                                 save_addr <= ddr3_addr;   
-                                 ddr3_addr <= 28'h300000;                                                            //FW Store
+                                 save_addr <= ddr3_addr;
+                                 ddr3_addr <= 28'h2000000;                                                           //FW Store base (must match MSX1.sv conf_str "FW PACK,32000000" + lines 283/353)
                                  ddr3_rd   <= 1'b1;                                                                  //Prefetch
                                  state     <= STATE_FIND_ROM;
                               end
@@ -280,7 +280,7 @@ module memory_upload
                         if (conf[7] == 8'd3 && {conf[5][2:0], conf[6]} == 11'd0) begin
                            data_id   <= ROM_MOONSOUND;
                            save_addr <= ddr3_addr;
-                           ddr3_addr <= 28'h300000;    // FW Store base
+                           ddr3_addr <= 28'h2000000;   // FW Store base (relocated 0x300000->0x2000000: 9MB region overflowed into slotA@0xC00000, clobbering yrw801's upper ~1MB)
                            ddr3_rd   <= 1'b1;
                            state     <= STATE_FIND_ROM;
                         end
@@ -350,7 +350,7 @@ module memory_upload
                         state     <= STATE_FILL_RAM;
                         $display("        FILL FW ROM size:%X", {fw_conf[5][2:0], fw_conf[6],14'h0});
                      end else begin          
-                        if ((ddr3_addr - 28'h300000 + (28'({fw_conf[5],fw_conf[6]}) << 14) + 28'd8) >= 28'(ioctl_size[1])) begin
+                        if ((ddr3_addr - 28'h2000000 + (28'({fw_conf[5],fw_conf[6]}) << 14) + 28'd8) >= 28'(ioctl_size[1])) begin
                            ddr3_addr <= save_addr;
                            state <= STATE_READ_CONF;                                                           //not find skip load
                         end else begin
