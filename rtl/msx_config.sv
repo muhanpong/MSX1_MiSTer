@@ -6,10 +6,10 @@ parameter CONF_STR_SLOT_B = {
     "O[31:29],SLOT B,ROM,SCC,SCC+,FM-PAC,Empty;"
 };
 parameter CONF_STR_MAPPER_A = {
-    "H3O[23:20],Mapper type,auto,none,ASCII8,ASCII16,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY,ASCII16X;"
+    "H3O[23:20],Mapper type,auto,none,ASCII8,ASCII16,ASCII16X,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY;"
 };
 parameter CONF_STR_MAPPER_B = {
-    "H4O[35:32],Mapper type,auto,none,ASCII8,ASCII16,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY,ASCII16X;"
+    "H4O[35:32],Mapper type,auto,none,ASCII8,ASCII16,ASCII16X,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY;"
 };
 parameter CONF_STR_SRAM_SIZE_A = {
     "H5O[28:26],SRAM size,auto,1kB,2kB,4kB,8kB,16kB,32kB,none;"
@@ -47,9 +47,9 @@ assign typ_A = cart_typ_t'(slot_A_select < CART_TYP_FDC  ? slot_A_select   :
 
 assign cart_conf[0].typ                = typ_A;
 assign cart_conf[1].typ                = slot_B_select < CART_TYP_MFRSD ? cart_typ_t'(slot_B_select) : CART_TYP_EMPTY;
-assign cart_conf[0].selected_mapper    = rom_loaded[0] ? mapper_typ_t'(mapper_A_select == 4'd10 ? 5'(MAPPER_ASCII16X) : (mapper_A_select + 4'd2)) : MAPPER_UNUSED;
-assign cart_conf[1].selected_mapper    = rom_loaded[1] ? mapper_typ_t'(mapper_B_select == 4'd10 ? 5'(MAPPER_ASCII16X) : (mapper_B_select + 4'd2)) : MAPPER_UNUSED;
-assign cart_conf[0].selected_sram_size = typ_A == CART_TYP_ROM & mapper_A_select > 4'd1 & mapper_A_select != 4'd10 & sram_A_select > 3'd0 & sram_A_select < 3'd7 ? (8'd1 << (sram_A_select - 1'd1)) : 8'd0;
+assign cart_conf[0].selected_mapper    = rom_loaded[0] ? mapper_typ_t'(mapper_A_select == 4'd4 ? 5'(MAPPER_ASCII16X) : mapper_A_select < 4'd4 ? (mapper_A_select + 4'd2) : (mapper_A_select + 4'd1)) : MAPPER_UNUSED;
+assign cart_conf[1].selected_mapper    = rom_loaded[1] ? mapper_typ_t'(mapper_B_select == 4'd4 ? 5'(MAPPER_ASCII16X) : mapper_B_select < 4'd4 ? (mapper_B_select + 4'd2) : (mapper_B_select + 4'd1)) : MAPPER_UNUSED;
+assign cart_conf[0].selected_sram_size = typ_A == CART_TYP_ROM & mapper_A_select > 4'd1 & mapper_A_select != 4'd4 & sram_A_select > 3'd0 & sram_A_select < 3'd7 ? (8'd1 << (sram_A_select - 1'd1)) : 8'd0;
 assign cart_conf[1].selected_sram_size = 8'd0;
 
 assign msxConfig.typ = bios_config.MSX_typ;
@@ -58,10 +58,11 @@ assign msxConfig.video_mode = video_mode_t'(bios_config.MSX_typ == MSX1 ? (HPS_s
 assign msxConfig.cas_audio_src = cas_audio_src_t'(HPS_status[8]);
 assign msxConfig.border = HPS_status[41];
 assign msxConfig.vdp_id = HPS_status[42];
+assign msxConfig.moonsound_en = HPS_status[45];
 
 assign ROM_A_load_hide    = cart_conf[0].typ != CART_TYP_ROM;
 assign ROM_B_load_hide    = cart_conf[1].typ != CART_TYP_ROM;
-assign sram_A_select_hide = cart_conf[0].typ != CART_TYP_ROM | mapper_A_select == 4'd0 | mapper_A_select == 4'd10;
+assign sram_A_select_hide = cart_conf[0].typ != CART_TYP_ROM | mapper_A_select == 4'd0 | mapper_A_select == 4'd4;
 assign fdc_enabled = bios_config.use_FDC | cart_conf[0].typ == CART_TYP_FDC;
 
 
