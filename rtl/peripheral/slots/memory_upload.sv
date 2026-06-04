@@ -104,6 +104,7 @@ module memory_upload
       logic        external;
       logic        ms_reserve_pending;   // (legacy, unused) — replaced by ms_zerofill_active below
       logic        ms_zerofill_active;   // after yrw801, fill the 2MB custom-wave RAM with 0x00 (match openMSX clearRam: empty slots = silent, not garbage)
+      logic        ms_zerofill_jump;     // one-shot: snap ram_addr to the FIXED custom-RAM base (pcm_rom_base+0x200000) before zero-filling, regardless of where the yrw801 fill ended
       ddr3_wr   <= 1'b0;
       load_sram <= 1'b0;
       if (ram_ce) begin
@@ -112,8 +113,9 @@ module memory_upload
          // the full 4MB YMF278 wave map (ROM 0..0x1FFFFF + custom RAM 0x200000..0x3FFFFF)
          // so subsequent uploads don't land on the custom-wave region the PCM engine
          // writes at pcm_rom_base + ms_mem_addr.
-         if (ms_reserve_pending) begin ram_addr <= pcm_rom_base + 27'h400000; ms_reserve_pending <= 1'b0; end
-         else                          ram_addr <= ram_addr + 1'd1;
+         if (ms_reserve_pending)    begin ram_addr <= pcm_rom_base + 27'h400000; ms_reserve_pending <= 1'b0; end
+         else if (ms_zerofill_jump) begin ram_addr <= pcm_rom_base + 27'h200000; ms_zerofill_jump   <= 1'b0; end
+         else                             ram_addr <= ram_addr + 1'd1;
       end
       if (ddr3_ready & ddr3_rd) begin ddr3_rd <= 1'b0; ddr3_addr <= ddr3_addr + 1'd1; end
       if (load) begin
@@ -140,6 +142,7 @@ module memory_upload
          pcm_rom_base          <= 27'h1800000;  // default, overwritten when yrw801.rom is loaded
          ms_reserve_pending    <= 1'b0;
          ms_zerofill_active    <= 1'b0;
+         ms_zerofill_jump      <= 1'b0;
       end
       if (ddr3_ready & ~ddr3_rd) begin
          case(state)
@@ -418,18 +421,25 @@ module memory_upload
                   data_size  <= data_size - 25'd1;
                   ram_ce     <= 1;
                   if (data_size == 25'd1 && data_id == ROM_MOONSOUND && ~ms_zerofill_active) begin
-                     // yrw801 (2MB ROM) just finished.  Instead of skipping the 2MB
-                     // custom-wave RAM above it, FILL it with 0x00 so empty/unloaded
-                     // custom slots read as silence — matching openMSX powerUp()
-                     // clearRam() (ram.clear(0)).  Without this the custom RAM holds
-                     // leftover SDRAM garbage, so unused custom waves (and ROM-region
-                     // junk headers whose startAddr lands in custom RAM) play noise on
-                     // hardware while openMSX is silent.  Stay in FILL_RAM2: ram_addr
-                     // keeps advancing through the next 0x200000 bytes to base+0x400000.
+                     // yrw801 ROM just finished.  Fill the 2MB custom-wave RAM with
+                     // 0x00 so empty/unloaded custom slots read as silence — matching
+                     // openMSX powerUp() clearRam() (ram.clear(0)).  Without this the
+                     // custom RAM holds leftover SDRAM garbage, so unused custom waves
+                     // play noise on hardware while openMSX is silent.
+                     //
+                     // CRITICAL: snap ram_addr to the FIXED custom-RAM base
+                     // (pcm_rom_base+0x200000) via ms_zerofill_jump — do NOT just
+                     // continue from wherever the yrw801 fill ended.  The yrw801 fill
+                     // can end BELOW base+0x200000 (short / multi-segment FW load), and
+                     // "continuing" would zero the TOP of the ROM region.  That zeroed
+                     // ROM samples whose startAddr sits just under 0x200000 (e.g. wave
+                     // 489 @0x1a458f: openMSX plays it, MiSTer went silent).  The fill
+                     // ends naturally at base+0x400000, restoring the old 4MB reserve.
                      data_size          <= 25'h200000;   // 2MB
                      pattern            <= 3'd2;          // 0x00
                      data_id            <= ROM_RAM;       // → no ddr3 prefetch during fill
                      ms_zerofill_active <= 1'b1;
+                     ms_zerofill_jump   <= 1'b1;          // next ram_ce snaps ram_addr to pcm_rom_base+0x200000
                   end else if (data_size == 25'd1) begin
                      // End of fill (a normal ROM/RAM fill, or the custom-RAM zero-fill).
                      state    <= STATE_FILL_RAM;
