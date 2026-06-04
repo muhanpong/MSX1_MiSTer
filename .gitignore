@@ -50,6 +50,7 @@ tools/CreateMSXpack/ToImport/
 *.vcd
 *.vvp
 *.out
+*.log
 __pycache__/
 build_log.txt
 
