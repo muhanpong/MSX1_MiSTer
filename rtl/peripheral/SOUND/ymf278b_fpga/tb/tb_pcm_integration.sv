@@ -348,6 +348,91 @@ initial begin
     check("Step 7.c: dbg_env_min reached 0 (envelope opened at some point)",
           dbg_env_min == 10'd0);
 
+    // ── Step 8: Verify pcm_left actually produces non-zero amplitude ──────
+    $display("\n=== Step 8: pcm_left amplitude check ===");
+    begin
+        int peak_abs = 0;
+        int curr_abs;
+        int run_cnt = 0;
+        // Run long enough for many samples; track peak |pcm_left|
+        for (int n = 0; n < 30000; n++) begin
+            @(posedge clk);
+            curr_abs = ($signed(pcm_left) < 0) ?
+                       -int'($signed(pcm_left)) : int'($signed(pcm_left));
+            if (curr_abs > peak_abs) peak_abs = curr_abs;
+            if ($signed(pcm_left) != 16'sd0) run_cnt++;
+        end
+        $display("  pcm_left peak abs over 30k cycles: %0d (0x%04h)",
+                 peak_abs, peak_abs);
+        $display("  pcm_left non-zero cycles: %0d / 30000", run_cnt);
+        // Dump intermediate signal peaks
+        begin
+            int interp_peak = 0, vol_peak = 0, accum_peak = 0;
+            int curr;
+            int vol_valid_cnt = 0, interp_valid_cnt = 0;
+            for (int n = 0; n < 10000; n++) begin
+                @(posedge clk);
+                curr = ($signed(u_pcm.interp_out) < 0) ?
+                       -int'($signed(u_pcm.interp_out)) : int'($signed(u_pcm.interp_out));
+                if (curr > interp_peak) interp_peak = curr;
+                curr = ($signed(u_pcm.vol_left) < 0) ?
+                       -int'($signed(u_pcm.vol_left)) : int'($signed(u_pcm.vol_left));
+                if (curr > vol_peak) vol_peak = curr;
+                curr = ($signed(u_pcm.accum_left) < 0) ?
+                       -int'($signed(u_pcm.accum_left)) : int'($signed(u_pcm.accum_left));
+                if (curr > accum_peak) accum_peak = curr;
+                if (u_pcm.vol_valid) vol_valid_cnt++;
+                if (u_pcm.interp_valid) interp_valid_cnt++;
+            end
+            $display("  interp_out peak: %0d (0x%h)", interp_peak, interp_peak);
+            $display("  vol_left peak:   %0d (0x%h)", vol_peak, vol_peak);
+            $display("  accum_left peak: %0d (0x%h)", accum_peak, accum_peak);
+            $display("  interp_valid count: %0d / 10000", interp_valid_cnt);
+            $display("  vol_valid count:    %0d / 10000", vol_valid_cnt);
+            $display("  sr_startAddr[0]=0x%06h, sr_endAddr[0]=0x%04h, sr_bits[0]=%0d",
+                     u_pcm.sr_startAddr[0], u_pcm.sr_endAddr[0], u_pcm.sr_bits[0]);
+            $display("  sr_FN[0]=%0d, sr_OCT[0]=%0d, sr_TL[0]=%0d, sr_pan[0]=%0d",
+                     u_pcm.sr_FN[0], u_pcm.sr_OCT[0], u_pcm.sr_TL[0], u_pcm.sr_pan[0]);
+            $display("  env_for_vol=0x%h env_vol_out=0x%h slot_mem[0][9:0]=0x%h",
+                     u_pcm.env_for_vol, u_pcm.env_vol_out,
+                     u_pcm.u_eg.slot_mem[0][9:0]);
+            $display("  pipe_env[1]=0x%h ev_with_am(reg)=0x%h",
+                     u_pcm.pipe_env[1], u_pcm.ev_with_am);
+        end
+        // env_for_vol min/max tracking over more cycles
+        begin
+            int env_min_seen = 1024, env_max_seen = 0;
+            int env_at_interp = 1024;  // env_for_vol when interp_valid fires
+            int sample_at_volstart = 0;
+            for (int n = 0; n < 20000; n++) begin
+                @(posedge clk);
+                if (int'(u_pcm.env_for_vol) < env_min_seen)
+                    env_min_seen = int'(u_pcm.env_for_vol);
+                if (int'(u_pcm.env_for_vol) > env_max_seen)
+                    env_max_seen = int'(u_pcm.env_for_vol);
+                if (u_pcm.interp_valid) begin
+                    env_at_interp = int'(u_pcm.env_for_vol);
+                    sample_at_volstart = int'($signed(u_pcm.interp_out));
+                    $display("    [interp_valid] env_for_vol=0x%03h sample=%d",
+                             u_pcm.env_for_vol, $signed(u_pcm.interp_out));
+                end
+                if (u_pcm.u_vol.valid_r) begin
+                    $display("    [u_vol compute] sample_r=%d env_vol_r=0x%h tl_vol_r=%0d pan_r=%0d left_out_next=?",
+                             $signed(u_pcm.u_vol.sample_r),
+                             u_pcm.u_vol.env_vol_r,
+                             u_pcm.u_vol.tl_vol_r,
+                             u_pcm.u_vol.pan_r);
+                end
+            end
+            $display("  env_for_vol seen: min=0x%h, max=0x%h",
+                     env_min_seen, env_max_seen);
+        end
+        check("Step 8.a: pcm_left peak >= 256 (audible threshold)",
+              peak_abs >= 256);
+        check("Step 8.b: pcm_left non-zero for > 100 cycles (sustained)",
+              run_cnt > 100);
+    end
+
     // ── Summary ─────────────────────────────────────────────────────────
     $display("\n=== Results: %0d PASS, %0d FAIL ===", test_passes, test_fails);
     if (test_fails == 0) $display("*** ALL TESTS PASSED ***");

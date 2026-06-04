@@ -1,0 +1,68 @@
+# Quartus Settings File — YMF278B OPL4
+# Target: Cyclone V 5CSEBA6U23I7 (DE10-Nano)
+
+set_global_assignment -name FAMILY "Cyclone V"
+set_global_assignment -name DEVICE 5CSEBA6U23I7
+set_global_assignment -name TOP_LEVEL_ENTITY ymf278b_top
+set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
+set_global_assignment -name MIN_CORE_JUNCTION_TEMP 0
+set_global_assignment -name MAX_CORE_JUNCTION_TEMP 100
+
+# SystemVerilog source files
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/pcm/ymf278_pcm_envelope.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/pcm/ymf278_pcm_lfo.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/pcm/ymf278_pcm_interpolator.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/pcm/ymf278_pcm_volume.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/pcm/ymf278_pcm_memory.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/pcm/ymf278_pcm_top.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/ymf278b_regs.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/ymf278b_top.sv
+
+# OPL3 FPGA sources
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/top_level/pkg/opl3_pkg.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/misc/src/pipeline_sr.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/misc/src/mem_simple_dual_port.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/misc/src/mem_simple_dual_port_async_read.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/misc/src/mem_multi_bank.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/misc/src/mem_multi_bank_reset.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/clks/src/clk_div.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/clks/src/reset_sync.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/operator/src/opl3_log_sine_lut.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/operator/src/opl3_exp_lut.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/operator/src/calc_envelope_shift.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/operator/src/calc_phase_inc.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/operator/src/calc_rhythm_phase.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/operator/src/phase_generator.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/operator/src/tremolo.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/operator/src/operator.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/channels/src/control_operators.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/channels/src/dac_prep.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/channels/src/channels.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/timers/src/timer.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/timers/src/timers.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/opl3/modules/top_level/src/opl3.sv
+
+# Clock constraint: 33.8688 MHz master clock
+set_global_assignment -name SDC_FILE ymf278b.sdc
+
+# Optimization
+set_global_assignment -name OPTIMIZATION_MODE "BALANCED"
+set_global_assignment -name FITTER_EFFORT "STANDARD FIT"
+set_global_assignment -name PHYSICAL_SYNTHESIS_EFFORT "NORMAL"
+set_global_assignment -name SEED 1
+
+# Virtual pins (unassigned — set real pins for target board)
+set_instance_assignment -name VIRTUAL_PIN ON -to audio_left[15:0]
+set_instance_assignment -name VIRTUAL_PIN ON -to audio_right[15:0]
+set_instance_assignment -name VIRTUAL_PIN ON -to audio_valid
+set_instance_assignment -name VIRTUAL_PIN ON -to mem_addr[21:0]
+set_instance_assignment -name VIRTUAL_PIN ON -to mem_rd_req
+set_instance_assignment -name VIRTUAL_PIN ON -to mem_rd_data[7:0]
+set_instance_assignment -name VIRTUAL_PIN ON -to mem_rd_valid
+set_instance_assignment -name VIRTUAL_PIN ON -to io_port[7:0]
+set_instance_assignment -name VIRTUAL_PIN ON -to io_data_in[7:0]
+set_instance_assignment -name VIRTUAL_PIN ON -to io_wr
+set_instance_assignment -name VIRTUAL_PIN ON -to io_rd
+set_instance_assignment -name VIRTUAL_PIN ON -to io_data_out[7:0]
+set_instance_assignment -name VIRTUAL_PIN ON -to io_ack
+set_instance_assignment -name VIRTUAL_PIN ON -to irq_n
