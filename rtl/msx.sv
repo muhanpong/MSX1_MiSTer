@@ -171,7 +171,11 @@ t80pa #(.Mode(0)) T80
 //  -----------------------------------------------------------------------------
 //  -- WAIT CPU
 //  -----------------------------------------------------------------------------
-wire exwait_n = 1;  // DIAGNOSTIC: WAIT_n pause disabled to isolate cause
+// Hold the CPU (WAIT_n low) while a MoonSound register access is in flight, so
+// the VGM driver's rapid back-to-back writes can't outrun the CDC/chip and drop.
+// Only asserts during 0x7E/0x7F/0xC4-0xC7 access when moonsound_en; bounded by a
+// safety timeout (ms_wait_cnt) so a lost ack cannot hang the CPU.
+wire exwait_n = ~ms_io_pending;
 
 logic wait_n = 1'b0;
 always @(posedge clk21m, negedge exwait_n, negedge u1_2_q) begin
@@ -589,26 +593,49 @@ logic [2:0] ms_rd_sync;
 logic       ms_wr_n_prev;
 logic       ms_rd_n_prev;
 logic [7:0] ms_io_dout_lat;
+// ── MoonSound I/O flow-control (WAIT_n handshake) ──────────────────────────
+// The MSX VGM driver writes the YMF278 with fixed inter-write delays (no BUSY
+// poll). When those writes come faster than our CDC+chip can absorb, accesses
+// race and a write gets lost → the player hangs (confirmed: adding per-op delay
+// on the player side avoids it).  Real MoonSound throttles the CPU via BUSY;
+// re-create that: hold WAIT_n during a MoonSound I/O access until the chip acks.
+logic       ms_ack_toggle = 1'b0;   // clk_sdram: flips on every ms_io_ack
+logic [2:0] ms_ack_sync;            // clk21m: 3-FF sync of ms_ack_toggle
+logic       ms_io_pending;          // clk21m: a MoonSound I/O is in flight → assert wait
+logic [7:0] ms_wait_cnt;            // safety timeout so a lost ack can't hang the CPU
 
 always_ff @(posedge clk21m) begin
     ms_wr_n_prev <= wr_n;
     ms_rd_n_prev <= rd_n;
+    ms_ack_sync  <= {ms_ack_sync[1:0], ms_ack_toggle};
     if (reset) begin
         ms_req_toggle <= 1'b0;
         ms_rd_toggle  <= 1'b0;
         ms_wr_n_prev  <= 1'b1;
         ms_rd_n_prev  <= 1'b1;
+        ms_io_pending <= 1'b0;
     end else begin
         if ((ms_wave_cs | ms_fm_cs) & ~wr_n & ms_wr_n_prev) begin
             // Falling edge of wr_n
             ms_io_port_lat <= a[7:0];
             ms_io_data_lat <= d_from_cpu;
             ms_req_toggle  <= ~ms_req_toggle;
+            ms_io_pending  <= 1'b1;        // hold CPU until this write is accepted
+            ms_wait_cnt    <= 8'd200;
         end
         if ((ms_wave_cs | ms_fm_cs) & ~rd_n & ms_rd_n_prev) begin
             // Falling edge of rd_n
             ms_io_port_lat <= a[7:0];
             ms_rd_toggle   <= ~ms_rd_toggle;
+            ms_io_pending  <= 1'b1;        // hold CPU until read data is ready
+            ms_wait_cnt    <= 8'd200;
+        end
+        // Release the wait when the chip acks (one access in flight at a time,
+        // since the CPU is held), or after the safety timeout.
+        if (ms_io_pending) begin
+            if (ms_ack_sync[2] ^ ms_ack_sync[1]) ms_io_pending <= 1'b0;
+            else if (ms_wait_cnt == 8'd0)        ms_io_pending <= 1'b0;
+            else                                 ms_wait_cnt   <= ms_wait_cnt - 8'd1;
         end
     end
 end
@@ -620,6 +647,7 @@ always_ff @(posedge clk_sdram) begin
     // Latch the returned data from the MoonSound core when io_ack pulses
     if (ms_io_ack) begin
         ms_io_dout_lat <= ms_io_dout_raw;
+        ms_ack_toggle  <= ~ms_ack_toggle;   // signal completion back to clk21m wait logic
     end
 end
 
