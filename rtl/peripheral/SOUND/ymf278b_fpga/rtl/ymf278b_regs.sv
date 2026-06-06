@@ -49,7 +49,14 @@ localparam int FM_REG_WRITE_DELAY     = 56;
 localparam int WAVE_REG_SELECT_DELAY  = 88;
 localparam int WAVE_REG_WRITE_DELAY   = 88;
 localparam int MEM_READ_DELAY         = 38;
-localparam int MEM_WRITE_DELAY        = 28;
+// MEM_WRITE_DELAY paces wave-memory writes.  With WAIT_n + deferred ack this is
+// how long the CPU is held per reg-0x06 write, so it MUST exceed the host's
+// natural write spacing to actually throttle an unpaced `otir` blast (otir is
+// ~21 Z80 T-states ≈ 5.9 µs ≈ 507 clk_sdram/byte; a small delay is absorbed and
+// adds nothing).  ~1024 ≈ 12 µs/byte, between otir (fails) and pcmload (~16 µs,
+// works).  Tunable: lower if uploads are too slow, raise if large uploads still
+// freeze. NOTE: keep msx.sv's MoonSound WAIT_n timeout > this (in clk21m).
+localparam int MEM_WRITE_DELAY        = 1024;
 localparam int LOAD_DELAY             = 10000;
 
 localparam int DELAY_W = $clog2(LOAD_DELAY + 1);
@@ -79,6 +86,13 @@ logic       new2_signature_pending;
 // Holds io_ack low until pcm_reg_rd_done pulses so the CPU latches
 // the fresh pcm_reg_dout instead of a stale value.
 logic pcm_rd_wait;
+// Same idea for PCM memory WRITES (regs 3-6): hold io_ack low until the write
+// has actually completed (busy_cnt drained AND engine cpu-mem op done = the same
+// BUSY the status bit exposes).  Paced drivers (pcmload) poll BUSY between bytes
+// and so never outrun the SDRAM write; an unpaced `otir` blast (vgmplay) does.
+// Deferring the ack makes WAIT_n hold the CPU until the write lands — i.e. it
+// throttles the host to the real memory speed, exactly like pcmload's BUSY poll.
+logic pcm_wr_wait;
 
 assign pcm_reg_addr = opl4latch;
 
@@ -108,6 +122,7 @@ always_ff @(posedge clk) begin
         opl4latch   <= 8'd0;
         opl3latch   <= 9'd0;
         pcm_rd_wait <= 1'b0;
+        pcm_wr_wait <= 1'b0;
         new2_prev   <= 1'b0;
         new2_signature_pending <= 1'b0;
     end else begin
@@ -121,6 +136,16 @@ always_ff @(posedge clk) begin
                 io_data_out <= pcm_reg_dout;
                 io_ack      <= 1'b1;
                 pcm_rd_wait <= 1'b0;
+            end
+        end
+        // PCM memory WRITE: hold the ack until BUSY clears (busy_cnt drained AND
+        // the engine's cpu-mem op finished).  This is what makes a fast unpaced
+        // uploader behave like pcmload — the host can't issue the next byte until
+        // this one has actually landed in SDRAM.
+        if (pcm_wr_wait) begin
+            if (busy_cnt == '0 && !pcm_cpu_mem_busy) begin
+                io_ack      <= 1'b1;
+                pcm_wr_wait <= 1'b0;
             end
         end
         // Counter decrement (write below overrides for the current cycle)
@@ -138,19 +163,28 @@ always_ff @(posedge clk) begin
                     // select
                     busy_cnt   <= DELAY_W'(WAVE_REG_SELECT_DELAY);
                     opl4latch  <= io_data_in;
+                    io_ack     <= 1'b1;
                 end else begin
                     // write
                     if (opl4latch >= 8'h08 && opl4latch <= 8'h1F)
                         load_cnt <= DELAY_W'(LOAD_DELAY);
-                    if (opl4latch >= 8'h03 && opl4latch <= 8'h06)
-                        busy_cnt <= DELAY_W'(MEM_WRITE_DELAY);
-                    else
-                        busy_cnt <= DELAY_W'(WAVE_REG_WRITE_DELAY);
                     pcm_reg_data <= io_data_in;
                     pcm_reg_wr   <= 1'b1;
+                    if (opl4latch >= 8'h03 && opl4latch <= 8'h06) begin
+                        // wave-memory data write → defer ack until BUSY clears,
+                        // so an unpaced uploader (otir) is throttled to the real
+                        // SDRAM write speed (matches pcmload's BUSY poll).
+                        busy_cnt    <= DELAY_W'(MEM_WRITE_DELAY);
+                        pcm_wr_wait <= 1'b1;
+                    end else begin
+                        // non-memory wave register write → ack now
+                        busy_cnt <= DELAY_W'(WAVE_REG_WRITE_DELAY);
+                        io_ack   <= 1'b1;
+                    end
                 end
+            end else begin
+                io_ack <= 1'b1;   // !new2: write ignored, ack immediately
             end
-            io_ack <= 1'b1;
         end else if (io_port[7:2] == 6'b110001) begin
             // 0xC4..0xC7 — FM part
             case (io_port[1:0])

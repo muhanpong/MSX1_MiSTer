@@ -602,7 +602,7 @@ logic [7:0] ms_io_dout_lat;
 logic       ms_ack_toggle = 1'b0;   // clk_sdram: flips on every ms_io_ack
 logic [2:0] ms_ack_sync;            // clk21m: 3-FF sync of ms_ack_toggle
 logic       ms_io_pending;          // clk21m: a MoonSound I/O is in flight → assert wait
-logic [7:0] ms_wait_cnt;            // safety timeout so a lost ack can't hang the CPU
+logic [9:0] ms_wait_cnt;            // safety timeout so a lost ack can't hang the CPU (must exceed the deferred mem-write ack ~ MEM_WRITE_DELAY/4 in clk21m)
 
 always_ff @(posedge clk21m) begin
     ms_wr_n_prev <= wr_n;
@@ -621,21 +621,21 @@ always_ff @(posedge clk21m) begin
             ms_io_data_lat <= d_from_cpu;
             ms_req_toggle  <= ~ms_req_toggle;
             ms_io_pending  <= 1'b1;        // hold CPU until this write is accepted
-            ms_wait_cnt    <= 8'd200;
+            ms_wait_cnt    <= 10'd600;
         end
         if ((ms_wave_cs | ms_fm_cs) & ~rd_n & ms_rd_n_prev) begin
             // Falling edge of rd_n
             ms_io_port_lat <= a[7:0];
             ms_rd_toggle   <= ~ms_rd_toggle;
             ms_io_pending  <= 1'b1;        // hold CPU until read data is ready
-            ms_wait_cnt    <= 8'd200;
+            ms_wait_cnt    <= 10'd600;
         end
         // Release the wait when the chip acks (one access in flight at a time,
         // since the CPU is held), or after the safety timeout.
         if (ms_io_pending) begin
             if (ms_ack_sync[2] ^ ms_ack_sync[1]) ms_io_pending <= 1'b0;
-            else if (ms_wait_cnt == 8'd0)        ms_io_pending <= 1'b0;
-            else                                 ms_wait_cnt   <= ms_wait_cnt - 8'd1;
+            else if (ms_wait_cnt == 10'd0)        ms_io_pending <= 1'b0;
+            else                                 ms_wait_cnt   <= ms_wait_cnt - 10'd1;
         end
     end
 end
