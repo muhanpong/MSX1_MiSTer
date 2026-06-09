@@ -30,7 +30,8 @@ package MSX;
         logic           vdp_id;
         video_mode_t    video_mode;
         cas_audio_src_t cas_audio_src;
-    } user_config_t;    
+        logic           moonsound_en;
+    } user_config_t;
     
     typedef struct {
         logic     [3:0] slot_expander_en;   

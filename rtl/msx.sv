@@ -85,7 +85,10 @@ module msx
 //  -----------------------------------------------------------------------------
 wire  [9:0] audioPSG    = ay_ch_mix + {keybeep,5'b00000} + {(cas_audio_in & ~cas_motor),4'b0000};
 wire [16:0] fm          = {3'b00, audioPSG, 4'b0000};
-wire [16:0] audio_mix   = {cart_sound[15], cart_sound} + fm;
+// MoonSound (OPL3 FM) stereo down-mixed to mono and added to the mix (Stage 1).
+wire signed [15:0] ms_out_l, ms_out_r;   // driven by the MoonSound block below
+wire signed [15:0] ms_mono = msxConfig.moonsound_en ? ((ms_out_l >>> 1) + (ms_out_r >>> 1)) : 16'sh0;
+wire [16:0] audio_mix   = {cart_sound[15], cart_sound} + fm + $signed({ms_mono[15], ms_mono});
 wire [15:0] compr[7:0]  = '{ {1'b1, audio_mix[13:0], 1'b0}, 16'h8000, 16'h8000, 16'h8000, 16'h7FFF, 16'h7FFF, 16'h7FFF,  {1'b0, audio_mix[13:0], 1'b0}};
 assign audio            = compr[audio_mix[16:14]];
 
@@ -121,7 +124,10 @@ t80pa #(.Mode(0)) T80
 //  -----------------------------------------------------------------------------
 //  -- WAIT CPU
 //  -----------------------------------------------------------------------------
-wire exwait_n = 1;
+// MoonSound FM I/O flow-control: hold the CPU (WAIT_n) during a MoonSound access
+// until the chip acks.  ms_io_pending (ms_io bridge below) only asserts for
+// 0xC4-0xC7 when moonsound_en, so non-MoonSound paths are unaffected.
+wire exwait_n = ~ms_io_pending;
 
 logic wait_n = 1'b0;
 always @(posedge clk21m, negedge exwait_n, negedge u1_2_q) begin
@@ -165,6 +171,9 @@ wire psg_n  = ~((a[7:3] == 5'b10100)   & ~iorq_n & m1_n);
 wire ppi_n  = ~((a[7:3] == 5'b10101)   & ~iorq_n & m1_n);
 wire vdp_en =   (a[7:3] == 5'b10011)   & ~iorq_n & m1_n ;
 wire rtc_en =   (a[7:1] == 7'b1011010) & ~iorq_n & m1_n & bios_config.MSX_typ == MSX2;
+// MoonSound (OPL3 FM) I/O select: ports 0xC4-0xC7 (a[7:2]==6'b11_0001).
+// Stage 1: FM only.  WAVE ports 0x7E/0x7F (PCM) are not decoded yet.
+wire ms_fm_cs = msxConfig.moonsound_en & ~iorq_n & m1_n & (a[7:2] == 6'b11_0001);
 
 //  -----------------------------------------------------------------------------
 //  -- 82C55 PPI
@@ -199,6 +208,7 @@ assign d_to_cpu = rd_n   ? 8'hFF           :
                   rtc_en ? d_from_rtc      :
                   ~psg_n ? d_from_psg      :
                   ~ppi_n ? d_from_8255     :
+                  ms_fm_cs ? ms_dout       :
                            d_from_slots    ;
 //  -----------------------------------------------------------------------------
 //  -- Keyboard decoder
@@ -496,5 +506,104 @@ msx_slots msx_slots
    .d_to_sd(d_to_sd),
    .d_from_sd(d_from_sd)
 );
+
+//  -----------------------------------------------------------------------------
+//  -- MoonSound (OPL3 FM only — Stage 1; PCM wave engine deferred)
+//  -----------------------------------------------------------------------------
+// OPL3 clock divider: clk_sdram (85.909 MHz) / 6 ≈ 14.318 MHz.
+logic [1:0] opl3_clk_div;
+logic       clk_opl3;
+always_ff @(posedge clk_sdram) begin
+    if (opl3_clk_div == 2'd2) begin
+        opl3_clk_div <= 2'd0;
+        clk_opl3     <= ~clk_opl3;
+    end else
+        opl3_clk_div <= opl3_clk_div + 1'd1;
+end
+
+// CDC: CPU (clk21m) → ymf278b_top (clk_sdram).  A toggle-synchronizer fires on the
+// FALLING edge of wr_n/rd_n (once per CPU access).  WAIT_n holds the CPU until the
+// chip acks (ms_io_pending), bounded by a safety timeout so a lost ack can't hang.
+logic [7:0] ms_io_port_lat, ms_io_data_lat;
+logic       ms_req_toggle, ms_rd_toggle;
+logic [2:0] ms_req_sync, ms_rd_sync;
+logic       ms_wr_n_prev, ms_rd_n_prev;
+logic [7:0] ms_io_dout_lat;
+logic       ms_ack_toggle = 1'b0;
+logic [2:0] ms_ack_sync;
+logic [9:0] ms_wait_cnt;
+logic       ms_io_pending;
+
+wire        ms_io_ack;
+wire  [7:0] ms_io_dout_raw;
+wire        ms_audio_valid;
+wire        ms_irq_n;       // OPL Timer IRQ — generated, NOT wired to /INT in Stage 1
+
+always_ff @(posedge clk21m) begin
+    ms_wr_n_prev <= wr_n;
+    ms_rd_n_prev <= rd_n;
+    ms_ack_sync  <= {ms_ack_sync[1:0], ms_ack_toggle};
+    if (reset) begin
+        ms_req_toggle <= 1'b0;
+        ms_rd_toggle  <= 1'b0;
+        ms_wr_n_prev  <= 1'b1;
+        ms_rd_n_prev  <= 1'b1;
+        ms_io_pending <= 1'b0;
+    end else begin
+        if (ms_fm_cs & ~wr_n & ms_wr_n_prev) begin
+            ms_io_port_lat <= a[7:0];
+            ms_io_data_lat <= d_from_cpu;
+            ms_req_toggle  <= ~ms_req_toggle;
+            ms_io_pending  <= 1'b1;
+            ms_wait_cnt    <= 10'd600;
+        end
+        if (ms_fm_cs & ~rd_n & ms_rd_n_prev) begin
+            ms_io_port_lat <= a[7:0];
+            ms_rd_toggle   <= ~ms_rd_toggle;
+            ms_io_pending  <= 1'b1;
+            ms_wait_cnt    <= 10'd600;
+        end
+        if (ms_io_pending) begin
+            if (ms_ack_sync[2] ^ ms_ack_sync[1]) ms_io_pending <= 1'b0;
+            else if (ms_wait_cnt == 10'd0)        ms_io_pending <= 1'b0;
+            else                                 ms_wait_cnt   <= ms_wait_cnt - 10'd1;
+        end
+    end
+end
+
+always_ff @(posedge clk_sdram) begin
+    ms_req_sync <= {ms_req_sync[1:0], ms_req_toggle};
+    ms_rd_sync  <= {ms_rd_sync[1:0],  ms_rd_toggle};
+    if (ms_io_ack) begin
+        ms_io_dout_lat <= ms_io_dout_raw;
+        ms_ack_toggle  <= ~ms_ack_toggle;
+    end
+end
+
+wire ms_io_wr_sdram = ms_req_sync[2] ^ ms_req_sync[1];
+wire ms_io_rd_sdram = ms_rd_sync[2]  ^ ms_rd_sync[1];
+
+ymf278b_top #(
+    .CLK_HZ   (85909090),
+    .CLK_OPL3 (14318182)
+) u_moonsound (
+    .clk          (clk_sdram),
+    .clk_opl3     (clk_opl3),
+    .rst_n        (~reset),
+    .io_port      (ms_io_port_lat),
+    .io_data_in   (ms_io_data_lat),
+    .io_wr        (ms_io_wr_sdram),
+    .io_rd        (ms_io_rd_sdram),
+    .io_data_out  (ms_io_dout_raw),
+    .io_ack       (ms_io_ack),
+    .audio_left   (ms_out_l),
+    .audio_right  (ms_out_r),
+    .audio_valid  (ms_audio_valid),
+    .irq_n        (ms_irq_n),    // Stage 1: left unwired (freeze avoidance)
+    .fm_mute      (1'b0)
+);
+
+// Read data back to the CPU when a MoonSound FM port is selected.
+wire [7:0] ms_dout = ms_fm_cs ? ms_io_dout_lat : 8'h00;
 
 endmodule

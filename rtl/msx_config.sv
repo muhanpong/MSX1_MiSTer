@@ -58,6 +58,10 @@ assign msxConfig.video_mode = video_mode_t'(bios_config.MSX_typ == MSX1 ? (HPS_s
 assign msxConfig.cas_audio_src = cas_audio_src_t'(HPS_status[8]);
 assign msxConfig.border = HPS_status[41];
 assign msxConfig.vdp_id = HPS_status[42];
+// MoonSound (OPL3 FM) — Stage 1: always enabled.  FM I/O ports 0xC4-0xC7 are
+// MoonSound-specific (harmless when no MoonSound software runs).  A proper OSD
+// toggle (e.g. HPS_status[45]) can replace this later.
+assign msxConfig.moonsound_en = 1'b1;
 
 assign ROM_A_load_hide    = cart_conf[0].typ != CART_TYP_ROM;
 assign ROM_B_load_hide    = cart_conf[1].typ != CART_TYP_ROM;
