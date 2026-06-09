@@ -53,7 +53,9 @@ module ymf278b_top #(
     output wire        dbg_mem_nonzero,
     output wire        dbg_pcm_base_set,
     output wire [23:0] dbg_slot_keyon,
-    output wire [23:0] dbg_slot_active
+    output wire [23:0] dbg_slot_active,
+    output wire [23:0] dbg_slot_envlive,
+    output logic       dbg_ack_stopped   // reg4 (timer ack) writes stopped reaching OPL3
 );
 
 // ─── OPL3 core (gtaylormb opl3.sv) ───────────────────────────────────
@@ -81,6 +83,27 @@ always_ff @(posedge clk) begin
         opl3_reg_shadow[0] <= opl3_reg_data;
 end
 assign new2 = opl3_reg_shadow[0][1];
+
+// Ack-reach detector (clk): latch if, WHILE the OPL irq is asserted (ft1 set →
+// irq_n low), no reg4 (timer-control) write reaches the OPL3 write stage for too
+// long (>~3ms).  Gating on irq_n means it only fires when an ack IS needed but
+// isn't arriving — not in the idle/boot state (irq deasserted, no reg4 traffic).
+//   dbg_ack_stopped LIT during the freeze => irq stuck AND ack never reaches here
+//                                            → bridge/ymf278b_regs drop the ack
+//   dbg_ack_stopped OFF during the freeze => the reg4 ack DOES reach here (resets
+//                                            the gap) → afifo/timers drop/ignore it
+logic [17:0] ack_gap_cnt;
+always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        ack_gap_cnt     <= 0;
+        dbg_ack_stopped <= 0;
+    end else begin
+        if (opl3_reg_wr && opl3_reg_addr == 9'd4) ack_gap_cnt <= 0;  // ack reached → reset
+        else if (irq_n)                           ack_gap_cnt <= 0;  // irq idle → not relevant
+        else if (~&ack_gap_cnt)                   ack_gap_cnt <= ack_gap_cnt + 1'b1;
+        if (&ack_gap_cnt) dbg_ack_stopped <= 1'b1;
+    end
+end
 
 // OPL3 chip instantiation (gtaylormb opl3_fpga)
 // host_if uses edge detection (wr_p1 && !wr_p2), so consecutive-cycle writes are dropped.
@@ -198,7 +221,8 @@ ymf278_pcm_engine #(
     .dbg_slot0_hdr_end   (),
     .dbg_slot0_hdr_bits  (),
     .dbg_slot_keyon  (dbg_slot_keyon),
-    .dbg_slot_active (dbg_slot_active)
+    .dbg_slot_active (dbg_slot_active),
+    .dbg_slot_envlive(dbg_slot_envlive)
 );
 
 // CPU register read mux.

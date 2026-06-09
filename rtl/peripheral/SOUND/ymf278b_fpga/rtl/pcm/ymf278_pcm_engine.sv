@@ -116,7 +116,12 @@ module ymf278_pcm_engine #(
     // arrived" (keyon bit clear) from "configured but silent" (keyon set,
     // active clear).
     output logic [23:0] dbg_slot_keyon,
-    output logic [23:0] dbg_slot_active
+    output logic [23:0] dbg_slot_active,
+    // env_live: slot's envelope still expected to produce audible output
+    // (state != EG_OFF && env_vol < MAX_ATT_INDEX).  Lets the overlay flag a
+    // RED voice only when it is keyed-on AND should be sounding AND produced
+    // none — i.e. a genuine failure, not a legitimate decay-to-silence tail.
+    output logic [23:0] dbg_slot_envlive
 );
 
     // ════════════════════════════════════════════════════════════════════════
@@ -1923,16 +1928,41 @@ module ymf278_pcm_engine #(
     // genuinely dead voice (shown red on the overlay).
     logic [23:0] active_acc;
     logic [13:0] act_frames;
+    // env_live snapshot (instantaneous): a slot's envelope is still expected to
+    // produce output when it is not EG_OFF and not clipped to silence.  Mirrors
+    // openMSX's silence clip (YMF278.cc: env_vol >= MAX_ATT_INDEX -> 0, and
+    // state==EG_OFF -> skipped).  Sampled at the same window-close as active so
+    // the overlay's RED = keyon & envlive & ~active flags only genuine failures.
+    // "expected audible" = not EG_OFF AND the COMBINED attenuation (EG env_vol
+    // + TL index) is below the -60dB silence floor.  The pipeline output is
+    // interp*gain_e*gain_t, so a voice only near the floor in BOTH factors is
+    // effectively silent and rounds vol_sample to 0 — NOT a failure.  Summing
+    // the two attenuation indices (same dB-index units, each clips at 0x280)
+    // mirrors that; per-factor checks alone let such voices false-red.  Covers
+    // both legit cases: EG decay-to-silence and TL/volume turned to 0.
+    logic [23:0] envlive_now;
+    always_comb begin
+        slot_dyn_t dy;
+        for (int i = 0; i < 24; i++) begin
+            dy = ram_dyn[i];
+            envlive_now[i] = (dy.env_state != EG_OFF)
+                          && (({2'b0, dy.env_vol} + {2'b0, tl_cur[i], 2'b00}) < 12'h280);
+        end
+    end
     always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin active_acc <= '0; dbg_slot_active <= '0; act_frames <= '0; end
+        if (!rst_n) begin
+            active_acc <= '0; dbg_slot_active <= '0; act_frames <= '0;
+            dbg_slot_envlive <= '0;
+        end
         else begin
             if (d2c_pkt.valid && d2c_pkt.vol_sample != 32'sd0)
                 active_acc[d2c_pkt.slot] <= 1'b1;
             if (sample_start) begin
                 act_frames <= act_frames + 14'd1;
                 if (act_frames == 14'h3FFF) begin
-                    dbg_slot_active <= active_acc;
-                    active_acc      <= '0;
+                    dbg_slot_active  <= active_acc;
+                    dbg_slot_envlive <= envlive_now;
+                    active_acc       <= '0;
                 end
             end
         end

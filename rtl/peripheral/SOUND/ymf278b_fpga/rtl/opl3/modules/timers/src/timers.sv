@@ -121,6 +121,21 @@ module timers
         .timer_overflow_pulse(timer2_overflow_pulse)
     );
 
+    // IRQ watchdog: a legitimately-asserted IRQ is cleared by the host's reg4 ack
+    // within one Timer-1 period (<1ms; up to ~1ms if a long BIOS ISR delays the
+    // ack).  If it stays asserted FAR longer the host's ack isn't clearing ft1 —
+    // a self-sustaining OPL-IRQ storm (the rapid back-to-back interrupt handler's
+    // ack writes race/drop in the ms_io bridge CDC).  Force-clear the flags after
+    // ~4.6ms to break the storm so the CPU returns to normal (non-back-to-back)
+    // interrupt handling and the next ack succeeds.  Never fires in normal play.
+    logic [15:0] irq_wdog = 0;
+    logic        irq_wdog_clr;
+    always_ff @(posedge clk) begin
+        if (!irq || reset) irq_wdog <= 0;
+        else if (~&irq_wdog) irq_wdog <= irq_wdog + 1'b1;
+    end
+    assign irq_wdog_clr = &irq_wdog;
+
     always_ff @(posedge clk) begin
         if ((timer1_overflow_pulse || force_timer_overflow) && !mt1)
             ft1 <= 1;
@@ -128,7 +143,7 @@ module timers
         if (timer2_overflow_pulse && !mt2)
             ft2 <= 1;
 
-        if (reset || irq_rst) begin
+        if (reset || irq_rst || irq_wdog_clr) begin
             ft1 <= 0;
             ft2 <= 0;
         end
