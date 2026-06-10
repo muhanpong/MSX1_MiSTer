@@ -31,7 +31,8 @@ wire         dbg_pcm_valid, dbg_opl3_valid, dbg_new2, dbg_mem_nonzero, dbg_pcm_b
 wire signed [15:0] dbg_pcm_level;
 wire  [4:0]  dbg_keyon_count, dbg_accum_cnt;
 wire  [9:0]  dbg_env_min;
-wire [23:0]  dbg_slot_keyon, dbg_slot_active;
+wire [23:0]  dbg_slot_keyon, dbg_slot_active, dbg_slot_envlive;
+wire         dbg_ack_stopped;
 logic signed [15:0] audio_left, audio_right;
 logic               audio_valid;
 logic        irq_n;

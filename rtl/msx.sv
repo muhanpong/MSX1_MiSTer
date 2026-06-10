@@ -111,7 +111,14 @@ module msx
    output wire               dbg_mem_nonzero,
    output wire               dbg_pcm_base_set,  // 1 if pcm_rom_base != default
    output wire        [23:0] dbg_slot_keyon,
-   output wire        [23:0] dbg_slot_active
+   output wire        [23:0] dbg_slot_active,
+   output wire        [23:0] dbg_slot_envlive,
+   // vgmplay OPL-timer freeze detectors (sticky latches, clk21m)
+   output logic              dbg_wait_stuck,
+   output logic              dbg_irq_stuck,
+   output logic              dbg_cpu_nom1,
+   output logic              dbg_intack_stop,  // CPU not taking the asserted OPL IRQ
+   output wire               dbg_ack_stopped   // reg4 ack writes stopped (clk_sdram, from ymf278b_top)
 );
 
 //  -----------------------------------------------------------------------------
@@ -602,7 +609,13 @@ logic [7:0] ms_io_dout_lat;
 logic       ms_ack_toggle = 1'b0;   // clk_sdram: flips on every ms_io_ack
 logic [2:0] ms_ack_sync;            // clk21m: 3-FF sync of ms_ack_toggle
 logic       ms_io_pending;          // clk21m: a MoonSound I/O is in flight → assert wait
-logic [9:0] ms_wait_cnt;            // safety timeout so a lost ack can't hang the CPU (must exceed the deferred mem-write ack ~ MEM_WRITE_DELAY/4 in clk21m)
+logic [11:0] ms_wait_cnt;           // safety timeout so a lost ack can't hang the CPU.
+                                    // MUST comfortably exceed the worst legitimate ack delay
+                                    // (deferred mem-write ack = MEM_WRITE_DELAY(12µs) + engine
+                                    // cpu-mem op under playback contention).  A PREMATURE timeout
+                                    // releases the CPU while the op is still in flight → the next
+                                    // I/O overlaps it → ack-toggle desync / latch corruption.
+                                    // 4000 clk21m ≈ 186µs: ~15× the normal worst case.
 
 always_ff @(posedge clk21m) begin
     ms_wr_n_prev <= wr_n;
@@ -621,21 +634,21 @@ always_ff @(posedge clk21m) begin
             ms_io_data_lat <= d_from_cpu;
             ms_req_toggle  <= ~ms_req_toggle;
             ms_io_pending  <= 1'b1;        // hold CPU until this write is accepted
-            ms_wait_cnt    <= 10'd600;
+            ms_wait_cnt    <= 12'd4000;
         end
         if ((ms_wave_cs | ms_fm_cs) & ~rd_n & ms_rd_n_prev) begin
             // Falling edge of rd_n
             ms_io_port_lat <= a[7:0];
             ms_rd_toggle   <= ~ms_rd_toggle;
             ms_io_pending  <= 1'b1;        // hold CPU until read data is ready
-            ms_wait_cnt    <= 10'd600;
+            ms_wait_cnt    <= 12'd4000;
         end
         // Release the wait when the chip acks (one access in flight at a time,
         // since the CPU is held), or after the safety timeout.
         if (ms_io_pending) begin
             if (ms_ack_sync[2] ^ ms_ack_sync[1]) ms_io_pending <= 1'b0;
-            else if (ms_wait_cnt == 10'd0)        ms_io_pending <= 1'b0;
-            else                                 ms_wait_cnt   <= ms_wait_cnt - 10'd1;
+            else if (ms_wait_cnt == 12'd0)        ms_io_pending <= 1'b0;
+            else                                 ms_wait_cnt   <= ms_wait_cnt - 12'd1;
         end
     end
 end
@@ -740,6 +753,47 @@ end
 // acks, so deferring assertion by ~1µs only adds jitter ≪ the 880µs period.
 wire ms_int_n = ms_irq_n_sync | ~msxConfig.moonsound_en | (~iorq_n & m1_n);
 
+// ── Freeze detectors (clk21m) — latch (sticky) when a signal is stuck
+// abnormally long, to diagnose the vgmplay OPL-timer freeze.  Exported to the
+// debug overlay (video domain), readable WHILE the CPU is frozen, to tell:
+//   dbg_wait_stuck : WAIT_n held low > ~760us  (normal M1/MoonSound wait << this)
+//                    => CPU held in a wait state (WAIT deadlock)
+//   dbg_irq_stuck  : ms_irq_n held low > ~6ms  (OPL flag never cleared)
+//                    => OPL-IRQ storm (interrupt never deasserts)
+//   dbg_cpu_nom1   : no M1 (opcode fetch) for > ~760us
+//                    => CPU not advancing (halt/stuck), independent of WAIT
+//   dbg_intack_stop: while the OPL irq is asserted (ms_irq_n_sync low), the CPU
+//                    runs NO interrupt-acknowledge cycle (m1_n & iorq_n both low)
+//                    for > ~760us => CPU is NOT taking the asserted interrupt
+//                    (IFF disabled / spin), so the handler never acks.
+logic [13:0] wait_cnt = 0, nom1_cnt = 0;
+logic [16:0] irq_cnt  = 0;
+logic [15:0] intack_cnt = 0;   // ~3ms threshold (> the ~880us Timer-1 period, so a
+                               // CPU taking the IRQ once per overflow doesn't false-latch)
+always_ff @(posedge clk21m) begin
+    if (reset) begin
+        wait_cnt <= 0; irq_cnt <= 0; nom1_cnt <= 0; intack_cnt <= 0;
+        dbg_wait_stuck <= 0; dbg_irq_stuck <= 0; dbg_cpu_nom1 <= 0; dbg_intack_stop <= 0;
+    end else begin
+        if (wait_n)            wait_cnt <= 0;
+        else if (~&wait_cnt)   wait_cnt <= wait_cnt + 1'b1;
+        if (&wait_cnt)         dbg_wait_stuck <= 1'b1;
+
+        if (ms_irq_n_sync)     irq_cnt <= 0;
+        else if (~&irq_cnt)    irq_cnt <= irq_cnt + 1'b1;
+        if (&irq_cnt)          dbg_irq_stuck <= 1'b1;
+
+        if (~m1_n)             nom1_cnt <= 0;
+        else if (~&nom1_cnt)   nom1_cnt <= nom1_cnt + 1'b1;
+        if (&nom1_cnt)         dbg_cpu_nom1 <= 1'b1;
+
+        if (~m1_n & ~iorq_n)   intack_cnt <= 0;   // int-ack cycle → CPU taking IRQ
+        else if (ms_irq_n_sync) intack_cnt <= 0;  // irq not asserted → not relevant
+        else if (~&intack_cnt) intack_cnt <= intack_cnt + 1'b1;
+        if (&intack_cnt)       dbg_intack_stop <= 1'b1;
+    end
+end
+
 ymf278b_top #(
     .CLK_HZ   (85909090),
     .CLK_OPL3 (14318182)
@@ -778,7 +832,9 @@ ymf278b_top #(
     .dbg_mem_nonzero(dbg_mem_nonzero),
     .dbg_pcm_base_set(),  // generated locally via assign
     .dbg_slot_keyon (dbg_slot_keyon),
-    .dbg_slot_active(dbg_slot_active)
+    .dbg_slot_active(dbg_slot_active),
+    .dbg_slot_envlive(dbg_slot_envlive),
+    .dbg_ack_stopped(dbg_ack_stopped)
 );
 
 // Gate audio to zero when MoonSound disabled

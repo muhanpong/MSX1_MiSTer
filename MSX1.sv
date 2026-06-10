@@ -223,7 +223,7 @@ wire       [7:0] sd_buff_dout;
 wire       [7:0] sd_buff_din[0:VDNUM-1];
 wire             sd_buff_wr;
 wire [VDNUM-1:0] img_mounted;
-wire      [31:0] img_size;
+wire      [63:0] img_size;   // 64-bit: SD images can exceed 4GiB (sd_card/hps_io are 64-bit)
 wire             img_readonly;
 wire      [15:0] sdram_sz;
 wire      [64:0] rtc;
@@ -398,6 +398,12 @@ wire        dbg_mem_nonzero;
 wire        dbg_pcm_base_set;
 wire [23:0] dbg_slot_keyon;
 wire [23:0] dbg_slot_active;
+wire [23:0] dbg_slot_envlive;
+wire        dbg_wait_stuck;
+wire        dbg_irq_stuck;
+wire        dbg_cpu_nom1;
+wire        dbg_intack_stop;
+wire        dbg_ack_stopped;
 wire [15:0] cpu_addr;
 wire signed [15:0] audio_l, audio_r;
 wire        hsync, vsync, blank_n, hblank, vblank, ce_pix;
@@ -441,7 +447,7 @@ msx MSX
    .sram_load(status[39]),
    .ioctl_addr(ioctl_addr[26:0]),
    .img_mounted(img_mounted[5]),
-   .img_size(img_size),
+   .img_size(img_size[31:0]),   // msx (FDC floppy) port is 32-bit; floppies are small
    .img_readonly(img_readonly),
    .sd_rd(sd_rd[5]),
    .sd_wr(sd_wr[5]),
@@ -629,7 +635,13 @@ debug_overlay u_overlay (
    .dbg_accum_cnt  (dbg_accum_cnt),
    .dbg_env_min    (dbg_env_min),
    .dbg_slot_keyon (dbg_slot_keyon),
-   .dbg_slot_active(dbg_slot_active)
+   .dbg_slot_active(dbg_slot_active),
+   .dbg_slot_envlive(dbg_slot_envlive),
+   .dbg_wait_stuck (dbg_wait_stuck),
+   .dbg_irq_stuck  (dbg_irq_stuck),
+   .dbg_cpu_nom1   (dbg_cpu_nom1),
+   .dbg_intack_stop(dbg_intack_stop),
+   .dbg_ack_stopped(dbg_ack_stopped)
 );
 
 video_mixer #(.GAMMA(0)) video_mixer

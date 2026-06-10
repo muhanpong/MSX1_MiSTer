@@ -20,7 +20,13 @@ module debug_overlay (
     input  wire [4:0]  dbg_accum_cnt,         // Unused legacy
     input  wire [9:0]  dbg_env_min,           // Unused legacy
     input  wire [23:0] dbg_slot_keyon,        // per-slot host key-on
-    input  wire [23:0] dbg_slot_active        // per-slot envelope running
+    input  wire [23:0] dbg_slot_active,       // per-slot produced output (window)
+    input  wire [23:0] dbg_slot_envlive,      // per-slot envelope still expected to sound
+    input  wire        dbg_wait_stuck,        // WAIT_n held low too long (deadlock)
+    input  wire        dbg_irq_stuck,         // OPL irq held asserted too long (storm)
+    input  wire        dbg_cpu_nom1,          // no opcode fetch too long (CPU halt)
+    input  wire        dbg_ack_stopped,       // reg4 timer-ack writes stopped reaching OPL3
+    input  wire        dbg_intack_stop        // CPU not taking the asserted OPL IRQ
 );
 
 // ─── CDC sync ───────────────────────────────────────────────────────────────────────
@@ -37,10 +43,17 @@ always_ff @(posedge CLK_VIDEO) begin
 end
 
 // Per-slot masks (slow-changing) — 2-FF CDC into the video clock.
-logic [23:0] keyon_s1, keyon_s2, active_s1, active_s2;
+logic [23:0] keyon_s1, keyon_s2, active_s1, active_s2, envlive_s1, envlive_s2;
+logic [1:0]  wstk_s, istk_s, nom1_s, astp_s, iack_s;   // freeze-detector latches, CDC into video clk
 always_ff @(posedge CLK_VIDEO) begin
-    keyon_s1  <= dbg_slot_keyon;   keyon_s2  <= keyon_s1;
-    active_s1 <= dbg_slot_active;  active_s2 <= active_s1;
+    keyon_s1   <= dbg_slot_keyon;    keyon_s2   <= keyon_s1;
+    active_s1  <= dbg_slot_active;   active_s2  <= active_s1;
+    envlive_s1 <= dbg_slot_envlive;  envlive_s2 <= envlive_s1;
+    wstk_s     <= {wstk_s[0], dbg_wait_stuck};
+    istk_s     <= {istk_s[0], dbg_irq_stuck};
+    nom1_s     <= {nom1_s[0], dbg_cpu_nom1};
+    astp_s     <= {astp_s[0], dbg_ack_stopped};
+    iack_s     <= {iack_s[0], dbg_intack_stop};
 end
 
 // ─── Hold counters (8/frame decay) ───────────────────────────────────────────
@@ -81,15 +94,19 @@ end
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 localparam PW = 11'd66;
-localparam PH = 8'd50;  // 6 rows × 8px + 2 border  (rows 5,6 = per-slot maps)
+localparam PH = 8'd58;  // 7 rows × 8px + 2 border  (row 7 = freeze detectors)
 wire in_panel = en && !hblank && !vblank && (h_cnt < PW) && (v_cnt < PH) && !drew_this_line;
 wire border   = (h_cnt == 11'd0) || (h_cnt == PW-1) || (v_cnt == 8'd0) || (v_cnt == PH-1);
 wire [7:0] px = h_cnt[7:0] - 8'd1;
 wire [7:0] py = v_cnt       - 8'd1;
 wire [4:0] slot_idx = px[5:1];   // 2px per slot → slot 0..23
 wire       slot_ok  = (px < 8'd48);
-// Dead voices = keyed-on but produced no output in the last window.
-wire [23:0] dead_mask = keyon_s2 & ~active_s2;
+// Dead voices = a genuine failure: keyed-on AND the envelope still expects to
+// sound (not EG_OFF / not clipped to silence) AND yet produced no output for
+// the whole window.  Gating on envlive removes the false reds from voices that
+// legitimately decayed to silence with key-on still held (e.g. percussive/
+// piano-like instruments the driver never sends key-off for).
+wire [23:0] dead_mask = keyon_s2 & envlive_s2 & ~active_s2;
 // Manual popcount ($countones isn't synthesizable in Quartus 17.1).
 logic [5:0] dead_cnt;
 always_comb begin
@@ -123,9 +140,27 @@ always_comb begin
                 if (slot_ok && dead_mask[slot_idx])      begin R_out=8'hFF; G_out=8'h00; B_out=8'h00; end
                 else if (slot_ok && keyon_s2[slot_idx])  begin R_out=8'h00; G_out=8'hFF; B_out=8'h00; end
                 else if (slot_ok)                        begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
-            end else begin                 // DEAD-VOICE COUNT — red bar (length = #dead)
+            end else if (py < 8'd48) begin // DEAD-VOICE COUNT — red bar (length = #dead)
                 if (px < dead_w) begin R_out=8'hFF; G_out=8'h00; B_out=8'h00; end
                 else             begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
+            end else begin                 // FREEZE DETECTORS — 5 segments (~12px each):
+                // [WAIT red][IRQ magenta][noM1 white][ACK-STOP yellow][INTACK-STOP cyan]
+                if (px < 8'd13) begin                  // WAIT deadlock
+                    if (wstk_s[1]) begin R_out=8'hFF; G_out=8'h00; B_out=8'h00; end
+                    else           begin R_out=8'h20; G_out=8'h00; B_out=8'h00; end
+                end else if (px < 8'd26) begin         // IRQ storm
+                    if (istk_s[1]) begin R_out=8'hFF; G_out=8'h00; B_out=8'hFF; end
+                    else           begin R_out=8'h20; G_out=8'h00; B_out=8'h20; end
+                end else if (px < 8'd39) begin         // CPU halt (no M1)
+                    if (nom1_s[1]) begin R_out=8'hFF; G_out=8'hFF; B_out=8'hFF; end
+                    else           begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
+                end else if (px < 8'd52) begin         // ACK writes stopped reaching OPL3
+                    if (astp_s[1]) begin R_out=8'hFF; G_out=8'hE0; B_out=8'h00; end
+                    else           begin R_out=8'h20; G_out=8'h1C; B_out=8'h00; end
+                end else begin                         // CPU not taking the asserted IRQ
+                    if (iack_s[1]) begin R_out=8'h00; G_out=8'hFF; B_out=8'hFF; end
+                    else           begin R_out=8'h00; G_out=8'h20; B_out=8'h20; end
+                end
             end
         end
     end

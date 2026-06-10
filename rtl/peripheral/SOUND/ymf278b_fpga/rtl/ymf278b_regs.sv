@@ -152,6 +152,13 @@ always_ff @(posedge clk) begin
         if (busy_cnt != '0) busy_cnt <= busy_cnt - 1;
         if (load_cnt != '0) load_cnt <= load_cnt - 1;
 
+        // While a deferred memory op is still waiting for its ack, a NEW I/O
+        // strobe can only arrive if the CPU escaped via the bridge WAIT
+        // timeout.  Accepting it would overwrite opl4latch/pcm_reg_data while
+        // the engine is still consuming them (custom-wave corruption) and
+        // desync the ack-toggle pairing.  Real-chip BUSY semantics: the access
+        // is simply lost.  Drop it; the bridge self-heals via its timeout.
+        if ((io_wr || io_rd) && !pcm_rd_wait && !pcm_wr_wait) begin
         if (io_wr) begin
         // I/O port map (low byte):
         // 0x7E-0x7F: WAVE (PCM)  — only writable when NEW2=1
@@ -256,6 +263,7 @@ always_ff @(posedge clk) begin
             io_ack <= 1'b1;
         end
     end // io_rd
+    end // !pcm_rd_wait && !pcm_wr_wait gate
     end // else begin
 end // always_ff
 
