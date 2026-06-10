@@ -57,7 +57,16 @@ module sdram
     input             ch3_req,
     input             ch3_rnw,     // 1 - read, 0 - write
     output reg        ch3_ready,
-	output reg        ch3_done
+	output reg        ch3_done,
+
+    // ch4: MoonSound PCM sample memory (read/write)
+    input      [26:0] ch4_addr,
+    output reg  [7:0] ch4_dout,
+    output     [15:0] ch4_dout16,  // full 16-bit word (both bytes) for PCM burst
+    input       [7:0] ch4_din,
+    input             ch4_req,
+    input             ch4_rnw,     // 1 - read, 0 - write
+    output reg        ch4_ready
 );
 
 assign SDRAM_nCS  = chip;
@@ -93,8 +102,8 @@ wire [2:0] CMD_LOAD_MODE       = 3'b000;
 reg [13:0] refresh_count = startup_refresh_max - sdram_startup_cycles;
 reg  [2:0] command;
 reg        chip;
-reg        ch1_saved_a0, ch2_saved_a0, ch3_saved_a0;
-reg [15:0] ch1_saved_data, ch2_saved_data, ch3_saved_data;
+reg        ch1_saved_a0, ch2_saved_a0, ch3_saved_a0, ch4_saved_a0;
+reg [15:0] ch1_saved_data, ch2_saved_data, ch3_saved_data, ch4_saved_data;
 
 localparam STATE_STARTUP = 0;
 localparam STATE_WAIT    = 1;
@@ -107,31 +116,45 @@ localparam STATE_IDLE_4  = 8;
 localparam STATE_IDLE_5  = 9;
 localparam STATE_RFSH    = 10;
 
+// ch4 (MoonSound PCM) burst-priority hold: after a ch4 grant, ch4 keeps priority
+// over ch1/ch2/ch3 for CH4_HOLD cycles so the 3-4 word burst read pays the arbiter
+// queue once instead of per word.  Bounded window + only active while ch4 has a
+// pending request → ch1-3 (and refresh) are not starved.  Validated end-to-end via
+// tb_trace_wave.sv +contention +hold=24 (ch4 read latency 29→11, sustain restored).
+localparam [4:0] CH4_HOLD = 5'd24;
+
 assign ch1_dout = ch1_saved_a0 ? ch1_saved_data[15:8] : ch1_saved_data[7:0];
 assign ch2_dout = ch2_saved_a0 ? ch2_saved_data[15:8] : ch2_saved_data[7:0];
 assign ch3_dout = ch3_saved_a0 ? ch3_saved_data[15:8] : ch3_saved_data[7:0];
+assign ch4_dout = ch4_saved_a0 ? ch4_saved_data[15:8] : ch4_saved_data[7:0];
+// Full 16-bit word: [7:0] = mem[even byte], [15:8] = mem[odd byte].  PCM
+// engine issues word-aligned (even) addresses and consumes both bytes.
+assign ch4_dout16 = ch4_saved_data;
 
 always @(posedge clk) begin
-    reg [CAS_LATENCY+BURST_LENGTH+1:0] data_ready_delay1, data_ready_delay2, data_ready_delay3;
+    reg [CAS_LATENCY+BURST_LENGTH+1:0] data_ready_delay1, data_ready_delay2, data_ready_delay3, data_ready_delay4;
 
     reg        saved_wr;
     reg [12:0] cas_addr;
     reg [15:0] saved_data;
     reg  [3:0] state = STATE_STARTUP;
 
-    reg       ch1_req_1, ch2_req_1, ch3_req_1;
-    reg       ch1_rq, ch2_rq, ch3_rq;
+    reg       ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1;
+    reg       ch1_rq, ch2_rq, ch3_rq, ch4_rq;
     reg [1:0] ch;
 
-    reg        ch1_rnw_1,ch2_rnw_1,ch3_rnw_1;
-    reg [26:0] ch1_addr_1,ch2_addr_1,ch3_addr_1;
-    reg  [7:0] ch1_din_1,ch2_din_1,ch3_din_1;
-    
+    reg        ch1_rnw_1,ch2_rnw_1,ch3_rnw_1,ch4_rnw_1;
+    reg [26:0] ch1_addr_1,ch2_addr_1,ch3_addr_1,ch4_addr_1;
+    reg  [7:0] ch1_din_1,ch2_din_1,ch3_din_1,ch4_din_1;
+    reg  [4:0] ch4_hold_cnt;
+    logic      ch4_pri;
+
     reg        doRefresh_1;
     
     ch1_req_1 <= ch1_req;
     ch2_req_1 <= ch2_req;
     ch3_req_1 <= ch3_req;
+    ch4_req_1 <= ch4_req;
       
     doRefresh_1 <= doRefresh;
 
@@ -153,13 +176,22 @@ always @(posedge clk) begin
         ch3_addr_1 <= ch3_addr;
         ch3_din_1  <= ch3_din;
     end
+    if (ch4_req & ~ch4_req_1) begin
+        ch4_rq     <= 1;
+        ch4_addr_1 <= ch4_addr;
+        ch4_rnw_1  <= ch4_rnw;
+        ch4_din_1  <= ch4_din;
+    end
 	if (~ch3_req) ch3_done <= 0;
 
     refresh_count <= refresh_count+1'b1;
 
+    if (ch4_hold_cnt != 5'd0) ch4_hold_cnt <= ch4_hold_cnt - 1'b1;
+
     data_ready_delay1 <= data_ready_delay1>>1;
     data_ready_delay2 <= data_ready_delay2>>1;
     data_ready_delay3 <= data_ready_delay3>>1;
+    data_ready_delay4 <= data_ready_delay4>>1;
 
 
     if(data_ready_delay1[CAS_LATENCY+BURST_LENGTH-1]) ch1_saved_data <= SDRAM_DQ;
@@ -171,9 +203,16 @@ always @(posedge clk) begin
 	if(data_ready_delay3[CAS_LATENCY+BURST_LENGTH-1]) ch3_saved_data <= SDRAM_DQ;
 	if(data_ready_delay3[CAS_LATENCY+BURST_LENGTH-1]) ch3_ready <= 1;
 
+	if(data_ready_delay4[CAS_LATENCY+BURST_LENGTH-1]) ch4_saved_data <= SDRAM_DQ;
+	if(data_ready_delay4[CAS_LATENCY+BURST_LENGTH-1]) ch4_ready <= 1;
+
     SDRAM_DQ <= 16'bz;
 
     command <= CMD_NOP;
+
+    // ch4 holds priority during its burst window (only while it has a pending req)
+    ch4_pri = (ch4_hold_cnt != 5'd0) & ch4_rq;
+
     case (state)
         STATE_STARTUP: begin
             SDRAM_A    <= 0;
@@ -208,6 +247,7 @@ always @(posedge clk) begin
                 ch1_ready <= 1;
 				ch2_ready <= 1;
 				ch3_ready <= 1;
+				ch4_ready <= 1;
             end
         end
 
@@ -230,7 +270,7 @@ always @(posedge clk) begin
                 refresh_count <= refresh_count - cycles_per_refresh + 1'd1;
                 chip          <= 0;
             end 
-            else if(ch1_rq) begin
+            else if(ch1_rq && !ch4_pri) begin
                 if (ch1_rnw)
                     {cas_addr[12:9],SDRAM_BA,SDRAM_A,cas_addr[8:0]} <= {2'b00, 1'b1, ch1_addr_1[25:1]};
                 else
@@ -245,7 +285,7 @@ always @(posedge clk) begin
                 state      <= STATE_WAIT;
                 ch1_ready  <= 0;
             end
-            else if(ch2_rq) begin
+            else if(ch2_rq && !ch4_pri) begin
 				if (ch1_rnw)
                     {cas_addr[12:9],SDRAM_BA,SDRAM_A,cas_addr[8:0]} <= {2'b00, 1'b1, ch2_addr_1[25:1]};
                 else
@@ -260,7 +300,7 @@ always @(posedge clk) begin
                 state      <= STATE_WAIT;
 				ch2_ready  <= 0;
             end
-            else if(ch3_rq) begin
+            else if(ch3_rq && !ch4_pri) begin
                 chip       <= ch3_addr_1[26];
                 saved_data <= {ch3_din_1,ch3_din_1};
                 saved_wr   <= ~ch3_rnw_1;
@@ -274,6 +314,22 @@ always @(posedge clk) begin
                 command    <= CMD_ACTIVE;
                 state      <= STATE_WAIT;
 				ch3_ready  <= 0;
+            end
+            else if(ch4_rq) begin
+                chip       <= ch4_addr_1[26];
+                saved_data <= {ch4_din_1,ch4_din_1};
+                saved_wr   <= ~ch4_rnw_1;
+				ch4_saved_a0 <= ch4_addr_1[0];
+                ch         <= 3;
+                ch4_rq     <= 0;
+                ch4_hold_cnt <= CH4_HOLD;   // hold priority for the rest of this burst
+                if (ch4_rnw_1)
+                    {cas_addr[12:9],SDRAM_BA,SDRAM_A,cas_addr[8:0]} <= {2'b00, 1'b1, ch4_addr_1[25:1]};
+                else
+                    {cas_addr[12:9],SDRAM_BA,SDRAM_A,cas_addr[8:0]} <= {~ch4_addr_1[0],ch4_addr_1[0], 1'b1, ch4_addr_1[25:1]};
+                command    <= CMD_ACTIVE;
+                state      <= STATE_WAIT;
+				ch4_ready  <= 0;
             end
             else if (doRefresh_1) begin
                 state         <= STATE_RFSH;
@@ -292,6 +348,7 @@ always @(posedge clk) begin
                 if(ch == 0) ch1_ready  <= 1;
                 if(ch == 1) ch2_ready  <= 1;
                 if(ch == 2) begin ch3_ready  <= 1; ch3_done   <= 1; end
+                if(ch == 3) ch4_ready  <= 1;
                 state <= STATE_IDLE_2;
             end
             else begin
@@ -299,7 +356,8 @@ always @(posedge clk) begin
                 state   <= STATE_IDLE_3;
                      if(ch == 0) data_ready_delay1[CAS_LATENCY+BURST_LENGTH+1] <= 1;
                 else if(ch == 1) data_ready_delay2[CAS_LATENCY+BURST_LENGTH+1] <= 1;
-                else             data_ready_delay3[CAS_LATENCY+BURST_LENGTH+1] <= 1;
+                else if(ch == 2) data_ready_delay3[CAS_LATENCY+BURST_LENGTH+1] <= 1;
+                else             data_ready_delay4[CAS_LATENCY+BURST_LENGTH+1] <= 1;
             end
         end
       

@@ -9,6 +9,7 @@
     </rom>
   </device>
   <device typ="RESET_STATUS" id="Reset Status register"></device>  
+  <device typ="MOONSOUND" id="MoonSound PCM Wave ROM"></device>
   <primary slot="0">
     <secondary slot="0">
       <block start="0" id="MSX BIOS with BASIC ROM">

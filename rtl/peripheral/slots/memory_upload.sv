@@ -35,7 +35,8 @@ module memory_upload
    output                [1:0] rom_loaded,
    output dev_typ_t            cart_device[2],
    output dev_typ_t            msx_device,
-   output                [3:0] msx_dev_ref_ram[8]
+   output                [3:0] msx_dev_ref_ram[8],
+   output logic         [26:0] pcm_rom_base
 );
    /*verilator tracing_off*/
    logic [26:0] ioctl_size [4];
@@ -101,9 +102,21 @@ module memory_upload
       logic [26:0] save_ram_addr;
       logic  [3:0] cart_slot_expander_en;
       logic        external;
+      logic        ms_reserve_pending;   // (legacy, unused) — replaced by ms_zerofill_active below
+      logic        ms_zerofill_active;   // after yrw801, fill the 2MB custom-wave RAM with 0x00 (match openMSX clearRam: empty slots = silent, not garbage)
+      logic        ms_zerofill_jump;     // one-shot: snap ram_addr to the FIXED custom-RAM base (pcm_rom_base+0x200000) before zero-filling, regardless of where the yrw801 fill ended
       ddr3_wr   <= 1'b0;
       load_sram <= 1'b0;
-      if (ram_ce)               begin ram_ce  <= 1'b0; ram_addr  <= ram_addr + 1'd1; end
+      if (ram_ce) begin
+         ram_ce <= 1'b0;
+         // MoonSound: after the yrw801 ROM (2MB) is written, jump the allocator past
+         // the full 4MB YMF278 wave map (ROM 0..0x1FFFFF + custom RAM 0x200000..0x3FFFFF)
+         // so subsequent uploads don't land on the custom-wave region the PCM engine
+         // writes at pcm_rom_base + ms_mem_addr.
+         if (ms_reserve_pending)    begin ram_addr <= pcm_rom_base + 27'h400000; ms_reserve_pending <= 1'b0; end
+         else if (ms_zerofill_jump) begin ram_addr <= pcm_rom_base + 27'h200000; ms_zerofill_jump   <= 1'b0; end
+         else                             ram_addr <= ram_addr + 1'd1;
+      end
       if (ddr3_ready & ddr3_rd) begin ddr3_rd <= 1'b0; ddr3_addr <= ddr3_addr + 1'd1; end
       if (load) begin
          state <= STATE_CLEAN;
@@ -126,6 +139,10 @@ module memory_upload
          lookup_SRAM[1].size   <= 16'd0;
          lookup_SRAM[2].size   <= 16'd0;
          lookup_SRAM[3].size   <= 16'd0;
+         pcm_rom_base          <= 27'h1800000;  // default, overwritten when yrw801.rom is loaded
+         ms_reserve_pending    <= 1'b0;
+         ms_zerofill_active    <= 1'b0;
+         ms_zerofill_jump      <= 1'b0;
       end
       if (ddr3_ready & ~ddr3_rd) begin
          case(state)
@@ -218,8 +235,8 @@ module memory_upload
                                  pattern   <= 3'd1;       
                               end
                               default: begin
-                                 save_addr <= ddr3_addr;   
-                                 ddr3_addr <= 28'h300000;                                                            //FW Store
+                                 save_addr <= ddr3_addr;
+                                 ddr3_addr <= 28'h2000000;                                                           //FW Store base (must match MSX1.sv conf_str "FW PACK,32000000" + lines 283/353)
                                  ddr3_rd   <= 1'b1;                                                                  //Prefetch
                                  state     <= STATE_FIND_ROM;
                               end
@@ -259,6 +276,14 @@ module memory_upload
                         sram_size                     <= 25'd0;
                         data_id                       <= ROM_ROM;
                         mode                          <= 0;
+                        // MOONSOUND: no inline ROM → search Extension firmware pack
+                        if (conf[7] == 8'd3 && {conf[5][2:0], conf[6]} == 11'd0) begin
+                           data_id   <= ROM_MOONSOUND;
+                           save_addr <= ddr3_addr;
+                           ddr3_addr <= 28'h2000000;   // FW Store base (relocated 0x300000->0x2000000: 9MB region overflowed into slotA@0xC00000, clobbering yrw801's upper ~1MB)
+                           ddr3_rd   <= 1'b1;
+                           state     <= STATE_FIND_ROM;
+                        end
                      end
                      CONFIG_SLOT_INTERNAL: begin
                         $display("  SLOT INTERNAL");
@@ -309,13 +334,23 @@ module memory_upload
                if (config_head_addr == 4'd7) begin
                   config_head_addr <= 4'd0;
                   if ({fw_conf[0],fw_conf[1],fw_conf[2]} == {"M","S","X"}) begin
-                     if (data_ID_t'(fw_conf[4]) == data_id) begin  
+                     if (data_ID_t'(fw_conf[4]) == data_id) begin
                         data_size <= {fw_conf[5][2:0], fw_conf[6],14'h0};
+                        // Skip rest of 16-byte FW header.  +7 (NOT +8): the
+                        // state machine itself is gated on (ddr3_ready & ~ddr3_rd),
+                        // so STATE_FILL_RAM consumes one extra DDR3 read between
+                        // here and the first FILL_RAM2 byte-write.  +7 lands us
+                        // on the last header-pad byte; STATE_FILL_RAM's prefetch
+                        // then advances to the actual data byte 0 (= yrw801[0])
+                        // which STATE_FILL_RAM2 captures into SDRAM.  Verified
+                        // by BASIC dump showing 40 18 .. at SDRAM[0..] (yrw801
+                        // first bytes) with +7, and 18 00 .. (shifted by 1)
+                        // with +8.
                         ddr3_addr <= ddr3_addr + 28'd7;
                         state     <= STATE_FILL_RAM;
                         $display("        FILL FW ROM size:%X", {fw_conf[5][2:0], fw_conf[6],14'h0});
                      end else begin          
-                        if ((ddr3_addr - 28'h100000 + (28'({fw_conf[5],fw_conf[6]}) << 14) + 28'd8) >= 28'(ioctl_size[1])) begin
+                        if ((ddr3_addr - 28'h2000000 + (28'({fw_conf[5],fw_conf[6]}) << 14) + 28'd8) >= 28'(ioctl_size[1])) begin
                            ddr3_addr <= save_addr;
                            state <= STATE_READ_CONF;                                                           //not find skip load
                         end else begin
@@ -331,22 +366,32 @@ module memory_upload
             end
             STATE_FILL_RAM: begin
                if (~ram_ce) begin
+                  logic [26:0] curr_ram_addr;
                   state <= STATE_FILL_RAM2;
                   if (bram_rq) sram_addr <= ram_addr;
                   sdram_rq <= 0;
                   bram_rq  <= 0;
+                  
+                  curr_ram_addr = (save_ram_addr != 27'd0) ? save_ram_addr : ram_addr;
+                  
                   if (save_ram_addr != 27'd0) begin
                      ram_addr <= save_ram_addr;
                      save_ram_addr <= 27'd0;
                   end
                   if (data_size != 25'd0) begin
                      refAdd                   <= 1'b1; // Add reference po ulozeni
-                     lookup_RAM[ref_ram].addr <= ram_addr;
+                     lookup_RAM[ref_ram].addr <= curr_ram_addr;
                      lookup_RAM[ref_ram].size <= 16'(data_size[24:14]);               
-                     $display("           FILL RAM ID:%d addr:%x size:%d kB (save:%x)",ref_ram, ram_addr, 16'(data_size[24:14])*16, save_ram_addr);
+                     $display("           FILL RAM ID:%d addr:%x size:%d kB (save:%x)",ref_ram, curr_ram_addr, 16'(data_size[24:14])*16, save_ram_addr);
                      case(data_id)
                         ROM_RAM: begin
                            lookup_RAM[ref_ram].ro   <= 1'd0;
+                        end
+                        ROM_MOONSOUND: begin
+                           lookup_RAM[ref_ram].ro   <= 1'd1;
+                           pattern                  <= 3'd0;
+                           ddr3_rd                  <= 1'd1;
+                           pcm_rom_base             <= 27'(curr_ram_addr); // Capture SDRAM base for PCM engine
                         end
                         default: begin
                            lookup_RAM[ref_ram].ro   <= 1'd1;
@@ -375,8 +420,30 @@ module memory_upload
                if (sdram_ready & ~ram_ce) begin
                   data_size  <= data_size - 25'd1;
                   ram_ce     <= 1;
-                  if (data_size == 25'd1) begin
+                  if (data_size == 25'd1 && data_id == ROM_MOONSOUND && ~ms_zerofill_active) begin
+                     // yrw801 ROM just finished.  Fill the 2MB custom-wave RAM with
+                     // 0x00 so empty/unloaded custom slots read as silence — matching
+                     // openMSX powerUp() clearRam() (ram.clear(0)).  Without this the
+                     // custom RAM holds leftover SDRAM garbage, so unused custom waves
+                     // play noise on hardware while openMSX is silent.
+                     //
+                     // CRITICAL: snap ram_addr to the FIXED custom-RAM base
+                     // (pcm_rom_base+0x200000) via ms_zerofill_jump — do NOT just
+                     // continue from wherever the yrw801 fill ended.  The yrw801 fill
+                     // can end BELOW base+0x200000 (short / multi-segment FW load), and
+                     // "continuing" would zero the TOP of the ROM region.  That zeroed
+                     // ROM samples whose startAddr sits just under 0x200000 (e.g. wave
+                     // 489 @0x1a458f: openMSX plays it, MiSTer went silent).  The fill
+                     // ends naturally at base+0x400000, restoring the old 4MB reserve.
+                     data_size          <= 25'h200000;   // 2MB
+                     pattern            <= 3'd2;          // 0x00
+                     data_id            <= ROM_RAM;       // → no ddr3 prefetch during fill
+                     ms_zerofill_active <= 1'b1;
+                     ms_zerofill_jump   <= 1'b1;          // next ram_ce snaps ram_addr to pcm_rom_base+0x200000
+                  end else if (data_size == 25'd1) begin
+                     // End of fill (a normal ROM/RAM fill, or the custom-RAM zero-fill).
                      state    <= STATE_FILL_RAM;
+                     ms_zerofill_active <= 1'b0;
                      if (save_addr > 0) begin
                         ddr3_addr <= save_addr; //restore
                         save_addr <= 28'd0;

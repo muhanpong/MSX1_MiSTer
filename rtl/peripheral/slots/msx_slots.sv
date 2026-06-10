@@ -58,7 +58,11 @@ module msx_slots
    output                   debug_FDC_req,
    output                   debug_sd_card,
    output                   debug_erase,
-   output                   debug_scc_wr
+   output                   debug_scc_wr,
+   // ASCII16X flash info (for SDRAM-based save/load)
+   output logic       [1:0] flash16x_active,
+   output logic      [26:0] flash16x_base[2],
+   output logic      [15:0] flash16x_size[2]
 );
 
 assign sound = sound_opll + scc_wave + sound_psg;
@@ -195,20 +199,22 @@ flash flash
 (
    .clk(clk),
    .clk_sdram(clk_sdram),
-   .addr(23'(mapper_mfrsd0_flash_rq ? flash_mfrsd0_addr :
-             mapper_mfrsd3_flash_rq ? flash_mfrsd3_addr : 
-                                      flash_mfrsd1_addr )),
+   .addr(23'(mapper_mfrsd0_flash_rq  ? flash_mfrsd0_addr             :
+             mapper_mfrsd3_flash_rq  ? flash_mfrsd3_addr             :
+             mapper_ascii16x_flash_rq ? mapper_ascii16x_flash_addr   :
+                                        flash_mfrsd1_addr             )),
    .din(cpu_dout),
    .dout(flash_dout),
    .data_valid(flash_rq),
    .we(cpu_mreq & cpu_wr),
-   .ce((mapper_mfrsd3_flash_rq | mapper_mfrsd1_flash_rq | mapper_mfrsd0_flash_rq) & |(cart_device[cart_num] & DEV_FLASH)),
+   .ce(((mapper_mfrsd3_flash_rq | mapper_mfrsd1_flash_rq | mapper_mfrsd0_flash_rq) & |(cart_device[cart_num] & DEV_FLASH)) |
+       mapper_ascii16x_flash_rq),
    .sdram_addr(flash_addr),
    .sdram_din(flash_din),
    .sdram_req(flash_req),
-	.sdram_ready(flash_ready),
+   .sdram_ready(flash_ready),
    .sdram_done(flash_done),
-   .sdram_offset(mfrsd_base_ram[0]),
+   .sdram_offset(mapper_ascii16x_flash_rq ? 27'(base_ram) : mfrsd_base_ram[0]),
    .debug_erase(debug_erase)
 );
 
@@ -339,6 +345,8 @@ cart_ascii16 ascii16
 
 wire [24:0] mapper_ascii16x_addr;
 wire        mapper_ascii16x_unmaped;
+wire [22:0] mapper_ascii16x_flash_addr;
+wire        mapper_ascii16x_flash_rq;
 cart_ascii16x ascii16x
 (
    .rom_size(25'(size) << 14),
@@ -346,6 +354,8 @@ cart_ascii16x ascii16x
    .cs(mapper == MAPPER_ASCII16X),
    .mem_unmaped(mapper_ascii16x_unmaped),
    .mem_addr(mapper_ascii16x_addr),
+   .flash_addr(mapper_ascii16x_flash_addr),
+   .flash_rq(mapper_ascii16x_flash_rq),
    .*
 );
 
@@ -460,6 +470,16 @@ psg psg
    .sound(sound_psg),
    .*
 );
+
+always @(posedge clk) begin
+    if (reset) begin
+        flash16x_active <= 2'b00;
+    end else if (mapper == MAPPER_ASCII16X & cpu_mreq) begin
+        flash16x_base[cart_num]   <= base_ram;
+        flash16x_size[cart_num]   <= size;
+        flash16x_active[cart_num] <= 1'b1;
+    end
+end
 
 wire        FDC_req;
 wire  [7:0] d_to_cpu_FDC;

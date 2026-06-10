@@ -45,3 +45,21 @@ tmp/
 tools/private/
 TODOS
 tools/CreateMSXpack/ToImport/
+
+# --- sim / build artifacts ---
+*.vcd
+*.vvp
+*.out
+*.log
+__pycache__/
+build_log.txt
+
+# --- generated MoonSound packs (rebuild via createMSXpack.py) ---
+/releases/CreateMSXpack/
+
+# --- analysis reports / working notes (not source) ---
+/pcm_*.md
+/pcm_*.html
+/moonsound_pcm_fix_implementation_plan.md
+/docs/pcm_openmsx_verification/
+/docs/ASCII16X_save_failure.*

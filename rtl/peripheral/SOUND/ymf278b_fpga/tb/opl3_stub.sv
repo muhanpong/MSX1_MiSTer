@@ -61,7 +61,14 @@ module opl3
 
     assign status_o     = status;
     assign dout         = address == 0 ? status : '1;
-    assign sample_valid = 0;
+    // Periodic sample_valid with silent samples — the wrapper latches FM
+    // samples on this pulse; without it the latches stay X and poison the
+    // audio mix.  Real core: one pulse per CLK_DIV_COUNT clk cycles.
+    logic [8:0] sample_div = '0;
+    always_ff @(posedge clk) begin
+        sample_div   <= (sample_div == CLK_DIV_COUNT - 1) ? '0 : sample_div + 1'b1;
+        sample_valid <= (sample_div == CLK_DIV_COUNT - 1);
+    end
     assign sample_l     = '0;
     assign sample_r     = '0;
     assign led          = '0;

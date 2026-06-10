@@ -8,19 +8,20 @@ ROM_DIR = 'ROM'
 XML_DIR_COMP = 'Computer'
 XML_DIR_FW = 'Extension'
 EXTENSIONS  =  ["NONE"          , "ROM"           , "RAM"          , "FDC"              , 
-                "FM_PAC"        , "MEGA_FLASH_ROM", "GM2"          , "EMPTY"             ]
+                "FM_PAC"        , "MEGA_FLASH_ROM", "GM2"          , "EMPTY"            ,
+                "MOONSOUND"     ]
 
 MEM_DEVICE  =  ["NONE"          , "ROM"           , "RAM"          , "FDC"               ]
 
-DEVICE_TYPES = ["NONE"          , "KANJI"         , "OPL3"         , "RESET_STATUS"      ]
+DEVICE_TYPES = ["NONE"          , "KANJI"         , "OPL3"         , "RESET_STATUS"      , "MOONSOUND"     ]
 
 CONFIG_TYPES = ["NONE"          , "FDC"           , "SLOT_A"       , "SLOT_B"           ,
                 "SLOT_INTERNAL" , "KBD_LAYOUT"    , "CONFIG"       , "DEVICE"            ]
-MAPPER_TYPES = ["MAPPER_UNUSED" , "MAPPER_RAM"    , "MAPPER_AUTO"  , "MAPPER_NONE"      , 
+MAPPER_TYPES = ["MAPPER_UNUSED" , "MAPPER_RAM"    , "MAPPER_AUTO"  , "MAPPER_NONE"      ,
                 "MAPPER_ASCII8" , "MAPPER_ASCII16", "MAPPER_KONAMI", "MAPPER_KONAMI_SCC",
-                "MAPPER_KOEI"   , "MAPPER_LINEAR" , "MAPPER_RTYPE" , "MAPPER_WIZARDY"   , 
-                "MAPPER_FMPAC"  , "MAPPER_OFFSET" , "MAPPER_MFRSD1", "MAPPER_MFRSD2"    , 
-                "MAPPER_MFRSD3" , "MAPPER_GM2"    , "MAPPER_HALNOTE"                     ]
+                "MAPPER_KOEI"   , "MAPPER_LINEAR" , "MAPPER_RTYPE" , "MAPPER_WIZARDY"   ,
+                "MAPPER_FMPAC"  , "MAPPER_OFFSET" , "MAPPER_MFRSD1", "MAPPER_MFRSD2"    ,
+                "MAPPER_MFRSD3" , "MAPPER_GM2"    , "MAPPER_HALNOTE", "MAPPER_ASCII16X"  ]
 MSX_TYPES    = ["MSX1", "MSX2"]
 
 BLOCK_TYPES = {"NONE"       : {"MEMORY": "NONE", "DEVICE" : "NONE" , "MAPPER" : "MAPPER_UNUSED" , "CONFIG" : "NONE"         , "SRAM": 0  },
@@ -34,7 +35,8 @@ BLOCK_TYPES = {"NONE"       : {"MEMORY": "NONE", "DEVICE" : "NONE" , "MAPPER" : 
                "ROM_MIRROR" : {"MEMORY": "NONE", "DEVICE" : "NONE" , "MAPPER" : "MAPPER_NONE"   , "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
                "IO_MIRROR"  : {"MEMORY": "NONE", "DEVICE" : "NONE" , "MAPPER" : "MAPPER_UNUSED" , "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
                "MIRROR"     : {"MEMORY": "NONE", "DEVICE" : "NONE" , "MAPPER" : "MAPPER_NONE"   , "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
-               "HALNOTE"    : {"MEMORY": "ROM" , "DEVICE" : "NONE" , "MAPPER" : "MAPPER_HALNOTE", "CONFIG" : "SLOT_INTERNAL", "SRAM": 16 },
+               "HALNOTE"    : {"MEMORY": "ROM" , "DEVICE" : "NONE" , "MAPPER" : "MAPPER_HALNOTE" , "CONFIG" : "SLOT_INTERNAL", "SRAM": 16 },
+               "ASCII16X"   : {"MEMORY": "ROM" , "DEVICE" : "NONE" , "MAPPER" : "MAPPER_ASCII16X", "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
                "MSX-MUSIC"  : {"MEMORY": "ROM" , "DEVICE" : "OPL3" , "MAPPER" : "MAPPER_NONE"   , "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
                }
 

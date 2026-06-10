@@ -184,12 +184,12 @@ assign HDMI_FREEZE = 0;
 assign HDMI_BLACKOUT = 0;
 
 assign AUDIO_S = 1;
-assign AUDIO_L = audio;
-assign AUDIO_R = audio;
+assign AUDIO_L = audio_l;
+assign AUDIO_R = audio_r;
 assign AUDIO_MIX = 0;
 
 assign LED_POWER = 0;
-assign LED_USER  = vsd_sel & sd_act;
+assign LED_USER = vsd_sel & sd_act;
 assign LED_DISK  = {1'b1, ~vsd_sel & sd_act};
 assign BUTTONS = 0;
 
@@ -253,7 +253,7 @@ localparam CONF_STR = {
    "MSX1;",
    "-;",
    "FC1,MSX,Load ROM PACK,30000000;",
-   "FC2,MSX,Load FW  PACK,30300000;",   
+   "FC2,MSX,Load FW  PACK,32000000;",
    CONF_STR_SLOT_A,
    "H3FS3,ROM,Load,30C00000;",
    CONF_STR_MAPPER_A,
@@ -283,6 +283,15 @@ localparam CONF_STR = {
    "P1O[41],Border,No,Yes;",
    "P1O[42],V9958,No,Yes;",
    "-;",
+   "O[43],Pause on OSD,No,Yes;",
+   "T[44],Pause;",
+   "-;",
+   "O[45],MoonSound,Off,On;",
+   "O[46],PCM Mute,Off,On;",
+   "O[47],FM Mute,Off,On;",
+   "O[50:49],PCM Volume,+6dB,+12dB,+18dB,+24dB;",
+   "O[48],Debug Overlay,Off,On;",
+   "-;",
    "T[0],Reset;",
    "R[10],Reset & Detach ROM Cartridge;",					
    "R[0],Reset and close OSD;",
@@ -297,7 +306,7 @@ assign status_menumask[2] = bios_config.use_FDC;
 assign status_menumask[3] = ROM_A_load_hide;
 assign status_menumask[4] = ROM_B_load_hide;
 assign status_menumask[5] = sram_A_select_hide;
-assign status_menumask[6] = lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0;
+assign status_menumask[6] = (lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0) & (cart_conf[0].selected_mapper != MAPPER_ASCII16X);
 assign sdram_size         = sdram_sz[15] ? sdram_sz[1:0] : 2'b00;
 
 hps_io #(.CONF_STR(CONF_STR),.VDNUM(VDNUM)) hps_io
@@ -378,7 +387,19 @@ wire reset = RESET | status[0] | status[10] | reset_rq;
 
 ///////////////// Computer /////////////////
 wire  [7:0] R, G, B, cpu_din, cpu_dout;
-wire [15:0] cpu_addr, audio;
+wire  [7:0] R_ovl, G_ovl, B_ovl;           // video after debug overlay
+wire        dbg_pcm_valid, dbg_opl3_valid;
+wire signed [15:0] dbg_pcm_level;
+wire        dbg_new2;
+wire [4:0]  dbg_keyon_count;
+wire [4:0]  dbg_accum_cnt;
+wire [9:0]  dbg_env_min;
+wire        dbg_mem_nonzero;
+wire        dbg_pcm_base_set;
+wire [23:0] dbg_slot_keyon;
+wire [23:0] dbg_slot_active;
+wire [15:0] cpu_addr;
+wire signed [15:0] audio_l, audio_r;
 wire        hsync, vsync, blank_n, hblank, vblank, ce_pix;
 wire        cpu_wr, cpu_rd, cpu_mreq, cpu_iorq, cpu_m1;
 wire [26:0] ram_addr;
@@ -393,14 +414,29 @@ wire   [3:0] msx_dev_ref_ram[8];
 mapper_typ_t selected_mapper[2];
 assign selected_mapper[0] = cart_conf[0].selected_mapper;
 assign selected_mapper[1] = cart_conf[1].selected_mapper;
+// Pause logic: flash DMA, OSD-open (if option enabled), or manual toggle (T[44])
+reg pause_toggle = 1'b0;
+reg status44_prev = 1'b0;
+always @(posedge clk21m) begin
+   status44_prev <= status[44];
+   if (~status44_prev & status[44]) pause_toggle <= ~pause_toggle;
+end
+wire msx_pause = nvbak_dma_active | (status[43] & OSD_STATUS) | pause_toggle;
+
 msx MSX
 (
+   .ce_10m7_p(ce_10m7_p & ~msx_pause),
+   .ce_3m58_p(ce_3m58_p & ~msx_pause),
+   .ce_3m58_n(ce_3m58_n & ~msx_pause),
+   .ce_5m39_n(ce_5m39_n & ~msx_pause),
+   .ce_10hz  (ce_10hz   & ~msx_pause),
    .HS(hsync),
    .DE(blank_n),
    .VS(vsync),
    .cas_motor(motor),
    .cas_audio_in(msxConfig.cas_audio_src == CAS_AUDIO_FILE  ? CAS_dout : tape_in),
    .rtc_time(rtc),
+   .dma_active(nvbak_dma_active),
    .sram_save(status[38]),
    .sram_load(status[39]),
    .ioctl_addr(ioctl_addr[26:0]),
@@ -432,6 +468,29 @@ msx MSX
    .d_from_sd(d_from_sd),
    .sd_tx(sd_tx),
    .sd_rx(sd_rx),
+   .flash16x_active(flash16x_active),
+   .flash16x_base(flash16x_base),
+   .flash16x_size(flash16x_size),
+   // MoonSound PCM SDRAM
+   .pcm_sdram_addr(pcm_sdram_addr),
+   .pcm_sdram_req(pcm_sdram_req),
+   .pcm_sdram_rnw(pcm_sdram_rnw),
+   .pcm_sdram_din(pcm_sdram_din),
+   .pcm_sdram_dout(pcm_sdram_dout),
+   .pcm_sdram_dout16(pcm_sdram_dout16),
+   .pcm_sdram_ready(pcm_sdram_ready),
+   .pcm_rom_base(pcm_rom_base),
+   // MoonSound mute / debug
+   .pcm_mute       (status[46]),
+   .fm_mute        (status[47]),
+   .pcm_vol        (status[50:49]),
+   .dbg_pcm_valid  (dbg_pcm_valid),
+   .dbg_opl3_valid (dbg_opl3_valid),
+   .dbg_pcm_level  (dbg_pcm_level),
+   .dbg_new2       (dbg_new2),
+   .dbg_keyon_count(dbg_keyon_count),
+   .dbg_accum_cnt  (dbg_accum_cnt),
+   .dbg_env_min    (dbg_env_min),
    .*
 );
 
@@ -548,6 +607,31 @@ video_freak video_freak
 	.SCALE(status[6:5])
 );
 
+debug_overlay u_overlay (
+   .CLK_VIDEO      (CLK_VIDEO),
+   .ce_pix         (ce_pix),
+   .hblank         (hblank),
+   .vblank         (vblank),
+   .R_in           (R),
+   .G_in           (G),
+   .B_in           (B),
+   .R_out          (R_ovl),
+   .G_out          (G_ovl),
+   .B_out          (B_ovl),
+   .en             (status[48]),
+   .dbg_pcm_valid  (dbg_pcm_valid),
+   .dbg_opl3_valid (dbg_opl3_valid),
+   .dbg_mem_nonzero(dbg_mem_nonzero),
+   .dbg_interp_nonzero(dbg_pcm_base_set),
+   .dbg_pcm_level  (dbg_pcm_level),
+   .dbg_new2       (dbg_new2),
+   .dbg_keyon_count(dbg_keyon_count),
+   .dbg_accum_cnt  (dbg_accum_cnt),
+   .dbg_env_min    (dbg_env_min),
+   .dbg_slot_keyon (dbg_slot_keyon),
+   .dbg_slot_active(dbg_slot_active)
+);
+
 video_mixer #(.GAMMA(0)) video_mixer
 (
    .CLK_VIDEO(CLK_VIDEO),
@@ -555,9 +639,9 @@ video_mixer #(.GAMMA(0)) video_mixer
    .scandoubler(scandoubler),
    .gamma_bus(gamma_bus),
    .ce_pix(ce_pix),
-   .R(R),
-   .G(G),
-   .B(B),
+   .R(R_ovl),
+   .G(G_ovl),
+   .B(B_ovl),
    .HSync(hsync),
    .VSync(vsync),
    
@@ -592,6 +676,8 @@ ltc2308_tape #(.ADC_RATE(120000), .CLK_RATE(21477272)) tape
 /////////////////  LOAD PACK   /////////////////
 
 wire upload_ram_ce, upload_sdram_rq, upload_bram_rq, upload_ram_ready, reset_rq;
+wire nvbak_dma_active;
+
 wire  [7:0] upload_ram_din, config_msx;
 wire [26:0] upload_ram_addr;
 wire  [7:0] kbd_din;
@@ -634,7 +720,8 @@ memory_upload memory_upload(
     .cart_device(cart_device),
     .msx_device(msx_device),
     .msx_dev_ref_ram(msx_dev_ref_ram),
-    .load_sram(load_sram)
+    .load_sram(load_sram),
+    .pcm_rom_base(pcm_rom_base)
 );
 
 wire [27:0] ddr3_addr, ddr3_addr_download, ddr3_addr_cas;
@@ -667,19 +754,39 @@ wire  [26:0] sdram_addr;
 wire  [24:0] dw_sdram_addr;
 wire  [26:0] flash_addr;
 wire   [7:0] sdram_dout, bram_dout, dw_sdram_din, flash_din;
+
+// SDRAM ch1: mux between ROM upload and nvram_backup SDRAM DMA
+wire  [7:0] nvbak_sdram_dout;
+wire [26:0] nvbak_sdram_addr;
+wire        nvbak_sdram_req, nvbak_sdram_rnw;
+wire  [7:0] nvbak_sdram_din;
+wire        upload_active = upload_ram_ce & upload_sdram_rq;
+
+// MoonSound PCM SDRAM ch4 wires
+wire [26:0] pcm_sdram_addr;
+wire        pcm_sdram_req;
+wire        pcm_sdram_rnw;
+wire  [7:0] pcm_sdram_din;
+wire  [7:0] pcm_sdram_dout;
+wire [15:0] pcm_sdram_dout16;
+wire        pcm_sdram_ready;
+
+// PCM ROM base address in SDRAM — driven by memory_upload when loading yrw801.rom
+wire [26:0] pcm_rom_base;
+
 sdram sdram
 (
    .init(~locked_sdram),
    .clk(clk_sdram),
    .doRefresh(1'd0),
-   
-   .ch1_dout(),
-   .ch1_din(upload_ram_din),
-   .ch1_addr(upload_ram_addr),
-   .ch1_req(upload_ram_ce & upload_sdram_rq),
-   .ch1_rnw(1'd0),
-   .ch1_ready(upload_ram_ready),   
-  
+
+   .ch1_dout(nvbak_sdram_dout),
+   .ch1_din (upload_active ? upload_ram_din  : nvbak_sdram_din),
+   .ch1_addr(upload_active ? upload_ram_addr : nvbak_sdram_addr),
+   .ch1_req (upload_active ? upload_active   : nvbak_sdram_req),
+   .ch1_rnw (upload_active ? 1'b0            : nvbak_sdram_rnw),
+   .ch1_ready(upload_ram_ready),
+
    .ch2_dout(sdram_dout),
    .ch2_din(ram_din),
    .ch2_addr(ram_addr),
@@ -694,8 +801,17 @@ sdram sdram
    .ch3_rnw(0),
    .ch3_ready(flash_ready),
    .ch3_done(flash_done),
+
+   // ch4: MoonSound PCM reads/writes
+   .ch4_addr(pcm_sdram_addr),
+   .ch4_dout(pcm_sdram_dout),
+   .ch4_dout16(pcm_sdram_dout16),
+   .ch4_din(pcm_sdram_din),
+   .ch4_req(pcm_sdram_req),
+   .ch4_rnw(pcm_sdram_rnw),
+   .ch4_ready(pcm_sdram_ready),
    .*
-);    
+);
 
 dpram #(.addr_width(18)) systemRAM
 (
@@ -711,12 +827,17 @@ dpram #(.addr_width(18)) systemRAM
 );
 
 ///////////////// NVRAM BACKUP ////////////////
+wire  [1:0] flash16x_active;
+wire [26:0] flash16x_base[2];
+wire [15:0] flash16x_size[2];
+
 wire [26:0] sram_addr;
 wire  [7:0] sram_dout;
 wire        sram_we;
 nvram_backup nvram_backup
 (
    .clk(clk21m),
+   .reset(reset),
    .lookup_SRAM(lookup_SRAM),
    .load_req(status[39] | load_sram),
    .save_req(status[38]),
@@ -728,10 +849,21 @@ nvram_backup nvram_backup
    .sd_wr(sd_wr[3:0]),
    .sd_ack(sd_ack[3:0]),
    .sd_buff_addr(sd_buff_addr),
+   .sd_buff_dout(sd_buff_dout),
    .sd_buff_din(sd_buff_din[0:3]),
    .ram_addr(sram_addr),
    .ram_dout(sram_dout),
-   .ram_we(sram_we)
+   .ram_we(sram_we),
+   .flash16x_active(flash16x_active[0]),
+   .flash16x_base(flash16x_base[0]),
+   .flash16x_size(flash16x_size[0]),
+   .sdram_req (nvbak_sdram_req),
+   .sdram_rnw (nvbak_sdram_rnw),
+   .sdram_addr(nvbak_sdram_addr),
+   .sdram_din (nvbak_sdram_din),
+   .sdram_dout(nvbak_sdram_dout),
+   .sdram_ready(upload_ram_ready),
+   .dma_active(nvbak_dma_active)
 );
 
 ///////////////// CAS EMULATE /////////////////

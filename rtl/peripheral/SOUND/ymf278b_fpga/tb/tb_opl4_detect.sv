@@ -18,6 +18,10 @@ module tb_opl4_detect;
     wire signed [15:0] audio_left, audio_right;
     wire        audio_valid, irq_n;
 
+    wire [21:0] mem_addr;
+    wire        mem_rd_req, mem_wr_req;
+    wire [7:0]  mem_wr_data;
+
     ymf278b_top #(
         .CLK_HZ   (85909090),
         .CLK_OPL3 (14318182)
@@ -25,9 +29,22 @@ module tb_opl4_detect;
         .clk, .clk_opl3, .rst_n,
         .io_port, .io_data_in, .io_wr, .io_rd,
         .io_data_out, .io_ack,
+        .mem_addr      (mem_addr),
+        .mem_rd_req    (mem_rd_req),
+        .mem_rd_data   (8'h00),
+        .mem_rd_data16 (16'h0000),
+        .mem_rd_valid  (mem_rd_req),   // immediate zero data
+        .mem_wr_req    (mem_wr_req),
+        .mem_wr_data   (mem_wr_data),
+        .mem_busy      (1'b0),
         .audio_left, .audio_right, .audio_valid,
         .irq_n,
-        .fm_mute(1'b0)
+        .pcm_mute (1'b0),
+        .fm_mute  (1'b0),
+        .pcm_vol  (2'd0),
+        .dbg_pcm_valid(), .dbg_opl3_valid(), .dbg_pcm_level(), .dbg_new2(),
+        .dbg_keyon_count(), .dbg_accum_cnt(), .dbg_env_min(), .dbg_mem_nonzero(),
+        .dbg_pcm_base_set(), .dbg_slot_keyon(), .dbg_slot_active()
     );
 
     always #5.82  clk      = ~clk;

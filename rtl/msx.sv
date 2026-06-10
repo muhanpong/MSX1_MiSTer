@@ -9,6 +9,7 @@ module msx
    input                    ce_5m39_n,
    input                    ce_10hz,
    input                    clk_sdram,
+   input                    dma_active,
    //Video
    output             [7:0] R,
    output             [7:0] G,
@@ -20,7 +21,8 @@ module msx
    output                   vblank,
    output                   ce_pix,
    //I/O
-   output            [15:0] audio,
+   output signed     [15:0] audio_l,
+   output signed     [15:0] audio_r,
    input  [           10:0] ps2_key,
    input              [5:0] joy0,
    input              [5:0] joy1,
@@ -77,20 +79,60 @@ module msx
    output             [7:0] d_to_sd,
    input              [7:0] d_from_sd,
    output                   sd_tx,
-   output                   sd_rx
+   output                   sd_rx,
+   // ASCII16X flash info
+   output              [1:0] flash16x_active,
+   output             [26:0] flash16x_base[2],
+   output             [15:0] flash16x_size[2],
+   // MoonSound PCM SDRAM interface (ch4)
+   output             [26:0] pcm_sdram_addr,
+   output                    pcm_sdram_req,
+   output                    pcm_sdram_rnw,
+   output              [7:0] pcm_sdram_din,
+   input               [7:0] pcm_sdram_dout,
+   input              [15:0] pcm_sdram_dout16,
+   input                     pcm_sdram_ready,
+   // PCM ROM base address in SDRAM (set by memory_upload)
+   input              [26:0] pcm_rom_base,
+
+   // MoonSound audio mute (debug)
+   input                     pcm_mute,
+   input                     fm_mute,
+   input               [1:0] pcm_vol,
+
+   // MoonSound debug outputs (clk_sdram domain)
+   output wire               dbg_pcm_valid,
+   output wire               dbg_opl3_valid,
+   output wire signed [15:0] dbg_pcm_level,
+   output wire               dbg_new2,
+   output wire [4:0]         dbg_keyon_count,
+   output wire [4:0]         dbg_accum_cnt,
+   output wire [9:0]         dbg_env_min,
+   output wire               dbg_mem_nonzero,
+   output wire               dbg_pcm_base_set,  // 1 if pcm_rom_base != default
+   output wire        [23:0] dbg_slot_keyon,
+   output wire        [23:0] dbg_slot_active
 );
 
 //  -----------------------------------------------------------------------------
-//  -- Audio MIX
+//  -- Audio MIX  (stereo; MoonSound is mixed in after instantiation below)
 //  -----------------------------------------------------------------------------
-wire  [9:0] audioPSG    = ay_ch_mix + {keybeep,5'b00000} + {(cas_audio_in & ~cas_motor),4'b0000};
-wire [16:0] fm          = {3'b00, audioPSG, 4'b0000};
-// MoonSound (OPL3 FM) stereo down-mixed to mono and added to the mix (Stage 1).
-wire signed [15:0] ms_out_l, ms_out_r;   // driven by the MoonSound block below
-wire signed [15:0] ms_mono = msxConfig.moonsound_en ? ((ms_out_l >>> 1) + (ms_out_r >>> 1)) : 16'sh0;
-wire [16:0] audio_mix   = {cart_sound[15], cart_sound} + fm + $signed({ms_mono[15], ms_mono});
-wire [15:0] compr[7:0]  = '{ {1'b1, audio_mix[13:0], 1'b0}, 16'h8000, 16'h8000, 16'h8000, 16'h7FFF, 16'h7FFF, 16'h7FFF,  {1'b0, audio_mix[13:0], 1'b0}};
-assign audio            = compr[audio_mix[16:14]];
+wire  [9:0] audioPSG = ay_ch_mix + {keybeep,5'b00000} + {(cas_audio_in & ~cas_motor),4'b0000};
+wire [16:0] fm       = {3'b00, audioPSG, 4'b0000};
+wire [16:0] mono_mix = {cart_sound[15], cart_sound} + fm;
+// Saturating compressor (same as original `compr[7:0]` lookup, inline)
+// Index audio_mix[16:14]: 000→linear-pos, 111→linear-neg, others→clamp
+wire signed [15:0] mono_audio =
+    (mono_mix[16:14] == 3'b000) ? {1'b0, mono_mix[13:0], 1'b0} :
+    (mono_mix[16:14] == 3'b111) ? {1'b1, mono_mix[13:0], 1'b0} :
+    mono_mix[16] ? 16'sh8000 : 16'sh7FFF;
+// MoonSound stereo mix wires — driven by the MoonSound block below
+wire signed [15:0] ms_audio_l, ms_audio_r;
+wire signed [16:0] mix_l = $signed({mono_audio[15], mono_audio}) + $signed({ms_audio_l[15], ms_audio_l});
+wire signed [16:0] mix_r = $signed({mono_audio[15], mono_audio}) + $signed({ms_audio_r[15], ms_audio_r});
+// Saturate 17-bit signed → 16-bit signed: clip only on real overflow (sign mismatch)
+assign audio_l = (mix_l[16] == mix_l[15]) ? mix_l[15:0] : (mix_l[16] ? 16'sh8000 : 16'sh7FFF);
+assign audio_r = (mix_r[16] == mix_r[15]) ? mix_r[15:0] : (mix_r[16] ? 16'sh8000 : 16'sh7FFF);
 
 //  -----------------------------------------------------------------------------
 //  -- T80 CPU
@@ -105,6 +147,11 @@ t80pa #(.Mode(0)) T80
    .CEN_p(ce_3m58_p),
    .CEN_n(ce_3m58_n),
    .WAIT_n(wait_n),
+   // Z80 /INT is shared (wired-AND, active-low) between the VDP and the
+   // MoonSound (YMF278B/OPL4) Timer-1 IRQ.  MoonSound music players (e.g.
+   // MBwave, vgmplay OPLTimer) drive their playback tick from the OPL Timer-1
+   // overflow interrupt, so its irq line must reach the CPU.  ms_int_n is the
+   // 2-FF-synced irq with I/O-cycle deferral (defined in the MoonSound block).
    .INT_n(vdp_int_n & ms_int_n),
    .NMI_n(1),
    .BUSRQ_n(1),
@@ -124,9 +171,10 @@ t80pa #(.Mode(0)) T80
 //  -----------------------------------------------------------------------------
 //  -- WAIT CPU
 //  -----------------------------------------------------------------------------
-// MoonSound FM I/O flow-control: hold the CPU (WAIT_n) during a MoonSound access
-// until the chip acks.  ms_io_pending (ms_io bridge below) only asserts for
-// 0xC4-0xC7 when moonsound_en, so non-MoonSound paths are unaffected.
+// Hold the CPU (WAIT_n low) while a MoonSound register access is in flight, so
+// the VGM driver's rapid back-to-back writes can't outrun the CDC/chip and drop.
+// Only asserts during 0x7E/0x7F/0xC4-0xC7 access when moonsound_en; bounded by a
+// safety timeout (ms_wait_cnt) so a lost ack cannot hang the CPU.
 wire exwait_n = ~ms_io_pending;
 
 logic wait_n = 1'b0;
@@ -171,13 +219,12 @@ wire psg_n  = ~((a[7:3] == 5'b10100)   & ~iorq_n & m1_n);
 wire ppi_n  = ~((a[7:3] == 5'b10101)   & ~iorq_n & m1_n);
 wire vdp_en =   (a[7:3] == 5'b10011)   & ~iorq_n & m1_n ;
 wire rtc_en =   (a[7:1] == 7'b1011010) & ~iorq_n & m1_n & bios_config.MSX_typ == MSX2;
-// MoonSound (OPL3 FM) I/O select: ports 0xC4-0xC7 (a[7:2]==6'b11_0001).
-// Stage 1: FM only.  WAVE ports 0x7E/0x7F (PCM) are not decoded yet.
-wire ms_fm_cs   = msxConfig.moonsound_en & ~iorq_n & m1_n & (a[7:2] == 6'b11_0001);
-// WAVE ports 0x7E/0x7F — needed for MoonSound chip DETECTION (reg 0x02 device-ID
-// read-back) even in Stage 1.  PCM playback itself is still deferred (the wave
-// engine isn't wired), but software must see the chip to write FM at all.
-wire ms_wave_cs = msxConfig.moonsound_en & ~iorq_n & m1_n & (a[7:1] == 7'b0111111);
+
+// MoonSound: WAVE 0x7E/7F, FM 0xC4-0xC7
+wire ms_wave_cs = msxConfig.moonsound_en & ~iorq_n & m1_n &
+                  (a[7:0] == 8'h7E | a[7:0] == 8'h7F);
+wire ms_fm_cs   = msxConfig.moonsound_en & ~iorq_n & m1_n &
+                  (a[7:2] == 6'b11_0001);     // 0xC4-0xC7
 
 //  -----------------------------------------------------------------------------
 //  -- 82C55 PPI
@@ -207,13 +254,14 @@ jt8255 PPI
 //  -----------------------------------------------------------------------------
 //  -- CPU data multiplex
 //  -----------------------------------------------------------------------------
-assign d_to_cpu = rd_n   ? 8'hFF           :
-                  vdp_en ? d_to_cpu_vdp    :
-                  rtc_en ? d_from_rtc      :
-                  ~psg_n ? d_from_psg      :
-                  ~ppi_n ? d_from_8255     :
-                  (ms_wave_cs | ms_fm_cs) ? ms_dout :
-                           d_from_slots    ;
+wire [7:0] ms_dout;   // driven by MoonSound block below
+assign d_to_cpu = rd_n              ? 8'hFF           :
+                  vdp_en            ? d_to_cpu_vdp    :
+                  rtc_en            ? d_from_rtc      :
+                  ~psg_n            ? d_from_psg      :
+                  ~ppi_n            ? d_from_8255     :
+                  (ms_wave_cs | ms_fm_cs) ? ms_dout   :
+                                    d_from_slots    ;
 //  -----------------------------------------------------------------------------
 //  -- Keyboard decoder
 //  -----------------------------------------------------------------------------
@@ -508,13 +556,21 @@ msx_slots msx_slots
    .sd_tx(sd_tx),
    .sd_rx(sd_rx),
    .d_to_sd(d_to_sd),
-   .d_from_sd(d_from_sd)
+   .d_from_sd(d_from_sd),
+   .flash16x_active(flash16x_active),
+   .flash16x_base(flash16x_base),
+   .flash16x_size(flash16x_size)
 );
 
-//  -----------------------------------------------------------------------------
-//  -- MoonSound (OPL3 FM only — Stage 1; PCM wave engine deferred)
-//  -----------------------------------------------------------------------------
-// OPL3 clock divider: clk_sdram (85.909 MHz) / 6 ≈ 14.318 MHz.
+
+// =============================================================================
+// MoonSound (YMF278B OPL4)
+// clk_sdram (85.909 MHz) is used as master; CLK_HZ=85909090 → fs≈44192 Hz (0.21% error)
+// OPL3 clock: clk_sdram / 6 ≈ 14318182 Hz (target 14318180 Hz — negligible error)
+// PCM sample memory: connected to SDRAM ch4 via request/valid bridge
+// =============================================================================
+
+// ─── OPL3 clock divider (clk_sdram / 6) ────────────────────────────────────
 logic [1:0] opl3_clk_div;
 logic       clk_opl3;
 always_ff @(posedge clk_sdram) begin
@@ -525,40 +581,28 @@ always_ff @(posedge clk_sdram) begin
         opl3_clk_div <= opl3_clk_div + 1'd1;
 end
 
-// CDC: CPU (clk21m) → ymf278b_top (clk_sdram).  A toggle-synchronizer fires on the
-// FALLING edge of wr_n/rd_n (once per CPU access).  WAIT_n holds the CPU until the
-// chip acks (ms_io_pending), bounded by a safety timeout so a lost ack can't hang.
+// ─── CDC: CPU (clk21m) → ymf278b_top (clk_sdram) ───────────────────────────
+// Toggle-synchronizer fires on the FALLING EDGE of wr_n only (once per CPU write).
+// wr_n stays low for ~6 clk21m cycles (one T-state at 3.58 MHz on 21.47 MHz clock);
+// firing every cycle would toggle ms_req_toggle 6×=even→CDC sees no net change→write dropped.
 logic [7:0] ms_io_port_lat, ms_io_data_lat;
-logic       ms_req_toggle, ms_rd_toggle;
-logic [2:0] ms_req_sync, ms_rd_sync;
-logic       ms_wr_n_prev, ms_rd_n_prev;
+logic       ms_req_toggle;
+logic       ms_rd_toggle;
+logic [2:0] ms_req_sync;
+logic [2:0] ms_rd_sync;
+logic       ms_wr_n_prev;
+logic       ms_rd_n_prev;
 logic [7:0] ms_io_dout_lat;
-logic       ms_ack_toggle = 1'b0;
-logic [2:0] ms_ack_sync;
-logic [9:0] ms_wait_cnt;
-logic       ms_io_pending;
-
-wire        ms_io_ack;
-wire  [7:0] ms_io_dout_raw;
-wire        ms_audio_valid;
-wire        ms_irq_n;       // OPL Timer IRQ (clk_opl3 domain)
-
-// OPL timer IRQ → Z80 /INT.  2-FF sync (clk_opl3 → clk21m), gated by moonsound_en.
-// OPL-timer-driven players (vgmplay OPLTimer, MoonBlaster) hook the interrupt and
-// ack with a reg-04 RST write; without this the 1130 Hz tick never reaches the
-// CPU and playback free-runs on VBlank (~19x slow).
-//
-// I/O-cycle deferral: the previous attempt at this wiring froze exactly when the
-// IRQ asserted while the main loop executed OUT instructions (hardware-isolated:
-// NOP loop + 1130 Hz IRQ ran clean for 2700+ interrupts, the same loop doing PSG
-// or FM OUTs froze — see project notes).  So hold off asserting /INT while a
-// normal I/O cycle is in flight (~iorq_n & m1_n; int-ack cycles have m1_n=0 and
-// are never masked, so an asserted /INT stays stable through its acknowledge).
-// The IRQ is level-held until software acks, so deferring assertion by ~1µs only
-// adds jitter ≪ the 880µs timer period.
-logic [1:0] ms_irq_sync_ff = 2'b11;
-always @(posedge clk21m) ms_irq_sync_ff <= {ms_irq_sync_ff[0], ms_irq_n};
-wire ms_int_n = ms_irq_sync_ff[1] | ~msxConfig.moonsound_en | (~iorq_n & m1_n);
+// ── MoonSound I/O flow-control (WAIT_n handshake) ──────────────────────────
+// The MSX VGM driver writes the YMF278 with fixed inter-write delays (no BUSY
+// poll). When those writes come faster than our CDC+chip can absorb, accesses
+// race and a write gets lost → the player hangs (confirmed: adding per-op delay
+// on the player side avoids it).  Real MoonSound throttles the CPU via BUSY;
+// re-create that: hold WAIT_n during a MoonSound I/O access until the chip acks.
+logic       ms_ack_toggle = 1'b0;   // clk_sdram: flips on every ms_io_ack
+logic [2:0] ms_ack_sync;            // clk21m: 3-FF sync of ms_ack_toggle
+logic       ms_io_pending;          // clk21m: a MoonSound I/O is in flight → assert wait
+logic [9:0] ms_wait_cnt;            // safety timeout so a lost ack can't hang the CPU (must exceed the deferred mem-write ack ~ MEM_WRITE_DELAY/4 in clk21m)
 
 always_ff @(posedge clk21m) begin
     ms_wr_n_prev <= wr_n;
@@ -572,18 +616,22 @@ always_ff @(posedge clk21m) begin
         ms_io_pending <= 1'b0;
     end else begin
         if ((ms_wave_cs | ms_fm_cs) & ~wr_n & ms_wr_n_prev) begin
+            // Falling edge of wr_n
             ms_io_port_lat <= a[7:0];
             ms_io_data_lat <= d_from_cpu;
             ms_req_toggle  <= ~ms_req_toggle;
-            ms_io_pending  <= 1'b1;
+            ms_io_pending  <= 1'b1;        // hold CPU until this write is accepted
             ms_wait_cnt    <= 10'd600;
         end
         if ((ms_wave_cs | ms_fm_cs) & ~rd_n & ms_rd_n_prev) begin
+            // Falling edge of rd_n
             ms_io_port_lat <= a[7:0];
             ms_rd_toggle   <= ~ms_rd_toggle;
-            ms_io_pending  <= 1'b1;
+            ms_io_pending  <= 1'b1;        // hold CPU until read data is ready
             ms_wait_cnt    <= 10'd600;
         end
+        // Release the wait when the chip acks (one access in flight at a time,
+        // since the CPU is held), or after the safety timeout.
         if (ms_io_pending) begin
             if (ms_ack_sync[2] ^ ms_ack_sync[1]) ms_io_pending <= 1'b0;
             else if (ms_wait_cnt == 10'd0)        ms_io_pending <= 1'b0;
@@ -595,14 +643,102 @@ end
 always_ff @(posedge clk_sdram) begin
     ms_req_sync <= {ms_req_sync[1:0], ms_req_toggle};
     ms_rd_sync  <= {ms_rd_sync[1:0],  ms_rd_toggle};
+    
+    // Latch the returned data from the MoonSound core when io_ack pulses
     if (ms_io_ack) begin
         ms_io_dout_lat <= ms_io_dout_raw;
-        ms_ack_toggle  <= ~ms_ack_toggle;
+        ms_ack_toggle  <= ~ms_ack_toggle;   // signal completion back to clk21m wait logic
     end
 end
 
 wire ms_io_wr_sdram = ms_req_sync[2] ^ ms_req_sync[1];
 wire ms_io_rd_sdram = ms_rd_sync[2]  ^ ms_rd_sync[1];
+
+// ─── PCM memory ↔ SDRAM ch4 bridge (read + write) ───────────────────────────
+// ymf278b_top outputs mem_addr[21:0] + mem_rd_req/mem_wr_req in clk_sdram domain.
+// SDRAM ch4 uses edge-triggered req → ready handshake in clk_sdram domain.
+wire [21:0] ms_mem_addr;
+wire        ms_mem_rd_req;
+wire        ms_mem_wr_req;
+wire  [7:0] ms_mem_wr_data;
+
+// Address: add PCM ROM base offset (set by memory_upload when loading yrw801.rom)
+assign pcm_sdram_addr = pcm_rom_base + {5'd0, ms_mem_addr};
+assign dbg_pcm_base_set = (pcm_rom_base != 27'h1800000);
+
+// Read/Write bridge → SDRAM ch4
+// Read/Write bridge → SDRAM ch4
+// SDRAM controller uses edge detection: ch4_req & ~ch4_req_1
+// So pcm_sdram_req must stay HIGH long enough for the edge to be captured.
+// State machine:
+//   0: IDLE — wait for rising edge of ms_mem_rd_req or ms_mem_wr_req
+//   1: ACTIVE — hold pcm_sdram_req HIGH, wait for ch4_ready to drop (req accepted)
+//   2: WAIT — keep req HIGH (SDRAM is processing), wait for ch4_ready to rise (data ready)
+//   3: DONE — deassert req, signal valid for 1 cycle
+logic [1:0] pcm_state;
+logic pcm_is_write;
+logic ms_mem_rd_req_prev;
+assign pcm_sdram_req = (pcm_state == 2'd1) || (pcm_state == 2'd2);
+assign pcm_sdram_rnw = ~pcm_is_write;
+assign pcm_sdram_din = ms_mem_wr_data;
+
+always_ff @(posedge clk_sdram) begin
+    if (reset) begin
+        pcm_state <= 2'd0;
+        pcm_is_write <= 1'b0;
+        ms_mem_rd_req_prev <= 1'b0;
+    end else begin
+        ms_mem_rd_req_prev <= ms_mem_rd_req;
+        case (pcm_state)
+            2'd0: begin // IDLE — detect rising edge of read request
+                if (ms_mem_rd_req && !ms_mem_rd_req_prev) begin
+                    pcm_is_write <= 1'b0;
+                    pcm_state <= 2'd1;
+                end else if (ms_mem_wr_req) begin
+                    pcm_is_write <= 1'b1;
+                    pcm_state <= 2'd1;
+                end
+            end
+            2'd1: begin // ACTIVE — req is HIGH, wait for SDRAM to accept (ready drops)
+                if (!pcm_sdram_ready) pcm_state <= 2'd2;
+            end
+            2'd2: begin // WAIT — req still HIGH, wait for SDRAM to complete (ready rises)
+                if (pcm_sdram_ready) pcm_state <= 2'd3;
+            end
+            2'd3: begin // DONE — deassert req, valid for 1 cycle
+                pcm_state <= 2'd0;
+            end
+        endcase
+    end
+end
+
+wire  [7:0] ms_mem_rd_data  = pcm_sdram_dout;
+wire [15:0] ms_mem_rd_data16 = pcm_sdram_dout16;
+wire        ms_mem_rd_valid = (pcm_state == 2'd3) && !pcm_is_write;
+wire        ms_mem_busy     = (pcm_state != 2'd0);
+
+// ─── ymf278b_top instance ────────────────────────────────────────────────────
+wire        ms_io_ack;
+wire  [7:0] ms_io_dout_raw;
+wire signed [15:0] ms_out_l, ms_out_r;
+wire        ms_audio_valid;
+wire        ms_irq_n;      // MoonSound OPL Timer-1 IRQ (active-low) → Z80 /INT
+// 2-FF CDC sync of the OPL irq (clk_opl3 domain) into clk21m (Z80 domain).
+(* preserve *) reg ms_irq_n_s1 = 1'b1, ms_irq_n_sync = 1'b1;
+always @(posedge clk21m) begin
+    ms_irq_n_s1   <= ms_irq_n;
+    ms_irq_n_sync <= ms_irq_n_s1;
+end
+
+// I/O-cycle deferral (freeze fix, hardware-verified 2026-06-10): the plain
+// ms_irq_n_sync wiring froze exactly when the IRQ asserted while the main loop
+// executed OUT instructions (isolated on hardware: NOP loop + 1130 Hz IRQ ran
+// clean for 2700+ interrupts, the same loop doing PSG or FM OUTs froze).  Hold
+// off asserting /INT while a normal I/O cycle is in flight (~iorq_n & m1_n;
+// int-ack cycles have m1_n=0 and are never masked, so an asserted /INT stays
+// stable through its own acknowledge).  The IRQ is level-held until software
+// acks, so deferring assertion by ~1µs only adds jitter ≪ the 880µs period.
+wire ms_int_n = ms_irq_n_sync | ~msxConfig.moonsound_en | (~iorq_n & m1_n);
 
 ymf278b_top #(
     .CLK_HZ   (85909090),
@@ -617,14 +753,39 @@ ymf278b_top #(
     .io_rd        (ms_io_rd_sdram),
     .io_data_out  (ms_io_dout_raw),
     .io_ack       (ms_io_ack),
+    .mem_addr     (ms_mem_addr),
+    .mem_rd_req   (ms_mem_rd_req),
+    .mem_rd_data  (ms_mem_rd_data),
+    .mem_rd_data16(ms_mem_rd_data16),
+    .mem_rd_valid (ms_mem_rd_valid),
+    .mem_wr_req   (ms_mem_wr_req),
+    .mem_wr_data  (ms_mem_wr_data),
+    .mem_busy     (ms_mem_busy),
     .audio_left   (ms_out_l),
     .audio_right  (ms_out_r),
     .audio_valid  (ms_audio_valid),
     .irq_n        (ms_irq_n),
-    .fm_mute      (1'b0)
+    .pcm_mute       (pcm_mute),
+    .fm_mute        (fm_mute),
+    .pcm_vol        (pcm_vol),
+    .dbg_pcm_valid  (dbg_pcm_valid),
+    .dbg_opl3_valid (dbg_opl3_valid),
+    .dbg_pcm_level  (dbg_pcm_level),
+    .dbg_new2       (dbg_new2),
+    .dbg_keyon_count(dbg_keyon_count),
+    .dbg_accum_cnt  (dbg_accum_cnt),
+    .dbg_env_min    (dbg_env_min),
+    .dbg_mem_nonzero(dbg_mem_nonzero),
+    .dbg_pcm_base_set(),  // generated locally via assign
+    .dbg_slot_keyon (dbg_slot_keyon),
+    .dbg_slot_active(dbg_slot_active)
 );
 
-// Read data back to the CPU when a MoonSound FM port is selected.
-wire [7:0] ms_dout = (ms_wave_cs | ms_fm_cs) ? ms_io_dout_lat : 8'h00;
+// Gate audio to zero when MoonSound disabled
+assign ms_audio_l = msxConfig.moonsound_en ? ms_out_l : 16'sh0;
+assign ms_audio_r = msxConfig.moonsound_en ? ms_out_r : 16'sh0;
+
+// Output latched read data back to CPU if MoonSound is selected
+assign ms_dout = (ms_wave_cs | ms_fm_cs) ? ms_io_dout_lat : 8'h00;
 
 endmodule
