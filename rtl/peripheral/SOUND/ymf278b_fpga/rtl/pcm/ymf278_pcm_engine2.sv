@@ -250,8 +250,11 @@ logic         w_do_upd;
 logic [9:0]   w_new_vol;
 logic [2:0]   w_new_state;
 logic [8:0]   w_am;
-logic signed [31:0] w_gain_e, w_gain_t;
-logic signed [31:0] w_inner, w_vol_sample;
+// value ranges are ±0x8000 (gain = (0x8000·vmul)>>>vsh ≤ 0x8000; each cascaded
+// ×gain>>>15 keeps |x| ≤ 0x8000) — 17-bit signed keeps the per-stage multiplier
+// shallow (the 32×32 version missed clk_sdram by 0.28 ns).
+logic signed [16:0] w_gain_e, w_gain_t;
+logic signed [16:0] w_inner, w_vol_sample;
 logic signed [23:0] w_l, w_r;
 
 logic signed [23:0] accum_l, accum_r;
@@ -346,6 +349,8 @@ always_ff @(posedge clk or negedge rst_n) begin
     logic [4:0]  vsh_e, vsh_t;
     logic [10:0] vol_add;
     logic [5:0]  pl_g, pr_g;
+    logic signed [33:0] mul_w;     // explicit wide product (the 17' cast must
+                                   // not narrow the multiply context pre-shift)
     slot_dyn_t   dyn_wb;
 
     if (!rst_n) begin
@@ -588,28 +593,32 @@ always_ff @(posedge clk or negedge rst_n) begin
                 vsh_e   = 5'(4'd7 + {1'b0, env_idx[9:6]});
                 vmul_t  = 8'h80 - {2'b0, tl_idx[5:0]};
                 vsh_t   = 5'(4'd7 + {1'b0, tl_idx[9:6]});
-                w_gain_e <= (env_idx >= 11'h280) ? 32'sd0
-                          : ((32'sh8000 * $signed({1'b0, vmul_e})) >>> vsh_e);
-                w_gain_t <= (tl_idx  >= 10'h280) ? 32'sd0
-                          : ((32'sh8000 * $signed({1'b0, vmul_t})) >>> vsh_t);
+                w_gain_e <= (env_idx >= 11'h280) ? 17'sd0
+                          : 17'((32'sh8000 * $signed({1'b0, vmul_e})) >>> vsh_e);
+                w_gain_t <= (tl_idx  >= 10'h280) ? 17'sd0
+                          : 17'((32'sh8000 * $signed({1'b0, vmul_t})) >>> vsh_t);
                 sl_state <= SL_MUL1;
             end
 
             SL_MUL1: begin
-                w_inner <= ($signed(w_interp) * w_gain_e) >>> 15;
+                mul_w   = $signed(w_interp) * w_gain_e;
+                w_inner <= 17'(mul_w >>> 15);
                 sl_state <= SL_MUL2;
             end
 
             SL_MUL2: begin
-                w_vol_sample <= (w_inner * w_gain_t) >>> 15;
+                mul_w        = w_inner * w_gain_t;
+                w_vol_sample <= 17'(mul_w >>> 15);
                 sl_state <= SL_PAN;
             end
 
             SL_PAN: begin
                 pl_g = pan_att_left (w_regs.pan);
                 pr_g = pan_att_right(w_regs.pan);
-                w_l <= 24'((w_vol_sample * 32'($signed({26'd0, pl_g}))) >>> 5);
-                w_r <= 24'((w_vol_sample * 32'($signed({26'd0, pr_g}))) >>> 5);
+                mul_w = w_vol_sample * $signed({1'b0, pl_g});
+                w_l  <= 24'(mul_w >>> 5);
+                mul_w = w_vol_sample * $signed({1'b0, pr_g});
+                w_r  <= 24'(mul_w >>> 5);
                 sl_state <= SL_ACC;
             end
 
