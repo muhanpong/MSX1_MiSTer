@@ -172,7 +172,7 @@ wire [7:0] pcm_cpu_mem_rd_data_w;
 wire       pcm_cpu_mem_busy_w;
 wire [7:0] pcm_reg02_readback_w;
 
-ymf278_pcm_engine #(
+ymf278_pcm_engine2 #(
     .CLK_HZ (CLK_HZ)
 ) u_pcm (
     .clk             (clk),

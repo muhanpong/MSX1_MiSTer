@@ -51,7 +51,7 @@ module tb_bridge_realism;
     logic [15:0] dbg_slot0_hdr_loop, dbg_slot0_hdr_end;
     logic [1:0]  dbg_slot0_hdr_bits;
 
-    ymf278_pcm_engine dut (
+    ymf278_pcm_engine2 dut (
         .clk(clk), .rst_n(rst_n),
         .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr),
         .mem_addr(mem_addr), .mem_rd_en(mem_rd_en),

@@ -40,7 +40,7 @@ module tb_loopseam;
     logic [9:0] dbg_slot0_dyn_env_vol; logic [2:0] dbg_slot0_dyn_env_state;
     logic dbg_stage_b_bytes_done, dbg_stage_advance, dbg_stage_b_valid;
 
-    ymf278_pcm_engine dut (
+    ymf278_pcm_engine2 dut (
         .clk(clk), .rst_n(rst_n),
         .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr),
         .mem_addr(mem_addr), .mem_rd_en(mem_rd_en),
@@ -195,10 +195,10 @@ module tb_loopseam;
     int slot0_c_valid, slot0_c_total; logic signed [15:0] slot0_interp;
     always_ff @(posedge clk) begin
         // Count slot-0 outcomes as it leaves Stage B → Stage C at stage_advance.
-        if (rst_n && dbg_stage_advance && dut.stage_b_reg.slot==5'd0) begin
+        if (rst_n && dbg_stage_advance && dut.w_slot==5'd0) begin
             slot0_c_total <= slot0_c_total + 1;
-            if (dut.stage_b_reg.valid && dut.stage_b_bytes_done) slot0_c_valid <= slot0_c_valid + 1;
-            slot0_interp <= dut.interp_val;
+            if (dut.win_had_slot && dut.win_done) slot0_c_valid <= slot0_c_valid + 1;
+            slot0_interp <= dut.w_interp;
         end
         if (mem_rd_en) begin
             if (mem_addr > max_mem_addr) max_mem_addr <= mem_addr;
@@ -238,20 +238,20 @@ module tb_loopseam;
     endfunction
 
     always_ff @(posedge clk) begin
-        if (rst_n && dbg_stage_advance && dut.stage_b_reg.slot==5'd0
-                  && dut.sb_split && dut.stage_b_reg.header.bits==2'd1) begin
+        if (rst_n && dbg_stage_advance && dut.w_slot==5'd0
+                  && dut.w_need_b && dut.w_hdr.bits==2'd1) begin
             logic signed [15:0] e, o;
-            e = dec12(dut.stage_b_reg.header.startAddr, dut.stage_b_reg.next_pos);
+            e = dec12(dut.w_hdr.startAddr, dut.w_posb);
             // OLD buggy (A-even ELSE branch): decode from A's window at a pos with
             // A's chunk but B's parity → wrong loop-seam bytes.
-            o = dec12(dut.stage_b_reg.header.startAddr,
-                      (dut.stage_b_reg.dyn.pos & ~16'd1) | (dut.stage_b_reg.next_pos & 16'd1));
+            o = dec12(dut.w_hdr.startAddr,
+                      (dut.w_pos2 & ~16'd1) | (dut.w_posb & 16'd1));
             seam_n   <= seam_n + 1;
-            seam_dut <= dut.samp_b;
+            seam_dut <= dut.w_sb;
             seam_exp <= e;
             seam_old <= o;
-            if (dut.samp_b === e)            seam_ok     <= seam_ok + 1;
-            if (e !== o && dut.samp_b === o) seam_oldbug <= seam_oldbug + 1;
+            if (dut.w_sb === e)            seam_ok     <= seam_ok + 1;
+            if (e !== o && dut.w_sb === o) seam_oldbug <= seam_oldbug + 1;
         end
     end
 

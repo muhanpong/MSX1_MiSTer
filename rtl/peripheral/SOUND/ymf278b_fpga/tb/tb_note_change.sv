@@ -64,9 +64,9 @@ module tb_note_change;
     logic        dbg_stage_advance;
     logic        dbg_stage_b_valid;
 
-    ymf278_pcm_engine dut (
+    ymf278_pcm_engine2 dut (
         .clk(clk), .rst_n(rst_n),
-        .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr),
+        .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr), .reg_rd(1'b0), .pcm_vol(2'd3),
         .mem_addr(mem_addr), .mem_rd_en(mem_rd_en),
         .mem_rd_data(mem_rd_data), .mem_rd_data16(mem_rd_data16),
         .mem_rd_valid(mem_rd_valid),

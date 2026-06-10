@@ -40,7 +40,7 @@ module tb_wavechg;
     logic [9:0] dbg_slot0_dyn_env_vol; logic [2:0] dbg_slot0_dyn_env_state;
     logic dbg_stage_b_bytes_done, dbg_stage_advance, dbg_stage_b_valid;
 
-    ymf278_pcm_engine dut (
+    ymf278_pcm_engine2 dut (
         .clk(clk), .rst_n(rst_n),
         .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr),
         .mem_addr(mem_addr), .mem_rd_en(mem_rd_en),
@@ -195,10 +195,10 @@ module tb_wavechg;
     int slot0_c_valid, slot0_c_total; logic signed [15:0] slot0_interp;
     always_ff @(posedge clk) begin
         // Count slot-0 outcomes as it leaves Stage B → Stage C at stage_advance.
-        if (rst_n && dbg_stage_advance && dut.stage_b_reg.slot==5'd0) begin
+        if (rst_n && dbg_stage_advance && dut.w_slot==5'd0) begin
             slot0_c_total <= slot0_c_total + 1;
-            if (dut.stage_b_reg.valid && dut.stage_b_bytes_done) slot0_c_valid <= slot0_c_valid + 1;
-            slot0_interp <= dut.interp_val;
+            if (dut.win_had_slot && dut.win_done) slot0_c_valid <= slot0_c_valid + 1;
+            slot0_interp <= dut.w_interp;
         end
         if (mem_rd_en) begin
             if (mem_addr > max_mem_addr) max_mem_addr <= mem_addr;
@@ -224,8 +224,9 @@ module tb_wavechg;
     logic s0_edge_seen; logic clr_edge=0;
     always_ff @(posedge clk) begin
         if (!rst_n || clr_edge) s0_edge_seen <= 1'b0;
-        else if (dut.stage_advance && dut.stage_c_reg.valid && dut.stage_c_reg.slot==5'd0
-                 && ((dut.stage_c_reg.regs.keyon & ~dut.key_on_prev[0]) | dut.key_retrig[0]))
+        // v3: the edge is consumed within the same slot turn (SL_ACC), so
+        // sample it at the engine's own consume point instead of at advance.
+        else if (dut.retrig_consume && dut.w_slot==5'd0 && dut.w_edge)
             s0_edge_seen <= 1'b1;
     end
 

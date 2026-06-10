@@ -33,7 +33,7 @@ module tb_cpu_reg_decode;
     logic [3:0]  dbg_slot0_pan, dbg_slot0_ar, dbg_slot0_d1r;
     logic [8:0]  dbg_slot5_wave, dbg_slot23_wave;
 
-    ymf278_pcm_engine dut (
+    ymf278_pcm_engine2 dut (
         .clk(clk), .rst_n(rst_n),
         .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr),
         .mem_addr(mem_addr), .mem_rd_en(mem_rd_en),

@@ -46,7 +46,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) .
 # YMF278B — PCM engine v2 (SCSP-style parallel pipeline)
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/pcm/ymf278_pcm_alu.sv]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/pcm/ymf278_pcm_eg_step.sv]
-set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/pcm/ymf278_pcm_engine.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/pcm/ymf278_pcm_engine2.sv]
 
 # YMF278B — top level
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/ymf278b_fpga/rtl/ymf278b_regs.sv]

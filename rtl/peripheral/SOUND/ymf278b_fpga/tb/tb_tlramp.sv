@@ -22,7 +22,7 @@ module tb_tlramp;
     always_ff @(posedge clk) begin rd_d <= mem_rd_en; mem_rd_valid <= rd_d; end
 
     logic [7:0] cpu_mem_rd_data; logic cpu_mem_busy; logic [7:0] reg02_readback;
-    ymf278_pcm_engine dut (
+    ymf278_pcm_engine2 dut (
         .clk(clk), .rst_n(rst_n),
         .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr), .reg_rd(reg_rd),
         .cpu_mem_rd_data(cpu_mem_rd_data), .cpu_mem_busy(cpu_mem_busy), .reg02_readback(reg02_readback),

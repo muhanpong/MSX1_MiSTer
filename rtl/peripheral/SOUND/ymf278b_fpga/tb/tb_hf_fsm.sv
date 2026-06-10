@@ -39,9 +39,9 @@ module tb_hf_fsm;
     logic [15:0] dbg_slot0_hdr_loop, dbg_slot0_hdr_end;
     logic [1:0]  dbg_slot0_hdr_bits;
 
-    ymf278_pcm_engine dut (
+    ymf278_pcm_engine2 dut (
         .clk(clk), .rst_n(rst_n),
-        .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr),
+        .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr), .reg_rd(1'b0), .pcm_vol(2'd3),
         .mem_addr(mem_addr), .mem_rd_en(mem_rd_en),
         .mem_rd_data(mem_rd_data), .mem_rd_data16(mem_rd_data16),
         .mem_rd_valid(mem_rd_valid),
@@ -142,10 +142,10 @@ module tb_hf_fsm;
         // Use a long wait to also cover frame wrap.
         wait (dut.frame_cycle == 11'd1730);
         $display("  [info] frame_cycle = %0d, hf_state = %0d",
-                 dut.frame_cycle, dut.hf_state);
+                 dut.frame_cycle, dut.sv_state);
 
         // Wait for HF_STORE to complete (hf_state returns to HF_IDLE).
-        wait (dut.hf_state == 0); // HF_IDLE = 0 in enum
+        wait (dut.hf_pending == 24'd0); // all headers fetched
         repeat (2) @(posedge clk);
 
         check("hf_pending[0] cleared after fetch", dbg_hf_pending[0] == 1'b0);

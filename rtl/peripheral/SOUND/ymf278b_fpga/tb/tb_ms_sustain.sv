@@ -25,7 +25,7 @@ module tb_ms_sustain;
     logic        mem_wr_en; logic [7:0] mem_wr_data; logic mem_busy;
     logic signed [15:0] pcm_left, pcm_right; logic pcm_valid;
 
-    ymf278_pcm_engine dut (
+    ymf278_pcm_engine2 dut (
         .clk(clk), .rst_n(rst_n),
         .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr),
         .mem_addr(mem_addr), .mem_rd_en(mem_rd_en),
@@ -109,9 +109,9 @@ module tb_ms_sustain;
     int done_cnt[0:23];   // ... with reads complete (fresh sample)
     logic measuring;
     always_ff @(posedge clk) begin
-        if (rst_n && dut.dbg_stage_advance && dut.stage_b_reg.valid && measuring) begin
-            adv_cnt[dut.stage_b_reg.slot] <= adv_cnt[dut.stage_b_reg.slot] + 1;
-            if (dut.stage_b_bytes_done) done_cnt[dut.stage_b_reg.slot] <= done_cnt[dut.stage_b_reg.slot] + 1;
+        if (rst_n && dut.dbg_stage_advance && dut.win_had_slot && measuring) begin
+            adv_cnt[dut.w_slot] <= adv_cnt[dut.w_slot] + 1;
+            if (dut.win_done) done_cnt[dut.w_slot] <= done_cnt[dut.w_slot] + 1;
         end
     end
 

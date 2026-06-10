@@ -36,7 +36,7 @@ module tb_cpu_mem;
     logic signed [15:0] pcm_left, pcm_right;
     logic        pcm_valid;
 
-    ymf278_pcm_engine dut (
+    ymf278_pcm_engine2 dut (
         .clk(clk), .rst_n(rst_n),
         .reg_addr(reg_addr), .reg_data(reg_data),
         .reg_wr(reg_wr), .reg_rd(reg_rd),

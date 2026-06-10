@@ -19,7 +19,7 @@ module tb_pipeline_scaffold;
     logic signed [15:0] pcm_left, pcm_right;
     logic               pcm_valid;
 
-    ymf278_pcm_engine dut (
+    ymf278_pcm_engine2 dut (
         .clk         (clk),
         .rst_n       (rst_n),
         .reg_addr    (8'd0),
