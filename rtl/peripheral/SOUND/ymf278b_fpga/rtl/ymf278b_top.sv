@@ -99,6 +99,20 @@ logic [7:0]  pcm_reg_addr, pcm_reg_data;
 logic        pcm_reg_wr, pcm_reg_rd;
 logic        busy_reg, load_busy_reg;
 
+// reg 0x02 (wavetable-header / memory-mode) read-back for MoonSound chip
+// detection.  Bits 7:5 read as the hardwired device ID 001 (= 0x20; verified on
+// real YMF278, see openMSX YMF278::peekReg case 2).  Detectors (vgmplay
+// OPL4_Detect, MoonBlaster) read reg 0x02 COLD — without writing it first — and
+// require (value & 0xE0) == 0x20, so the ID must not depend on written state.
+// The PCM engine is deferred in Stage 1; shadow only the written low bits.
+// Other PCM registers read back 0.
+logic [7:0]  reg02_shadow;
+always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n)                                     reg02_shadow <= 8'h00;
+    else if (pcm_reg_wr && pcm_reg_addr == 8'h02)   reg02_shadow <= pcm_reg_data;
+end
+wire [7:0] pcm_reg_dout_s1 = (pcm_reg_addr == 8'h02) ? ((reg02_shadow & 8'h1F) | 8'h20) : 8'h00;
+
 ymf278b_regs #(
     .CLK_HZ (CLK_HZ)
 ) u_regs (
@@ -122,7 +136,7 @@ ymf278b_regs #(
     .pcm_reg_data   (pcm_reg_data),
     .pcm_reg_wr     (pcm_reg_wr),
     .pcm_reg_rd     (pcm_reg_rd),
-    .pcm_reg_dout   (8'h00),
+    .pcm_reg_dout   (pcm_reg_dout_s1),
     .pcm_reg_rd_done(1'b1),
     .pcm_cpu_mem_busy(1'b0),
     .busy           (busy_reg),

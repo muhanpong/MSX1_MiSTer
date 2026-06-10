@@ -128,6 +128,17 @@ module timers
         if (timer2_overflow_pulse && !mt2)
             ft2 <= 1;
 
+        // Real chips hide a flag the moment its mask bit is set (MAME fmopl
+        // statusmask): a RST=0 control write with MT=1 must make the flag read
+        // 0.  OPL3/OPL4 detection routines end with reg4=0x78 (MT1|MT2, no
+        // RST) and the OPL4 detect then requires status==0 — without this
+        // clear, ft1 stays latched and status sticks at 0xC0, failing it.
+        if (opl3_reg_wr.valid && opl3_reg_wr.bank_num == 0 &&
+            opl3_reg_wr.address == 4 && !opl3_reg_wr.data[7]) begin
+            if (opl3_reg_wr.data[6]) ft1 <= 0;
+            if (opl3_reg_wr.data[5]) ft2 <= 0;
+        end
+
         if (reset || irq_rst) begin
             ft1 <= 0;
             ft2 <= 0;

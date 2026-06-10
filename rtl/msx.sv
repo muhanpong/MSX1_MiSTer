@@ -105,7 +105,7 @@ t80pa #(.Mode(0)) T80
    .CEN_p(ce_3m58_p),
    .CEN_n(ce_3m58_n),
    .WAIT_n(wait_n),
-   .INT_n(vdp_int_n),
+   .INT_n(vdp_int_n & ms_int_n),
    .NMI_n(1),
    .BUSRQ_n(1),
    .M1_n(m1_n),
@@ -173,7 +173,11 @@ wire vdp_en =   (a[7:3] == 5'b10011)   & ~iorq_n & m1_n ;
 wire rtc_en =   (a[7:1] == 7'b1011010) & ~iorq_n & m1_n & bios_config.MSX_typ == MSX2;
 // MoonSound (OPL3 FM) I/O select: ports 0xC4-0xC7 (a[7:2]==6'b11_0001).
 // Stage 1: FM only.  WAVE ports 0x7E/0x7F (PCM) are not decoded yet.
-wire ms_fm_cs = msxConfig.moonsound_en & ~iorq_n & m1_n & (a[7:2] == 6'b11_0001);
+wire ms_fm_cs   = msxConfig.moonsound_en & ~iorq_n & m1_n & (a[7:2] == 6'b11_0001);
+// WAVE ports 0x7E/0x7F — needed for MoonSound chip DETECTION (reg 0x02 device-ID
+// read-back) even in Stage 1.  PCM playback itself is still deferred (the wave
+// engine isn't wired), but software must see the chip to write FM at all.
+wire ms_wave_cs = msxConfig.moonsound_en & ~iorq_n & m1_n & (a[7:1] == 7'b0111111);
 
 //  -----------------------------------------------------------------------------
 //  -- 82C55 PPI
@@ -208,7 +212,7 @@ assign d_to_cpu = rd_n   ? 8'hFF           :
                   rtc_en ? d_from_rtc      :
                   ~psg_n ? d_from_psg      :
                   ~ppi_n ? d_from_8255     :
-                  ms_fm_cs ? ms_dout       :
+                  (ms_wave_cs | ms_fm_cs) ? ms_dout :
                            d_from_slots    ;
 //  -----------------------------------------------------------------------------
 //  -- Keyboard decoder
@@ -537,7 +541,24 @@ logic       ms_io_pending;
 wire        ms_io_ack;
 wire  [7:0] ms_io_dout_raw;
 wire        ms_audio_valid;
-wire        ms_irq_n;       // OPL Timer IRQ — generated, NOT wired to /INT in Stage 1
+wire        ms_irq_n;       // OPL Timer IRQ (clk_opl3 domain)
+
+// OPL timer IRQ → Z80 /INT.  2-FF sync (clk_opl3 → clk21m), gated by moonsound_en.
+// OPL-timer-driven players (vgmplay OPLTimer, MoonBlaster) hook the interrupt and
+// ack with a reg-04 RST write; without this the 1130 Hz tick never reaches the
+// CPU and playback free-runs on VBlank (~19x slow).
+//
+// I/O-cycle deferral: the previous attempt at this wiring froze exactly when the
+// IRQ asserted while the main loop executed OUT instructions (hardware-isolated:
+// NOP loop + 1130 Hz IRQ ran clean for 2700+ interrupts, the same loop doing PSG
+// or FM OUTs froze — see project notes).  So hold off asserting /INT while a
+// normal I/O cycle is in flight (~iorq_n & m1_n; int-ack cycles have m1_n=0 and
+// are never masked, so an asserted /INT stays stable through its acknowledge).
+// The IRQ is level-held until software acks, so deferring assertion by ~1µs only
+// adds jitter ≪ the 880µs timer period.
+logic [1:0] ms_irq_sync_ff = 2'b11;
+always @(posedge clk21m) ms_irq_sync_ff <= {ms_irq_sync_ff[0], ms_irq_n};
+wire ms_int_n = ms_irq_sync_ff[1] | ~msxConfig.moonsound_en | (~iorq_n & m1_n);
 
 always_ff @(posedge clk21m) begin
     ms_wr_n_prev <= wr_n;
@@ -550,14 +571,14 @@ always_ff @(posedge clk21m) begin
         ms_rd_n_prev  <= 1'b1;
         ms_io_pending <= 1'b0;
     end else begin
-        if (ms_fm_cs & ~wr_n & ms_wr_n_prev) begin
+        if ((ms_wave_cs | ms_fm_cs) & ~wr_n & ms_wr_n_prev) begin
             ms_io_port_lat <= a[7:0];
             ms_io_data_lat <= d_from_cpu;
             ms_req_toggle  <= ~ms_req_toggle;
             ms_io_pending  <= 1'b1;
             ms_wait_cnt    <= 10'd600;
         end
-        if (ms_fm_cs & ~rd_n & ms_rd_n_prev) begin
+        if ((ms_wave_cs | ms_fm_cs) & ~rd_n & ms_rd_n_prev) begin
             ms_io_port_lat <= a[7:0];
             ms_rd_toggle   <= ~ms_rd_toggle;
             ms_io_pending  <= 1'b1;
@@ -599,11 +620,11 @@ ymf278b_top #(
     .audio_left   (ms_out_l),
     .audio_right  (ms_out_r),
     .audio_valid  (ms_audio_valid),
-    .irq_n        (ms_irq_n),    // Stage 1: left unwired (freeze avoidance)
+    .irq_n        (ms_irq_n),
     .fm_mute      (1'b0)
 );
 
 // Read data back to the CPU when a MoonSound FM port is selected.
-wire [7:0] ms_dout = ms_fm_cs ? ms_io_dout_lat : 8'h00;
+wire [7:0] ms_dout = (ms_wave_cs | ms_fm_cs) ? ms_io_dout_lat : 8'h00;
 
 endmodule
