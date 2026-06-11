@@ -33,6 +33,8 @@ module debug_overlay (
     input  wire [15:0] dbg_pc_vec,            // handler-entry PC after last INTA
     input  wire [15:0] dbg_pc_now,            // live PC
     input  wire [15:0] dbg_im_i,              // {IM, 6'b0, I} at last INTA
+    input  wire [15:0] dbg_watch_pc,          // PC of last write to table byte 257
+    input  wire [15:0] dbg_watch_dc,          // {data, count} of that write
     input  wire        dbg_int_ghost          // fatal IFF1-fall had no INTA
 );
 
@@ -55,6 +57,7 @@ logic [1:0]  wstk_s, istk_s, nom1_s, astp_s, iack_s;   // freeze-detector latche
 logic [1:0]  ioff_s, irfs_s;                            // IFF1-split detectors
 logic [15:0] pcs_s1, pcs_s2, pcl_s1, pcl_s2;            // PC snapshot / vec
 logic [15:0] pcn_s1, pcn_s2, imi_s1, imi_s2;            // live PC / IM+I
+logic [15:0] wpc_s1, wpc_s2, wdc_s1, wdc_s2;            // watchpoint PC / data+count
 logic [1:0]  gho_s;                                      // ghost acceptance
 always_ff @(posedge CLK_VIDEO) begin
     keyon_s1   <= dbg_slot_keyon;    keyon_s2   <= keyon_s1;
@@ -72,6 +75,8 @@ always_ff @(posedge CLK_VIDEO) begin
     pcl_s1     <= dbg_pc_vec;    pcl_s2 <= pcl_s1;
     pcn_s1     <= dbg_pc_now;    pcn_s2 <= pcn_s1;
     imi_s1     <= dbg_im_i;      imi_s2 <= imi_s1;
+    wpc_s1     <= dbg_watch_pc;  wpc_s2 <= wpc_s1;
+    wdc_s1     <= dbg_watch_dc;  wdc_s2 <= wdc_s1;
 end
 
 // ─── Hold counters (8/frame decay) ───────────────────────────────────────────
@@ -112,8 +117,8 @@ end
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 localparam PW = 11'd66;
-localparam PH = 8'd90;  // 11 rows × 8px + 2 border  (row 7 = detectors, row 8 = fall-PC,
-                        //  row 9 = vector-target PC, row 10 = LIVE PC, row 11 = IM+I)
+localparam PH = 8'd106; // 13 rows × 8px + 2 border  (… row 12 = watch PC,
+                        //  row 13 = watch {data,count} — writes to IM2 table+0x100)
 wire in_panel = en && !hblank && !vblank && (h_cnt < PW) && (v_cnt < PH) && !drew_this_line;
 wire border   = (h_cnt == 11'd0) || (h_cnt == PW-1) || (v_cnt == 8'd0) || (v_cnt == PH-1);
 wire [7:0] px = h_cnt[7:0] - 8'd1;
@@ -205,10 +210,20 @@ always_comb begin
                     if (pcn_s2[4'd15 - px[7:2]]) begin R_out=8'h80; G_out=8'hC0; B_out=8'hFF; end
                     else                          begin R_out=8'h10; G_out=8'h14; B_out=8'h20; end
                 end
-            end else begin                 // IM+I at last INTA — amber bits
+            end else if (py < 8'd88) begin // IM+I at last INTA — amber bits
                 if (px < 8'd64) begin
                     if (imi_s2[4'd15 - px[7:2]]) begin R_out=8'hFF; G_out=8'hC0; B_out=8'h40; end
                     else                          begin R_out=8'h20; G_out=8'h18; B_out=8'h08; end
+                end
+            end else if (py < 8'd96) begin // WATCH PC — pink bits (writer of table+0x100)
+                if (px < 8'd64) begin
+                    if (wpc_s2[4'd15 - px[7:2]]) begin R_out=8'hFF; G_out=8'h60; B_out=8'hA0; end
+                    else                          begin R_out=8'h20; G_out=8'h0C; B_out=8'h14; end
+                end
+            end else begin                 // WATCH {data,count} — violet bits
+                if (px < 8'd64) begin
+                    if (wdc_s2[4'd15 - px[7:2]]) begin R_out=8'hC0; G_out=8'h80; B_out=8'hFF; end
+                    else                          begin R_out=8'h18; G_out=8'h10; B_out=8'h20; end
                 end
             end
         end

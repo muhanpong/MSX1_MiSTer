@@ -410,6 +410,8 @@ wire [15:0] dbg_pc_snap;
 wire [15:0] dbg_pc_vec;
 wire [15:0] dbg_pc_now;
 wire [15:0] dbg_im_i;
+wire [15:0] dbg_watch_pc;
+wire [15:0] dbg_watch_dc;
 wire        dbg_int_ghost;
 wire [15:0] cpu_addr;
 wire signed [15:0] audio_l, audio_r;
@@ -655,6 +657,8 @@ debug_overlay u_overlay (
    .dbg_pc_vec(dbg_pc_vec),
    .dbg_pc_now(dbg_pc_now),
    .dbg_im_i(dbg_im_i),
+   .dbg_watch_pc(dbg_watch_pc),
+   .dbg_watch_dc(dbg_watch_dc),
    .dbg_int_ghost(dbg_int_ghost)
 );
 

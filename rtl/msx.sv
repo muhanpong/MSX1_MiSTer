@@ -125,6 +125,8 @@ module msx
    output logic       [15:0] dbg_pc_vec,        // PC of handler entry after the last INTA
    output logic       [15:0] dbg_pc_now,        // live PC (dark-freeze spin locator)
    output logic       [15:0] dbg_im_i,          // {IM[1:0], 6'b0, I[7:0]} at last INTA
+   output logic       [15:0] dbg_watch_pc,      // PC of last write to IM2 table byte 257
+   output logic       [15:0] dbg_watch_dc,      // {written data, write count} for that byte
    output logic              dbg_int_ghost      // fatal IFF1-fall had NO INTA (DI-death / ghost)
 );
 
@@ -818,6 +820,10 @@ logic [15:0] intack_cnt = 0;   // ~3ms threshold (> the ~880us Timer-1 period, s
                                // CPU taking the IRQ once per overflow doesn't false-latch)
 logic [15:0] iffoff_cnt = 0, refuse_cnt = 0;
 logic        iff1_d = 1'b0, ghost_arm = 1'b0, intack_seen = 1'b0;
+logic        mreq_n_d = 1'b1, wr_n_d = 1'b1;
+logic [15:0] addr_d;
+logic [7:0]  data_d;
+wire  [7:0]  im2_tbl_hi = t80_reg[39:32] + 8'd1;   // I+1 = page of table byte 257
 always_ff @(posedge clk21m) begin
     if (reset) begin
         wait_cnt <= 0; irq_cnt <= 0; nom1_cnt <= 0; intack_cnt <= 0;
@@ -882,6 +888,22 @@ always_ff @(posedge clk21m) begin
             dbg_im_i   <= {t80_reg[209:208], 6'd0, t80_reg[39:32]};  // IM + I at dispatch
         end
         dbg_pc_now <= t80_reg[79:64];
+
+        // WRITE WATCHPOINT on the IM2 table's 257th byte ({I+1, 0x00}) — the
+        // byte found corrupted (0x10-0x13) in the freeze forensics.  Captures
+        // WHO writes it: PC + data + count.  The legitimate init value is the
+        // entry byte (I+1); only captures of OTHER values are interesting, but
+        // count all writes so the init shows up as count=1.
+        if (~mreq_n_d & mreq_n & ~wr_n_d) begin   // end of a memory write cycle
+            if (addr_d == {im2_tbl_hi, 8'h00}) begin
+                dbg_watch_pc <= t80_reg[79:64];
+                dbg_watch_dc <= {data_d, dbg_watch_dc[7:0] + 8'd1};
+            end
+        end
+        mreq_n_d <= mreq_n;
+        wr_n_d   <= wr_n;
+        addr_d   <= a;
+        data_d   <= d_from_cpu;
 
         if (~m1_n & ~iorq_n)               refuse_cnt <= 0;
         else if (ms_irq_n_sync | ~t80_reg[210]) refuse_cnt <= 0;
