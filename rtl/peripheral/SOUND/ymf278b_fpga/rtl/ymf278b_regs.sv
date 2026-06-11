@@ -56,13 +56,13 @@ localparam int MEM_READ_DELAY         = 38;
 // adds nothing).  ~1024 ≈ 12 µs/byte, between otir (fails) and pcmload (~16 µs,
 // works).  Tunable: lower if uploads are too slow, raise if large uploads still
 // freeze. NOTE: keep msx.sv's MoonSound WAIT_n timeout > this (in clk21m).
-// MEM_WRITE_DELAY 1024→64 (2026-06-12): the 12µs/byte floor was v2-era
-// tuning when the engine's busy reporting was unreliable.  v3 defers the ack
-// on the ACTUAL completion (pcm_cpu_mem_busy, bounded ≤1 frame), so the floor
-// only needs to bridge the issue latency.  The huge floor stretched vgmplay's
-// DI-protected otir loops to multi-ms — long enough to break interrupt-driven
-// players (and it made uploads 16× slower than necessary).
-localparam int MEM_WRITE_DELAY        = 64;
+// MEM_WRITE_DELAY: 12µs/byte upload pacing.  Briefly lowered to 64 (2026-06-12)
+// once the flag-stealing watchdog was removed — but the 16× denser ch4 write
+// bursts corrupted the CPU-visible SDRAM side (vgmplay aborted with "An
+// exception occurred." while streaming from its mapper buffer on ch2).  With
+// the watchdog gone, long DI-held otir stretches are harmless, so the gentle
+// pacing is the safe choice again.
+localparam int MEM_WRITE_DELAY        = 1024;
 localparam int LOAD_DELAY             = 10000;
 
 localparam int DELAY_W = $clog2(LOAD_DELAY + 1);
