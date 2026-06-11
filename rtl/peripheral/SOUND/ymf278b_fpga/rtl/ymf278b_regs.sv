@@ -40,7 +40,14 @@ module ymf278b_regs #(
 
     // BUSY/LOAD status
     output logic       busy,
-    output logic       load_busy
+    output logic       load_busy,
+
+    // Live status byte for the host's DIRECT (bridge-free) FM status reads:
+    // exactly what a bridge status read would return, continuously composed.
+    output logic [7:0] status_live,
+    // Pulse: the host served a direct status read — consume the NEW2 one-shot
+    // device-ID signature (datasheet: 02H returned once after NEW2 set).
+    input  wire        status_rd_notify
 );
 
 // Timing delays in clock cycles (at 33.8688 MHz)
@@ -104,6 +111,9 @@ wire io_is_fm = (io_port[7:2] == 6'b110001);
 
 assign pcm_reg_addr = opl4latch;
 
+assign status_live = opl3_status | {6'd0, load_busy, busy}
+                   | (new2_signature_pending ? 8'h02 : 8'h00);
+
 // Busy / Load counters
 // CPU mem (reg 0x03-0x06) access: the fixed MEM_*_DELAY only bridges the first
 // cycles; the engine issues the SDRAM op opportunistically (HF/Stage B must be
@@ -138,6 +148,7 @@ always_ff @(posedge clk) begin
         // Detect NEW2 rising edge to arm the YMF278B device-ID signature
         new2_prev <= new2;
         if (new2 && !new2_prev) new2_signature_pending <= 1'b1;
+        else if (status_rd_notify) new2_signature_pending <= 1'b0;
         // If waiting for PCM memory read to finish, hold io_ack low until
         // pcm_reg_rd_done pulses, then deliver the data and ack the CPU.
         // Emergency bailout (~48µs, beyond any legitimate completion): a

@@ -125,6 +125,7 @@ module tb_vgmplay_freeze;
         .io_port(ms_io_port_lat), .io_data_in(ms_io_data_lat),
         .io_wr(ms_io_wr_sdram), .io_rd(ms_io_rd_sdram),
         .io_data_out(ms_io_dout_raw), .io_ack(ms_io_ack),
+        .status_export(), .status_rd_notify(1'b0),
         .mem_addr(ms_mem_addr), .mem_rd_req(ms_mem_rd_req),
         .mem_rd_data(ms_mem_rd_data), .mem_rd_data16(ms_mem_rd_data16),
         .mem_rd_valid(ms_mem_rd_valid), .mem_wr_req(ms_mem_wr_req),

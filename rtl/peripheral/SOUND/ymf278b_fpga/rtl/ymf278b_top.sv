@@ -19,6 +19,11 @@ module ymf278b_top #(
     output logic [7:0] io_data_out,
     output logic       io_ack,
 
+    // Direct (bridge-free) FM status path: live status byte out, and a pulse
+    // in when the host served a direct status read (consumes the NEW2 one-shot).
+    output wire  [7:0] status_export,
+    input  wire        status_rd_notify,
+
     // External memory bus (for PCM sample data)
     output logic [21:0] mem_addr,
     output logic        mem_rd_req,
@@ -277,6 +282,8 @@ ymf278b_regs #(
     .pcm_reg_rd_done(pcm_reg_rd_done),
     .pcm_cpu_mem_busy(pcm_cpu_mem_busy_w),
     .busy           (busy_reg),
+    .status_live    (status_export),
+    .status_rd_notify(status_rd_notify),
     .load_busy      (load_busy_reg)
 );
 

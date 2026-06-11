@@ -644,11 +644,21 @@ always_ff @(posedge clk21m) begin
             ms_wait_cnt    <= 12'd4000;
         end
         if ((ms_wave_cs | ms_fm_cs) & ~rd_n & ms_rd_n_prev) begin
-            // Falling edge of rd_n
-            ms_io_port_lat <= a[7:0];
-            ms_rd_toggle   <= ~ms_rd_toggle;
-            ms_io_pending  <= 1'b1;        // hold CPU until read data is ready
-            ms_wait_cnt    <= 12'd4000;
+            if (ms_fm_cs & ~a[0]) begin
+                // FM STATUS read (0xC4/0xC6): served DIRECTLY from the
+                // continuously-synced status byte — no bridge round trip, no
+                // WAIT, no request/response pairing to corrupt.  The IRQ
+                // handler's status read is the one access that must NEVER
+                // return stale data (a single stale bit6=0 sends vgmplay
+                // down its no-EI OldHook exit = interrupts silently die).
+                ms_strd_toggle <= ~ms_strd_toggle;   // notify: consume NEW2 one-shot
+            end else begin
+                // Falling edge of rd_n — bridge read (wave ports + FM data port)
+                ms_io_port_lat <= a[7:0];
+                ms_rd_toggle   <= ~ms_rd_toggle;
+                ms_io_pending  <= 1'b1;    // hold CPU until read data is ready
+                ms_wait_cnt    <= 12'd4000;
+            end
         end
         // Release the wait when the chip acks (one access in flight at a time,
         // since the CPU is held), or after the safety timeout.
@@ -673,6 +683,20 @@ end
 
 wire ms_io_wr_sdram = ms_req_sync[2] ^ ms_req_sync[1];
 wire ms_io_rd_sdram = ms_rd_sync[2]  ^ ms_rd_sync[1];
+
+// Direct FM-status path: continuous CDC of the live status byte into clk21m
+// (bits change slowly; the handler cares about bit6 only), plus the
+// status-read notification toggle into clk_sdram.
+(* preserve *) reg [7:0] ms_status_s1, ms_status_s2;
+always @(posedge clk21m) begin
+    ms_status_s1 <= ms_status_export;
+    ms_status_s2 <= ms_status_s1;
+end
+logic       ms_strd_toggle = 1'b0;
+logic [2:0] ms_strd_sync;
+always_ff @(posedge clk_sdram) ms_strd_sync <= {ms_strd_sync[1:0], ms_strd_toggle};
+wire ms_status_rd_notify = ms_strd_sync[2] ^ ms_strd_sync[1];
+wire [7:0] ms_status_export;
 
 // ─── PCM memory ↔ SDRAM ch4 bridge (read + write) ───────────────────────────
 // ymf278b_top outputs mem_addr[21:0] + mem_rd_req/mem_wr_req in clk_sdram domain.
@@ -874,6 +898,8 @@ ymf278b_top #(
     .io_rd        (ms_io_rd_sdram),
     .io_data_out  (ms_io_dout_raw),
     .io_ack       (ms_io_ack),
+    .status_export(ms_status_export),
+    .status_rd_notify(ms_status_rd_notify),
     .mem_addr     (ms_mem_addr),
     .mem_rd_req   (ms_mem_rd_req),
     .mem_rd_data  (ms_mem_rd_data),
@@ -908,7 +934,9 @@ ymf278b_top #(
 assign ms_audio_l = msxConfig.moonsound_en ? ms_out_l : 16'sh0;
 assign ms_audio_r = msxConfig.moonsound_en ? ms_out_r : 16'sh0;
 
-// Output latched read data back to CPU if MoonSound is selected
-assign ms_dout = (ms_wave_cs | ms_fm_cs) ? ms_io_dout_lat : 8'h00;
+// Read data back to the CPU: FM status (0xC4/0xC6) comes straight from the
+// live synced byte; everything else from the bridge latch.
+assign ms_dout = (ms_fm_cs & ~a[0])       ? ms_status_s2   :
+                 (ms_wave_cs | ms_fm_cs)  ? ms_io_dout_lat : 8'h00;
 
 endmodule

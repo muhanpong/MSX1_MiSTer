@@ -29,6 +29,7 @@ module tb_opl4_detect;
         .clk, .clk_opl3, .rst_n,
         .io_port, .io_data_in, .io_wr, .io_rd,
         .io_data_out, .io_ack,
+        .status_export(), .status_rd_notify(1'b0),
         .mem_addr      (mem_addr),
         .mem_rd_req    (mem_rd_req),
         .mem_rd_data   (8'h00),

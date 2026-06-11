@@ -36,6 +36,8 @@ wire         dbg_ack_stopped;
 logic signed [15:0] audio_left, audio_right;
 logic               audio_valid;
 logic        irq_n;
+wire  [7:0]  status_export;
+wire         status_rd_notify = 1'b0;
 
 // Stub memory model (4KB)
 logic [7:0] sample_mem [0:4095];
