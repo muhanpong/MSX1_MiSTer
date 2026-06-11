@@ -222,7 +222,7 @@ end
 // Slot FSM — one slot start-to-finish inside its 72-cycle window
 // ═══════════════════════════════════════════════════════════════════════════
 typedef enum logic [4:0] {
-    SL_IDLE, SL_LOAD, SL_VIB, SL_STEP, SL_ADV, SL_POSB, SL_ADDR,
+    SL_IDLE, SL_LOAD, SL_VIB, SL_STEP, SL_ADV, SL_POSB, SL_ADDR, SL_CHIT,
     SL_F_ISSUE, SL_F_WAIT, SL_DECODE, SL_INTERP, SL_EGRATE, SL_EGROM,
     SL_EGSTEP, SL_GAIN, SL_MUL1, SL_MUL2, SL_PAN, SL_ACC, SL_DONE
 } sl_state_t;
@@ -237,7 +237,8 @@ logic         w_edge;                  // key-on edge (incl. retrig)
 logic signed [15:0] w_vib;
 logic [31:0]  w_step;
 logic [15:0]  w_pos2, w_ptr2, w_posb;
-logic [21:0]  w_a0, w_b0;              // first byte addr of sample A / B
+logic [21:0]  w_a0, w_a1, w_a2;       // registered byte addrs of sample A
+logic [21:0]  w_b0, w_b1, w_b2;       // registered byte addrs of sample B
 logic         w_need_b;                // B bytes not covered by A's words
 // fetched words: 0:wA0 1:wA0+1 2:wB0 3:wB0+1
 logic [15:0]  w_word [0:3];
@@ -448,17 +449,24 @@ always_ff @(posedge clk or negedge rst_n) begin
             end
 
             SL_ADDR: begin
+                // register all six byte addresses — byte_addr's ×3 multiply
+                // (12-bit format) must not chain into the cache compare or
+                // the decode muxes (failed clk_sdram by ~0.5 ns when it did)
+                w_a0 <= addr_a0;  w_a1 <= addr_a1;  w_a2 <= addr_a2;
+                w_b0 <= addr_b0;  w_b1 <= addr_b1;  w_b2 <= addr_b2;
+                sl_state <= SL_CHIT;
+            end
+
+            SL_CHIT: begin
                 logic need_b_c, hit_c;
-                w_a0 <= addr_a0;
-                w_b0 <= addr_b0;
                 // B covered by A's two words iff its bytes lie in [a0&~1, a0&~1+3]
-                need_b_c = !((addr_b0[21:1] >= addr_a0[21:1]) &&
-                             (addr_b2[21:1] <= addr_a0[21:1] + 21'd1));
+                need_b_c = !((w_b0[21:1] >= w_a0[21:1]) &&
+                             (w_b2[21:1] <= w_a0[21:1] + 21'd1));
                 w_need_b <= need_b_c;
                 w_fidx   <= 2'd0;
                 hit_c = cache_vld[w_slot]
-                      && (cache_tagA[w_slot] == addr_a0[21:1])
-                      && (!need_b_c || (cache_tagB[w_slot] == addr_b0[21:1]));
+                      && (cache_tagA[w_slot] == w_a0[21:1])
+                      && (!need_b_c || (cache_tagB[w_slot] == w_b0[21:1]));
                 if (hit_c) begin
                     w_word[0] <= cache_w0[w_slot];
                     w_word[1] <= cache_w1[w_slot];
@@ -504,14 +512,14 @@ always_ff @(posedge clk or negedge rst_n) begin
 
             SL_DECODE: begin
                 w_sa <= decode_sample(
-                    pick_byte(addr_a0, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
-                    pick_byte(addr_a1, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
-                    pick_byte(addr_a2, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
+                    pick_byte(w_a0, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
+                    pick_byte(w_a1, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
+                    pick_byte(w_a2, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
                     w_pos2, w_hdr.bits);
                 w_sb <= decode_sample(
-                    pick_byte(addr_b0, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
-                    pick_byte(addr_b1, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
-                    pick_byte(addr_b2, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
+                    pick_byte(w_b0, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
+                    pick_byte(w_b1, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
+                    pick_byte(w_b2, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
                     w_posb, w_hdr.bits);
                 sl_state <= SL_INTERP;
             end
