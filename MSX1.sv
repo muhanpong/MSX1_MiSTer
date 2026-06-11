@@ -407,7 +407,7 @@ wire        dbg_ack_stopped;
 wire        dbg_iff_stuck_off;
 wire        dbg_int_refused;
 wire [15:0] dbg_pc_snap;
-wire [15:0] dbg_pc_live;
+wire [15:0] dbg_pc_vec;
 wire        dbg_int_ghost;
 wire [15:0] cpu_addr;
 wire signed [15:0] audio_l, audio_r;
@@ -650,7 +650,7 @@ debug_overlay u_overlay (
    .dbg_iff_stuck_off(dbg_iff_stuck_off),
    .dbg_int_refused(dbg_int_refused),
    .dbg_pc_snap(dbg_pc_snap),
-   .dbg_pc_live(dbg_pc_live),
+   .dbg_pc_vec(dbg_pc_vec),
    .dbg_int_ghost(dbg_int_ghost)
 );
 

@@ -30,8 +30,8 @@ module debug_overlay (
     input  wire        dbg_iff_stuck_off,     // irq asserted while IFF1==0 (EI unreached)
     input  wire        dbg_int_refused,       // irq asserted, IFF1==1, no INTA (T80 refusal)
     input  wire [15:0] dbg_pc_snap,           // PC at last IFF1-fall before green latch
-    input  wire [15:0] dbg_pc_live,           // live PC
-    input  wire        dbg_int_ghost          // IFF1 fell, no INTA followed
+    input  wire [15:0] dbg_pc_vec,            // handler-entry PC after last INTA
+    input  wire        dbg_int_ghost          // fatal IFF1-fall had no INTA
 );
 
 // ─── CDC sync ───────────────────────────────────────────────────────────────────────
@@ -66,7 +66,7 @@ always_ff @(posedge CLK_VIDEO) begin
     irfs_s     <= {irfs_s[0], dbg_int_refused};
     gho_s      <= {gho_s[0],  dbg_int_ghost};
     pcs_s1     <= dbg_pc_snap;   pcs_s2 <= pcs_s1;
-    pcl_s1     <= dbg_pc_live;   pcl_s2 <= pcl_s1;
+    pcl_s1     <= dbg_pc_vec;    pcl_s2 <= pcl_s1;
 end
 
 // ─── Hold counters (8/frame decay) ───────────────────────────────────────────
@@ -190,7 +190,7 @@ always_comb begin
                     if (pcs_s2[4'd15 - px[7:2]]) begin R_out=8'hFF; G_out=8'hFF; B_out=8'hFF; end
                     else                          begin R_out=8'h18; G_out=8'h18; B_out=8'h18; end
                 end
-            end else begin                 // LIVE PC — 16 bits, MSB left, 4px/bit
+            end else begin                 // VECTOR-TARGET PC — 16 bits, MSB left, 4px/bit
                 if (px < 8'd64) begin
                     if (pcl_s2[4'd15 - px[7:2]]) begin R_out=8'h80; G_out=8'hFF; B_out=8'h80; end
                     else                          begin R_out=8'h10; G_out=8'h20; B_out=8'h10; end
