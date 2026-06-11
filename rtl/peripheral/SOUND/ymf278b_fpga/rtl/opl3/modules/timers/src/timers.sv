@@ -121,20 +121,14 @@ module timers
         .timer_overflow_pulse(timer2_overflow_pulse)
     );
 
-    // IRQ watchdog: a legitimately-asserted IRQ is cleared by the host's reg4 ack
-    // within one Timer-1 period (<1ms; up to ~1ms if a long BIOS ISR delays the
-    // ack).  If it stays asserted FAR longer the host's ack isn't clearing ft1 —
-    // a self-sustaining OPL-IRQ storm (the rapid back-to-back interrupt handler's
-    // ack writes race/drop in the ms_io bridge CDC).  Force-clear the flags after
-    // ~4.6ms to break the storm so the CPU returns to normal (non-back-to-back)
-    // interrupt handling and the next ack succeeds.  Never fires in normal play.
-    logic [15:0] irq_wdog = 0;
-    logic        irq_wdog_clr;
-    always_ff @(posedge clk) begin
-        if (!irq || reset) irq_wdog <= 0;
-        else if (~&irq_wdog) irq_wdog <= irq_wdog + 1'b1;
-    end
-    assign irq_wdog_clr = &irq_wdog;
+    // (wip-era 4.6ms IRQ watchdog REMOVED 2026-06-12.  It force-cleared ft1
+    // when the irq stayed asserted "too long" — but vgmplay OPL4 legitimately
+    // holds DI for multi-ms otir upload stretches, so the watchdog STOLE the
+    // flag right before the handler's status read: the handler saw bit6=0,
+    // took its no-EI OldHook exit, and the system died with interrupts off
+    // (hardware forensics: accept@0x0C5A → handler 0xC6F3 → no EI → spin at
+    // Update.Wait 0xD0B0).  The storm the watchdog mitigated was a v2-bridge
+    // ack-loss bug, fixed since.)
 
     always_ff @(posedge clk) begin
         if ((timer1_overflow_pulse || force_timer_overflow) && !mt1)
@@ -154,7 +148,7 @@ module timers
             if (opl3_reg_wr.data[5]) ft2 <= 0;
         end
 
-        if (reset || irq_rst || irq_wdog_clr) begin
+        if (reset || irq_rst) begin
             ft1 <= 0;
             ft2 <= 0;
         end
