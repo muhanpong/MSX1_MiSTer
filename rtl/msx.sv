@@ -123,6 +123,8 @@ module msx
    output logic              dbg_int_refused,   // irq asserted, IFF1==1, yet no INTA (T80 acceptance)
    output logic       [15:0] dbg_pc_snap,       // PC at the last IFF1-fall before green latched
    output logic       [15:0] dbg_pc_vec,        // PC of handler entry after the last INTA
+   output logic       [15:0] dbg_pc_now,        // live PC (dark-freeze spin locator)
+   output logic       [15:0] dbg_im_i,          // {IM[1:0], 6'b0, I[7:0]} at last INTA
    output logic              dbg_int_ghost      // fatal IFF1-fall had NO INTA (DI-death / ghost)
 );
 
@@ -875,8 +877,11 @@ always_ff @(posedge clk21m) begin
         // once green latches).  Direct check for IM2 vector corruption.
         intack_seen <= (~m1_n & ~iorq_n) ? 1'b1
                      : (intack_seen && !(~m1_n & iorq_n)) ? intack_seen : 1'b0;
-        if (intack_seen && ~m1_n && iorq_n && !dbg_iff_stuck_off)
+        if (intack_seen && ~m1_n && iorq_n && !dbg_iff_stuck_off) begin
             dbg_pc_vec <= t80_reg[79:64];
+            dbg_im_i   <= {t80_reg[209:208], 6'd0, t80_reg[39:32]};  // IM + I at dispatch
+        end
+        dbg_pc_now <= t80_reg[79:64];
 
         if (~m1_n & ~iorq_n)               refuse_cnt <= 0;
         else if (ms_irq_n_sync | ~t80_reg[210]) refuse_cnt <= 0;

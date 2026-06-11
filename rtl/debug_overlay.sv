@@ -31,6 +31,8 @@ module debug_overlay (
     input  wire        dbg_int_refused,       // irq asserted, IFF1==1, no INTA (T80 refusal)
     input  wire [15:0] dbg_pc_snap,           // PC at last IFF1-fall before green latch
     input  wire [15:0] dbg_pc_vec,            // handler-entry PC after last INTA
+    input  wire [15:0] dbg_pc_now,            // live PC
+    input  wire [15:0] dbg_im_i,              // {IM, 6'b0, I} at last INTA
     input  wire        dbg_int_ghost          // fatal IFF1-fall had no INTA
 );
 
@@ -51,7 +53,8 @@ end
 logic [23:0] keyon_s1, keyon_s2, active_s1, active_s2, envlive_s1, envlive_s2;
 logic [1:0]  wstk_s, istk_s, nom1_s, astp_s, iack_s;   // freeze-detector latches, CDC into video clk
 logic [1:0]  ioff_s, irfs_s;                            // IFF1-split detectors
-logic [15:0] pcs_s1, pcs_s2, pcl_s1, pcl_s2;            // PC snapshot/live
+logic [15:0] pcs_s1, pcs_s2, pcl_s1, pcl_s2;            // PC snapshot / vec
+logic [15:0] pcn_s1, pcn_s2, imi_s1, imi_s2;            // live PC / IM+I
 logic [1:0]  gho_s;                                      // ghost acceptance
 always_ff @(posedge CLK_VIDEO) begin
     keyon_s1   <= dbg_slot_keyon;    keyon_s2   <= keyon_s1;
@@ -67,6 +70,8 @@ always_ff @(posedge CLK_VIDEO) begin
     gho_s      <= {gho_s[0],  dbg_int_ghost};
     pcs_s1     <= dbg_pc_snap;   pcs_s2 <= pcs_s1;
     pcl_s1     <= dbg_pc_vec;    pcl_s2 <= pcl_s1;
+    pcn_s1     <= dbg_pc_now;    pcn_s2 <= pcn_s1;
+    imi_s1     <= dbg_im_i;      imi_s2 <= imi_s1;
 end
 
 // ─── Hold counters (8/frame decay) ───────────────────────────────────────────
@@ -107,8 +112,8 @@ end
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 localparam PW = 11'd66;
-localparam PH = 8'd74;  // 9 rows × 8px + 2 border  (row 7 = freeze detectors,
-                        //  row 8 = PC snapshot @green, row 9 = live PC; MSB left, 4px/bit)
+localparam PH = 8'd90;  // 11 rows × 8px + 2 border  (row 7 = detectors, row 8 = fall-PC,
+                        //  row 9 = vector-target PC, row 10 = LIVE PC, row 11 = IM+I)
 wire in_panel = en && !hblank && !vblank && (h_cnt < PW) && (v_cnt < PH) && !drew_this_line;
 wire border   = (h_cnt == 11'd0) || (h_cnt == PW-1) || (v_cnt == 8'd0) || (v_cnt == PH-1);
 wire [7:0] px = h_cnt[7:0] - 8'd1;
@@ -190,10 +195,20 @@ always_comb begin
                     if (pcs_s2[4'd15 - px[7:2]]) begin R_out=8'hFF; G_out=8'hFF; B_out=8'hFF; end
                     else                          begin R_out=8'h18; G_out=8'h18; B_out=8'h18; end
                 end
-            end else begin                 // VECTOR-TARGET PC — 16 bits, MSB left, 4px/bit
+            end else if (py < 8'd72) begin // VECTOR-TARGET PC — light green bits
                 if (px < 8'd64) begin
                     if (pcl_s2[4'd15 - px[7:2]]) begin R_out=8'h80; G_out=8'hFF; B_out=8'h80; end
                     else                          begin R_out=8'h10; G_out=8'h20; B_out=8'h10; end
+                end
+            end else if (py < 8'd80) begin // LIVE PC — light blue bits
+                if (px < 8'd64) begin
+                    if (pcn_s2[4'd15 - px[7:2]]) begin R_out=8'h80; G_out=8'hC0; B_out=8'hFF; end
+                    else                          begin R_out=8'h10; G_out=8'h14; B_out=8'h20; end
+                end
+            end else begin                 // IM+I at last INTA — amber bits
+                if (px < 8'd64) begin
+                    if (imi_s2[4'd15 - px[7:2]]) begin R_out=8'hFF; G_out=8'hC0; B_out=8'h40; end
+                    else                          begin R_out=8'h20; G_out=8'h18; B_out=8'h08; end
                 end
             end
         end
