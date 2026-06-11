@@ -99,6 +99,8 @@ logic pcm_rd_wait;
 // Deferring the ack makes WAIT_n hold the CPU until the write lands — i.e. it
 // throttles the host to the real memory speed, exactly like pcmload's BUSY poll.
 logic pcm_wr_wait;
+logic [11:0] wait_guard;           // emergency wait bailout (~48µs @85.9MHz)
+wire io_is_fm = (io_port[7:2] == 6'b110001);
 
 assign pcm_reg_addr = opl4latch;
 
@@ -129,6 +131,7 @@ always_ff @(posedge clk) begin
         opl3latch   <= 9'd0;
         pcm_rd_wait <= 1'b0;
         pcm_wr_wait <= 1'b0;
+        wait_guard  <= '0;
         new2_prev   <= 1'b0;
         new2_signature_pending <= 1'b0;
     end else begin
@@ -137,6 +140,15 @@ always_ff @(posedge clk) begin
         if (new2 && !new2_prev) new2_signature_pending <= 1'b1;
         // If waiting for PCM memory read to finish, hold io_ack low until
         // pcm_reg_rd_done pulses, then deliver the data and ack the CPU.
+        // Emergency bailout (~48µs, beyond any legitimate completion): a
+        // wedged engine op must not freeze the wave port forever.
+        if (pcm_rd_wait || pcm_wr_wait) wait_guard <= wait_guard + 1'b1;
+        else                            wait_guard <= '0;
+        if (&wait_guard) begin
+            io_ack      <= 1'b1;
+            pcm_rd_wait <= 1'b0;
+            pcm_wr_wait <= 1'b0;
+        end
         if (pcm_rd_wait) begin
             if (pcm_reg_rd_done) begin
                 io_data_out <= pcm_reg_dout;
@@ -158,13 +170,21 @@ always_ff @(posedge clk) begin
         if (busy_cnt != '0) busy_cnt <= busy_cnt - 1;
         if (load_cnt != '0) load_cnt <= load_cnt - 1;
 
-        // While a deferred memory op is still waiting for its ack, a NEW I/O
-        // strobe can only arrive if the CPU escaped via the bridge WAIT
+        // While a deferred WAVE-memory op is waiting for its ack, a new WAVE
+        // access can only arrive if the CPU escaped via the bridge WAIT
         // timeout.  Accepting it would overwrite opl4latch/pcm_reg_data while
-        // the engine is still consuming them (custom-wave corruption) and
-        // desync the ack-toggle pairing.  Real-chip BUSY semantics: the access
-        // is simply lost.  Drop it; the bridge self-heals via its timeout.
-        if ((io_wr || io_rd) && !pcm_rd_wait && !pcm_wr_wait) begin
+        // the engine is still consuming them.  Real-chip BUSY semantics: the
+        // access is lost — but it must still be ACKED, or every subsequent
+        // access becomes a 186µs bridge-timeout zombie (hardware-observed
+        // death chain: stale status read → vgmplay's no-EI OldHook exit).
+        //
+        // FM ports (0xC4-C7) are NEVER gated: they share no state with the
+        // PCM wait paths, and the interrupt handler's status read + timer ack
+        // must stay alive even when the wave path is wedged.
+        if ((io_wr || io_rd) && !io_is_fm && (pcm_rd_wait || pcm_wr_wait)) begin
+            io_ack <= 1'b1;            // dropped, but acknowledged
+        end
+        if ((io_wr || io_rd) && (io_is_fm || (!pcm_rd_wait && !pcm_wr_wait))) begin
         if (io_wr) begin
         // I/O port map (low byte):
         // 0x7E-0x7F: WAVE (PCM)  — only writable when NEW2=1
