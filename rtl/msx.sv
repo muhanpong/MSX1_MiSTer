@@ -120,7 +120,9 @@ module msx
    output logic              dbg_intack_stop,  // CPU not taking the asserted OPL IRQ
    output wire               dbg_ack_stopped,  // reg4 ack writes stopped (clk_sdram, from ymf278b_top)
    output logic              dbg_iff_stuck_off, // irq asserted while IFF1==0 (EI unreached)
-   output logic              dbg_int_refused    // irq asserted, IFF1==1, yet no INTA (T80 acceptance)
+   output logic              dbg_int_refused,   // irq asserted, IFF1==1, yet no INTA (T80 acceptance)
+   output logic       [15:0] dbg_pc_snap,       // PC captured when iff_stuck_off first latched
+   output logic       [15:0] dbg_pc_live        // live PC (for spin-range observation)
 );
 
 //  -----------------------------------------------------------------------------
@@ -821,7 +823,11 @@ always_ff @(posedge clk21m) begin
         //           (acceptance-condition bug: Prefix/SetEI/sampling).
         if (ms_irq_n_sync | t80_reg[210])  iffoff_cnt <= 0;
         else if (~&iffoff_cnt)             iffoff_cnt <= iffoff_cnt + 1'b1;
-        if (&iffoff_cnt)                   dbg_iff_stuck_off <= 1'b1;
+        if (&iffoff_cnt) begin
+            if (!dbg_iff_stuck_off) dbg_pc_snap <= t80_reg[79:64];  // first latch
+            dbg_iff_stuck_off <= 1'b1;
+        end
+        dbg_pc_live <= t80_reg[79:64];
 
         if (~m1_n & ~iorq_n)               refuse_cnt <= 0;
         else if (ms_irq_n_sync | ~t80_reg[210]) refuse_cnt <= 0;

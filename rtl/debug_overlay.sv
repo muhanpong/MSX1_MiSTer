@@ -28,7 +28,9 @@ module debug_overlay (
     input  wire        dbg_ack_stopped,       // reg4 timer-ack writes stopped reaching OPL3
     input  wire        dbg_intack_stop,       // CPU not taking the asserted OPL IRQ
     input  wire        dbg_iff_stuck_off,     // irq asserted while IFF1==0 (EI unreached)
-    input  wire        dbg_int_refused        // irq asserted, IFF1==1, no INTA (T80 refusal)
+    input  wire        dbg_int_refused,       // irq asserted, IFF1==1, no INTA (T80 refusal)
+    input  wire [15:0] dbg_pc_snap,           // PC at green-latch moment
+    input  wire [15:0] dbg_pc_live            // live PC
 );
 
 // ─── CDC sync ───────────────────────────────────────────────────────────────────────
@@ -48,6 +50,7 @@ end
 logic [23:0] keyon_s1, keyon_s2, active_s1, active_s2, envlive_s1, envlive_s2;
 logic [1:0]  wstk_s, istk_s, nom1_s, astp_s, iack_s;   // freeze-detector latches, CDC into video clk
 logic [1:0]  ioff_s, irfs_s;                            // IFF1-split detectors
+logic [15:0] pcs_s1, pcs_s2, pcl_s1, pcl_s2;            // PC snapshot/live
 always_ff @(posedge CLK_VIDEO) begin
     keyon_s1   <= dbg_slot_keyon;    keyon_s2   <= keyon_s1;
     active_s1  <= dbg_slot_active;   active_s2  <= active_s1;
@@ -59,6 +62,8 @@ always_ff @(posedge CLK_VIDEO) begin
     iack_s     <= {iack_s[0], dbg_intack_stop};
     ioff_s     <= {ioff_s[0], dbg_iff_stuck_off};
     irfs_s     <= {irfs_s[0], dbg_int_refused};
+    pcs_s1     <= dbg_pc_snap;   pcs_s2 <= pcs_s1;
+    pcl_s1     <= dbg_pc_live;   pcl_s2 <= pcl_s1;
 end
 
 // ─── Hold counters (8/frame decay) ───────────────────────────────────────────
@@ -99,7 +104,8 @@ end
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 localparam PW = 11'd66;
-localparam PH = 8'd58;  // 7 rows × 8px + 2 border  (row 7 = freeze detectors)
+localparam PH = 8'd74;  // 9 rows × 8px + 2 border  (row 7 = freeze detectors,
+                        //  row 8 = PC snapshot @green, row 9 = live PC; MSB left, 4px/bit)
 wire in_panel = en && !hblank && !vblank && (h_cnt < PW) && (v_cnt < PH) && !drew_this_line;
 wire border   = (h_cnt == 11'd0) || (h_cnt == PW-1) || (v_cnt == 8'd0) || (v_cnt == PH-1);
 wire [7:0] px = h_cnt[7:0] - 8'd1;
@@ -148,7 +154,7 @@ always_comb begin
             end else if (py < 8'd48) begin // DEAD-VOICE COUNT — red bar (length = #dead)
                 if (px < dead_w) begin R_out=8'hFF; G_out=8'h00; B_out=8'h00; end
                 else             begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
-            end else begin                 // FREEZE DETECTORS — 7 segments (9px each):
+            end else if (py < 8'd56) begin // FREEZE DETECTORS — 7 segments (9px each):
                 // [WAIT red][IRQ magenta][noM1 white][ACK-STOP yellow][INTACK-STOP cyan]
                 // [IFF-OFF green][REFUSED orange]
                 if (px < 8'd9) begin                   // WAIT deadlock
@@ -172,6 +178,16 @@ always_comb begin
                 end else begin                         // IFF1==1 yet refused — ORANGE
                     if (irfs_s[1]) begin R_out=8'hFF; G_out=8'h80; B_out=8'h00; end
                     else           begin R_out=8'h20; G_out=8'h10; B_out=8'h00; end
+                end
+            end else if (py < 8'd64) begin // PC SNAPSHOT at green latch — 16 bits, MSB left, 4px/bit
+                if (px < 8'd64) begin
+                    if (pcs_s2[4'd15 - px[7:2]]) begin R_out=8'hFF; G_out=8'hFF; B_out=8'hFF; end
+                    else                          begin R_out=8'h18; G_out=8'h18; B_out=8'h18; end
+                end
+            end else begin                 // LIVE PC — 16 bits, MSB left, 4px/bit
+                if (px < 8'd64) begin
+                    if (pcl_s2[4'd15 - px[7:2]]) begin R_out=8'h80; G_out=8'hFF; B_out=8'h80; end
+                    else                          begin R_out=8'h10; G_out=8'h20; B_out=8'h10; end
                 end
             end
         end
