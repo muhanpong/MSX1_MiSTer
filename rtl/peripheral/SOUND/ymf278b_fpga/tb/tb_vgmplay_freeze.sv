@@ -137,13 +137,15 @@ module tb_vgmplay_freeze;
         .dbg_pcm_base_set(), .dbg_slot_keyon(), .dbg_slot_active()
     );
 
-    // INT deferral replica: irq sync + I/O mask (iorq low while wr/rd active)
-    logic ms_irq_s1 = 1, ms_irq_sync = 1;
+    // INT assert-and-hold replica (matches msx.sv): defer only the initial
+    // assertion to a non-I/O moment, then hold until the irq is acked.
+    logic ms_irq_s1 = 1, ms_irq_sync = 1, int_hold = 0;
     always @(posedge clk21m) begin
         ms_irq_s1 <= ms_irq_n; ms_irq_sync <= ms_irq_s1;
+        if (ms_irq_sync)            int_hold <= 1'b0;
+        else if (wr_n && rd_n)      int_hold <= 1'b1;
     end
-    wire iorq_active = ~wr_n | ~rd_n;
-    wire int_n = ms_irq_sync | iorq_active;   // deferral: masked during I/O
+    wire int_n = ~int_hold;
 
     int errors = 0;
     longint main_ops = 0, handler_runs = 0, ack_writes = 0;

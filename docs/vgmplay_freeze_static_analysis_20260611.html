@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YMF278B FPGA — vgmplay 웨이브 테이블 로드/재생 시 Freeze 정적 분석 보고</title>
+<style>
+  body { font-family: "Segoe UI", "Malgun Gothic", sans-serif; max-width: 980px; margin: 2em auto; padding: 0 1.5em; color: #222; line-height: 1.65; }
+  h1 { border-bottom: 3px solid #c0392b; padding-bottom: .3em; font-size: 1.6em; }
+  h2 { border-bottom: 1px solid #ccc; padding-bottom: .2em; margin-top: 2em; color: #2c3e50; }
+  h3 { margin-top: 1.5em; color: #34495e; }
+  code { background: #f4f4f4; padding: .1em .35em; border-radius: 3px; font-size: .92em; }
+  pre { background: #f8f8f8; border: 1px solid #ddd; border-radius: 4px; padding: 1em; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+  th, td { border: 1px solid #bbb; padding: .45em .7em; text-align: left; vertical-align: top; }
+  th { background: #eef2f5; }
+  .tldr { background: #fdf3f2; border-left: 5px solid #c0392b; padding: .8em 1.2em; margin: 1.2em 0; }
+  .meta { color: #666; font-size: .95em; }
+  .freeze { color: #c0392b; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<h1>YMF278B FPGA — vgmplay 웨이브 테이블 로드/재생 시 Freeze 정적 분석 보고</h1>
+
+<p class="meta">
+<b>작성일</b>: 2026-06-11<br>
+<b>대상</b>: <code>rtl/peripheral/SOUND/ymf278b_fpga</code> (브랜치 <code>moonsound-wip</code>)<br>
+<b>증상</b>: vgmplay로 OPL4 PCM 모듈에 웨이브 테이블을 로드하고 재생하면 시스템이 freeze 됨.
+동일 동작을 openMSX(YMF278B/MoonSound 레퍼런스 구현)에서 수행하면 문제 없음.<br>
+<b>분석 방법</b>: RTL 정적 분석 (사이클 단위 시그널 트레이스, 시뮬레이션/하드웨어 실측 없이 코드만으로 도출)
+</p>
+
+<h2>결론 (TL;DR)</h2>
+<div class="tldr">
+<p><b>근본 원인은 PCM 엔진의 SDRAM 포트 중재(arbitration) 프로토콜 위반이다.</b>
+Header-Fetch(HF) FSM과 CPU 메모리 FSM이 "1-cycle 펄스를 쏘고 잊어버리는(pulse-and-forget)" 방식으로
+요청을 발행하는데, msx.sv의 ch4 브리지는 <b>IDLE 상태에서만 요청을 수락</b>한다.
+<code>mem_busy</code> 가드는 Stage B에만 있고 HF·CPU 경로에는 없다.</p>
+<p><b>CPU 메모리 write 트랜잭션이 비행 중일 때 HF가 read 요청을 발행하면 그 요청이 조용히 버려지고,
+write 트랜잭션은 <code>mem_rd_valid</code>를 발생시키지 않으므로 HF FSM이 <code>HF_WAIT</code>에서
+영원히 멈춘다.</b> 이 교착은 vgmplay의 액세스 패턴(슬롯 wave 레지스터 write 직후 reg 0x02 mode=1 +
+reg 0x06 <code>otir</code> 블래스트)에서 결정론적으로 발생하며, 이후 상태 레지스터의 BUSY(D0) 비트가
+영구히 1로 고정되어 시스템이 <span class="freeze">freeze</span> 된다.</p>
+<p>openMSX는 모든 동작이 순차적 C++ 함수 호출(버스 중재 자체가 없음)이라 이 클래스의 버그가
+원천적으로 존재하지 않는다.</p>
+</div>
+
+<h2>1. 구조 배경</h2>
+<p>SDRAM 포트(ch4)에는 세 요청자가 있다 (<code>ymf278_pcm_engine.sv:1828-1865</code>의 중재기):</p>
+<table>
+<tr><th>요청자</th><th>발행 가드</th><th>요청 방식</th></tr>
+<tr><td>HF FSM (<code>HF_REQ</code>)</td><td><b>없음</b></td><td>1-cycle <code>mem_rd_en</code> 펄스</td></tr>
+<tr><td>Stage B (<code>B_ISSUE</code>)</td><td><code>!mem_busy</code> ✔</td><td>1-cycle 펄스</td></tr>
+<tr><td>CPU rd/wr (<code>cpu_*_issue_now</code>)</td><td><b>없음</b></td><td>1-cycle 펄스</td></tr>
+</table>
+<p>msx.sv의 브리지(<code>msx.sv:699-720</code>)는 <code>pcm_state==IDLE</code>에서만
+<code>ms_mem_rd_req</code>의 상승 에지를 검출한다. <b>busy 중에 도착한 펄스는 흔적 없이 사라진다.</b><br>
+또한 <code>ms_mem_rd_valid = (pcm_state==3) &amp;&amp; !pcm_is_write</code> (<code>msx.sv:724</code>) —
+<b>write 트랜잭션은 valid를 절대 만들지 않는다.</b></p>
+
+<p>관련 신호 정의:</p>
+<ul>
+<li><code>hf_window_open = (frame_cycle >= PIPELINE_END) || cpu_mem_active</code> (<code>ymf278_pcm_engine.sv:1550</code>)</li>
+<li><code>cpu_mem_active = reg02_mem_access_mode &amp; cpu_mem_busy</code> (<code>:1810</code>)</li>
+<li><code>cpu_mem_busy = cpu_rd_pend | cpu_wr_pend | cpu_rd_outstanding</code> (<code>:1808</code>)</li>
+<li><code>cpu_issue_ok = hf_window_open &amp;&amp; (hf_state == HF_IDLE) &amp;&amp; (b_state == B_IDLE || b_state == B_DONE) &amp;&amp; !cpu_rd_outstanding</code> (<code>:1742-1745</code>)</li>
+<li><code>hf_pick_now = (hf_state == HF_IDLE) &amp;&amp; hf_window_open &amp;&amp; hf_found</code> (<code>:1632</code>)</li>
+</ul>
+<p>핵심 관찰: <b>reg 0x06 write가 pending이 되는 순간(<code>cpu_wr_pend=1</code>)
+<code>cpu_mem_active</code>를 통해 HF 윈도우가 프레임 중간 임의 시점에 즉시 열린다.</b>
+이때 <code>hf_pending</code>이 하나라도 서 있으면(직전 ~1프레임 = 22.7µs 내 wave 번호 레지스터
+write가 있었거나, 윈도우가 닫혀 있어 적체된 경우) <code>hf_pick_now</code>와
+<code>cpu_wr_issue_now</code>가 <b>같은 사이클에 동시 발화</b>한다.</p>
+
+<h2>2. 핵심 결함: HF ↔ CPU-write 충돌 → <code>HF_WAIT</code> 영구 교착</h2>
+
+<h3>2.1 사이클 단위 트레이스</h3>
+<p>전제 (사이클 T의 상태): <code>hf_state==HF_IDLE</code>, <code>hf_found=1</code>,
+<code>cpu_wr_pend=1</code>, <code>reg02_mem_access_mode=1</code>, <code>b_state==B_DONE</code>,
+<code>cpu_rd_outstanding=0</code>.</p>
+<table>
+<tr><th>사이클</th><th>사건</th></tr>
+<tr><td><b>T</b></td><td><code>cpu_mem_active=1</code> → 윈도우 열림. <code>hf_pick_now=1</code>과
+<code>cpu_wr_issue_now=1</code>이 <b>동시 발화</b> (<code>cpu_wr_issue_now</code>는
+<code>hf_state==HF_IDLE</code>을 조건으로 사용하므로 서로를 배제하지 못함)</td></tr>
+<tr><td><b>T+1</b></td><td>중재기가 CPU write 발행: <code>mem_wr_en=1</code>,
+<code>mem_addr=cpu_mem_adr</code>. 동시에 <code>hf_state→HF_REQ</code>, <code>cpu_wr_pend→0</code></td></tr>
+<tr><td><b>T+2</b></td><td>중재기가 HF read 발행 — <b><code>mem_addr</code>를 HF 헤더 주소로 덮어씀</b>.
+브리지는 이 사이클에 state 1(write, <code>pcm_is_write=1</code>)로 진입하며
+<code>pcm_sdram_req</code>를 올림. SDRAM ch4는 바로 이 사이클의 <code>ch4_addr</code>를 래치
+(<code>sdram.sv:179-183</code>) → <b>CPU의 write 데이터가 HF 헤더 주소에 기록됨 (메모리 오염)</b>.
+HF의 <code>mem_rd_en</code> 펄스는 브리지가 busy(state≠IDLE)라 <b>무시됨</b></td></tr>
+<tr><td><b>T+3 이후</b></td><td>write 트랜잭션 완료. <code>ms_mem_rd_valid</code>는 write이므로
+발생하지 않음. <code>hf_state=HF_WAIT</code>은 <code>mem_rd_valid</code>를 영원히 대기 —
+<b>HF_WAIT에는 타임아웃이 없음 → 영구 교착</b></td></tr>
+</table>
+<p>같은 사이클이 아니어도, <b>write 트랜잭션이 비행 중인 ~10-15 사이클 구간 안에서 HF가 pick되면
+동일하게 요청이 드롭되어 같은 교착에 빠진다.</b></p>
+
+<h3>2.2 Freeze로 이어지는 체인</h3>
+<p>웨이브 테이블 <b>업로드 단계에서는 모든 슬롯이 <code>EG_OFF</code></b>다
+(리셋값 <code>env_state=0</code> = <code>EG_OFF</code>, <code>ymf278_pcm_eg_step.sv:13</code>).
+<code>EG_OFF</code> 슬롯은 Stage B가 SDRAM read를 전혀 발행하지 않으므로
+(<code>ymf278_pcm_engine.sv:599</code>의 skip 경로) <b>HF를 구출할 <code>mem_rd_valid</code>가
+영원히 오지 않는다.</b> 그러면:</p>
+<ol>
+<li><code>cpu_issue_ok</code>는 <code>hf_state==HF_IDLE</code>을 요구 → 이후 모든 reg 0x06 write의
+<code>cpu_wr_pend</code>가 영구히 1 → <code>cpu_mem_busy</code> 영구 1.</li>
+<li><code>ymf278b_regs.sv:106</code>: <code>busy = (busy_cnt != 0) | pcm_cpu_mem_busy</code> →
+<b>상태 레지스터 BUSY(D0) 비트 영구 1</b>. BUSY를 폴링하는 소프트웨어는 즉시 무한 루프 =
+<span class="freeze">하드 freeze</span> (CPU는 M1을 계속 돌리며 폴링 루프에 갇힘).</li>
+<li><code>pcm_wr_wait</code>(<code>ymf278b_regs.sv:145-150</code>)의 deferred ack가 영원히 나가지 않음 →
+이후 모든 wave-memory write는 msx.sv의 600-cycle WAIT 타임아웃(≈28µs, <code>msx.sv:631,644</code>)으로만
+풀리고, <b>데이터는 SDRAM에 전혀 기록되지 않음</b> (업로드 내용 전부 유실).</li>
+<li><code>cpu_mem_active</code>가 stuck 1 → <code>dispatch_now</code> 영구 억제
+(<code>ymf278_pcm_engine.sv:231</code>) → <b>이후 key-on을 해도 슬롯이 절대 디스패치되지 않음</b> —
+PCM 엔진 전체 사망이 재생 단계까지 영구 지속.</li>
+</ol>
+<p><b>재생 중</b>(슬롯 활성)에 같은 충돌이 나면 Stage B의 valid를 HF가 가로채
+(<code>HF_WAIT</code>은 raw <code>mem_rd_valid</code>를 무조건 소비, <code>:1574</code>)
+일시적으로 교착이 풀리지만, 그 대가로 <b>헤더 byte0 오염 + write가 엉뚱한 주소에 기록되는
+데이터 오염</b>이 발생한다.</p>
+
+<h3>2.3 vgmplay에서 결정론적으로 재현되는 이유</h3>
+<ol>
+<li>초기화에서 24개 슬롯의 wave 번호 레지스터(0x08-0x37)를 write → <code>hf_pending</code> 다수 set.
+HF는 프레임 꼬리(220 cycle/프레임)에서 한 슬롯씩 서비스하므로 전부 비우는 데 수백 µs 필요.</li>
+<li>그 직후 reg 0x02 mode=1, reg 0x03/04/05 주소 설정, reg 0x06 <code>otir</code> 업로드 시작.</li>
+<li>첫 reg 0x06 write가 <code>cpu_wr_pend</code>를 세우는 순간 → 윈도우 즉시 개방 →
+잔존 <code>hf_pending</code>과 충돌 → <b>교착</b>.</li>
+</ol>
+<p>또한 엔진 주석(<code>ymf278_pcm_engine.sv:156-161</code>)에 따르면 실제 플레이어가 재생 중에도
+mode 비트를 켠 채로 두는 것이 관찰되었으므로, 재생 중 스트리밍 RAM write에서도 동일 충돌이
+상시 발생 가능하다.</p>
+
+<h2>3. 부수 결함 (정적으로 확인됨)</h2>
+
+<h3>3.1 valid 소유자 미태깅 (응답 가로채기)</h3>
+<p><code>HF_WAIT</code>은 raw <code>mem_rd_valid</code>를 무조건 소비한다(<code>:1574</code>).
+Stage B/CPU read의 응답을 HF가 가로채면 <code>hf_buf</code>에 샘플 바이트가 헤더로 들어가고, 반대로
+<code>mem_rd_valid_b</code>는 <code>hf_active</code>로 게이팅되어(<code>:556</code>) Stage B가
+자기 데이터를 받지 못한다. <b>트랜잭션에 소유자 태그가 없는 것이 구조적 원인</b>이며, HF가 프레임
+꼬리(220 cycle) 안에 12바이트 fetch를 끝내지 못하고 다음 프레임의 dispatch 구간으로 흘러넘칠 때도
+같은 가로채기/오염이 발생한다.</p>
+
+<h3>3.2 <code>hf_pick_now</code> vs FSM 천이 조건 불일치 → <code>hf_pending</code> 유실</h3>
+<ul>
+<li>FSM 천이(<code>:1562</code>): <code>hf_window_open &amp;&amp; hf_found &amp;&amp; !cpu_rd_outstanding</code></li>
+<li><code>hf_pick_now</code>(<code>:1632</code>) 및 <code>hf_cur_wave</code> 로드(<code>:1603</code>):
+<b><code>!cpu_rd_outstanding</code> 조건이 빠져 있음</b></li>
+</ul>
+<p><code>cpu_rd_outstanding=1</code>인 동안 윈도우가 열려 있으면 <code>hf_pick_now=1</code>이 되어
+<b><code>hf_pending</code> 비트가 클리어되지만 FSM은 HF_IDLE을 떠나지 않는다</b> → 해당 슬롯의 헤더가
+fetch 없이 영영 로드되지 않음 (무음/잘못된 음).</p>
+
+<h3>3.3 <code>mem_addr</code> 안정성 계약 위반</h3>
+<p>중재기 주석(<code>:1835-1842</code>) 스스로 "주소는 다음 issue까지 유지되어야 한다"고 명시하지만
+(브리지가 1사이클 뒤 천이, SDRAM이 다시 1사이클 뒤 주소 샘플), 1-2 사이클 뒤 다른 요청자가
+issue하면 SDRAM이 주소를 샘플하기 전에 <code>mem_addr</code>이 덮어써진다
+(§2.1의 T+2 — write가 HF 주소로 들어가는 경로).</p>
+
+<h3>3.4 WAIT ack 패리티 desync</h3>
+<p>타임아웃(<code>msx.sv:644</code>)으로 <code>ms_io_pending</code>이 풀린 뒤 늦게 도착하는
+<code>ms_ack_toggle</code> 에지는 <b>다음</b> I/O의 WAIT를 즉시 풀어버린다. 한 번의 타임아웃 이후
+ack 패리티가 한 단계 밀린 채로 스로틀이 무력화되어, WAIT 핸드셰이크가 막으려던 원래의 race
+(<code>cpu_wr_data_latch</code> 덮어쓰기, <code>:1777-1780</code>)가 되살아난다.</p>
+
+<h2>4. openMSX에 이 버그가 없는 이유</h2>
+<p>openMSX(<code>YMF278.cc</code>)는 <code>writeReg(wave#)</code> 안에서 헤더 12바이트를
+<b>동기적으로</b> 읽고, reg 0x06 write도 함수 호출 하나로 완결된다. "동시에 진행 중인 메모리
+트랜잭션"이라는 개념 자체가 없으므로 중재/핸드셰이크 버그 클래스가 존재할 수 없다.
+FPGA 포팅에서 새로 도입된 공유-버스 중재 계층(HF FSM / Stage B / CPU mem FSM ↔ ch4 브리지)이
+버그의 발생지다.</p>
+
+<h2>5. 권장 수정 (우선순위순)</h2>
+<ol>
+<li><b>모든 요청자에 <code>!mem_busy</code> 가드 적용 + pend 비트는 수락 확인 후 클리어</b>
+<ul>
+<li><code>HF_REQ</code>를 <code>B_ISSUE</code>처럼 <code>if (!mem_busy)</code>에서 홀드.</li>
+<li><code>cpu_wr_issue_now</code> / <code>cpu_rd_issue_now</code>에도 <code>!mem_busy</code> 추가.</li>
+<li><code>cpu_wr_pend</code> / <code>cpu_rd_pend</code>는 브리지가 IDLE→ACTIVE로 천이한 것을
+확인한 뒤에만 클리어.</li>
+</ul></li>
+<li><b>트랜잭션 소유자 태깅</b>
+<ul>
+<li>issue 시 2비트 owner(B / HF / CPU_RD)를 래치하고 <code>mem_rd_valid</code>를 소유자에게만 라우팅.</li>
+<li><code>hf_active</code> / <code>cpu_rd_outstanding</code> 기반의 휴리스틱 valid 게이팅을 대체.</li>
+</ul></li>
+<li><b>HF 시작 조건 강화 + 워치독</b>
+<ul>
+<li><code>hf_pick_now</code>에 FSM과 동일한 조건(<code>!cpu_rd_outstanding</code>, 가능하면
+<code>!cpu_wr_pend &amp;&amp; !mem_busy</code>)을 적용해 §3.2 불일치 제거.</li>
+<li><code>HF_WAIT</code>에 타임아웃(예: 256 cycle) → 재발행 또는 <code>HF_IDLE</code> 복귀
+(이때 <code>hf_pending</code> 재설정).</li>
+</ul></li>
+<li><b>타임아웃 desync 해소</b>
+<ul>
+<li>msx.sv에서 타임아웃으로 pending을 풀 때 ack 패리티를 재동기화
+(예: 타임아웃 시 <code>ms_ack_sync</code>를 현재 토글 값으로 강제 일치).</li>
+</ul></li>
+</ol>
+
+<h2>6. 검증 방법 제안</h2>
+<p>기존 <code>tb_bridge_realism.sv</code> 스타일의 브리지 모델 위에서
+"wave 레지스터 write → 수 µs 내 reg 0x02 mode=1 + reg 0x05/0x06 write" 시퀀스를 주입하면
+<code>HF_WAIT</code> 고착과 <code>cpu_mem_busy</code> stuck을 시뮬레이션에서 그대로 재현할 수 있다.</p>
+<p>이 진단은 현재 커밋된 디버그 검출기와도 부합한다 — 이 freeze에서는:</p>
+<ul>
+<li><code>dbg_wait_stuck</code> <b>꺼짐</b> (WAIT는 28µs 타임아웃으로 매번 풀림)</li>
+<li><code>dbg_cpu_nom1</code> <b>꺼짐</b> (CPU는 BUSY 폴링 루프에서 M1을 계속 수행)</li>
+<li>상태 읽기의 <b>D0(BUSY)만 영구 1</b></li>
+</ul>
+<p>로 관측될 것이다.</p>
+
+<h2>부록: 핵심 코드 위치 요약</h2>
+<table>
+<tr><th>파일:라인</th><th>내용</th></tr>
+<tr><td><code>ymf278_pcm_engine.sv:1550</code></td><td><code>hf_window_open</code> — <code>cpu_mem_active</code>로 프레임 중간 개방</td></tr>
+<tr><td><code>ymf278_pcm_engine.sv:1562</code></td><td>HF_IDLE 천이 조건 (<code>!cpu_rd_outstanding</code> 포함)</td></tr>
+<tr><td><code>ymf278_pcm_engine.sv:1632</code></td><td><code>hf_pick_now</code> (<code>!cpu_rd_outstanding</code> 누락 — §3.2)</td></tr>
+<tr><td><code>ymf278_pcm_engine.sv:1569-1573</code></td><td><code>HF_REQ</code> — <code>mem_busy</code> 가드 없이 무조건 발행</td></tr>
+<tr><td><code>ymf278_pcm_engine.sv:1574</code></td><td><code>HF_WAIT</code> — raw valid 소비, 타임아웃 없음</td></tr>
+<tr><td><code>ymf278_pcm_engine.sv:1742-1747</code></td><td><code>cpu_issue_ok</code> / <code>cpu_wr_issue_now</code> — <code>mem_busy</code> 가드 없음</td></tr>
+<tr><td><code>ymf278_pcm_engine.sv:1828-1865</code></td><td>SDRAM 포트 중재기 (<code>mem_addr</code> 홀드 계약 주석 포함)</td></tr>
+<tr><td><code>ymf278_pcm_engine.sv:599</code></td><td>EG_OFF 슬롯 read skip (업로드 중 구출-valid 부재의 원인)</td></tr>
+<tr><td><code>ymf278b_regs.sv:106</code></td><td><code>busy</code> 상태비트 = <code>busy_cnt | pcm_cpu_mem_busy</code></td></tr>
+<tr><td><code>ymf278b_regs.sv:145-150</code></td><td><code>pcm_wr_wait</code> deferred ack (BUSY 해제 대기)</td></tr>
+<tr><td><code>msx.sv:699-720</code></td><td>ch4 브리지 FSM — IDLE에서만 요청 수락</td></tr>
+<tr><td><code>msx.sv:724</code></td><td><code>ms_mem_rd_valid</code> — write는 valid를 만들지 않음</td></tr>
+<tr><td><code>msx.sv:631,644</code></td><td>WAIT 600-cycle 타임아웃 / ack 패리티 desync 지점</td></tr>
+<tr><td><code>sdram.sv:179-183</code></td><td>ch4 주소 래치 시점 (req 상승 에지 사이클)</td></tr>
+<tr><td><code>ymf278_pcm_eg_step.sv:13</code></td><td><code>EG_OFF = 0</code> (리셋 상태)</td></tr>
+</table>
+
+</body>
+</html>

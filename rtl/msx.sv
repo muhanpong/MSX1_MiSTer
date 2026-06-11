@@ -743,15 +743,28 @@ always @(posedge clk21m) begin
     ms_irq_n_sync <= ms_irq_n_s1;
 end
 
-// I/O-cycle deferral (freeze fix, hardware-verified 2026-06-10): the plain
-// ms_irq_n_sync wiring froze exactly when the IRQ asserted while the main loop
-// executed OUT instructions (isolated on hardware: NOP loop + 1130 Hz IRQ ran
-// clean for 2700+ interrupts, the same loop doing PSG or FM OUTs froze).  Hold
-// off asserting /INT while a normal I/O cycle is in flight (~iorq_n & m1_n;
-// int-ack cycles have m1_n=0 and are never masked, so an asserted /INT stays
-// stable through its own acknowledge).  The IRQ is level-held until software
-// acks, so deferring assertion by ~1µs only adds jitter ≪ the 880µs period.
-wire ms_int_n = ms_irq_n_sync | ~msxConfig.moonsound_en | (~iorq_n & m1_n);
+// I/O-cycle deferral, ASSERT-AND-HOLD form (2026-06-11).  History:
+//  * plain level wiring (ms_irq_n_sync directly) froze whenever the IRQ
+//    asserted while the main loop executed OUT instructions (hardware-isolated
+//    2026-06-08: NOP loop + 1130 Hz IRQ ran 2700+ clean interrupts; the same
+//    loop doing PSG or FM OUTs froze) — the T80 race needs /INT to be STABLE
+//    around I/O cycles.
+//  * combinational masking (| (~iorq_n & m1_n), 2026-06-10) fixed OPL3 but
+//    re-broke OPL4: it TOGGLES /INT twice around EVERY I/O cycle while the
+//    irq is pending.  OPL4's otir wave uploads are back-to-back 12µs WAIT-held
+//    OUTs, so the line bounced at exactly the poison moments — hardware showed
+//    cyan (CPU stops taking the IRQ) + yellow (so no acks).
+//  * now: defer only the INITIAL assertion to a non-I/O moment, then HOLD the
+//    level until the software ack deasserts the irq.  No mid-I/O edges at all;
+//    int-ack cycles see a rock-stable /INT.
+logic ms_int_hold = 1'b0;
+always @(posedge clk21m) begin
+    if (ms_irq_n_sync | ~msxConfig.moonsound_en)
+        ms_int_hold <= 1'b0;                       // irq acked / disabled
+    else if (iorq_n | ~m1_n)
+        ms_int_hold <= 1'b1;                       // first non-I/O moment: assert, then hold
+end
+wire ms_int_n = ~ms_int_hold;
 
 // ── Freeze detectors (clk21m) — latch (sticky) when a signal is stuck
 // abnormally long, to diagnose the vgmplay OPL-timer freeze.  Exported to the
