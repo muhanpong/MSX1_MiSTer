@@ -222,7 +222,7 @@ end
 // Slot FSM — one slot start-to-finish inside its 72-cycle window
 // ═══════════════════════════════════════════════════════════════════════════
 typedef enum logic [4:0] {
-    SL_IDLE, SL_LOAD, SL_VIB, SL_STEP, SL_ADV, SL_POSB, SL_ADDR, SL_CHIT,
+    SL_IDLE, SL_LOAD, SL_VIB, SL_VIB2, SL_STEP, SL_ADV, SL_POSB, SL_ADDR, SL_CHIT,
     SL_F_ISSUE, SL_F_WAIT, SL_DECODE, SL_INTERP, SL_EGRATE, SL_EGROM,
     SL_EGSTEP, SL_GAIN, SL_MUL1, SL_MUL2, SL_PAN, SL_ACC, SL_DONE
 } sl_state_t;
@@ -235,6 +235,8 @@ slot_dyn_t    w_dyn;
 logic [4:0]   w_slot;
 logic         w_edge;                  // key-on edge (incl. retrig)
 logic signed [15:0] w_vib;
+logic [9:0]   w_vib_mag;               // |lfo offset| × depth (compute_vib stage 1)
+logic         w_vib_neg;
 logic [31:0]  w_step;
 logic [15:0]  w_pos2, w_ptr2, w_posb;
 logic [21:0]  w_a0, w_a1, w_a2;       // registered byte addrs of sample A
@@ -413,10 +415,28 @@ always_ff @(posedge clk or negedge rst_n) begin
                 end
             end
 
+            // compute_vib split across two cycles — the full triangle-fold +
+            // depth-mult + ×43691-reciprocal chain missed clk_sdram by ~1 ns
+            // as a single cycle.
             SL_VIB: begin
-                w_vib <= (w_regs.lfo_active && w_regs.vib != 3'd0)
-                       ? compute_vib(w_dyn.lfo_cnt, w_regs.vib)
-                       : 16'sd0;
+                logic [5:0] fm6;
+                logic [4:0] mag_fm;
+                fm6 = w_dyn.lfo_cnt[17:12];
+                if (fm6[4]) fm6 = fm6 ^ 6'h1F;            // triangle fold
+                mag_fm    = fm6[5] ? (5'(fm6 & 6'h0F)) : {1'b0, fm6[3:0]};
+                w_vib_neg <= fm6[5];
+                w_vib_mag <= (w_regs.lfo_active && w_regs.vib != 3'd0)
+                           ? 10'(mag_fm * vib_depth_rom(w_regs.vib))
+                           : 10'd0;
+                sl_state <= SL_VIB2;
+            end
+
+            SL_VIB2: begin
+                logic [25:0] vscaled;
+                logic [9:0]  vq;
+                vscaled = w_vib_mag * 26'd43691;          // exact ÷12 reciprocal
+                vq      = vscaled[25:16] >> 3;
+                w_vib   <= w_vib_neg ? -$signed({6'd0, vq}) : $signed({6'd0, vq});
                 sl_state <= SL_STEP;
             end
 
