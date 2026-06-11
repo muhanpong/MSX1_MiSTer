@@ -29,8 +29,9 @@ module debug_overlay (
     input  wire        dbg_intack_stop,       // CPU not taking the asserted OPL IRQ
     input  wire        dbg_iff_stuck_off,     // irq asserted while IFF1==0 (EI unreached)
     input  wire        dbg_int_refused,       // irq asserted, IFF1==1, no INTA (T80 refusal)
-    input  wire [15:0] dbg_pc_snap,           // PC at green-latch moment
-    input  wire [15:0] dbg_pc_live            // live PC
+    input  wire [15:0] dbg_pc_snap,           // PC at last IFF1-fall before green latch
+    input  wire [15:0] dbg_pc_live,           // live PC
+    input  wire        dbg_int_ghost          // IFF1 fell, no INTA followed
 );
 
 // ─── CDC sync ───────────────────────────────────────────────────────────────────────
@@ -51,6 +52,7 @@ logic [23:0] keyon_s1, keyon_s2, active_s1, active_s2, envlive_s1, envlive_s2;
 logic [1:0]  wstk_s, istk_s, nom1_s, astp_s, iack_s;   // freeze-detector latches, CDC into video clk
 logic [1:0]  ioff_s, irfs_s;                            // IFF1-split detectors
 logic [15:0] pcs_s1, pcs_s2, pcl_s1, pcl_s2;            // PC snapshot/live
+logic [1:0]  gho_s;                                      // ghost acceptance
 always_ff @(posedge CLK_VIDEO) begin
     keyon_s1   <= dbg_slot_keyon;    keyon_s2   <= keyon_s1;
     active_s1  <= dbg_slot_active;   active_s2  <= active_s1;
@@ -62,6 +64,7 @@ always_ff @(posedge CLK_VIDEO) begin
     iack_s     <= {iack_s[0], dbg_intack_stop};
     ioff_s     <= {ioff_s[0], dbg_iff_stuck_off};
     irfs_s     <= {irfs_s[0], dbg_int_refused};
+    gho_s      <= {gho_s[0],  dbg_int_ghost};
     pcs_s1     <= dbg_pc_snap;   pcs_s2 <= pcs_s1;
     pcl_s1     <= dbg_pc_live;   pcl_s2 <= pcl_s1;
 end
@@ -157,27 +160,30 @@ always_comb begin
             end else if (py < 8'd56) begin // FREEZE DETECTORS — 7 segments (9px each):
                 // [WAIT red][IRQ magenta][noM1 white][ACK-STOP yellow][INTACK-STOP cyan]
                 // [IFF-OFF green][REFUSED orange]
-                if (px < 8'd9) begin                   // WAIT deadlock
+                if (px < 8'd8) begin                   // WAIT deadlock
                     if (wstk_s[1]) begin R_out=8'hFF; G_out=8'h00; B_out=8'h00; end
                     else           begin R_out=8'h20; G_out=8'h00; B_out=8'h00; end
-                end else if (px < 8'd18) begin         // IRQ storm
+                end else if (px < 8'd16) begin         // IRQ storm
                     if (istk_s[1]) begin R_out=8'hFF; G_out=8'h00; B_out=8'hFF; end
                     else           begin R_out=8'h20; G_out=8'h00; B_out=8'h20; end
-                end else if (px < 8'd27) begin         // CPU halt (no M1)
+                end else if (px < 8'd24) begin         // CPU halt (no M1)
                     if (nom1_s[1]) begin R_out=8'hFF; G_out=8'hFF; B_out=8'hFF; end
                     else           begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
-                end else if (px < 8'd36) begin         // ACK writes stopped reaching OPL3
+                end else if (px < 8'd32) begin         // ACK writes stopped reaching OPL3
                     if (astp_s[1]) begin R_out=8'hFF; G_out=8'hE0; B_out=8'h00; end
                     else           begin R_out=8'h20; G_out=8'h1C; B_out=8'h00; end
-                end else if (px < 8'd45) begin         // CPU not taking the asserted IRQ
+                end else if (px < 8'd40) begin         // CPU not taking the asserted IRQ
                     if (iack_s[1]) begin R_out=8'h00; G_out=8'hFF; B_out=8'hFF; end
                     else           begin R_out=8'h00; G_out=8'h20; B_out=8'h20; end
-                end else if (px < 8'd54) begin         // IFF1==0 stuck (EI unreached) — GREEN
+                end else if (px < 8'd48) begin         // IFF1==0 stuck (EI unreached) — GREEN
                     if (ioff_s[1]) begin R_out=8'h00; G_out=8'hFF; B_out=8'h00; end
                     else           begin R_out=8'h00; G_out=8'h20; B_out=8'h00; end
-                end else begin                         // IFF1==1 yet refused — ORANGE
+                end else if (px < 8'd56) begin         // IFF1==1 yet refused — ORANGE
                     if (irfs_s[1]) begin R_out=8'hFF; G_out=8'h80; B_out=8'h00; end
                     else           begin R_out=8'h20; G_out=8'h10; B_out=8'h00; end
+                end else begin                         // GHOST acceptance — PINK
+                    if (gho_s[1])  begin R_out=8'hFF; G_out=8'h40; B_out=8'h80; end
+                    else           begin R_out=8'h20; G_out=8'h08; B_out=8'h10; end
                 end
             end else if (py < 8'd64) begin // PC SNAPSHOT at green latch — 16 bits, MSB left, 4px/bit
                 if (px < 8'd64) begin

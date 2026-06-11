@@ -121,8 +121,9 @@ module msx
    output wire               dbg_ack_stopped,  // reg4 ack writes stopped (clk_sdram, from ymf278b_top)
    output logic              dbg_iff_stuck_off, // irq asserted while IFF1==0 (EI unreached)
    output logic              dbg_int_refused,   // irq asserted, IFF1==1, yet no INTA (T80 acceptance)
-   output logic       [15:0] dbg_pc_snap,       // PC captured when iff_stuck_off first latched
-   output logic       [15:0] dbg_pc_live        // live PC (for spin-range observation)
+   output logic       [15:0] dbg_pc_snap,       // PC at the last IFF1-fall before green latched
+   output logic       [15:0] dbg_pc_live,       // live PC (for spin-range observation)
+   output logic              dbg_int_ghost      // IFF1 fell but NO INTA followed (ghost acceptance)
 );
 
 //  -----------------------------------------------------------------------------
@@ -790,12 +791,15 @@ logic [16:0] irq_cnt  = 0;
 logic [15:0] intack_cnt = 0;   // ~3ms threshold (> the ~880us Timer-1 period, so a
                                // CPU taking the IRQ once per overflow doesn't false-latch)
 logic [15:0] iffoff_cnt = 0, refuse_cnt = 0;
+logic        iff1_d = 1'b0, ghost_arm = 1'b0;
+logic [6:0]  ghost_cnt = 0;
 always_ff @(posedge clk21m) begin
     if (reset) begin
         wait_cnt <= 0; irq_cnt <= 0; nom1_cnt <= 0; intack_cnt <= 0;
         iffoff_cnt <= 0; refuse_cnt <= 0;
+        iff1_d <= 0; ghost_arm <= 0; ghost_cnt <= 0;
         dbg_wait_stuck <= 0; dbg_irq_stuck <= 0; dbg_cpu_nom1 <= 0; dbg_intack_stop <= 0;
-        dbg_iff_stuck_off <= 0; dbg_int_refused <= 0;
+        dbg_iff_stuck_off <= 0; dbg_int_refused <= 0; dbg_int_ghost <= 0;
     end else begin
         if (wait_n)            wait_cnt <= 0;
         else if (~&wait_cnt)   wait_cnt <= wait_cnt + 1'b1;
@@ -823,11 +827,29 @@ always_ff @(posedge clk21m) begin
         //           (acceptance-condition bug: Prefix/SetEI/sampling).
         if (ms_irq_n_sync | t80_reg[210])  iffoff_cnt <= 0;
         else if (~&iffoff_cnt)             iffoff_cnt <= iffoff_cnt + 1'b1;
-        if (&iffoff_cnt) begin
-            if (!dbg_iff_stuck_off) dbg_pc_snap <= t80_reg[79:64];  // first latch
-            dbg_iff_stuck_off <= 1'b1;
-        end
+        if (&iffoff_cnt)                   dbg_iff_stuck_off <= 1'b1;
         dbg_pc_live <= t80_reg[79:64];
+
+        // Acceptance-moment forensics: IFF1 falls exactly when the T80 accepts
+        // an interrupt.  Snapshot the PC there (until the green latch freezes
+        // it) and verify an INTA cycle (m1·iorq) actually follows within ~6µs.
+        // No INTA after the fall = GHOST acceptance (T80 cleared IFF1 but the
+        // int sequence never ran) — the decisive split vs. a corrupted-vector
+        // wild jump (INTA present, then wild).
+        iff1_d <= t80_reg[210];
+        if (iff1_d && !t80_reg[210]) begin
+            if (!dbg_iff_stuck_off) dbg_pc_snap <= t80_reg[79:64];
+            ghost_arm <= 1'b1;
+            ghost_cnt <= '0;
+        end else if (~m1_n & ~iorq_n) begin
+            ghost_arm <= 1'b0;                      // INTA seen → not a ghost
+        end else if (ghost_arm) begin
+            ghost_cnt <= ghost_cnt + 1'b1;
+            if (&ghost_cnt) begin
+                dbg_int_ghost <= 1'b1;
+                ghost_arm     <= 1'b0;
+            end
+        end
 
         if (~m1_n & ~iorq_n)               refuse_cnt <= 0;
         else if (ms_irq_n_sync | ~t80_reg[210]) refuse_cnt <= 0;

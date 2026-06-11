@@ -408,6 +408,7 @@ wire        dbg_iff_stuck_off;
 wire        dbg_int_refused;
 wire [15:0] dbg_pc_snap;
 wire [15:0] dbg_pc_live;
+wire        dbg_int_ghost;
 wire [15:0] cpu_addr;
 wire signed [15:0] audio_l, audio_r;
 wire        hsync, vsync, blank_n, hblank, vblank, ce_pix;
@@ -649,7 +650,8 @@ debug_overlay u_overlay (
    .dbg_iff_stuck_off(dbg_iff_stuck_off),
    .dbg_int_refused(dbg_int_refused),
    .dbg_pc_snap(dbg_pc_snap),
-   .dbg_pc_live(dbg_pc_live)
+   .dbg_pc_live(dbg_pc_live),
+   .dbg_int_ghost(dbg_int_ghost)
 );
 
 video_mixer #(.GAMMA(0)) video_mixer
