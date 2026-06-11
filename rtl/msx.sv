@@ -118,7 +118,9 @@ module msx
    output logic              dbg_irq_stuck,
    output logic              dbg_cpu_nom1,
    output logic              dbg_intack_stop,  // CPU not taking the asserted OPL IRQ
-   output wire               dbg_ack_stopped   // reg4 ack writes stopped (clk_sdram, from ymf278b_top)
+   output wire               dbg_ack_stopped,  // reg4 ack writes stopped (clk_sdram, from ymf278b_top)
+   output logic              dbg_iff_stuck_off, // irq asserted while IFF1==0 (EI unreached)
+   output logic              dbg_int_refused    // irq asserted, IFF1==1, yet no INTA (T80 acceptance)
 );
 
 //  -----------------------------------------------------------------------------
@@ -172,8 +174,10 @@ t80pa #(.Mode(0)) T80
    .BUSAK_n(),
    .A(a),
    .DI(d_to_cpu),
-   .DO(d_from_cpu)
+   .DO(d_from_cpu),
+   .REG(t80_reg)        // [211]=IFF2 [210]=IFF1 ... — freeze diagnosis
 );
+wire [211:0] t80_reg;
 
 //  -----------------------------------------------------------------------------
 //  -- WAIT CPU
@@ -783,10 +787,13 @@ logic [13:0] wait_cnt = 0, nom1_cnt = 0;
 logic [16:0] irq_cnt  = 0;
 logic [15:0] intack_cnt = 0;   // ~3ms threshold (> the ~880us Timer-1 period, so a
                                // CPU taking the IRQ once per overflow doesn't false-latch)
+logic [15:0] iffoff_cnt = 0, refuse_cnt = 0;
 always_ff @(posedge clk21m) begin
     if (reset) begin
         wait_cnt <= 0; irq_cnt <= 0; nom1_cnt <= 0; intack_cnt <= 0;
+        iffoff_cnt <= 0; refuse_cnt <= 0;
         dbg_wait_stuck <= 0; dbg_irq_stuck <= 0; dbg_cpu_nom1 <= 0; dbg_intack_stop <= 0;
+        dbg_iff_stuck_off <= 0; dbg_int_refused <= 0;
     end else begin
         if (wait_n)            wait_cnt <= 0;
         else if (~&wait_cnt)   wait_cnt <= wait_cnt + 1'b1;
@@ -804,6 +811,22 @@ always_ff @(posedge clk21m) begin
         else if (ms_irq_n_sync) intack_cnt <= 0;  // irq not asserted → not relevant
         else if (~&intack_cnt) intack_cnt <= intack_cnt + 1'b1;
         if (&intack_cnt)       dbg_intack_stop <= 1'b1;
+
+        // IFF1 split detectors: WHICH side refuses the asserted IRQ?
+        //   iffoff: irq asserted while IFF1==0 for >3ms — an interrupt was
+        //           accepted but software never re-enabled (EI unreached:
+        //           vector fetch / handler-path problem).
+        //   refuse: irq asserted while IFF1==1 yet NO int-ack for >3ms —
+        //           the T80 declines an enabled, stably-asserted /INT
+        //           (acceptance-condition bug: Prefix/SetEI/sampling).
+        if (ms_irq_n_sync | t80_reg[210])  iffoff_cnt <= 0;
+        else if (~&iffoff_cnt)             iffoff_cnt <= iffoff_cnt + 1'b1;
+        if (&iffoff_cnt)                   dbg_iff_stuck_off <= 1'b1;
+
+        if (~m1_n & ~iorq_n)               refuse_cnt <= 0;
+        else if (ms_irq_n_sync | ~t80_reg[210]) refuse_cnt <= 0;
+        else if (~&refuse_cnt)             refuse_cnt <= refuse_cnt + 1'b1;
+        if (&refuse_cnt)                   dbg_int_refused <= 1'b1;
     end
 end
 
