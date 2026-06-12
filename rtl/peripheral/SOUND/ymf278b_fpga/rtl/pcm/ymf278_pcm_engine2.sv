@@ -164,6 +164,13 @@ logic [23:0]  tl_load;               // immediate-load request per slot
 logic [23:0]  key_on_prev;
 logic [23:0]  key_retrig;
 logic [23:0]  hf_pending;
+// Header-backfill dirty mask: openMSX backfills the envelope/LFO registers
+// SYNCHRONOUSLY at the wave-number write, so software's writes AFTER the wave
+// write survive.  Our header fetch is deferred (service window), so the
+// backfill must skip any field the CPU wrote since the wave write — otherwise
+// "wave# then params" sequences (every tracker/driver) lose their params.
+// bit0=f5(lfo/vib) 1=f6(ar/d1r) 2=f7(dl/d2r) 3=f8(rc/rr) 4=f9(am)
+logic [4:0]   bf_dirty [0:23];
 
 logic [2:0]   wavetblhdr;
 logic [2:0]   pcm_mix_l, pcm_mix_r;  // reg 0xF9
@@ -359,6 +366,8 @@ always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         sl_state  <= SL_IDLE;
         sl_rd_req <= 1'b0;
+        cur_slot  <= '0;     // (was uninitialized → X: frame-0 slots_done never
+                             //  true → header fetches deferred one frame)
         accum_l   <= '0;
         accum_r   <= '0;
         cache_vld <= '0;
@@ -865,6 +874,7 @@ always_ff @(posedge clk or negedge rst_n) begin
         pcm_mix_l  <= 3'd0;
         pcm_mix_r  <= 3'd0;
         for (int i = 0; i < 24; i++) ram_regs[i] <= '0;
+        for (int i = 0; i < 24; i++) bf_dirty[i] <= '0;
     end else begin
         if (reg_wr && reg_addr == 8'h02)
             wavetblhdr <= reg_data[4:2];
@@ -874,6 +884,16 @@ always_ff @(posedge clk or negedge rst_n) begin
         end
         if (wr_slot_reg) begin
             reg_upd = ram_regs[wr_snum];
+            // dirty tracking for deferred header backfill
+            case (wr_field)
+                4'd0, 4'd1: bf_dirty[wr_snum] <= 5'b0;
+                4'd5: bf_dirty[wr_snum][0] <= 1'b1;
+                4'd6: bf_dirty[wr_snum][1] <= 1'b1;
+                4'd7: bf_dirty[wr_snum][2] <= 1'b1;
+                4'd8: bf_dirty[wr_snum][3] <= 1'b1;
+                4'd9: bf_dirty[wr_snum][4] <= 1'b1;
+                default: ;
+            endcase
             case (wr_field)
                 4'd0: reg_upd.wave[7:0] = reg_data[7:0];
                 4'd1: begin
@@ -923,19 +943,30 @@ always_ff @(posedge clk or negedge rst_n) begin
         // land (separate array elements).
         if (hf_store_now) begin
             slot_regs_t hf_upd;
+            logic [4:0] dly;
             if (wr_slot_reg && wr_snum == hf_cur_slot)
                 hf_upd = reg_upd;
             else
                 hf_upd = ram_regs[hf_cur_slot];
-            hf_upd.lfo_speed = hf_buf[7][5:3];
-            hf_upd.vib       = hf_buf[7][2:0];
-            hf_upd.ar        = hf_buf[8][7:4];
-            hf_upd.d1r       = hf_buf[8][3:0];
-            hf_upd.dl_idx    = hf_buf[9][7:4];
-            hf_upd.d2r       = hf_buf[9][3:0];
-            hf_upd.rc        = hf_buf[10][7:4];
-            hf_upd.rr        = hf_buf[10][3:0];
-            hf_upd.am        = hf_buf[11][2:0];
+            dly = bf_dirty[hf_cur_slot];
+            if (!dly[0]) begin
+                hf_upd.lfo_speed = hf_buf[7][5:3];
+                hf_upd.vib       = hf_buf[7][2:0];
+            end
+            if (!dly[1]) begin
+                hf_upd.ar        = hf_buf[8][7:4];
+                hf_upd.d1r       = hf_buf[8][3:0];
+            end
+            if (!dly[2]) begin
+                hf_upd.dl_idx    = hf_buf[9][7:4];
+                hf_upd.d2r       = hf_buf[9][3:0];
+            end
+            if (!dly[3]) begin
+                hf_upd.rc        = hf_buf[10][7:4];
+                hf_upd.rr        = hf_buf[10][3:0];
+            end
+            if (!dly[4])
+                hf_upd.am        = hf_buf[11][2:0];
             ram_regs[hf_cur_slot] <= hf_upd;
         end
     end
