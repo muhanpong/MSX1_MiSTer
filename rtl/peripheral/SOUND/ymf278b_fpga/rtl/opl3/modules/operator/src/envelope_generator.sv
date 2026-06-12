@@ -106,6 +106,7 @@ module envelope_generator
     logic [PIPELINE_DELAY:1] [REG_ENV_WIDTH-1:0] sl_p;
     logic [PIPELINE_DELAY:1] [ENV_WIDTH-1:0] env_int_p;
     logic [PIPELINE_DELAY:1] key_on_p;
+    logic [PIPELINE_DELAY:1] am_p;
     logic [PIPELINE_DELAY:1] eg_reset_p;
 
     pipeline_sr #(
@@ -302,7 +303,20 @@ module envelope_generator
 
     always_comb tl_shifted_p2 = tl_p[2] << 2;
 
+    // am must be pipeline-aligned to the op whose envelope is being summed
+    // (calc_phase_inc does the same for vib via vib_sr).  Consuming the RAW
+    // am here applied the attribute of the op 2 slots later — tremolo only
+    // worked when ALL ops had AM set (found by the Nuked-OPL3 golden harness:
+    // deep tremolo measured 0.09dB instead of 4.8dB).
+    pipeline_sr #(
+        .ENDING_CYCLE(PIPELINE_DELAY)
+    ) am_sr (
+        .clk,
+        .in(am),
+        .out(am_p)
+    );
+
     always_ff @(posedge clk)
-        env_p3 <= env_int_p[2] + tl_shifted_p2 + ksl_add_p2 + (am ? am_val_p2 : 0); // max val 1044
+        env_p3 <= env_int_p[2] + tl_shifted_p2 + ksl_add_p2 + (am_p[2] ? am_val_p2 : 0); // max val 1044
 endmodule
 `default_nettype wire

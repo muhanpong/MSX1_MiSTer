@@ -29,14 +29,16 @@ eg_cnt 오프바이원, EG_OFF 슬롯 LFO 미진행, vib ÷12 절단방향(0방�
 | chord_dualbank | 0.99984 | 1.0000 | 1.000 | OK |
 | rhythm | 0.793 | 0.9962 | 1.066 | OK(포락선) — 노이즈 LFSR 위상차 |
 | vib_only | 0.951 | 0.9985 | 1.000 | OK(포락선) — LFO 위상차 |
-| **trem_only** | 0.988 | **0.697** | **1.337** | **실편차** |
+| trem_only (수정 후) | **0.99984** | 0.9954 | 1.006 | **OK** (1.87% RMS) |
 | 4op | 0.99769 | 0.9997 | 1.000 | OK |
 
-### 발견된 FM 편차 (후속 수정 후보)
-**트레몰로가 레퍼런스 대비 평균 ~2.4dB 얕음** (lvl=1.337 = 평균 감쇠 부재 수준).
-단서: `opl3_pkg TREMOLO_MAX_COUNT=13312` vs 실칩 주기 13440(210×64),
-tremolo.sv 삼각파 폴드식(`2*26 + ~val`)의 불연속. 정확 원인은 하네스의
-가설→패치→재측정 루프로 격리할 것. vibrato는 포락선 기준 정상.
+### 발견 → 수정 완료된 FM 버그 (2026-06-12)
+**envelope_generator의 `am` 파이프라인 미정렬** (업스트림 gtaylormb 버그):
+calc_phase_inc는 vib를 `pipeline_sr`로 p2에 정렬하지만 env 가산은 raw `am`을
+소비 → 2슬롯 뒤 op의 속성이 적용되어 트레몰로가 사실상 무효였음
+(deep 4.8dB가 0.09dB로 측정됨; 전 op에 am=1을 주면 정상 = 정렬 증명).
+vib와 동일하게 `am_sr` 추가로 수정 → trem_only 1.87% RMS/corr 0.99984.
+잔여 미세 단서(비차단): TREMOLO_MAX_COUNT 13312 vs 실칩 13440, 폴드식 불연속.
 
 ## 제3자 코드
 `third_party/nuked_opl3.[ch]` = Nuked-OPL3 (Nuke.YKT, LGPL 2.1) —

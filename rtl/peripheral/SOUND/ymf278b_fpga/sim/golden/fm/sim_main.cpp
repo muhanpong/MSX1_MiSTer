@@ -10,6 +10,7 @@
 #include <cmath>
 #include <algorithm>
 #include "Vopl3.h"
+#include "Vopl3___024root.h"
 #include "verilated.h"
 extern "C" {
 #include "../third_party/nuked_opl3.h"
@@ -97,10 +98,19 @@ static std::vector<Scen> build_scenarios() {
       op_patch(s.wr, 1, 2, 0, (uint8_t)(0x21|0x40), 0x14, 0xF2, 0x36);  // VIB only
       keyon(s.wr, 2, 2, 0, 0x205, 4);
       v.push_back(s); }
-    { Scen s{"trem_only", {}, 12000};
+    { Scen s{"trem_only", {}, 28000};
       s.wr.push_back({0, 0x105, 0x01});
       s.wr.push_back({0, 0xBD, 0x80});                             // DAM deep, no DVB
-      op_patch(s.wr, 1, 2, 0, (uint8_t)(0x21|0x80), 0x14, 0xF2, 0x36);  // AM only
+      op_patch(s.wr, 1, 2, 0, (uint8_t)(0x21|0x80), 0x14, 0xF0, 0x06);  // AM, DR=0 SL=0 → flat env
+      keyon(s.wr, 2, 2, 0, 0x205, 4);
+      v.push_back(s); }
+    { Scen s{"trem_allam", {}, 28000};       // am bit on EVERY op reg (alignment probe)
+      s.wr.push_back({0, 0x105, 0x01});
+      s.wr.push_back({0, 0xBD, 0x80});
+      op_patch(s.wr, 1, 2, 0, (uint8_t)(0x21|0x80), 0x14, 0xF0, 0x06);
+      for (int o = 0; o <= 0x15; o++)
+          if (o != 2 && o != 5)
+              s.wr.push_back({1, (uint16_t)(0x20+o), 0x80});       // am=1, rest 0
       keyon(s.wr, 2, 2, 0, 0x205, 4);
       v.push_back(s); }
     { Scen s{"4op", {}, 8000};
@@ -125,12 +135,23 @@ static std::vector<Scen> build_scenarios() {
 // ── RTL driving ─────────────────────────────────────────────────────────────
 static Vopl3* top;
 static vluint64_t tcyc = 0;
+static int dbg_regwr = 0;
 static void tick() {
     top->clk = 0; top->clk_host = 0; top->clk_dac = 0; top->eval();
     top->clk = 1; top->clk_host = 1; top->clk_dac = 1; top->eval();
+    if (getenv("FM_TRIDX")) {
+        uint32_t w = top->rootp->opl3__DOT__opl3_reg_wr;
+        if ((w & (1u << 17)) && ((w >> 8) & 0xFF) == 0xBD)
+            printf("REGWR-BD bank=%d data=%02x -> dam(ctrl)=%d\n",
+                   (w >> 16) & 1, w & 0xFF,
+                   (int)top->rootp->opl3__DOT__channels__DOT__control_operators__DOT__dam);
+    }
     tcyc++;
 }
+static int dbg_wr = 0;
 static void rtl_write(uint16_t reg, uint8_t val) {
+    if (getenv("FM_TRIDX") && dbg_wr++ < 40)
+        printf("WR %03x=%02x\n", reg, val);
     // ymf278b_top 3-phase protocol: addr (address[0]=0), gap, data (address[0]=1)
     top->cs_n = 0; top->wr_n = 0; top->address = (reg >> 8) ? 2 : 0; top->din = reg & 0xFF;
     tick();
@@ -176,12 +197,44 @@ int main(int argc, char** argv) {
             do { tick(); guard++; }
             while (!(top->sample_valid && !prev) &&
                    (prev = top->sample_valid, guard < sc.samples * 400));
+            if (getenv("FM_ENV") && strcmp(sc.name, "trem_only") == 0 &&
+                ((sample > 200 && sample < 206) || (sample > 6600 && sample < 6606))) {
+                int mn = 4096, amv_at = -1;
+                for (int k = 0; k < 290; k++) {
+                    tick();
+                    int e = (int)top->rootp->opl3__DOT__channels__DOT__control_operators__DOT__operator__DOT__env_p3;
+                    if (e < mn) {
+                        mn = e;
+                        amv_at = (int)top->rootp->opl3__DOT__channels__DOT__control_operators__DOT__operator__DOT__envelope_generator__DOT__am_val_p2;
+                    }
+                }
+                printf("ENVMIN [%s] s=%d min_env=%d amv@min=%d\n", sc.name, sample, mn, amv_at);
+            }
+            if (getenv("FM_TRIDX") && (sample % 1000) == 0)
+                printf("AMV [%s] dam=%d am_val_p2=%d\n", sc.name,
+                       (int)top->rootp->opl3__DOT__channels__DOT__control_operators__DOT__dam,
+                       (int)top->rootp->opl3__DOT__channels__DOT__control_operators__DOT__operator__DOT__envelope_generator__DOT__am_val_p2);
+            if (getenv("FM_TRIDX") && (sample % 1000) == 0)
+                printf("DAM ctrl=%d trem_p1=%d\n",
+                       (int)top->rootp->opl3__DOT__channels__DOT__control_operators__DOT__dam,
+                       (int)top->rootp->opl3__DOT__channels__DOT__control_operators__DOT__operator__DOT__envelope_generator__DOT__tremolo__DOT__dam_p1);
+            if (getenv("FM_TRIDX") && (sample % 1000) == 0)
+                printf("TRIDX sample=%d index=%d\n", sample,
+                       (int)top->rootp->opl3__DOT__channels__DOT__control_operators__DOT__operator__DOT__envelope_generator__DOT__tremolo__DOT__tremolo_index_p1);
             rl.push_back(((int32_t)top->sample_l << 8) >> 8 >> 5);   // 24b → 16b
             rr.push_back(((int32_t)top->sample_r << 8) >> 8 >> 5);
             int16_t buf[2];
             OPL3_Generate(&ref, buf);
             nl.push_back(buf[0]); nr.push_back(buf[1]);
             sample++;
+        }
+        if (getenv("FM_DUMP")) {
+            char fn[128];
+            snprintf(fn, sizeof fn, "dump_%s.txt", sc.name);
+            FILE* f = fopen(fn, "w");
+            for (int i = 0; i < sample; i++)
+                fprintf(f, "%d %d\n", rl[i], nl[i]);
+            fclose(f);
         }
         delete top;
 
