@@ -801,6 +801,11 @@ always @(posedge clk21m) begin
 end
 wire ms_int_n = ~ms_int_hold;
 
+// ═══ MoonSound freeze-diagnosis infrastructure ═══════════════════════════════
+// Battle-tested during the 2026-06 vgmplay-OPL4 freeze hunt (detectors, T80
+// IFF/IM/I/PC forensics, IM2-table write watchpoint).  Compiled out by default;
+// re-enable by defining MOONSOUND_DIAG (see MSX1.qsf).
+`ifdef MOONSOUND_DIAG
 // ── Freeze detectors (clk21m) — latch (sticky) when a signal is stuck
 // abnormally long, to diagnose the vgmplay OPL-timer freeze.  Exported to the
 // debug overlay (video domain), readable WHILE the CPU is frozen, to tell:
@@ -911,6 +916,21 @@ always_ff @(posedge clk21m) begin
         if (&refuse_cnt)                   dbg_int_refused <= 1'b1;
     end
 end
+`else
+assign dbg_wait_stuck    = 1'b0;
+assign dbg_irq_stuck     = 1'b0;
+assign dbg_cpu_nom1      = 1'b0;
+assign dbg_intack_stop   = 1'b0;
+assign dbg_iff_stuck_off = 1'b0;
+assign dbg_int_refused   = 1'b0;
+assign dbg_int_ghost     = 1'b0;
+assign dbg_pc_snap       = '0;
+assign dbg_pc_vec        = '0;
+assign dbg_pc_now        = '0;
+assign dbg_im_i          = '0;
+assign dbg_watch_pc      = '0;
+assign dbg_watch_dc      = '0;
+`endif
 
 ymf278b_top #(
     .CLK_HZ   (85909090),

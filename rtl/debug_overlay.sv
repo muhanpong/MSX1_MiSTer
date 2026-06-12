@@ -63,6 +63,7 @@ always_ff @(posedge CLK_VIDEO) begin
     keyon_s1   <= dbg_slot_keyon;    keyon_s2   <= keyon_s1;
     active_s1  <= dbg_slot_active;   active_s2  <= active_s1;
     envlive_s1 <= dbg_slot_envlive;  envlive_s2 <= envlive_s1;
+`ifdef MOONSOUND_DIAG
     wstk_s     <= {wstk_s[0], dbg_wait_stuck};
     istk_s     <= {istk_s[0], dbg_irq_stuck};
     nom1_s     <= {nom1_s[0], dbg_cpu_nom1};
@@ -77,6 +78,7 @@ always_ff @(posedge CLK_VIDEO) begin
     imi_s1     <= dbg_im_i;      imi_s2 <= imi_s1;
     wpc_s1     <= dbg_watch_pc;  wpc_s2 <= wpc_s1;
     wdc_s1     <= dbg_watch_dc;  wdc_s2 <= wdc_s1;
+`endif
 end
 
 // ─── Hold counters (8/frame decay) ───────────────────────────────────────────
@@ -117,8 +119,11 @@ end
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 localparam PW = 11'd66;
-localparam PH = 8'd106; // 13 rows × 8px + 2 border  (… row 12 = watch PC,
-                        //  row 13 = watch {data,count} — writes to IM2 table+0x100)
+`ifdef MOONSOUND_DIAG
+localparam PH = 8'd106; // 13 rows: PCM rows + freeze detectors + forensic PC/IM/watch rows
+`else
+localparam PH = 8'd50;  // 6 rows: PCM diagnosis only
+`endif
 wire in_panel = en && !hblank && !vblank && (h_cnt < PW) && (v_cnt < PH) && !drew_this_line;
 wire border   = (h_cnt == 11'd0) || (h_cnt == PW-1) || (v_cnt == 8'd0) || (v_cnt == PH-1);
 wire [7:0] px = h_cnt[7:0] - 8'd1;
@@ -167,6 +172,7 @@ always_comb begin
             end else if (py < 8'd48) begin // DEAD-VOICE COUNT — red bar (length = #dead)
                 if (px < dead_w) begin R_out=8'hFF; G_out=8'h00; B_out=8'h00; end
                 else             begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
+`ifdef MOONSOUND_DIAG
             end else if (py < 8'd56) begin // FREEZE DETECTORS — 7 segments (9px each):
                 // [WAIT red][IRQ magenta][noM1 white][ACK-STOP yellow][INTACK-STOP cyan]
                 // [IFF-OFF green][REFUSED orange]
@@ -226,6 +232,9 @@ always_comb begin
                     else                          begin R_out=8'h18; G_out=8'h10; B_out=8'h20; end
                 end
             end
+`else
+            end
+`endif
         end
     end
 end
