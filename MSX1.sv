@@ -291,6 +291,8 @@ localparam CONF_STR = {
    "O[47],FM Mute,Off,On;",
    "O[50:49],PCM Volume,+6dB,+12dB,+18dB,+24dB;",
    "O[48],Debug Overlay,Off,On;",
+   "F9,CHT,Load Cheats;",
+   "O[51],Cheats,Off,On;",
    "-;",
    "T[0],Reset;",
    "R[10],Reset & Detach ROM Cartridge;",					
@@ -506,6 +508,7 @@ msx MSX
    .dbg_keyon_count(dbg_keyon_count),
    .dbg_accum_cnt  (dbg_accum_cnt),
    .dbg_env_min    (dbg_env_min),
+   .cheat_en_master(status[51]),
    .*
 );
 

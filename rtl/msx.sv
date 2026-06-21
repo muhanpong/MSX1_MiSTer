@@ -43,6 +43,9 @@ module msx
    input                    ioctl_download,
    input             [15:0] ioctl_index,
    input             [26:0] ioctl_addr,
+   input                    ioctl_wr,
+   input             [7:0]  ioctl_dout,
+   input                    cheat_en_master,   // OSD: cheats Off/On (status[51])
    //SDRAM/BRAM
    output            [26:0] ram_addr,
    output             [7:0] ram_din,
@@ -273,12 +276,54 @@ jt8255 PPI
 //  -- CPU data multiplex
 //  -----------------------------------------------------------------------------
 wire [7:0] ms_dout;   // driven by MoonSound block below
+
+//  ----- Cheat engine: freeze/POKE, register-based (no BRAM), loaded via ioctl "F9,CHT" -----
+//  Override happens at the d_to_cpu priority mux (below all IO legs) so it forces an
+//  arbitrary byte on CPU memory reads only. flash.sv / msx_slots / SDRAM untouched.
+localparam CHEAT_N = 8;
+logic        cheat_en  [CHEAT_N];
+logic [15:0] cheat_addr[CHEAT_N];
+logic [7:0]  cheat_val [CHEAT_N];
+
+wire       cheat_dl = ioctl_download & (ioctl_index[5:0] == 6'd9);  // F9,CHT loader, 4 bytes/entry
+wire [2:0] cheat_e  = ioctl_addr[4:2];                              // {addr_lo,addr_hi,value,flags}
+reg        cheat_dl_q;
+integer    ci;
+always @(posedge clk21m) begin
+   cheat_dl_q <= cheat_dl;
+   if (cheat_dl & ~cheat_dl_q)
+      for (ci = 0; ci < CHEAT_N; ci = ci + 1) cheat_en[ci] <= 1'b0;          // clear on new download
+   if (cheat_dl & ioctl_wr & (ioctl_addr < (CHEAT_N*4))) begin
+      case (ioctl_addr[1:0])
+         2'd0: cheat_addr[cheat_e][7:0]  <= ioctl_dout;
+         2'd1: cheat_addr[cheat_e][15:8] <= ioctl_dout;
+         2'd2: cheat_val [cheat_e]       <= ioctl_dout;
+         2'd3: cheat_en  [cheat_e]       <= ioctl_dout[0];
+      endcase
+   end
+end
+
+logic       cheat_hit;
+logic [7:0] cheat_value;
+integer     cj;
+always_comb begin
+   cheat_hit   = 1'b0;
+   cheat_value = 8'hFF;
+   for (cj = 0; cj < CHEAT_N; cj = cj + 1)
+      if (cheat_en[cj] & (a == cheat_addr[cj])) begin
+         cheat_hit   = 1'b1;
+         cheat_value = cheat_val[cj];
+      end
+end
+wire cheat_act = cheat_en_master & cheat_hit & ~mreq_n & rfrsh_n;  // memory read only (rd_n gated by mux top)
+
 assign d_to_cpu = rd_n              ? 8'hFF           :
                   vdp_en            ? d_to_cpu_vdp    :
                   rtc_en            ? d_from_rtc      :
                   ~psg_n            ? d_from_psg      :
                   ~ppi_n            ? d_from_8255     :
                   (ms_wave_cs | ms_fm_cs) ? ms_dout   :
+                  cheat_act         ? cheat_value     :   // cheat freeze/POKE override
                                     d_from_slots    ;
 //  -----------------------------------------------------------------------------
 //  -- Keyboard decoder
