@@ -145,9 +145,9 @@ assign cpu_din          = mapper_ram_dout                        //IO
                         & d_to_cpu_reset_status                  //IO
                         & (mem_unmaped  ? 8'hFF : ram_dout);
 
-assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce);
+assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce | mapper_ascii16x_prog_we);
 assign bram_ce  = (sdram_size == 2'd0 | sram_cs)  & ((cpu_mreq & (cpu_rd | (cpu_wr & (~ram_ro | sram_cs))) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce);
-assign ram_rnw  = ~((sram_cs & sram_wr) | (~sram_cs & cpu_wr & cpu_mreq & ~ram_ro));
+assign ram_rnw  = ~((sram_cs & sram_wr) | (~sram_cs & cpu_wr & cpu_mreq & ~ram_ro) | mapper_ascii16x_prog_we);
 
 assign ram_din  = cpu_dout;
 
@@ -347,6 +347,7 @@ wire [24:0] mapper_ascii16x_addr;
 wire        mapper_ascii16x_unmaped;
 wire [22:0] mapper_ascii16x_flash_addr;
 wire        mapper_ascii16x_flash_rq;
+wire        mapper_ascii16x_prog_we;   // validated JEDEC byte-program data write -> SDRAM
 cart_ascii16x ascii16x
 (
    .rom_size(25'(size) << 14),
@@ -356,6 +357,7 @@ cart_ascii16x ascii16x
    .mem_addr(mapper_ascii16x_addr),
    .flash_addr(mapper_ascii16x_flash_addr),
    .flash_rq(mapper_ascii16x_flash_rq),
+   .prog_we(mapper_ascii16x_prog_we),
    .*
 );
 
