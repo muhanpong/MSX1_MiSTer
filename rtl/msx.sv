@@ -277,45 +277,72 @@ jt8255 PPI
 //  -----------------------------------------------------------------------------
 wire [7:0] ms_dout;   // driven by MoonSound block below
 
-//  ----- Cheat engine: freeze/POKE, register-based (no BRAM), loaded via ioctl "F9,CHT" -----
-//  Override happens at the d_to_cpu priority mux (below all IO legs) so it forces an
-//  arbitrary byte on CPU memory reads only. flash.sv / msx_slots / SDRAM untouched.
-localparam CHEAT_N = 8;
-logic        cheat_en  [CHEAT_N];
-logic [15:0] cheat_addr[CHEAT_N];
-logic [7:0]  cheat_val [CHEAT_N];
+//  ----- Cheat engine: 4-way set-associative BRAM, 1-cycle parallel lookup -----
+//  512 sets x 4 ways (capacity 2048). slot = {gen[2:0], tag[6:0], value[7:0]} (18b).
+//  index = a[8:0], tag = a[15:9]. gen = generation -> invalidate-on-reload (no sweep/race).
+//  Loaded via ioctl "F9,CHT" (4B/entry {addr_lo,addr_hi,value,flags(bit0=enable)}). Master O[51].
+//  Override at the d_to_cpu mux (memory reads only). flash.sv / msx_slots / SDRAM untouched.
+(* ramstyle = "M10K" *) logic [17:0] cheat_ram0 [512];
+(* ramstyle = "M10K" *) logic [17:0] cheat_ram1 [512];
+(* ramstyle = "M10K" *) logic [17:0] cheat_ram2 [512];
+(* ramstyle = "M10K" *) logic [17:0] cheat_ram3 [512];
+logic [17:0] cq0, cq1, cq2, cq3;       // registered reads at set index a[8:0]
+logic [15:0] a_q;                      // address aligned with the registered read
+logic [3:0]  cwe;                      // per-way write enable (loader)
+logic [8:0]  cwaddr;
+logic [17:0] cwdata;
 
-wire       cheat_dl = ioctl_download & (ioctl_index[5:0] == 6'd9);  // F9,CHT loader, 4 bytes/entry
-wire [2:0] cheat_e  = ioctl_addr[4:2];                              // {addr_lo,addr_hi,value,flags}
-reg        cheat_dl_q;
-integer    ci;
+always @(posedge clk21m) begin
+   cq0 <= cheat_ram0[a[8:0]]; cq1 <= cheat_ram1[a[8:0]];
+   cq2 <= cheat_ram2[a[8:0]]; cq3 <= cheat_ram3[a[8:0]];
+   a_q <= a;
+   if (cwe[0]) cheat_ram0[cwaddr] <= cwdata;
+   if (cwe[1]) cheat_ram1[cwaddr] <= cwdata;
+   if (cwe[2]) cheat_ram2[cwaddr] <= cwdata;
+   if (cwe[3]) cheat_ram3[cwaddr] <= cwdata;
+end
+
+logic [2:0] cur_gen;                   // current generation (1..7, never 0)
+wire [3:0]  chit;                      // slot: [17:15]=gen, [14:8]=tag, [7:0]=value
+assign chit[0] = (cq0[17:15]==cur_gen) & (cq0[14:8]==a_q[15:9]);
+assign chit[1] = (cq1[17:15]==cur_gen) & (cq1[14:8]==a_q[15:9]);
+assign chit[2] = (cq2[17:15]==cur_gen) & (cq2[14:8]==a_q[15:9]);
+assign chit[3] = (cq3[17:15]==cur_gen) & (cq3[14:8]==a_q[15:9]);
+wire        cheat_hit   = |chit;
+wire [7:0]  cheat_value = chit[0]?cq0[7:0] : chit[1]?cq1[7:0] : chit[2]?cq2[7:0] : cq3[7:0];
+wire        cheat_act   = cheat_en_master & cheat_hit & (a==a_q) & ~mreq_n & rfrsh_n;
+
+// loader (ioctl "F9,CHT"): generation invalidate + next-way placement
+logic       cheat_dl_q;
+logic [7:0] ld_lo, ld_hi, ld_val;
+logic [1:0] nextway [512];
+integer     ni;
+wire        cheat_dl = ioctl_download & (ioctl_index[5:0]==6'd9);
+wire [8:0]  ld_set   = {ld_hi[0], ld_lo};   // index = addr[8:0]
+wire [6:0]  ld_tag   = ld_hi[7:1];          // tag   = addr[15:9]
+
+initial cur_gen = 3'd1;
 always @(posedge clk21m) begin
    cheat_dl_q <= cheat_dl;
-   if (cheat_dl & ~cheat_dl_q)
-      for (ci = 0; ci < CHEAT_N; ci = ci + 1) cheat_en[ci] <= 1'b0;          // clear on new download
-   if (cheat_dl & ioctl_wr & (ioctl_addr < (CHEAT_N*4))) begin
+   cwe <= 4'b0000;
+   if (cheat_dl & ~cheat_dl_q) begin                       // new download: bump gen, reset way ptrs
+      cur_gen <= (cur_gen==3'd7) ? 3'd1 : cur_gen + 3'd1;
+      for (ni=0; ni<512; ni=ni+1) nextway[ni] <= 2'd0;
+   end
+   if (cheat_dl & ioctl_wr) begin
       case (ioctl_addr[1:0])
-         2'd0: cheat_addr[cheat_e][7:0]  <= ioctl_dout;
-         2'd1: cheat_addr[cheat_e][15:8] <= ioctl_dout;
-         2'd2: cheat_val [cheat_e]       <= ioctl_dout;
-         2'd3: cheat_en  [cheat_e]       <= ioctl_dout[0];
+         2'd0: ld_lo  <= ioctl_dout;
+         2'd1: ld_hi  <= ioctl_dout;
+         2'd2: ld_val <= ioctl_dout;
+         2'd3: if (ioctl_dout[0]) begin                    // enable -> insert into next way of the set
+                  cwe             <= (4'b0001 << nextway[ld_set]);
+                  cwaddr          <= ld_set;
+                  cwdata          <= {cur_gen, ld_tag, ld_val};
+                  nextway[ld_set] <= nextway[ld_set] + 2'd1;
+               end
       endcase
    end
 end
-
-logic       cheat_hit;
-logic [7:0] cheat_value;
-integer     cj;
-always_comb begin
-   cheat_hit   = 1'b0;
-   cheat_value = 8'hFF;
-   for (cj = 0; cj < CHEAT_N; cj = cj + 1)
-      if (cheat_en[cj] & (a == cheat_addr[cj])) begin
-         cheat_hit   = 1'b1;
-         cheat_value = cheat_val[cj];
-      end
-end
-wire cheat_act = cheat_en_master & cheat_hit & ~mreq_n & rfrsh_n;  // memory read only (rd_n gated by mux top)
 
 assign d_to_cpu = rd_n              ? 8'hFF           :
                   vdp_en            ? d_to_cpu_vdp    :
