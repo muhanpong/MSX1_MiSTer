@@ -321,7 +321,10 @@ logic       cheat_dl_q;
 logic [7:0] ld_lo, ld_hi;
 logic [1:0] nextway [512];
 integer     ni;
-wire        cheat_dl = ioctl_download & (ioctl_index[7:0]==8'd255);
+// Accept the standard cheats stream (ioctl 255) AND a manual OSD cheat file via "FC7,GG"
+// (ioctl index 7): FC7 streams the picked .gg raw (byte-identical 16-byte records) and,
+// being store_name=1, does NOT trigger cheats_init's 255 reset that would wipe it.
+wire        cheat_dl = ioctl_download & ((ioctl_index[7:0]==8'd255) | (ioctl_index[5:0]==6'd7));
 wire [8:0]  ld_set   = {ld_hi[0], ld_lo};   // index = addr[8:0]
 wire [6:0]  ld_tag   = ld_hi[7:1];          // tag   = addr[15:9]
 

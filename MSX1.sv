@@ -267,6 +267,7 @@ localparam CONF_STR = {
    "H6R[39],SRAM Load;",
    "-;",
    "C,Cheats;",
+   "FC7,GG,Load Cheat;",
    "h1-;",
    "h1S5,DSK,Mount Drive A:;",
    "SC4,VHD,Load SD card;",
