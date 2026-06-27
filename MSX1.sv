@@ -268,6 +268,7 @@ localparam CONF_STR = {
    "-;",
    "C,Cheats;",
    "FC7,GG,Load Cheat;",
+   "O[51],Cheats,On,Off;",
    "h1-;",
    "h1S5,DSK,Mount Drive A:;",
    "SC4,VHD,Load SD card;",
@@ -509,7 +510,7 @@ msx MSX
    .dbg_keyon_count(dbg_keyon_count),
    .dbg_accum_cnt  (dbg_accum_cnt),
    .dbg_env_min    (dbg_env_min),
-   .cheat_en_master(1'b1),   // standard MiSTer OSD cheat menu is the sole on/off control
+   .cheat_en_master(~status[51]),   // global "Cheats On/Off" (O[51], default On=0): gates ALL cheats (standard+FC7), non-destructive
    .*
 );
 
