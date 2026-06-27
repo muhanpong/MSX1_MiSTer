@@ -265,6 +265,8 @@ localparam CONF_STR = {
    "H6-;",
    "H6R[38],SRAM Save;",
    "H6R[39],SRAM Load;",
+   "-;",
+   "C,Cheats;",
    "h1-;",
    "h1S5,DSK,Mount Drive A:;",
    "SC4,VHD,Load SD card;",
@@ -291,8 +293,6 @@ localparam CONF_STR = {
    "O[47],FM Mute,Off,On;",
    "O[50:49],PCM Volume,+6dB,+12dB,+18dB,+24dB;",
    "O[48],Debug Overlay,Off,On;",
-   "F6,CHT,Load Cheats;",
-   "O[51],Cheats,Off,On;",
    "-;",
    "T[0],Reset;",
    "R[10],Reset & Detach ROM Cartridge;",					
@@ -508,7 +508,7 @@ msx MSX
    .dbg_keyon_count(dbg_keyon_count),
    .dbg_accum_cnt  (dbg_accum_cnt),
    .dbg_env_min    (dbg_env_min),
-   .cheat_en_master(status[51]),
+   .cheat_en_master(1'b1),   // standard MiSTer OSD cheat menu is the sole on/off control
    .*
 );
 
@@ -846,10 +846,11 @@ sdram sdram
    .*
 );
 
-// NOTE: addr_width REVERTED 16→18 — the 16 build broke machine-ROM auto-load
-// (regression: only force-load worked).  Reverting to 18 to confirm/restore;
-// the M10K headroom it freed is no longer needed (multi-probe removed).
-dpram #(.addr_width(18)) systemRAM
+// systemRAM addr_width 16: reclaims ~192 M10K. Verified safe (HW autoload OK) —
+// machine-ROM PACK and MSX main RAM route to SDRAM (msx_slots sdram_ce when
+// sdram_size!=0); BRAM serves only SRAM (sram_cs, <=64KB). The earlier autoload
+// regression was the F1/store_name conf bug (fixed: FC1), NOT this width.
+dpram #(.addr_width(16)) systemRAM
 (
    .clock(clk21m),
    .address_a(18'(upload_bram_rq ? upload_ram_addr : ram_addr)          ),

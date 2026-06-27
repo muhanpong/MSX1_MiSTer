@@ -277,72 +277,59 @@ jt8255 PPI
 //  -----------------------------------------------------------------------------
 wire [7:0] ms_dout;   // driven by MoonSound block below
 
-//  ----- Cheat engine: 4-way set-associative BRAM, 1-cycle parallel lookup -----
-//  512 sets x 4 ways (capacity 2048). slot = {gen[2:0], tag[6:0], value[7:0]} (18b).
-//  index = a[8:0], tag = a[15:9]. gen = generation -> invalidate-on-reload (no sweep/race).
-//  Loaded via ioctl "F9,CHT" (4B/entry {addr_lo,addr_hi,value,flags(bit0=enable)}). Master O[51].
-//  Override at the d_to_cpu mux (memory reads only). flash.sv / msx_slots / SDRAM untouched.
-(* ramstyle = "M10K" *) logic [17:0] cheat_ram0 [512];
-(* ramstyle = "M10K" *) logic [17:0] cheat_ram1 [512];
-(* ramstyle = "M10K" *) logic [17:0] cheat_ram2 [512];
-(* ramstyle = "M10K" *) logic [17:0] cheat_ram3 [512];
-logic [17:0] cq0, cq1, cq2, cq3;       // registered reads at set index a[8:0]
-logic [15:0] a_q;                      // address aligned with the registered read
-logic [3:0]  cwe;                      // per-way write enable (loader)
-logic [8:0]  cwaddr;
-logic [17:0] cwdata;
+//  ----- Cheat engine: MiSTer STANDARD .gg via ioctl index 255 (Kitrinx CODES) -----
+//  Common cross-core format. HPS sends ONLY the enabled cheats as concatenated 16-byte
+//  .gg records, COMMON layout = [flags LE32][addr LE32][compare LE32][replace LE32],
+//  assembled MSB-first into code[127:0] (code[128] = clock-in). Each OSD toggle re-sends
+//  the whole enabled set; a reset pulse at download start clears the table.
+//  Applied at the d_to_cpu slots leg (memory reads). flash.sv / msx_slots / SDRAM untouched.
+reg  [128:0] gg_code;
+wire         gg_avail;
+wire         genie_ovr;
+wire  [7:0]  genie_data;
+
+reg          cheat_dl_q;
+wire         cheat_dl = ioctl_download & (ioctl_index[7:0]==8'd255);
+wire         gg_reset = cheat_dl & ~cheat_dl_q;   // new download -> clear code table
 
 always @(posedge clk21m) begin
-   cq0 <= cheat_ram0[a[8:0]]; cq1 <= cheat_ram1[a[8:0]];
-   cq2 <= cheat_ram2[a[8:0]]; cq3 <= cheat_ram3[a[8:0]];
-   a_q <= a;
-   if (cwe[0]) cheat_ram0[cwaddr] <= cwdata;
-   if (cwe[1]) cheat_ram1[cwaddr] <= cwdata;
-   if (cwe[2]) cheat_ram2[cwaddr] <= cwdata;
-   if (cwe[3]) cheat_ram3[cwaddr] <= cwdata;
-end
-
-logic [2:0] cur_gen;                   // current generation (1..7, never 0)
-wire [3:0]  chit;                      // slot: [17:15]=gen, [14:8]=tag, [7:0]=value
-assign chit[0] = (cq0[17:15]==cur_gen) & (cq0[14:8]==a_q[15:9]);
-assign chit[1] = (cq1[17:15]==cur_gen) & (cq1[14:8]==a_q[15:9]);
-assign chit[2] = (cq2[17:15]==cur_gen) & (cq2[14:8]==a_q[15:9]);
-assign chit[3] = (cq3[17:15]==cur_gen) & (cq3[14:8]==a_q[15:9]);
-wire        cheat_hit   = |chit;
-wire [7:0]  cheat_value = chit[0]?cq0[7:0] : chit[1]?cq1[7:0] : chit[2]?cq2[7:0] : cq3[7:0];
-wire        cheat_act   = cheat_en_master & cheat_hit & (a==a_q) & ~mreq_n & rfrsh_n;
-
-// loader (ioctl "F9,CHT"): generation invalidate + next-way placement
-logic       cheat_dl_q;
-logic [7:0] ld_lo, ld_hi, ld_val;
-logic [1:0] nextway [512];
-integer     ni;
-wire        cheat_dl = ioctl_download & (ioctl_index[5:0]==6'd6);  // CHT moved F9→F6 (F9 entry didn't show in OSD)
-wire [8:0]  ld_set   = {ld_hi[0], ld_lo};   // index = addr[8:0]
-wire [6:0]  ld_tag   = ld_hi[7:1];          // tag   = addr[15:9]
-
-initial cur_gen = 3'd1;
-always @(posedge clk21m) begin
-   cheat_dl_q <= cheat_dl;
-   cwe <= 4'b0000;
-   if (cheat_dl & ~cheat_dl_q) begin                       // new download: bump gen, reset way ptrs
-      cur_gen <= (cur_gen==3'd7) ? 3'd1 : cur_gen + 3'd1;
-      for (ni=0; ni<512; ni=ni+1) nextway[ni] <= 2'd0;
-   end
+   cheat_dl_q   <= cheat_dl;
+   gg_code[128] <= 1'b0;                                 // default: no clock-in
    if (cheat_dl & ioctl_wr) begin
-      case (ioctl_addr[1:0])
-         2'd0: ld_lo  <= ioctl_dout;
-         2'd1: ld_hi  <= ioctl_dout;
-         2'd2: ld_val <= ioctl_dout;
-         2'd3: if (ioctl_dout[0]) begin                    // enable -> insert into next way of the set
-                  cwe             <= (4'b0001 << nextway[ld_set]);
-                  cwaddr          <= ld_set;
-                  cwdata          <= {cur_gen, ld_tag, ld_val};
-                  nextway[ld_set] <= nextway[ld_set] + 2'd1;
-               end
+      case (ioctl_addr[3:0])                             // byte position within 16-byte record (fields are LE32)
+         4'd0:  gg_code[103:96]  <= ioctl_dout;          // flags  [7:0]  (bit96 = compare-enable)
+         4'd1:  gg_code[111:104] <= ioctl_dout;          // flags  [15:8]
+         4'd2:  gg_code[119:112] <= ioctl_dout;          // flags  [23:16]
+         4'd3:  gg_code[127:120] <= ioctl_dout;          // flags  [31:24]
+         4'd4:  gg_code[71:64]   <= ioctl_dout;          // addr   [7:0]
+         4'd5:  gg_code[79:72]   <= ioctl_dout;          // addr   [15:8]
+         4'd6:  gg_code[87:80]   <= ioctl_dout;          // addr   [23:16]
+         4'd7:  gg_code[95:88]   <= ioctl_dout;          // addr   [31:24]
+         4'd8:  gg_code[39:32]   <= ioctl_dout;          // compare[7:0]
+         4'd9:  gg_code[47:40]   <= ioctl_dout;          // compare[15:8]
+         4'd10: gg_code[55:48]   <= ioctl_dout;          // compare[23:16]
+         4'd11: gg_code[63:56]   <= ioctl_dout;          // compare[31:24]
+         4'd12: gg_code[7:0]     <= ioctl_dout;          // replace[7:0]
+         4'd13: gg_code[15:8]    <= ioctl_dout;          // replace[15:8]
+         4'd14: gg_code[23:16]   <= ioctl_dout;          // replace[23:16]
+         4'd15: begin gg_code[31:24] <= ioctl_dout; gg_code[128] <= 1'b1; end // replace[31:24] + clock in
+         default: ;
       endcase
    end
 end
+
+CODES #(.ADDR_WIDTH(16), .DATA_WIDTH(8), .MAX_CODES(32)) cheatcodes
+(
+   .clk        (clk21m),
+   .reset      (gg_reset),
+   .enable     (cheat_en_master),
+   .available  (gg_avail),
+   .addr_in    (a),
+   .data_in    (d_from_slots),
+   .code       (gg_code),
+   .genie_ovr  (genie_ovr),
+   .genie_data (genie_data)
+);
 
 assign d_to_cpu = rd_n              ? 8'hFF           :
                   vdp_en            ? d_to_cpu_vdp    :
@@ -350,7 +337,7 @@ assign d_to_cpu = rd_n              ? 8'hFF           :
                   ~psg_n            ? d_from_psg      :
                   ~ppi_n            ? d_from_8255     :
                   (ms_wave_cs | ms_fm_cs) ? ms_dout   :
-                  cheat_act         ? cheat_value     :   // cheat freeze/POKE override
+                  genie_ovr         ? genie_data      :   // standard .gg cheat override (memory reads)
                                     d_from_slots    ;
 //  -----------------------------------------------------------------------------
 //  -- Keyboard decoder

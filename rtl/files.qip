@@ -4,6 +4,7 @@ set_global_assignment -name QIP_FILE           [file join $::quartus(qip_path) c
 set_global_assignment -name QIP_FILE           [file join $::quartus(qip_path) peripheral/peripheral.qip             ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) package.sv                            ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) msx.sv                                ]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) cheatcodes.sv                         ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) debug_overlay.sv                      ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) tape.sv                               ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) msx_config.sv                         ]
