@@ -53,6 +53,7 @@ end
 
 // Per-slot masks (slow-changing) — 2-FF CDC into the video clock.
 logic [23:0] keyon_s1, keyon_s2, active_s1, active_s2, envlive_s1, envlive_s2;
+logic [9:0]  env_s1, env_s2;                            // ch4 latency probe (measurement)
 logic [1:0]  wstk_s, istk_s, nom1_s, astp_s, iack_s;   // freeze-detector latches, CDC into video clk
 logic [1:0]  ioff_s, irfs_s;                            // IFF1-split detectors
 logic [15:0] pcs_s1, pcs_s2, pcl_s1, pcl_s2;            // PC snapshot / vec
@@ -63,6 +64,7 @@ always_ff @(posedge CLK_VIDEO) begin
     keyon_s1   <= dbg_slot_keyon;    keyon_s2   <= keyon_s1;
     active_s1  <= dbg_slot_active;   active_s2  <= active_s1;
     envlive_s1 <= dbg_slot_envlive;  envlive_s2 <= envlive_s1;
+    env_s1     <= dbg_env_min;       env_s2     <= env_s1;
 `ifdef MOONSOUND_DIAG
     wstk_s     <= {wstk_s[0], dbg_wait_stuck};
     istk_s     <= {istk_s[0], dbg_irq_stuck};
@@ -122,7 +124,7 @@ localparam PW = 11'd66;
 `ifdef MOONSOUND_DIAG
 localparam PH = 8'd106; // 13 rows: PCM rows + freeze detectors + forensic PC/IM/watch rows
 `else
-localparam PH = 8'd50;  // 6 rows: PCM diagnosis only
+localparam PH = 8'd58;  // 7 rows: PCM diagnosis + ch4 latency probe
 `endif
 wire in_panel = en && !hblank && !vblank && (h_cnt < PW) && (v_cnt < PH) && !drew_this_line;
 wire border   = (h_cnt == 11'd0) || (h_cnt == PW-1) || (v_cnt == 8'd0) || (v_cnt == PH-1);
@@ -143,6 +145,14 @@ always_comb begin
     for (int i = 0; i < 24; i++) dead_cnt = dead_cnt + {5'd0, dead_mask[i]};
 end
 wire [7:0] dead_w = {1'b0, dead_cnt, 1'b0};   // dead count * 2 px
+
+// ch4 SDRAM read-integrity CANARY error count (via dbg_env_min).
+// 0  = green stub (no ch4 read corruption under playback load) = GOOD.
+// >0 = RED bar grows with the corruption count = ROOT CAUSE CONFIRMED.
+wire       can_err  = (env_s2 != 10'd0);
+wire [7:0] lat_w    = can_err ? ((env_s2 > 10'd60) ? 8'd60 : (env_s2[7:0] + 8'd4)) : 8'd2;
+wire       lat_mid  = can_err;   // yellow/red when any error
+wire       lat_hi   = can_err;   // red
 
 always_comb begin
     R_out = R_in; G_out = G_in; B_out = B_in;
@@ -233,6 +243,15 @@ always_comb begin
                 end
             end
 `else
+            end else if (py < 8'd56) begin // CH4 SDRAM LATENCY (measurement build)
+                // peak-held max ch4 round-trip cycles since reset.
+                // green <24 (fits idle), yellow <72 (within slot window),
+                // red >=72 (exceeds per-slot fetch budget → voice drops).
+                if (px < {3'd0, lat_w}) begin
+                    R_out = lat_mid ? 8'hFF : 8'h00;
+                    G_out = lat_hi  ? 8'h00 : (lat_mid ? 8'hE0 : 8'hFF);
+                    B_out = 8'h00;
+                end else begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
             end
 `endif
         end

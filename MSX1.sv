@@ -291,7 +291,7 @@ localparam CONF_STR = {
    "O[47],FM Mute,Off,On;",
    "O[50:49],PCM Volume,+6dB,+12dB,+18dB,+24dB;",
    "O[48],Debug Overlay,Off,On;",
-   "F9,CHT,Load Cheats;",
+   "F6,CHT,Load Cheats;",
    "O[51],Cheats,Off,On;",
    "-;",
    "T[0],Reset;",
@@ -846,6 +846,9 @@ sdram sdram
    .*
 );
 
+// NOTE: addr_width REVERTED 16→18 — the 16 build broke machine-ROM auto-load
+// (regression: only force-load worked).  Reverting to 18 to confirm/restore;
+// the M10K headroom it freed is no longer needed (multi-probe removed).
 dpram #(.addr_width(18)) systemRAM
 (
    .clock(clk21m),

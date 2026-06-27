@@ -13,8 +13,8 @@ iverilog -g2012 -o out/tb_golden_pcm.vvp \
   $R/rtl/pcm/ymf278_pcm_engine2.sv $R/tb/tb_golden_pcm.sv 2>&1 | grep -v sorry || true
 
 FAIL=0
-for sc in sc_single8 sc_square16 sc_tri12_loop sc_multi sc_lfo; do
-    frames=$(case $sc in sc_tri12_loop) echo 1000;; sc_multi) echo 1200;; sc_lfo) echo 1500;; *) echo 900;; esac)
+for sc in sc_single8 sc_square16 sc_tri12_loop sc_multi sc_lfo sc_pitchbend sc_wavehi sc_odd16; do
+    frames=$(case $sc in sc_tri12_loop|sc_pitchbend) echo 1000;; sc_multi) echo 1200;; sc_lfo) echo 1500;; sc_wavehi) echo 800;; *) echo 900;; esac)
     vvp out/tb_golden_pcm.vvp +script=$G/$sc.txt +mem=$G/mem.hex +frames=$frames +out=out/${sc}_rtl.txt > /dev/null 2>&1
     python3 golden_pcm.py $G/$sc.txt $G/mem.bin $frames out/${sc}_gold.txt > /dev/null
     python3 compare_pcm.py out/${sc}_rtl.txt out/${sc}_gold.txt "$sc" || FAIL=1

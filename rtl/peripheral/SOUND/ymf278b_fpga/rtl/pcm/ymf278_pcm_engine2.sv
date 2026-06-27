@@ -231,7 +231,7 @@ end
 typedef enum logic [4:0] {
     SL_IDLE, SL_LOAD, SL_VIB, SL_VIB2, SL_STEP, SL_ADV, SL_POSB, SL_ADDR, SL_CHIT,
     SL_F_ISSUE, SL_F_WAIT, SL_DECODE, SL_INTERP, SL_EGRATE, SL_EGROM,
-    SL_EGSTEP, SL_GAIN, SL_MUL1, SL_MUL2, SL_PAN, SL_ACC, SL_DONE
+    SL_EGSTEP, SL_GAIN, SL_MUL1, SL_MUL2, SL_PAN, SL_ACC, SL_DONE, SL_STALL_HDR
 } sl_state_t;
 sl_state_t sl_state;
 
@@ -346,9 +346,17 @@ wire        ld_edge_w = (ld_regs_c.keyon & ~key_on_prev[ld_slot])
                       | key_retrig[ld_slot];
 wire        ld_run    = ((ld_dyn_c.env_state != EG_OFF) | ld_edge_w)
                       & ~hf_pending[ld_slot];
+// wants to run, but its wave-header re-fetch is still pending → must stall and
+// fetch the new header BEFORE playing (else the onset plays the stale prev-wave
+// header = the direction-dependency glitch).
+wire        ld_want_hdr = ((ld_dyn_c.env_state != EG_OFF) | ld_edge_w)
+                        & hf_pending[ld_slot];
 
 // opportunistic CPU service grant while the slot FSM idles between slots
 wire sl_tail_idle = (sl_state == SL_IDLE);
+// a slot is stalled waiting for its eager header fetch → let the service FSM
+// run the header fetch NOW (the slot isn't touching the bus while stalled).
+wire slot_stalled_hdr = (sl_state == SL_STALL_HDR);
 
 always_ff @(posedge clk or negedge rst_n) begin
     logic [15:0] ptr_n;
@@ -409,18 +417,37 @@ always_ff @(posedge clk or negedge rst_n) begin
         case (sl_state)
             SL_IDLE: begin
                 if (dispatch_now) begin
-                    cur_slot <= cur_slot + 5'd1;     // consume this slot's turn
                     if (ld_run) begin
+                        cur_slot <= cur_slot + 5'd1; // consume this slot's turn
                         w_slot <= ld_slot;
                         w_regs <= ram_regs[ld_slot];
                         w_hdr  <= ram_header[ld_slot];
                         w_dyn  <= ram_dyn[ld_slot];
                         w_edge <= ld_edge_w;
                         sl_state <= SL_VIB;
+                    end else if (ld_want_hdr) begin
+                        // wants to run but header re-fetch pending: stall (turn
+                        // NOT consumed) and let the service FSM fetch the new
+                        // header NOW, then play with it — openMSX-like eager load
+                        // instead of deferring to the frame tail (= the onset fix).
+                        sl_state <= SL_STALL_HDR;
+                    end else begin
+                        cur_slot <= cur_slot + 5'd1; // EG_OFF & no edge → skip
                     end
-                    // EG_OFF / hf_pending → skip (silence, no SDRAM traffic);
-                    // key_on_prev tracking is handled via key_retrig at write
-                    // time, so nothing to update here.
+                end
+            end
+
+            SL_STALL_HDR: begin
+                // hold until the service FSM stored this slot's header
+                // (hf_pending clears on store), then dispatch with the new header.
+                if (!hf_pending[ld_slot]) begin
+                    cur_slot <= cur_slot + 5'd1;
+                    w_slot <= ld_slot;
+                    w_regs <= ram_regs[ld_slot];
+                    w_hdr  <= ram_header[ld_slot];
+                    w_dyn  <= ram_dyn[ld_slot];
+                    w_edge <= ld_edge_w;
+                    sl_state <= SL_VIB;
                 end
             end
 
@@ -488,9 +515,15 @@ always_ff @(posedge clk or negedge rst_n) begin
 
             SL_CHIT: begin
                 logic need_b_c, hit_c;
-                // B covered by A's two words iff its bytes lie in [a0&~1, a0&~1+3]
+                logic [21:0] b_last;
+                // B covered by A's two words iff its bytes lie in [a0&~1, a0&~1+3].
+                // The LAST byte of sample B is format-dependent: b1 for 16-bit
+                // (byte_addr's b2 aliases b0 there), b2 for 12-bit, b0 for 8-bit.
+                // Using b2 unconditionally missed b1 for 16-bit samples at ODD
+                // start addresses → un-fetched word selected in SL_DECODE (X).
+                b_last = (w_hdr.bits == 2'd2) ? w_b1 : w_b2;
                 need_b_c = !((w_b0[21:1] >= w_a0[21:1]) &&
-                             (w_b2[21:1] <= w_a0[21:1] + 21'd1));
+                             (b_last[21:1] <= w_a0[21:1] + 21'd1));
                 w_need_b <= need_b_c;
                 w_fidx   <= 2'd0;
                 hit_c = cache_vld[w_slot]
@@ -695,7 +728,7 @@ end
 // ═══════════════════════════════════════════════════════════════════════════
 typedef enum logic [3:0] {
     SV_IDLE, SV_CPU_RD_ISSUE, SV_CPU_RD_WAIT, SV_CPU_WR_ISSUE, SV_CPU_WR_SETTLE,
-    SV_HDR_PICK, SV_HDR_ISSUE, SV_HDR_WAIT, SV_HDR_STORE
+    SV_HDR_PICK, SV_HDR_ISSUE, SV_HDR_WAIT, SV_HDR_STORE, SV_HDR_DRAIN
 } sv_state_t;
 sv_state_t sv_state;
 logic [1:0]  sv_settle;
@@ -760,9 +793,12 @@ always_ff @(posedge clk or negedge rst_n) begin
                     sv_state <= SV_CPU_RD_ISSUE;
                 else if (sv_can_cpu && cpu_wr_pend)
                     sv_state <= SV_CPU_WR_ISSUE;
-                else if (slots_done && hf_found
-                         && frame_cycle < CPU_RESERVE_AT - 130) begin
-                    // need ~7×15+parse ≈ 110 cycles — only start when they fit
+                else if (hf_found && frame_cycle < CPU_RESERVE_AT - 130
+                         && (slot_stalled_hdr || slots_done)) begin
+                    // need ~7×15+parse ≈ 110 cycles — only start when they fit.
+                    // slot_stalled_hdr = a waiting slot wants its header NOW
+                    // (eager, mid-frame); slots_done = the original frame-tail
+                    // cleanup for pending-but-skipped (EG_OFF) slots.
                     hf_cur_slot <= hf_pick;
                     hf_cur_wave <= hf_pick_wave_c;
                     hf_widx     <= '0;
@@ -834,8 +870,14 @@ always_ff @(posedge clk or negedge rst_n) begin
             end
             SV_HDR_STORE: begin
                 hf_store_now <= 1'b1;
-                sv_state     <= SV_IDLE;
+                sv_state     <= SV_HDR_DRAIN;
             end
+            // 1-cycle drain so hf_pending (cleared by hf_store_now, registered)
+            // is seen low when SV_IDLE re-checks the gate — else SV_IDLE re-fires
+            // a spurious second fetch (harmless when slots idle, but in the eager
+            // stall path it collides on the shared read bus with the now-resumed
+            // slot's sample reads → corrupted header).
+            SV_HDR_DRAIN: sv_state <= SV_IDLE;
             default: sv_state <= SV_IDLE;
         endcase
     end
@@ -886,7 +928,7 @@ always_ff @(posedge clk or negedge rst_n) begin
             reg_upd = ram_regs[wr_snum];
             // dirty tracking for deferred header backfill
             case (wr_field)
-                4'd0, 4'd1: bf_dirty[wr_snum] <= 5'b0;
+                4'd0: bf_dirty[wr_snum] <= 5'b0;
                 4'd5: bf_dirty[wr_snum][0] <= 1'b1;
                 4'd6: bf_dirty[wr_snum][1] <= 1'b1;
                 4'd7: bf_dirty[wr_snum][2] <= 1'b1;
@@ -972,8 +1014,11 @@ always_ff @(posedge clk or negedge rst_n) begin
     end
 end
 
-// hf_pending: set on wave write, clear when the header store lands.
-wire wr_sets_hf = wr_slot_reg && (wr_field == 4'd0 || wr_field == 4'd1);
+// hf_pending: set on wave-LSB write only (openMSX case 0).  Field 1 changes
+// wave bit8/FN but must NOT reload the header — the load happens when the
+// LSB is written afterwards.  vgmplay's clock-compensation rewrites FN
+// (fields 1/2) continuously; reloading here muted/reset slots every write.
+wire wr_sets_hf = wr_slot_reg && (wr_field == 4'd0);
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) hf_pending <= '0;
     else begin

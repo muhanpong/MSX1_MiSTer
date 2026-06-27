@@ -317,7 +317,7 @@ logic       cheat_dl_q;
 logic [7:0] ld_lo, ld_hi, ld_val;
 logic [1:0] nextway [512];
 integer     ni;
-wire        cheat_dl = ioctl_download & (ioctl_index[5:0]==6'd9);
+wire        cheat_dl = ioctl_download & (ioctl_index[5:0]==6'd6);  // CHT moved F9→F6 (F9 entry didn't show in OSD)
 wire [8:0]  ld_set   = {ld_hi[0], ld_lo};   // index = addr[8:0]
 wire [6:0]  ld_tag   = ld_hi[7:1];          // tag   = addr[15:9]
 
@@ -760,6 +760,10 @@ end
 wire ms_io_wr_sdram = ms_req_sync[2] ^ ms_req_sync[1];
 wire ms_io_rd_sdram = ms_rd_sync[2]  ^ ms_rd_sync[1];
 
+// (slot-0 multi-probe removed — root cause found; see note further down.)
+// ms_mem_addr / ms_mem_rd_valid are declared after the bridge below.
+// REPURPOSED → ch4 READ-ADDRESS trace" further down.
+
 // Direct FM-status path: continuous CDC of the live status byte into clk21m
 // (bits change slowly; the handler cares about bit6 only), plus the
 // status-read notification toggle into clk_sdram.
@@ -782,8 +786,27 @@ wire        ms_mem_rd_req;
 wire        ms_mem_wr_req;
 wire  [7:0] ms_mem_wr_data;
 
+// ─── SDRAM ch4 read-integrity CANARY (instrumentation) ─────────────────────
+// Functional sim has exonerated the engine (5s bit-exact), register path
+// (0.995), and the SDRAM controller logic (concurrency TB).  The remaining
+// hardware-only suspect is a PHYSICAL ch4 read corruption under playback load
+// (the thin 0.303ns slack / SDRAM_DQ path).  This canary re-reads a FIXED
+// known SRAM word (header 0 @ 0x200000, stable during playback) through the
+// REAL ch4 path whenever the engine's bridge is idle, latches the first value,
+// and counts any later mismatch.  can_errs>0 == ch4 SDRAM reads corrupt under
+// load == root cause confirmed.  Exposed on the overlay via dbg_env_min.
+localparam [21:0] CAN_ADDR = 22'h200000;
+logic        can_owns = 1'b0, can_rd_req = 1'b0, can_ref_set = 1'b0;
+logic [15:0] can_ref = 16'd0, can_errs = 16'd0, can_bad = 16'd0;
+logic [13:0] can_timer = 14'd0;
+
+// muxed bridge inputs: canary takes over only when the engine is fully idle
+wire [21:0] br_addr   = can_owns ? CAN_ADDR     : ms_mem_addr;
+wire        br_rd_req = can_owns ? can_rd_req   : ms_mem_rd_req;
+wire        br_wr_req = can_owns ? 1'b0         : ms_mem_wr_req;
+
 // Address: add PCM ROM base offset (set by memory_upload when loading yrw801.rom)
-assign pcm_sdram_addr = pcm_rom_base + {5'd0, ms_mem_addr};
+assign pcm_sdram_addr = pcm_rom_base + {5'd0, br_addr};
 assign dbg_pcm_base_set = (pcm_rom_base != 27'h1800000);
 
 // Read/Write bridge → SDRAM ch4
@@ -797,7 +820,7 @@ assign dbg_pcm_base_set = (pcm_rom_base != 27'h1800000);
 //   3: DONE — deassert req, signal valid for 1 cycle
 logic [1:0] pcm_state;
 logic pcm_is_write;
-logic ms_mem_rd_req_prev;
+logic br_rd_req_prev;
 assign pcm_sdram_req = (pcm_state == 2'd1) || (pcm_state == 2'd2);
 assign pcm_sdram_rnw = ~pcm_is_write;
 assign pcm_sdram_din = ms_mem_wr_data;
@@ -806,15 +829,15 @@ always_ff @(posedge clk_sdram) begin
     if (reset) begin
         pcm_state <= 2'd0;
         pcm_is_write <= 1'b0;
-        ms_mem_rd_req_prev <= 1'b0;
+        br_rd_req_prev <= 1'b0;
     end else begin
-        ms_mem_rd_req_prev <= ms_mem_rd_req;
+        br_rd_req_prev <= br_rd_req;
         case (pcm_state)
-            2'd0: begin // IDLE — detect rising edge of read request
-                if (ms_mem_rd_req && !ms_mem_rd_req_prev) begin
+            2'd0: begin // IDLE — detect rising edge of read request (engine OR canary)
+                if (br_rd_req && !br_rd_req_prev) begin
                     pcm_is_write <= 1'b0;
                     pcm_state <= 2'd1;
-                end else if (ms_mem_wr_req) begin
+                end else if (br_wr_req) begin
                     pcm_is_write <= 1'b1;
                     pcm_state <= 2'd1;
                 end
@@ -832,10 +855,141 @@ always_ff @(posedge clk_sdram) begin
     end
 end
 
+// canary control: start a re-read when the bridge AND engine are idle; on the
+// DONE cycle, latch the reference (first time) or count a mismatch.
+always_ff @(posedge clk_sdram) begin
+    if (reset) begin
+        can_owns <= 1'b0; can_rd_req <= 1'b0; can_ref_set <= 1'b0;
+        can_ref <= 16'd0; can_errs <= 16'd0; can_bad <= 16'd0; can_timer <= 14'd0;
+    end else begin
+        can_timer <= can_timer + 14'd1;
+        // any wave-memory WRITE (sample upload / FixUp) legitimately changes
+        // SRAM → re-arm the reference so it latches the FINAL settled content.
+        // Playback issues no writes, so the reference is stable while monitoring.
+        if (ms_mem_wr_req) begin can_ref_set <= 1'b0; can_errs <= 16'd0; end
+        if (!can_owns) begin
+            // fire periodically, only when nothing else wants the bridge
+            if ((&can_timer) && pcm_state == 2'd0 && !ms_mem_rd_req && !ms_mem_wr_req) begin
+                can_owns   <= 1'b1;
+                can_rd_req <= 1'b1;
+                can_timer  <= 14'd0;
+            end
+        end else begin
+            can_rd_req <= 1'b1;                 // hold req through the transaction
+            if (pcm_state == 2'd3) begin        // data ready this cycle
+                if (!can_ref_set) begin
+                    can_ref     <= pcm_sdram_dout16;
+                    can_ref_set <= 1'b1;
+                end else if (pcm_sdram_dout16 != can_ref) begin
+                    if (can_errs != 16'hFFFF) can_errs <= can_errs + 16'd1;
+                    can_bad <= pcm_sdram_dout16;
+                end
+                can_owns   <= 1'b0;
+                can_rd_req <= 1'b0;
+            end
+        end
+    end
+end
+
 wire  [7:0] ms_mem_rd_data  = pcm_sdram_dout;
 wire [15:0] ms_mem_rd_data16 = pcm_sdram_dout16;
-wire        ms_mem_rd_valid = (pcm_state == 2'd3) && !pcm_is_write;
-wire        ms_mem_busy     = (pcm_state != 2'd0);
+wire        ms_mem_rd_valid = (pcm_state == 2'd3) && !pcm_is_write && !can_owns;
+wire        ms_mem_busy     = (pcm_state != 2'd0) || can_owns;
+
+// ─── slot-0 multi-probe REMOVED ────────────────────────────────────────────
+// The 96-bit MPRB capture BRAM found the root cause (stale-pos loud read during
+// the wave-change release window) and is no longer needed.  Removed so the build
+// fits with systemRAM back at addr_width(18) (no M10K headroom).  Engine taps
+// dbg_slot0_* remain exposed but unconnected at the ymf278b_top instance.
+
+// ─── ch4 header-read integrity CHECKER (register-only, no BRAM) ─────────────
+// The 122->123 onset glitch ("찍") happens ONLY on a NEW wave (= a header
+// fetch); replay (no fetch) is clean — and the engine is sim-proven bit-exact.
+// Suspect: the REAL SDRAM returns corrupt header bytes during the fetch (which
+// coincides with the CPU register-write burst = ch2 contention).  This checker
+// compares each ch4 read of wave-123's header words (@0x5C4..0x5CE) to their
+// KNOWN yrw801.rom values and counts mismatches.  No BRAM (the CH4LOG BRAM at
+// 96% M10K broke SDRAM_DQ IOB packing → flaky RAM → FDD/MFRSD dead).  Result on
+// the debug overlay via dbg_env_min: GREEN(0)=header reads clean, RED(>0)=ch4
+// read corruption under load = root cause confirmed.  Expected words (little-
+// endian {byte[i+1],byte[i]}) from yrw801 wave 123 = 4c bc 46 07 6d f8 8e 00 f0 00 09 00.
+logic [15:0] hdr_errs = 16'd0, hdr_bad = 16'd0, hdr_reads = 16'd0;
+logic [15:0] hdr_exp;
+wire hdr_in_win = ms_mem_rd_valid && (ms_mem_addr[21:4] == 18'h0005C)
+                  && (ms_mem_addr[3:1] >= 3'd2) && !ms_mem_addr[0];
+always_comb case (ms_mem_addr[3:1])
+    3'd2:    hdr_exp = 16'hBC4C;   // @0x5C4: bits/startHi
+    3'd3:    hdr_exp = 16'h0746;   // @0x5C6: startLo/loopHi
+    3'd4:    hdr_exp = 16'hF86D;   // @0x5C8: loopLo/endHi
+    3'd5:    hdr_exp = 16'h008E;   // @0x5CA: endLo/lfovib
+    3'd6:    hdr_exp = 16'h00F0;   // @0x5CC: ar.d1r/dl.d2r
+    3'd7:    hdr_exp = 16'h0009;   // @0x5CE: rc.rr/am
+    default: hdr_exp = 16'h0000;
+endcase
+always_ff @(posedge clk_sdram) begin
+    if (reset) begin hdr_errs <= 16'd0; hdr_bad <= 16'd0; hdr_reads <= 16'd0; end
+    else if (hdr_in_win) begin
+        if (hdr_reads != 16'hFFFF) hdr_reads <= hdr_reads + 16'd1;
+        if (pcm_sdram_dout16 != hdr_exp) begin
+            if (hdr_errs != 16'hFFFF) hdr_errs <= hdr_errs + 16'd1;
+            hdr_bad <= pcm_sdram_dout16;
+        end
+    end
+end
+
+// ─── ch4 SAMPLE-onset read CHECKER (wave 123 startAddr 0x0CBC46) ────────────
+// Header reads proved clean (99/0).  This checks the NEW wave's first SAMPLE
+// reads (a HIGH address, different SDRAM row/bank than the header) — read at
+// each re-attack (pos=0).  Compares words @0x0CBC46..0x0CBC50 to yrw801 values
+// (32FE FE02 FC04 DAFF 0303 FD11).  smp_errs>0 == sample-onset read corruption.
+logic [15:0] smp_errs = 16'd0, smp_bad = 16'd0, smp_reads = 16'd0;
+logic [15:0] smp_exp;
+wire smp_in_win = ms_mem_rd_valid && (ms_mem_addr[21:8] == 14'h0CBC)
+                  && (ms_mem_addr[7:1] >= 7'h23) && (ms_mem_addr[7:1] <= 7'h28)
+                  && !ms_mem_addr[0];
+always_comb case (ms_mem_addr[7:1])
+    7'h23:   smp_exp = 16'h32FE;
+    7'h24:   smp_exp = 16'hFE02;
+    7'h25:   smp_exp = 16'hFC04;
+    7'h26:   smp_exp = 16'hDAFF;
+    7'h27:   smp_exp = 16'h0303;
+    7'h28:   smp_exp = 16'hFD11;
+    default: smp_exp = 16'h0000;
+endcase
+always_ff @(posedge clk_sdram) begin
+    if (reset) begin smp_errs <= 16'd0; smp_bad <= 16'd0; smp_reads <= 16'd0; end
+    else if (smp_in_win) begin
+        if (smp_reads != 16'hFFFF) smp_reads <= smp_reads + 16'd1;
+        if (pcm_sdram_dout16 != smp_exp) begin
+            if (smp_errs != 16'hFFFF) smp_errs <= smp_errs + 16'd1;
+            smp_bad <= pcm_sdram_dout16;
+        end
+    end
+end
+
+// ─── ch4 (PCM) SDRAM round-trip latency probe (measurement build) ───────────
+// Counts clk_sdram cycles each ch4 READ transaction is in flight (pcm_state
+// non-idle), peak-held since reset.  Routed to the debug overlay via
+// dbg_env_min so we can read the worst-case ch4 latency the PCM engine sees on
+// real hardware — the number that decides whether slot drops come from SDRAM
+// starvation.  Also peak-holds the max concurrent fetch backlog as a sanity bar.
+logic [9:0] ms_ch4_rt = '0, ms_ch4_rt_max = '0;
+always @(posedge clk_sdram) begin
+    if (reset) begin
+        ms_ch4_rt <= '0; ms_ch4_rt_max <= '0;
+    end else if (pcm_state != 2'd0 && !pcm_is_write) begin
+        if (ms_ch4_rt != 10'h3FF) ms_ch4_rt <= ms_ch4_rt + 1'b1;
+    end else begin
+        if (ms_ch4_rt > ms_ch4_rt_max) ms_ch4_rt_max <= ms_ch4_rt;
+        ms_ch4_rt <= '0;
+    end
+end
+// Expose the ACTIVE header-read CHECKER on the overlay (replaces the idle
+// canary for the 122->123 onset investigation).  Play 122->123 (fetches the
+// wave-123 header @0x5C4): GREEN(0) = header words read clean → corruption is
+// NOT the header read; RED(>0) = ch4 returns corrupt header bytes under the
+// wave-change contention = root cause.  Saturate to the 10-bit overlay field.
+assign dbg_env_min = (hdr_errs[15:10] != 6'd0) ? 10'h3FF : hdr_errs[9:0];
 
 // ─── ymf278b_top instance ────────────────────────────────────────────────────
 wire        ms_io_ack;
@@ -1040,12 +1194,16 @@ ymf278b_top #(
     .dbg_new2       (dbg_new2),
     .dbg_keyon_count(dbg_keyon_count),
     .dbg_accum_cnt  (dbg_accum_cnt),
-    .dbg_env_min    (dbg_env_min),
+    .dbg_env_min    (),                 // measurement build: dbg_env_min driven by ch4 latency probe
     .dbg_mem_nonzero(dbg_mem_nonzero),
     .dbg_pcm_base_set(),  // generated locally via assign
     .dbg_slot_keyon (dbg_slot_keyon),
     .dbg_slot_active(dbg_slot_active),
     .dbg_slot_envlive(dbg_slot_envlive),
+    .dbg_slot0_hdr_start    (),
+    .dbg_slot0_dyn_pos      (),
+    .dbg_slot0_dyn_env_vol  (),
+    .dbg_slot0_dyn_env_state(),
     .dbg_ack_stopped(dbg_ack_stopped)
 );
 

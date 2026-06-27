@@ -14,7 +14,7 @@
   </fw> 
   <fw name="MEGA_FLASH_ROM">
     <filename>mfrsd.ROM</filename>
-    <SHA1>d398bd184fd31def95a5cc21fee184a9d6b70541</SHA1>
+    <SHA1>411c6d8cb5c9085f4ab405d0f16f16706f30d77f</SHA1>
   </fw>
   <fw name="MOONSOUND">
     <filename>yrw801.rom</filename>

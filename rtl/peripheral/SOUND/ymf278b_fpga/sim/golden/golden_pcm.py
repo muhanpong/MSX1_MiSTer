@@ -107,9 +107,9 @@ class Engine:
             s.wave = (s.wave & 0x100) | data
             self.load_header(s)
         elif f == 1:
+            # openMSX case 1: wave bit8 + FN low only — NO header reload.
             s.wave = (s.wave & 0xFF) | ((data & 1) << 8)
             s.FN = (s.FN & 0x380) | (data >> 1)
-            self.load_header(s)
         elif f == 2:
             s.FN = (s.FN & 0x07F) | ((data & 7) << 7)
             s.PRVB = bool(data & 8)
@@ -254,7 +254,8 @@ def main():
     for ln in open(script_f):
         ln = ln.split('#')[0].strip()
         if not ln: continue
-        fr, ad, da = ln.split()
+        cols = ln.split()           # 4th column (TB apply cycle) is ignored:
+        fr, ad, da = cols[0:3]      # golden applies all writes before frame N
         writes.setdefault(int(fr), []).append((int(ad, 16), int(da, 16)))
     with open(out_f, 'w') as out:
         for fr in range(frames):

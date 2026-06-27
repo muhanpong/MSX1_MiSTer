@@ -60,6 +60,11 @@ module ymf278b_top #(
     output wire [23:0] dbg_slot_keyon,
     output wire [23:0] dbg_slot_active,
     output wire [23:0] dbg_slot_envlive,
+    // slot-0 multi-probe taps (causal-chain capture in msx.sv)
+    output wire [21:0] dbg_slot0_hdr_start,      // committed startAddr (header)
+    output wire [15:0] dbg_slot0_dyn_pos,        // sample position
+    output wire [9:0]  dbg_slot0_dyn_env_vol,    // envelope attenuation (loudness)
+    output wire [2:0]  dbg_slot0_dyn_env_state,  // EG state
     output logic       dbg_ack_stopped   // reg4 (timer ack) writes stopped reaching OPL3
 );
 
@@ -222,10 +227,13 @@ ymf278_pcm_engine2 #(
     .dbg_slot0_d1r   (),
     .dbg_slot5_wave  (),
     .dbg_slot23_wave (),
-    .dbg_slot0_hdr_start (),
+    .dbg_slot0_hdr_start (dbg_slot0_hdr_start),
     .dbg_slot0_hdr_loop  (),
     .dbg_slot0_hdr_end   (),
     .dbg_slot0_hdr_bits  (),
+    .dbg_slot0_dyn_pos      (dbg_slot0_dyn_pos),
+    .dbg_slot0_dyn_env_vol  (dbg_slot0_dyn_env_vol),
+    .dbg_slot0_dyn_env_state(dbg_slot0_dyn_env_state),
     .dbg_slot_keyon  (dbg_slot_keyon),
     .dbg_slot_active (dbg_slot_active),
     .dbg_slot_envlive(dbg_slot_envlive)
