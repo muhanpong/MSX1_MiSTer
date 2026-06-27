@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MSX1_MiSTer Cheat (.CHT) Editor</title>
+<style>
+  :root{
+    --bg:#11141a; --panel:#1b2029; --line:#2c333f; --fg:#e6e9ef;
+    --muted:#8b94a6; --accent:#5ad1a0; --accent2:#ffcf5a; --bad:#ff6b6b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+    font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,monospace}
+  .wrap{max-width:980px;margin:0 auto;padding:24px}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--muted);margin:0 0 20px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:16px;margin-bottom:16px}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:8px 6px;text-align:left;border-bottom:1px solid var(--line)}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+  td.idx{color:var(--muted);width:34px}
+  input[type=text]{width:100%;background:#0e1116;border:1px solid var(--line);
+    color:var(--fg);border-radius:6px;padding:7px 9px;font-family:ui-monospace,Menlo,Consolas,monospace}
+  input[type=text]:focus{outline:none;border-color:var(--accent)}
+  input.bad{border-color:var(--bad)}
+  .pfx{color:var(--muted);font-family:ui-monospace,monospace}
+  .dec{color:var(--accent2);font-family:ui-monospace,monospace;white-space:nowrap}
+  .col-name{min-width:200px}
+  .col-addr{width:150px}.col-val{width:150px}.col-on{width:46px;text-align:center}
+  .col-del{width:40px;text-align:center}
+  .bytes{color:var(--muted);font-family:ui-monospace,monospace;font-size:12px}
+  .row-off td:not(.col-on):not(.idx):not(.col-del){opacity:.45}
+  .row-conflict td.col-addr input{border-color:var(--bad)}
+  .scroll{max-height:460px;overflow-y:auto;border:1px solid var(--line);border-radius:8px}
+  .scroll thead th{position:sticky;top:0;background:var(--panel);z-index:1}
+  .controls{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  label.fn{color:var(--muted)}
+  button{background:var(--accent);color:#06231a;border:0;border-radius:7px;
+    padding:9px 16px;font-weight:700;cursor:pointer}
+  button:hover{filter:brightness(1.08)}
+  button.ghost{background:transparent;color:var(--fg);border:1px solid var(--line);font-weight:600}
+  button.del{background:transparent;color:var(--bad);border:1px solid var(--line);
+    font-weight:700;padding:4px 9px;line-height:1}
+  .hex{background:#0e1116;border:1px solid var(--line);border-radius:8px;padding:12px;
+    font-family:ui-monospace,Menlo,Consolas,monospace;white-space:pre;overflow-x:auto;color:#cdd6e3;
+    max-height:240px;overflow-y:auto}
+  .muted{color:var(--muted)}
+  code{background:#0e1116;border:1px solid var(--line);border-radius:4px;padding:1px 5px;
+    font-family:ui-monospace,monospace}
+  .warn{color:var(--accent2)}
+  .err{color:var(--bad)}
+  .ok{color:var(--accent)}
+  ol{margin:6px 0 0;padding-left:20px}
+  a.filelbl{display:inline-block;cursor:pointer;color:var(--accent);text-decoration:underline}
+  input[type=file]{display:none}
+  .summary{display:flex;gap:20px;flex-wrap:wrap;align-items:center}
+  .summary b{color:var(--fg)}
+  details summary{cursor:pointer;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MSX1_MiSTer — Cheat Editor</h1>
+  <p class="sub">Edit cheats once, export to <b>two</b> targets:
+     <br>(a) raw <code>.cht</code> — for this core's custom F9 loader (4 bytes/cheat <code>{addr_lo, addr_hi, value, flags}</code>, 4-way set-associative engine, 512 sets × 4 ways).
+     <br>(b) MiSTer-standard <code>.zip</code> of <code>.gg</code> files — for the standard MiSTer OSD cheat menu, where each cheat shows by its <b>description</b> and can be toggled on/off in the OSD itself.</p>
+
+  <div class="panel controls">
+    <button id="add">＋ Add cheat</button>
+    <a class="filelbl" id="mcflbl">⬆ Load .mcf (blueMSX)</a>
+    <input type="file" id="mcffile" accept=".mcf,.MCF,.txt">
+    <a class="filelbl" id="loadlbl">⬆ Load existing .cht</a>
+    <input type="file" id="loadfile" accept=".cht,.CHT">
+    <a class="filelbl" id="zlbl">⬆ Load .zip (MiSTer)</a>
+    <input type="file" id="zfile" accept=".zip,.ZIP">
+    <button class="ghost" id="clear">Clear all</button>
+  </div>
+
+  <div class="warn" id="notice" style="display:none"></div>
+
+  <div class="panel">
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th class="idx">#</th>
+          <th class="col-on">On</th>
+          <th class="col-name">Name / description</th>
+          <th class="col-addr">Address (hex)</th>
+          <th class="col-val">Value (hex)</th>
+          <th class="col-del"></th>
+        </tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="muted" id="emptyhint" style="margin-top:10px;display:none">
+      No cheats yet. Click <b>Add cheat</b> or load a <code>.mcf</code> / <code>.cht</code> file.
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="summary" id="summary"></div>
+    <div id="conflict" style="margin-top:10px"></div>
+  </div>
+
+  <div class="panel controls">
+    <label class="fn">File name <input type="text" id="fname" value="my_cheat" style="width:200px"></label>
+    <button id="dl">⬇ Download .cht (custom F9)</button>
+    <button id="dlzip">⬇ Download .zip (MiSTer standard)</button>
+  </div>
+
+  <div class="panel">
+    <div class="muted" style="margin-bottom:6px">MiSTer-standard <code>.zip</code> export</div>
+    <p style="margin:0 0 6px">The <b>.zip</b> contains one <code>.gg</code> file per cheat; the filename (minus
+      <code>.gg</code>) becomes the cheat's <b>description</b> shown in the OSD. <b>All valid rows are
+      exported</b> (invalid addr/value rows are skipped) — the MiSTer OSD shows each one by its
+      description and lets the user toggle it on/off there, so the per-row <b>On</b> state above is only
+      used for the raw <code>.cht</code> path.</p>
+    <p style="margin:0">Place the file at
+      <code>/media/fat/cheats/&lt;CoreName&gt;/&lt;romname&gt;.zip</code>. The base name must match the loaded
+      ROM file name (or the ROM's CRC) for MiSTer to auto-find it.</p>
+  </div>
+
+  <div class="panel">
+    <details>
+      <summary>File preview <span id="size"></span></summary>
+      <div class="hex" id="hex" style="margin-top:10px">(empty)</div>
+    </details>
+  </div>
+
+  <div class="panel">
+    <div class="muted" style="margin-bottom:6px">How to use</div>
+    <ol>
+      <li>Add cheats manually or <b>Load .mcf</b> / <b>Load .zip</b> to import a whole game's set. e.g. fuel = address <code>DC78</code>, value <code>80</code>.</li>
+      <li><b>Custom F9 path</b> — <b>Download .cht</b> and copy it to <code>/media/fat/games/MSX1/</code>.
+        In the core OSD: <code>Load Cheats</code> → pick the file, then set <code>Cheats → On</code>.
+        All rows (on <i>and</i> off) are written; only the <b>On</b> ones activate on hardware.
+        The 4-way conflict warning above applies here.</li>
+      <li><b>MiSTer-standard OSD path</b> — <b>Download .zip</b> and place it at
+        <code>/media/fat/cheats/&lt;CoreName&gt;/&lt;romname&gt;.zip</code> (base name must match the ROM
+        name or its CRC). The standard cheat menu lists each cheat by its <b>description</b> and lets you
+        toggle each one on/off in the OSD. All valid rows are exported regardless of the <b>On</b> column.</li>
+    </ol>
+  </div>
+</div>
+
+<script>
+const CAP = 2048;          // hardware capacity (512 sets x 4 ways)
+const SET_MASK = 0x1FF;    // set index = address & 0x1FF
+const WAYS = 4;            // ways per set
+
+const rowsEl = document.getElementById('rows');
+let nextId = 1;
+let state = [];            // [{id, on, name, addr, val}]
+
+function newRow(o){ return Object.assign({id:nextId++, on:false, name:'', addr:'', val:''}, o||{}); }
+
+function hx(s){ // parse hex string -> number or NaN
+  s = (s||'').trim().replace(/^0x/i,'').replace(/h$/i,'');
+  if(s==='') return NaN;
+  if(!/^[0-9a-fA-F]+$/.test(s)) return NaN;
+  return parseInt(s,16);
+}
+function pad(n,w){ return n.toString(16).toUpperCase().padStart(w,'0'); }
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// is a row's addr/val a usable cheat?
+function rowValid(c){
+  const a=hx(c.addr), v=hx(c.val);
+  return !isNaN(a)&&a>=0&&a<=0xFFFF && !isNaN(v)&&v>=0&&v<=0xFF;
+}
+
+// compute the 4-way set-associative conflicts over ENABLED + valid rows.
+// returns {conflictIds:Set, sets:[{idx, rows:[...], dropped:[...]}]}
+function computeConflicts(){
+  const bySet = new Map();
+  state.forEach(c=>{
+    if(!c.on || !rowValid(c)) return;
+    const a=hx(c.addr);
+    const s=a & SET_MASK;
+    if(!bySet.has(s)) bySet.set(s,[]);
+    bySet.get(s).push(c);
+  });
+  const conflictIds = new Set();
+  const sets = [];
+  bySet.forEach((rows, idx)=>{
+    if(rows.length>WAYS){
+      const dropped = rows.slice(WAYS); // 5th+ dropped by HW
+      dropped.forEach(c=>conflictIds.add(c.id));
+      sets.push({idx, rows, dropped});
+    }
+  });
+  sets.sort((a,b)=>a.idx-b.idx);
+  return {conflictIds, sets};
+}
+
+function render(){
+  const {conflictIds} = computeConflicts();
+  rowsEl.innerHTML='';
+  state.forEach((c,i)=>{
+    const tr=document.createElement('tr');
+    let cls=[];
+    if(!c.on) cls.push('row-off');
+    if(conflictIds.has(c.id)) cls.push('row-conflict');
+    tr.className=cls.join(' ');
+    const a=hx(c.addr), v=hx(c.val);
+    const aok = c.addr==='' || (!isNaN(a) && a>=0 && a<=0xFFFF);
+    const vok = c.val===''  || (!isNaN(v) && v>=0 && v<=0xFF);
+    const dec = (!isNaN(v)&&v>=0&&v<=0xFF) ? '= '+v : '';
+    tr.innerHTML=`
+      <td class="idx">${i+1}</td>
+      <td class="col-on"><input type="checkbox" ${c.on?'checked':''} data-i="${i}" data-k="on"></td>
+      <td class="col-name"><input type="text" value="${esc(c.name)}" data-i="${i}" data-k="name" placeholder="(description)"></td>
+      <td class="col-addr"><span class="pfx">0x</span> <input type="text" value="${esc(c.addr)}" data-i="${i}" data-k="addr" class="${aok?'':'bad'}" placeholder="DC78" style="width:calc(100% - 26px)"></td>
+      <td class="col-val"><span class="pfx">0x</span> <input type="text" value="${esc(c.val)}" data-i="${i}" data-k="val" class="${vok?'':'bad'}" placeholder="80" style="width:calc(100% - 80px)"> <span class="dec">${dec}</span></td>
+      <td class="col-del"><button class="del" data-i="${i}" data-k="del" title="delete">✕</button></td>`;
+    rowsEl.appendChild(tr);
+  });
+  document.getElementById('emptyhint').style.display = state.length? 'none':'';
+  bindRowInputs();
+  updateSummary();
+  updatePreview();
+}
+
+function bindRowInputs(){
+  rowsEl.querySelectorAll('input').forEach(el=>{
+    const i=+el.dataset.i, k=el.dataset.k;
+    el.addEventListener(el.type==='checkbox'?'change':'input', ()=>{
+      state[i][k] = el.type==='checkbox' ? el.checked : el.value;
+      if(k==='on' && el.checked && state[i].val==='') state[i].val='FF';
+      render();
+      if(el.type==='text'){
+        const again=rowsEl.querySelector(`input[data-i="${i}"][data-k="${k}"]`);
+        if(again){again.focus(); again.setSelectionRange(again.value.length,again.value.length);}
+      }
+    });
+  });
+  rowsEl.querySelectorAll('button.del').forEach(el=>{
+    el.addEventListener('click',()=>{ state.splice(+el.dataset.i,1); render(); });
+  });
+}
+
+// build the .cht byte array from ALL valid rows (on and off).
+function buildBytes(){
+  const out=[];
+  let invalid=0, written=0;
+  state.forEach(c=>{
+    if(c.addr.trim()==='' && c.val.trim()==='') return; // wholly empty row
+    if(!rowValid(c)){ invalid++; return; }
+    const a=hx(c.addr), v=hx(c.val);
+    out.push(a&0xFF, (a>>8)&0xFF, v, c.on?0x01:0x00);
+    written++;
+  });
+  return {bytes:Uint8Array.from(out), invalid, written};
+}
+
+function updateSummary(){
+  const total = state.length;
+  const enabled = state.filter(c=>c.on && rowValid(c)).length;
+  const {bytes, invalid} = buildBytes();
+  const {sets, conflictIds} = computeConflicts();
+  const el=document.getElementById('summary');
+  let over = total>CAP ? ` <span class="err">⚠ exceeds capacity ${CAP}</span>` : '';
+  el.innerHTML =
+    `<span>Rows: <b>${total}</b></span>`+
+    `<span>Enabled: <b class="ok">${enabled}</b></span>`+
+    `<span>.cht size: <b>${bytes.length}</b> bytes (${bytes.length/4} entries)</span>`+
+    (invalid? `<span class="err">Invalid rows skipped: ${invalid}</span>`:'')+
+    over;
+
+  const cdiv=document.getElementById('conflict');
+  if(sets.length===0){
+    cdiv.innerHTML = enabled? `<span class="ok">✔ No 4-way conflicts.</span>`
+                            : `<span class="muted">No enabled cheats.</span>`;
+  } else {
+    let parts = sets.map(s=>{
+      const names = s.dropped.map(c=>esc(c.name||`0x${pad(hx(c.addr),4)}`)).join(', ');
+      return `set <code>0x${pad(s.idx,3)}</code>: ${s.rows.length} enabled (max ${WAYS}) → `+
+             `<span class="err">${s.dropped.length} dropped</span>: ${names}`;
+    });
+    cdiv.innerHTML = `<div class="err">⚠ 4-way conflict (raw .cht path only): the F9 hardware loader keeps only ${WAYS} cheats per set index `+
+      `(address &amp; 0x1FF). Disable some of the cheats below to avoid silent drops:</div>`+
+      `<ul style="margin:6px 0 0">`+parts.map(p=>`<li>${p}</li>`).join('')+`</ul>`+
+      `<div class="muted" style="margin-top:6px">This limit does not apply to the MiSTer-standard `+
+      `<code>.zip</code> path — there you simply toggle individual cheats off in the OSD.</div>`;
+  }
+}
+
+function updatePreview(){
+  const {bytes}=buildBytes();
+  const hexEl=document.getElementById('hex');
+  document.getElementById('size').textContent =
+    `(${bytes.length} bytes, ${bytes.length/4} entr${bytes.length===4?'y':'ies'})`;
+  if(bytes.length===0){ hexEl.textContent='(empty)'; return; }
+  let s='';
+  const lim=Math.min(bytes.length, 256*4);
+  for(let i=0;i<lim;i+=4){
+    const e=i/4;
+    const a=bytes[i]|(bytes[i+1]<<8);
+    s+=`entry${String(e).padStart(4)}: `+[...bytes.slice(i,i+4)].map(b=>pad(b,2)).join(' ')
+       +`   ; 0x${pad(a,4)} = 0x${pad(bytes[i+2],2)} ${bytes[i+3]&1?'(on)':'(off)'}\n`;
+  }
+  if(bytes.length>lim) s+=`… (${(bytes.length-lim)/4} more entries)\n`;
+  hexEl.textContent=s.trimEnd();
+}
+
+function setNotice(msg, kind){
+  const n=document.getElementById('notice');
+  if(!msg){ n.style.display='none'; n.textContent=''; return; }
+  n.style.display=''; n.className = kind==='err'?'err':'warn'; n.textContent=msg;
+}
+
+// ---- buttons ----------------------------------------------------------
+document.getElementById('add').addEventListener('click',()=>{
+  if(state.length>=CAP){ setNotice(`Capacity is ${CAP} cheats; cannot add more.`,'err'); return; }
+  state.push(newRow()); setNotice('');
+  render();
+  // focus the name field of the new row
+  const last=rowsEl.querySelector('tr:last-child input[data-k="name"]');
+  if(last) last.focus();
+});
+
+document.getElementById('clear').addEventListener('click',()=>{
+  state=[]; setNotice(''); render();
+});
+
+document.getElementById('dl').addEventListener('click',()=>{
+  const {bytes, written}=buildBytes();
+  if(written===0){ alert('No valid cheats to save.'); return; }
+  let name=(document.getElementById('fname').value.trim()||'cheat').replace(/\.cht$/i,'');
+  const blob=new Blob([bytes],{type:'application/octet-stream'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=name+'.cht';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+});
+
+// ---- load existing .cht ----------------------------------------------
+document.getElementById('loadlbl').addEventListener('click',()=>document.getElementById('loadfile').click());
+document.getElementById('loadfile').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    const b=new Uint8Array(r.result);
+    state=[];
+    let n=0;
+    for(let i=0; i+3<b.length && n<CAP; i+=4,n++){
+      const a=b[i]|(b[i+1]<<8);
+      state.push(newRow({on:(b[i+3]&1)===1, name:'', addr:pad(a,4), val:pad(b[i+2],2)}));
+    }
+    setNotice(`Loaded ${n} cheat(s) from ${f.name} (names are not stored in .cht).`,'warn');
+    render();
+  };
+  r.readAsArrayBuffer(f);
+  e.target.value='';
+});
+
+// ---- blueMSX .mcf import (loads ALL into main list, default ON) -------
+function parseMcf(text){
+  const cheats=[], skipped=[];
+  text.split(/\r?\n/).forEach((raw,idx)=>{
+    const line=raw.trim();
+    if(line==='' || line.startsWith('!')) return; // comment / blank
+    // type,address,value,flag,description...  (description may contain commas)
+    const parts=line.split(',');
+    if(parts.length<3){ skipped.push(`line ${idx+1}: not a cheat line`); return; }
+    const addrStr=parts[1].trim(), valStr=parts[2].trim();
+    const addr=parseInt(addrStr,10);
+    const val =parseInt(valStr,10);
+    const desc=(parts.slice(4).join(',')||'').trim();
+    if(!/^-?\d+$/.test(addrStr) || !/^-?\d+$/.test(valStr) || !Number.isFinite(addr) || !Number.isFinite(val)){
+      skipped.push(`line ${idx+1}: non-numeric addr/value`); return;
+    }
+    if(addr<0 || addr>0xFFFF){
+      skipped.push(`"${desc||line}": addr ${addr} out of range (0-65535)`); return;
+    }
+    if(val<0 || val>0xFF){
+      skipped.push(`"${desc||line}": value ${val} out of range (0-255)`); return;
+    }
+    cheats.push({addr, val, desc});
+  });
+  return {cheats, skipped};
+}
+
+document.getElementById('mcflbl').addEventListener('click',
+  ()=>document.getElementById('mcffile').click());
+
+document.getElementById('mcffile').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    const {cheats, skipped}=parseMcf(r.result||'');
+    if(cheats.length===0){
+      setNotice('No valid cheats found in '+f.name+
+        (skipped.length?` (${skipped.length} line(s) skipped).`:'.'),'err');
+      return;
+    }
+    let added=cheats;
+    let capMsg='';
+    if(added.length>CAP){ added=added.slice(0,CAP); capMsg=` Truncated to capacity ${CAP}.`; }
+    state = added.map(c=>newRow({on:true, name:c.desc, addr:pad(c.addr,4), val:pad(c.val,2)}));
+    let msg=`Loaded ${state.length} cheat(s) from ${f.name}, all ON.`;
+    if(skipped.length) msg+=` Skipped ${skipped.length} line(s): `+
+      skipped.slice(0,5).join('; ')+(skipped.length>5?' …':'');
+    setNotice(msg+capMsg, skipped.length?'warn':'warn');
+    document.getElementById('fname').value = f.name.replace(/\.mcf$/i,'')||'my_cheat';
+    render();
+  };
+  r.readAsText(f);
+  e.target.value='';
+});
+
+// ======================================================================
+// MiSTer-standard .zip of .gg files
+// .gg = 16 bytes = 4 LE uint32 COMMON cross-core layout: flags, addr, compare, replace
+//   (flags bit0 = compare-enabled). filename (minus .gg) = description.
+//   Plain freeze/POKE: flags=0, addr, compare=0, replace=value.
+// ======================================================================
+
+// CRC32 (IEEE, reflected) — table built once.
+const CRC_TABLE = (function(){
+  const t=new Uint32Array(256);
+  for(let n=0;n<256;n++){
+    let c=n;
+    for(let k=0;k<8;k++) c = (c&1)? (0xEDB88320 ^ (c>>>1)) : (c>>>1);
+    t[n]=c>>>0;
+  }
+  return t;
+})();
+function crc32(bytes){
+  let c=0xFFFFFFFF;
+  for(let i=0;i<bytes.length;i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xFF] ^ (c>>>8);
+  return (c ^ 0xFFFFFFFF)>>>0;
+}
+function utf8Bytes(s){
+  if(window.TextEncoder) return new TextEncoder().encode(s);
+  const out=[]; for(const ch of unescape(encodeURIComponent(s))) out.push(ch.charCodeAt(0));
+  return Uint8Array.from(out);
+}
+function p16(a,v){ a.push(v&0xFF,(v>>>8)&0xFF); }
+function p32(a,v){ a.push(v&0xFF,(v>>>8)&0xFF,(v>>>16)&0xFF,(v>>>24)&0xFF); }
+
+// entries: [{name:String, data:Uint8Array}] -> Uint8Array of a STORE-only zip.
+function buildZip(entries){
+  const chunks=[]; const central=[]; let offset=0;
+  for(const e of entries){
+    const nameB=utf8Bytes(e.name); const data=e.data; const crc=crc32(data);
+    const lh=[];
+    p32(lh,0x04034b50); p16(lh,20); p16(lh,0); p16(lh,0);  // sig, ver, flags, method=STORE
+    p16(lh,0); p16(lh,0x21);                               // time, date (valid 1980-01-01)
+    p32(lh,crc); p32(lh,data.length); p32(lh,data.length); // crc, csize, usize
+    p16(lh,nameB.length); p16(lh,0);                       // name len, extra len
+    for(const b of nameB) lh.push(b);
+    const lho=offset;
+    chunks.push(Uint8Array.from(lh)); offset+=lh.length;
+    chunks.push(data); offset+=data.length;
+    const cd=[];
+    p32(cd,0x02014b50); p16(cd,20); p16(cd,20); p16(cd,0); p16(cd,0); // sig, vermade, verneed, flags, method
+    p16(cd,0); p16(cd,0x21);                                          // time, date
+    p32(cd,crc); p32(cd,data.length); p32(cd,data.length);            // crc, csize, usize
+    p16(cd,nameB.length); p16(cd,0); p16(cd,0);                       // name, extra, comment len
+    p16(cd,0); p16(cd,0); p32(cd,0);                                  // disk#, intAttr, extAttr
+    p32(cd,lho);                                                      // local header offset
+    for(const b of nameB) cd.push(b);
+    central.push(Uint8Array.from(cd));
+  }
+  const cdStart=offset; let cdSize=0;
+  for(const c of central){ chunks.push(c); cdSize+=c.length; offset+=c.length; }
+  const eocd=[];
+  p32(eocd,0x06054b50); p16(eocd,0); p16(eocd,0);
+  p16(eocd,central.length); p16(eocd,central.length);
+  p32(eocd,cdSize); p32(eocd,cdStart); p16(eocd,0);
+  chunks.push(Uint8Array.from(eocd));
+  let total=0; for(const c of chunks) total+=c.length;
+  const out=new Uint8Array(total); let p=0;
+  for(const c of chunks){ out.set(c,p); p+=c.length; }
+  return out;
+}
+
+// parse a zip via its central directory. returns [{name, method, data}]
+function readZip(bytes){
+  const dv=new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eocd=-1;
+  for(let i=bytes.length-22;i>=0;i--){
+    if(dv.getUint32(i,true)===0x06054b50){ eocd=i; break; }
+  }
+  if(eocd<0) throw new Error('not a zip (no end-of-central-directory record)');
+  const cdCount=dv.getUint16(eocd+10,true);
+  const cdOff=dv.getUint32(eocd+16,true);
+  const entries=[]; let p=cdOff;
+  for(let n=0;n<cdCount;n++){
+    if(dv.getUint32(p,true)!==0x02014b50) throw new Error('corrupt central directory');
+    const method=dv.getUint16(p+10,true);
+    const compSize=dv.getUint32(p+20,true);
+    const nameLen=dv.getUint16(p+28,true);
+    const extraLen=dv.getUint16(p+30,true);
+    const cmtLen=dv.getUint16(p+32,true);
+    const lho=dv.getUint32(p+42,true);
+    const name=new TextDecoder().decode(bytes.slice(p+46,p+46+nameLen));
+    if(dv.getUint32(lho,true)!==0x04034b50) throw new Error('corrupt local header');
+    const lNameLen=dv.getUint16(lho+26,true);
+    const lExtraLen=dv.getUint16(lho+28,true);
+    const dataStart=lho+30+lNameLen+lExtraLen;
+    const data=bytes.slice(dataStart,dataStart+compSize);
+    entries.push({name, method, data});
+    p+=46+nameLen+extraLen+cmtLen;
+  }
+  return entries;
+}
+
+// sanitize a description for use as a filename (strip path/illegal chars).
+function sanitizeName(s){
+  return (s||'').replace(/[\/\\:*?"<>|\x00-\x1F]/g,'_').replace(/\s+/g,' ').trim();
+}
+
+// build .gg entries from all valid rows.
+function buildGgEntries(){
+  const entries=[]; const used=new Set(); let invalid=0;
+  state.forEach(c=>{
+    if(c.addr.trim()==='' && c.val.trim()==='') return;
+    if(!rowValid(c)){ invalid++; return; }
+    const a=hx(c.addr), v=hx(c.val);
+    let base=sanitizeName(c.name) || ('cheat_'+pad(a,4));
+    let name=base+'.gg', k=2;
+    while(used.has(name.toLowerCase())){ name=base+' ('+(k++)+').gg'; }
+    used.add(name.toLowerCase());
+    // 16 bytes COMMON cross-core layout: [flags LE32][addr LE32][compare LE32][replace LE32]
+    // POKE/freeze: flags=0 (compare disabled), compare=0.
+    const data=new Uint8Array(16);
+    data[4]=a&0xFF; data[5]=(a>>8)&0xFF;          // addr LE32 -> bytes 4,5 (6,7 = 0)
+    data[12]=v&0xFF;                              // replace LE32 low byte (13..15 = 0)
+    entries.push({name, data});
+  });
+  return {entries, invalid};
+}
+
+document.getElementById('dlzip').addEventListener('click',()=>{
+  const {entries, invalid}=buildGgEntries();
+  if(entries.length===0){ alert('No valid cheats to export.'); return; }
+  const zip=buildZip(entries);
+  let name=(document.getElementById('fname').value.trim()||'cheat').replace(/\.zip$/i,'');
+  const blob=new Blob([zip],{type:'application/zip'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob); a.download=name+'.zip';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  setNotice(`Exported ${entries.length} cheat(s) to ${name}.zip`+
+    (invalid?` (${invalid} invalid row(s) skipped).`:'.'),'warn');
+});
+
+document.getElementById('zlbl').addEventListener('click',()=>document.getElementById('zfile').click());
+document.getElementById('zfile').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f) return;
+  const r=new FileReader();
+  r.onload=()=>{
+    let entries;
+    try{ entries=readZip(new Uint8Array(r.result)); }
+    catch(err){ setNotice('Could not read '+f.name+': '+err.message,'err'); e.target.value=''; return; }
+    const ggs=entries.filter(en=>/\.gg$/i.test(en.name));
+    if(ggs.length===0){ setNotice('No .gg entries found in '+f.name+'.','err'); e.target.value=''; return; }
+    const rows=[]; const notes=[]; let deflated=0, badlen=0;
+    for(const en of ggs){
+      if(en.method!==0){ deflated++; continue; }            // STORE only
+      if(en.data.length<16){ badlen++; continue; }
+      const d=en.data;
+      const addr=(d[4]|(d[5]<<8)|(d[6]<<16)|(d[7]<<24))>>>0; // addr LE32 = bytes 4..7
+      const value=d[12];                                    // replace LE32 low byte = byte 12
+      const desc=en.name.replace(/\.gg$/i,'');
+      rows.push(newRow({on:true, name:desc, addr:pad(addr&0xFFFF,4), val:pad(value,2)}));
+    }
+    if(rows.length===0){
+      setNotice('No usable .gg entries in '+f.name+'.'+
+        (deflated?` ${deflated} entr(y/ies) are compressed (deflate) — unsupported.`:'')+
+        (badlen?` ${badlen} entr(y/ies) too short.`:''),'err');
+      e.target.value=''; return;
+    }
+    if(rows.length>CAP) rows.length=CAP;
+    state=rows;
+    if(deflated) notes.push(`${deflated} compressed (deflate) entr(y/ies) skipped — only STORE is supported`);
+    if(badlen) notes.push(`${badlen} short entr(y/ies) skipped`);
+    setNotice(`Loaded ${state.length} cheat(s) from ${f.name}, all ON.`+
+      (notes.length? ' '+notes.join('; ')+'.':''),'warn');
+    document.getElementById('fname').value = f.name.replace(/\.zip$/i,'')||'my_cheat';
+    render();
+  };
+  r.readAsArrayBuffer(f);
+  e.target.value='';
+});
+
+render();
+</script>
+</body>
+</html>
