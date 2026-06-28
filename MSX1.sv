@@ -440,7 +440,12 @@ always @(posedge clk21m) begin
    status44_prev <= status[44];
    if (~status44_prev & status[44]) pause_toggle <= ~pause_toggle;
 end
-wire msx_pause = nvbak_dma_active | (status[43] & OSD_STATUS) | pause_toggle;
+// flash_dump_test (B: ASCII16X full-image save/restore engine) ch1 master + CPU pause
+wire        dump_active;
+wire [26:0] dump_sdram_addr;
+wire        dump_sdram_req, dump_sdram_rnw;
+wire  [7:0] dump_sdram_din;
+wire msx_pause = nvbak_dma_active | dump_active | (status[43] & OSD_STATUS) | pause_toggle;
 
 msx MSX
 (
@@ -816,10 +821,10 @@ sdram sdram
    .doRefresh(1'd0),
 
    .ch1_dout(nvbak_sdram_dout),
-   .ch1_din (upload_active ? upload_ram_din  : nvbak_sdram_din),
-   .ch1_addr(upload_active ? upload_ram_addr : nvbak_sdram_addr),
-   .ch1_req (upload_active ? upload_active   : nvbak_sdram_req),
-   .ch1_rnw (upload_active ? 1'b0            : nvbak_sdram_rnw),
+   .ch1_din (upload_active ? upload_ram_din  : dump_active ? dump_sdram_din  : nvbak_sdram_din),
+   .ch1_addr(upload_active ? upload_ram_addr : dump_active ? dump_sdram_addr : nvbak_sdram_addr),
+   .ch1_req (upload_active ? upload_active   : dump_active ? dump_sdram_req  : nvbak_sdram_req),
+   .ch1_rnw (upload_active ? 1'b0            : dump_active ? dump_sdram_rnw  : nvbak_sdram_rnw),
    .ch1_ready(upload_ram_ready),
 
    .ch2_dout(sdram_dout),
@@ -873,6 +878,30 @@ wire [15:0] flash16x_size[2];
 wire [26:0] sram_addr;
 wire  [7:0] sram_dout;
 wire        sram_we;
+
+// EXPERIMENT: VD0 (auto-mounted <rom>.sav) is muxed between nvram_backup and the
+// flash_dump_test module. nvram drives nv_sd_*; dump drives dump_sd_*; dump wins
+// while dump_active. VD1-3 pass through nvram unchanged.
+wire [31:0] nv_sd_lba[0:3];
+wire  [3:0] nv_sd_rd, nv_sd_wr;
+wire  [7:0] nv_sd_buff_din[0:3];
+wire [31:0] dump_sd_lba;
+wire        dump_sd_wr, dump_sd_rd;
+wire  [7:0] dump_sd_buff_din;
+
+assign sd_lba[0]      = dump_active ? dump_sd_lba      : nv_sd_lba[0];
+assign sd_lba[1]      = nv_sd_lba[1];
+assign sd_lba[2]      = nv_sd_lba[2];
+assign sd_lba[3]      = nv_sd_lba[3];
+assign sd_rd[3:1]     = nv_sd_rd[3:1];
+assign sd_rd[0]       = dump_active ? dump_sd_rd       : nv_sd_rd[0];
+assign sd_wr[3:1]     = nv_sd_wr[3:1];
+assign sd_wr[0]       = dump_active ? dump_sd_wr       : nv_sd_wr[0];
+assign sd_buff_din[0] = dump_active ? dump_sd_buff_din : nv_sd_buff_din[0];
+assign sd_buff_din[1] = nv_sd_buff_din[1];
+assign sd_buff_din[2] = nv_sd_buff_din[2];
+assign sd_buff_din[3] = nv_sd_buff_din[3];
+
 nvram_backup nvram_backup
 (
    .clk(clk21m),
@@ -883,13 +912,13 @@ nvram_backup nvram_backup
    .img_mounted(img_mounted[3:0]),
    .img_readonly(img_readonly),
    .img_size(img_size),
-   .sd_lba(sd_lba[0:3]),
-   .sd_rd(sd_rd[3:0]),
-   .sd_wr(sd_wr[3:0]),
+   .sd_lba(nv_sd_lba),
+   .sd_rd(nv_sd_rd),
+   .sd_wr(nv_sd_wr),
    .sd_ack(sd_ack[3:0]),
    .sd_buff_addr(sd_buff_addr),
    .sd_buff_dout(sd_buff_dout),
-   .sd_buff_din(sd_buff_din[0:3]),
+   .sd_buff_din(nv_sd_buff_din),
    .ram_addr(sram_addr),
    .ram_dout(sram_dout),
    .ram_we(sram_we),
@@ -903,6 +932,37 @@ nvram_backup nvram_backup
    .sdram_dout(nvbak_sdram_dout),
    .sdram_ready(upload_ram_ready),
    .dma_active(nvbak_dma_active)
+);
+
+// ---- B: ASCII16X full-image SAVE/RESTORE engine (flash16x region <-> VD0 .sav) ----
+// SAVE=status[38], LOAD=status[39]|load_sram. Gated on flash16x_active; VD0 muxed
+// vs nvram_backup. raw 8MB image (no header); A's loader treats it as legacy fulldump.
+flash_dump_test flash_dump_test
+(
+   .clk(clk21m),
+   .reset(reset),
+   .flash16x_active(flash16x_active[0]),
+   .flash16x_base(flash16x_base[0]),
+   .flash16x_size(flash16x_size[0]),
+   .save_req(status[38]),
+   .load_req(status[39] | load_sram),
+   .upload_active(upload_active),
+   .img_mounted(img_mounted[0]),
+   .img_readonly(img_readonly),
+   .img_size(img_size),
+   .sdram_addr(dump_sdram_addr),
+   .sdram_req(dump_sdram_req),
+   .sdram_rnw(dump_sdram_rnw),
+   .sdram_din(dump_sdram_din),
+   .sdram_dout(nvbak_sdram_dout),
+   .dump_active(dump_active),
+   .sd_lba(dump_sd_lba),
+   .sd_rd(dump_sd_rd),
+   .sd_wr(dump_sd_wr),
+   .sd_ack(sd_ack[0]),
+   .sd_buff_addr(sd_buff_addr),
+   .sd_buff_din(dump_sd_buff_din),
+   .sd_buff_dout(sd_buff_dout)
 );
 
 ///////////////// CAS EMULATE /////////////////
