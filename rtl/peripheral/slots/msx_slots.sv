@@ -62,8 +62,16 @@ module msx_slots
    // ASCII16X flash info (for SDRAM-based save/load)
    output logic       [1:0] flash16x_active,
    output logic      [26:0] flash16x_base[2],
-   output logic      [15:0] flash16x_size[2]
+   output logic      [15:0] flash16x_size[2],
+   // ASCII16X write-time capture (for change-log persistence)
+   output                   flash16x_prog_we,
+   output            [22:0] flash16x_prog_addr,
+   output             [7:0] flash16x_prog_data
 );
+
+assign flash16x_prog_we   = mapper_ascii16x_prog_we;
+assign flash16x_prog_addr = mapper_ascii16x_addr[22:0];
+assign flash16x_prog_data = cpu_dout;
 
 assign sound = sound_opll + scc_wave + sound_psg;
 assign d_to_sd = cpu_dout;

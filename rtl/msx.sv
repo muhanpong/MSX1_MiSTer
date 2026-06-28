@@ -87,6 +87,9 @@ module msx
    output              [1:0] flash16x_active,
    output             [26:0] flash16x_base[2],
    output             [15:0] flash16x_size[2],
+   output                    flash16x_prog_we,
+   output             [22:0] flash16x_prog_addr,
+   output              [7:0] flash16x_prog_data,
    // MoonSound PCM SDRAM interface (ch4)
    output             [26:0] pcm_sdram_addr,
    output                    pcm_sdram_req,
@@ -656,7 +659,10 @@ msx_slots msx_slots
    .d_from_sd(d_from_sd),
    .flash16x_active(flash16x_active),
    .flash16x_base(flash16x_base),
-   .flash16x_size(flash16x_size)
+   .flash16x_size(flash16x_size),
+   .flash16x_prog_we(flash16x_prog_we),
+   .flash16x_prog_addr(flash16x_prog_addr),
+   .flash16x_prog_data(flash16x_prog_data)
 );
 
 

@@ -440,11 +440,17 @@ always @(posedge clk21m) begin
    status44_prev <= status[44];
    if (~status44_prev & status[44]) pause_toggle <= ~pause_toggle;
 end
-// flash_dump_test (B: ASCII16X full-image save/restore engine) ch1 master + CPU pause
+// flash_changelog (A: ASCII16X change-log engine) ch1 master + CPU pause
+// reuses the dump_* mux wires (ch1 + VD0)
 wire        dump_active;
 wire [26:0] dump_sdram_addr;
 wire        dump_sdram_req, dump_sdram_rnw;
 wire  [7:0] dump_sdram_din;
+wire        flash16x_prog_we;
+wire [22:0] flash16x_prog_addr;
+wire  [7:0] flash16x_prog_data;
+wire        cl_overflow;
+wire        log_clear;
 wire msx_pause = nvbak_dma_active | dump_active | (status[43] & OSD_STATUS) | pause_toggle;
 
 msx MSX
@@ -495,6 +501,9 @@ msx MSX
    .flash16x_active(flash16x_active),
    .flash16x_base(flash16x_base),
    .flash16x_size(flash16x_size),
+   .flash16x_prog_we(flash16x_prog_we),
+   .flash16x_prog_addr(flash16x_prog_addr),
+   .flash16x_prog_data(flash16x_prog_data),
    // MoonSound PCM SDRAM
    .pcm_sdram_addr(pcm_sdram_addr),
    .pcm_sdram_req(pcm_sdram_req),
@@ -801,6 +810,10 @@ wire [26:0] nvbak_sdram_addr;
 wire        nvbak_sdram_req, nvbak_sdram_rnw;
 wire  [7:0] nvbak_sdram_din;
 wire        upload_active = upload_ram_ce & upload_sdram_rq;
+// log_clear: pulse on new ROM staging start -> reset change-log journal per game
+reg         upload_active_q;
+always @(posedge clk21m) upload_active_q <= upload_active;
+assign      log_clear = upload_active & ~upload_active_q;
 
 // MoonSound PCM SDRAM ch4 wires
 wire [26:0] pcm_sdram_addr;
@@ -934,19 +947,23 @@ nvram_backup nvram_backup
    .dma_active(nvbak_dma_active)
 );
 
-// ---- B: ASCII16X full-image SAVE/RESTORE engine (flash16x region <-> VD0 .sav) ----
-// SAVE=status[38], LOAD=status[39]|load_sram. Gated on flash16x_active; VD0 muxed
-// vs nvram_backup. raw 8MB image (no header); A's loader treats it as legacy fulldump.
-flash_dump_test flash_dump_test
+// ---- A: ASCII16X CHANGE-LOG engine (capture -> journal -> VD0 .sav -> replay) ----
+// SAVE=status[38], LOAD=status[39]|load_sram. Gated on flash16x_active. Reuses the
+// dump_* ch1/VD0 mux wires (cl_active==dump_active). Overflow/erase -> fail-loud.
+flash_changelog flash_changelog
 (
    .clk(clk21m),
    .reset(reset),
    .flash16x_active(flash16x_active[0]),
    .flash16x_base(flash16x_base[0]),
    .flash16x_size(flash16x_size[0]),
+   .prog_we(flash16x_prog_we),
+   .prog_addr(flash16x_prog_addr),
+   .prog_data(flash16x_prog_data),
    .save_req(status[38]),
    .load_req(status[39] | load_sram),
    .upload_active(upload_active),
+   .log_clear(log_clear),
    .img_mounted(img_mounted[0]),
    .img_readonly(img_readonly),
    .img_size(img_size),
@@ -954,15 +971,15 @@ flash_dump_test flash_dump_test
    .sdram_req(dump_sdram_req),
    .sdram_rnw(dump_sdram_rnw),
    .sdram_din(dump_sdram_din),
-   .sdram_dout(nvbak_sdram_dout),
-   .dump_active(dump_active),
+   .cl_active(dump_active),
    .sd_lba(dump_sd_lba),
    .sd_rd(dump_sd_rd),
    .sd_wr(dump_sd_wr),
    .sd_ack(sd_ack[0]),
    .sd_buff_addr(sd_buff_addr),
    .sd_buff_din(dump_sd_buff_din),
-   .sd_buff_dout(sd_buff_dout)
+   .sd_buff_dout(sd_buff_dout),
+   .cl_overflow(cl_overflow)
 );
 
 ///////////////// CAS EMULATE /////////////////
