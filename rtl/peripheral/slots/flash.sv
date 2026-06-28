@@ -13,6 +13,7 @@ module flash (
 	output reg  [7:0] sdram_din,
 	output reg        sdram_req,
 	input      [26:0] sdram_offset,
+	input             is_ascii16x,   // ASCII16X cart selected: use 8KB boot-sector erase
 	output            debug_erase
 );
 /*verilator tracing_off*/
@@ -38,6 +39,7 @@ module flash (
 
 	reg       erase_block = 0;
 	reg [7:0] erase_block_num;
+	reg       erase_boot = 0;   // ASCII16X 8KB boot-sector erase (M29W640 bottom-boot: 0x0-0xFFFF = 8x8KB)
 //	reg       erase_chip = 0;
 
 	reg old_we;
@@ -56,7 +58,7 @@ module flash (
 				index <= index + 1'b1;
 				if (int_valid5) begin
 					index <= 0;
-					if (din == 8'h30) begin erase_block <= 1; erase_block_num <= (addr > 23'hFFFF ? {1'b0,addr[22:16]} : {5'd0,addr[15:13]} ); end
+					if (din == 8'h30) begin erase_block <= 1; erase_boot <= is_ascii16x & ~(addr > 23'hFFFF); erase_block_num <= (addr > 23'hFFFF ? {1'b0,addr[22:16]} : {5'd0,addr[15:13]} ); end
 					//if (din == 8'h10) erase_chip  <= 1;
 				end
 				if (addr[11:1] != (index == 3'd1 | index == 3'd4 ? 11'h2aa : 11'h555) & ~(din == 8'hF0 & index == 0) ) begin
@@ -125,12 +127,12 @@ module flash (
 			sdram_req <= 1;
 		end
 		if (erase_block) begin
-			write_cnt <= 16'hFFFF;
+			write_cnt <= erase_boot ? 16'h1FFF : 16'hFFFF;   // 8KB boot sector vs 64KB sector
 			sdram_din <=  8'hFF;
 			sdram_need_wr <= 1;
-			sdram_addr <= sdram_offset + (27'(erase_block_num) << 16);
+			sdram_addr <= sdram_offset + (erase_boot ? (27'(erase_block_num) << 13) : (27'(erase_block_num) << 16));
 			erase <= 1;
-		end else 
+		end else
 		if ((quadrupleProgram | write_cnt > 0) & we & ~old_we & ce ) begin
 			//Zkontrolovat zda je writable sector num1 a num2 vypocet
 			sdram_addr <= sdram_offset + 27'(addr);

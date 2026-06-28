@@ -223,6 +223,7 @@ flash flash
    .sdram_ready(flash_ready),
    .sdram_done(flash_done),
    .sdram_offset(mapper_ascii16x_flash_rq ? 27'(base_ram) : mfrsd_base_ram[0]),
+   .is_ascii16x(mapper_ascii16x_flash_rq & ~mapper_mfrsd0_flash_rq & ~mapper_mfrsd3_flash_rq),
    .debug_erase(debug_erase)
 );
 
