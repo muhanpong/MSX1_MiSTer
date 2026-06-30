@@ -449,7 +449,6 @@ wire  [7:0] dump_sdram_din;
 wire        flash16x_prog_we;
 wire [22:0] flash16x_prog_addr;
 wire  [7:0] flash16x_prog_data;
-wire        cl_overflow;
 wire        log_clear;
 wire msx_pause = nvbak_dma_active | dump_active | (status[43] & OSD_STATUS) | pause_toggle;
 
@@ -947,10 +946,11 @@ nvram_backup nvram_backup
    .dma_active(nvbak_dma_active)
 );
 
-// ---- A: ASCII16X CHANGE-LOG engine (capture -> journal -> VD0 .sav -> replay) ----
+// ---- ASCII16X DIRTY-BLOCK engine (64KB dirty bitmap -> dump dirty blocks -> VD0 .sav) ----
 // SAVE=status[38], LOAD=status[39]|load_sram. Gated on flash16x_active. Reuses the
-// dump_* ch1/VD0 mux wires (cl_active==dump_active). Overflow/erase -> fail-loud.
-flash_changelog flash_changelog
+// dump_* ch1/VD0 mux wires (cl_active==dump_active). Captures prog_we at 64KB
+// granularity (0 M10K bitmap); SAVE reads real data from SDRAM -> no overflow.
+flash_dirtysave flash_dirtysave
 (
    .clk(clk21m),
    .reset(reset),
@@ -959,7 +959,6 @@ flash_changelog flash_changelog
    .flash16x_size(flash16x_size[0]),
    .prog_we(flash16x_prog_we),
    .prog_addr(flash16x_prog_addr),
-   .prog_data(flash16x_prog_data),
    .save_req(status[38]),
    .load_req(status[39] | load_sram),
    .upload_active(upload_active),
@@ -971,6 +970,7 @@ flash_changelog flash_changelog
    .sdram_req(dump_sdram_req),
    .sdram_rnw(dump_sdram_rnw),
    .sdram_din(dump_sdram_din),
+   .sdram_dout(nvbak_sdram_dout),
    .cl_active(dump_active),
    .sd_lba(dump_sd_lba),
    .sd_rd(dump_sd_rd),
@@ -979,7 +979,7 @@ flash_changelog flash_changelog
    .sd_buff_addr(sd_buff_addr),
    .sd_buff_din(dump_sd_buff_din),
    .sd_buff_dout(sd_buff_dout),
-   .cl_overflow(cl_overflow)
+   .sd_buff_wr(sd_buff_wr)
 );
 
 ///////////////// CAS EMULATE /////////////////
