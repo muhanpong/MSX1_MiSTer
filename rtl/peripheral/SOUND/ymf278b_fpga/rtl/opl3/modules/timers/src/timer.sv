@@ -81,6 +81,15 @@ module timer
             else
                 tick_counter <= tick_counter + 1;
         end
+        else
+            // Clear while stopped.  Without this the counter FREEZES at whatever it
+            // held when the driver cleared ST, and if that value is
+            // TICK_TIMER_COUNT_VALUE-1 the combinational tick_pulse sticks high --
+            // the timer block below is not gated on start_timer, so it then
+            // free-runs at the full clock and re-raises the overflow flag faster
+            // than the IRQ can be acked (IRQ storm, replayer timing destroyed).
+            // A song change is exactly when ST gets cleared.
+            tick_counter <= 0;
 
     /*
      * Timer gets set to timer_reg upon overflow

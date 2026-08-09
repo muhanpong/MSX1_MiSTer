@@ -275,7 +275,14 @@ module control_operators
             end
             else begin
                 kon_block_fnum_channel_mem_rd_address = connection_sel[5] ? 2 : 5;
-                fb_cnt0_channel_mem_rd_address = connection_sel[2] ? 2 : 5;
+                // was connection_sel[2] — the bank-0 index, copy-pasted into the
+                // bank-1 branch.  Every other bank-1 case uses the same index for
+                // both reads (6,9 -> [3]; 7,10 -> [4]), so this must be [5].  With
+                // the wrong index, whenever the two banks have different 4-op splits
+                // (exactly what a song change does by rewriting 0x104) OPL3 channels
+                // 11/14 took feedback/connection from the wrong channel = wrong
+                // algorithm and feedback depth -> broken FM timbre after a transition.
+                fb_cnt0_channel_mem_rd_address = connection_sel[5] ? 2 : 5;
             end
         end
         12, 15: begin
