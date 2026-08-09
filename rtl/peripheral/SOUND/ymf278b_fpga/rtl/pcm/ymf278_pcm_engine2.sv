@@ -73,6 +73,8 @@ module ymf278_pcm_engine2 #(
     output logic [21:0] dbg_slot0_hdr_start,
     output logic [15:0] dbg_slot0_hdr_loop,
     output logic [15:0] dbg_slot0_hdr_end,
+    output logic [2:0]  fm_mix_l_o,
+    output logic [2:0]  fm_mix_r_o,
     output logic [1:0]  dbg_slot0_hdr_bits,
     output logic [15:0] dbg_slot0_dyn_pos,
     output logic [15:0] dbg_slot0_dyn_stepPtr,
@@ -163,6 +165,13 @@ logic [7:0]   tl_cur     [0:23];     // ramped TL (volume stage input)
 logic [23:0]  tl_load;               // immediate-load request per slot
 logic [23:0]  key_on_prev;
 logic [23:0]  key_retrig;
+// YMF278.cc:594-622 case 0 (wave-number write): if the slot is keyed on it does a
+// full keyOnHelper (our key_retrig); if it is NOT keyed on it still does
+// `stepPtr = 0; pos = 0;`.  We only had the keyed-on half, so a wave swapped onto a
+// slot that is still RELEASING kept the old position and addressed
+// new_start + stale_pos -> arbitrary memory = the documented "찍" burst.  Drivers hit
+// this whenever they key-off then re-instrument before the release has died.
+logic [23:0]  pos_rst;
 logic [23:0]  hf_pending;
 // Header-backfill dirty mask: openMSX backfills the envelope/LFO registers
 // SYNCHRONOUSLY at the wave-number write, so software's writes AFTER the wave
@@ -174,6 +183,9 @@ logic [4:0]   bf_dirty [0:23];
 
 logic [2:0]   wavetblhdr;
 logic [2:0]   pcm_mix_l, pcm_mix_r;  // reg 0xF9
+logic [2:0]   fm_mix_l,  fm_mix_r;   // reg 0xF8 (FM mix level — the FM half of the
+                                       // same fade a driver does with 0xF9; without it the
+                                       // FM keeps blaring at full level through a fade)
 
 // Loop wrap (v2 next_pos_calc, verbatim)
 function automatic [15:0] next_pos_calc(
@@ -241,6 +253,7 @@ slot_header_t w_hdr;
 slot_dyn_t    w_dyn;
 logic [4:0]   w_slot;
 logic         w_edge;                  // key-on edge (incl. retrig)
+logic         w_posrst;   // dispatched copy of pos_rst[slot]
 logic signed [15:0] w_vib;
 logic [9:0]   w_vib_mag;               // |lfo offset| × depth (compute_vib stage 1)
 logic         w_vib_neg;
@@ -280,6 +293,11 @@ logic [20:0] cache_tagA [0:23];
 logic [20:0] cache_tagB [0:23];
 logic [15:0] cache_w0 [0:23], cache_w1 [0:23], cache_w2 [0:23], cache_w3 [0:23];
 logic [23:0] cache_vld;
+// Did the fill that populated this entry actually FETCH the B pair?  A partial fill
+// (need_b==0) still stores cache_w2/w3 from the shared w_word[] regs (possibly another
+// slot's leftovers) and a cache_tagB, so a later need_b==1 request could match both tags
+// and consume words that were never read.
+logic [23:0] cache_hasb;
 // Periodic cache-scrub round-robin pointer (see scrub block in the slot FSM).
 logic [4:0]  cache_rr;
 
@@ -381,6 +399,7 @@ always_ff @(posedge clk or negedge rst_n) begin
         accum_l   <= '0;
         accum_r   <= '0;
         cache_vld <= '0;
+        cache_hasb <= '0;
         cache_rr  <= '0;
         key_on_prev <= '0;
         pcm_left  <= '0;
@@ -396,8 +415,25 @@ always_ff @(posedge clk or negedge rst_n) begin
         sl_rd_req <= 1'b0;
         pcm_valid <= 1'b0;
 
-        // CPU wrote sample RAM → cached words may be stale → invalidate all
-        if (cpu_wr_issue) cache_vld <= '0;
+        // CPU wrote sample RAM → invalidate ONLY the slots whose cached words cover
+        // the written address.  A blanket flush here is catastrophic under a streaming
+        // upload: a driver may rewrite a wave-table header block on every screen
+        // transition and do it BEFORE muting, so all 24 voices are still keyed on.
+        // Flushing every cache on every byte then forces all of them to refetch for
+        // the whole upload, and ch4 is LAST in the SDRAM arbiter — voices lose their
+        // slot budget and drop out, i.e. the music breaks up until the upload ends
+        // (MSXdev25 GoFigure: 1536 bytes ≈ 18 ms at our write pacing).
+        if (cpu_wr_issue) begin
+            // The entry caches FOUR words: w0@tagA, w1@tagA+1, w2@tagB, w3@tagB+1,
+            // so all four must be compared or a write to an odd word leaves a stale
+            // entry valid until the tag moves or the 32-frame scrub reaches it.
+            for (int i = 0; i < 24; i++)
+                if (cache_tagA[i]            == sv_wr_addr[21:1]
+                 || (cache_tagA[i] + 21'd1)  == sv_wr_addr[21:1]
+                 || (cache_hasb[i] && (cache_tagB[i]           == sv_wr_addr[21:1]
+                                    || (cache_tagB[i] + 21'd1) == sv_wr_addr[21:1])))
+                    cache_vld[i] <= 1'b0;
+        end
 
         // ── frame output (independent of slot FSM state) ──
         if (sample_start) begin
@@ -446,6 +482,7 @@ always_ff @(posedge clk or negedge rst_n) begin
                         w_hdr  <= ram_header[ld_slot];
                         w_dyn  <= ram_dyn[ld_slot];
                         w_edge <= ld_edge_w;
+                        w_posrst <= pos_rst[ld_slot];
                         sl_state <= SL_VIB;
                     end else if (ld_want_hdr) begin
                         // wants to run but header re-fetch pending: stall (turn
@@ -469,6 +506,7 @@ always_ff @(posedge clk or negedge rst_n) begin
                     w_hdr  <= ram_header[ld_slot];
                     w_dyn  <= ram_dyn[ld_slot];
                     w_edge <= ld_edge_w;
+                    w_posrst <= pos_rst[ld_slot];
                     sl_state <= SL_VIB;
                 end
             end
@@ -504,7 +542,7 @@ always_ff @(posedge clk or negedge rst_n) begin
             end
 
             SL_ADV: begin
-                if (w_edge) begin
+                if (w_edge || w_posrst) begin
                     // key-on (or retrig): restart sample (v2: pos/stepPtr reset)
                     w_pos2 <= 16'd0;
                     w_ptr2 <= 16'd0;
@@ -550,7 +588,8 @@ always_ff @(posedge clk or negedge rst_n) begin
                 w_fidx   <= 2'd0;
                 hit_c = cache_vld[w_slot]
                       && (cache_tagA[w_slot] == w_a0[21:1])
-                      && (!need_b_c || (cache_tagB[w_slot] == w_b0[21:1]));
+                      && (!need_b_c || (cache_hasb[w_slot]
+                                        && cache_tagB[w_slot] == w_b0[21:1]));
                 if (hit_c) begin
                     w_word[0] <= cache_w0[w_slot];
                     w_word[1] <= cache_w1[w_slot];
@@ -586,6 +625,7 @@ always_ff @(posedge clk or negedge rst_n) begin
                         cache_w2[w_slot] <= (w_fidx == 2'd2) ? mem_rd_data16 : w_word[2];
                         cache_w3[w_slot] <= (w_fidx == 2'd3) ? mem_rd_data16 : w_word[3];
                         cache_vld[w_slot] <= 1'b1;
+                        cache_hasb[w_slot] <= w_need_b;
                         sl_state <= SL_DECODE;
                     end else begin
                         w_fidx   <= w_fidx + 2'd1;
@@ -750,7 +790,7 @@ end
 // ═══════════════════════════════════════════════════════════════════════════
 typedef enum logic [3:0] {
     SV_IDLE, SV_CPU_RD_ISSUE, SV_CPU_RD_WAIT, SV_CPU_WR_ISSUE, SV_CPU_WR_SETTLE,
-    SV_HDR_PICK, SV_HDR_ISSUE, SV_HDR_WAIT, SV_HDR_STORE, SV_HDR_DRAIN
+    SV_HDR_PICK, SV_HDR_ISSUE, SV_HDR_WAIT, SV_HDR_STORE, SV_HDR_DRAIN, SV_HDR_DRAIN2
 } sv_state_t;
 sv_state_t sv_state;
 logic [1:0]  sv_settle;
@@ -786,7 +826,12 @@ wire [21:0] hf_base_calc = (hf_cur_wave < 9'd384 || wavetblhdr == 3'd0)
 // ops only (header fetch is too long to guarantee completion there).
 // CPU op service: in the frame-end reserve ALWAYS (the slot FSM has been
 // forced idle there), and opportunistically between slots.
-wire slots_done  = (cur_slot == 5'd24);
+// cur_slot increments at DISPATCH, so it reaches 24 while slot 23 is still running
+// (and possibly mid-SDRAM-fetch).  Starting a header fetch then makes the untagged
+// SV_HDR_WAIT latch the SLOT's sample word as header bytes -> garbage startAddr /
+// loopAddr / bits plus a garbage envelope backfill on that voice.  Require the slot
+// FSM to be idle as well.
+wire slots_done  = (cur_slot == 5'd24) && (sl_state == SL_IDLE);
 wire sv_can_cpu  = in_reserve | sl_tail_idle;
 
 always_ff @(posedge clk or negedge rst_n) begin
@@ -899,7 +944,11 @@ always_ff @(posedge clk or negedge rst_n) begin
             // a spurious second fetch (harmless when slots idle, but in the eager
             // stall path it collides on the shared read bus with the now-resumed
             // slot's sample reads → corrupted header).
-            SV_HDR_DRAIN: sv_state <= SV_IDLE;
+            // 2 drain cycles: a slot leaving SL_STALL_HDR needs two (hf_pending
+            // clears, then sl_state moves), and with a single drain SV_IDLE re-armed
+            // a fetch in the very cycle the resumed slot started reading samples.
+            SV_HDR_DRAIN:  sv_state <= SV_HDR_DRAIN2;
+            SV_HDR_DRAIN2: sv_state <= SV_IDLE;
             default: sv_state <= SV_IDLE;
         endcase
     end
@@ -937,11 +986,17 @@ always_ff @(posedge clk or negedge rst_n) begin
         wavetblhdr <= '0;
         pcm_mix_l  <= 3'd0;
         pcm_mix_r  <= 3'd0;
+        fm_mix_l   <= 3'd0;
+        fm_mix_r   <= 3'd0;
         for (int i = 0; i < 24; i++) ram_regs[i] <= '0;
         for (int i = 0; i < 24; i++) bf_dirty[i] <= '0;
     end else begin
         if (reg_wr && reg_addr == 8'h02)
             wavetblhdr <= reg_data[4:2];
+        if (reg_wr && reg_addr == 8'hF8) begin
+            fm_mix_l  <= reg_data[2:0];
+            fm_mix_r  <= reg_data[5:3];
+        end
         if (reg_wr && reg_addr == 8'hF9) begin
             pcm_mix_l <= reg_data[2:0];
             pcm_mix_r <= reg_data[5:3];
@@ -1064,6 +1119,12 @@ always_ff @(posedge clk or negedge rst_n) begin
         if (retrig_consume && w_edge) key_retrig[w_slot] <= 1'b0;
         if (wr_retrig)                key_retrig[wr_snum] <= 1'b1;  // set wins
     end
+    if (!rst_n) pos_rst <= '0;
+    else begin
+        if (retrig_consume && w_posrst) pos_rst[w_slot] <= 1'b0;
+        if (wr_slot_reg && (wr_field == 4'd0) && !cur_r.keyon)
+            pos_rst[wr_snum] <= 1'b1;                              // set wins
+    end
 end
 
 // TL ramp (v2, carried over): one step per slot per frame, 9-sample phase.
@@ -1169,6 +1230,8 @@ always_comb begin
     dbg_h0  = ram_header[0];
     dbg_d0  = ram_dyn[0];
 end
+assign fm_mix_l_o = fm_mix_l;
+assign fm_mix_r_o = fm_mix_r;
 assign dbg_wavetblhdr  = wavetblhdr;
 assign dbg_hf_pending  = hf_pending;
 assign dbg_slot0_wave  = dbg_s0.wave;

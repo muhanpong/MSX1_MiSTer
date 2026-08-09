@@ -238,6 +238,8 @@ ymf278_pcm_engine2 #(
     .dbg_slot23_wave (),
     .dbg_slot0_hdr_start (dbg_slot0_hdr_start),
     .dbg_slot0_hdr_loop  (),
+    .fm_mix_l_o          (fm_mix_l),
+    .fm_mix_r_o          (fm_mix_r),
     .dbg_slot0_hdr_end   (),
     .dbg_slot0_hdr_bits  (),
     .dbg_slot0_dyn_pos      (dbg_slot0_dyn_pos),
@@ -313,10 +315,31 @@ assign opl3_status = opl3_status_s2;
 logic signed [16:0] mix_left_tmp, mix_right_tmp;
 logic signed [15:0] pcm_left_hold, pcm_right_hold;
 
-// FM/PCM mute mux — zero the respective path when muted
+// FM/PCM mute mux — zero the respective path when muted.
+// The FM level also follows wave register 0xF8 (FM MIX_CTRL), the FM twin of the
+// 0xF9 PCM mix level.  Drivers fade BOTH together (GoFigure writes 0xF9 then
+// DEC B -> 0xF8 with the same value); with 0xF8 unimplemented the PCM half faded
+// on schedule while the FM half stayed at full level right through a song change,
+// so the outgoing track blared over the transition until the new song's key-off
+// blast silenced it.
+logic [2:0] fm_mix_l, fm_mix_r;
+function automatic signed [16:0] fm_mix_gain(input [2:0] idx, input signed [16:0] x);
+    logic signed [20:0] x3;
+    x3 = $signed(x) * 21'sd3;
+    case (idx)
+        3'd0: return x;                  // x1
+        3'd1: return 17'(x3 >>> 2);      // x3/4
+        3'd2: return x >>> 1;            // x1/2
+        3'd3: return 17'(x3 >>> 3);      // x3/8
+        3'd4: return x >>> 2;            // x1/4
+        3'd5: return 17'(x3 >>> 4);      // x3/16
+        3'd6: return x >>> 3;            // x1/8
+        default: return 17'sd0;          // mute
+    endcase
+endfunction
 logic signed [16:0] opl3_l_eff, opl3_r_eff;
-assign opl3_l_eff    = fm_mute  ? 17'sh0 : $signed({opl3_left[20],  opl3_left[20:5]});
-assign opl3_r_eff    = fm_mute  ? 17'sh0 : $signed({opl3_right[20], opl3_right[20:5]});
+assign opl3_l_eff    = fm_mute  ? 17'sh0 : fm_mix_gain(fm_mix_l, $signed({opl3_left[20],  opl3_left[20:5]}));
+assign opl3_r_eff    = fm_mute  ? 17'sh0 : fm_mix_gain(fm_mix_r, $signed({opl3_right[20], opl3_right[20:5]}));
 
 // ─── DIAGNOSTIC MODE ────────────────────────────────────────────────────
 // User reports overlay row 2 (PCM valid) OFF on hardware even after
