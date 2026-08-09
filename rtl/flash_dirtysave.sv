@@ -19,6 +19,16 @@
 //  flash16x_base + block*64KB via ch1 WRITES (the proven-safe half). Unknown
 //  magic -> ignore (fail-quiet). Loaded blocks are re-marked dirty so a later
 //  SAVE still re-emits them (avoids losing earlier blocks on an incremental save).
+//
+//  SAVE-MERGE (robustness): SAVE must NEVER drop a previously-saved block just
+//  because LOAD did not run / the dirty set is incomplete this session. So SAVE
+//  first reads the EXISTING .sav header and, for every previously-saved block we
+//  did NOT change this session, restores it from the old .sav into SDRAM (blocks
+//  we DID change keep their current SDRAM data -- restore is skipped). It then
+//  dumps the UNION (old | this-session) from SDRAM to the new .sav. Routing the
+//  old data through SDRAM (rather than copying old.sav->new.sav in place) avoids
+//  ever reading and overwriting the same file region at once, so reordering a
+//  newly-inserted low block ahead of an old high block cannot corrupt the copy.
 // =============================================================================
 module flash_dirtysave #(
     parameter int RDWAIT = 68            // SDRAM dead-reckon read latency (sim can override)
@@ -87,6 +97,14 @@ logic [26:0] sd_to;
 logic        save_q, load_q, last_ack, mounted_rw = 1'b0;
 logic [63:0] image_size = 64'd0;
 logic        pw_q;
+// ---- SAVE-MERGE: before overwriting the .sav, fold in any previously-saved
+//  blocks that are NOT dirty this session so a partial-dirty SAVE never loses
+//  them. Implemented by routing old.sav -> SDRAM (restore the missing blocks,
+//  skipping the ones we changed this session) and THEN dumping the UNION from
+//  SDRAM to the new .sav. Going via SDRAM (never read+write the same file
+//  region at once) avoids in-place overlap corruption. ----
+logic        merge_save = 1'b0;  // this LOAD pass is the restore phase of a SAVE
+logic [127:0] dsave = '0;        // snapshot of `dirty` at SAVE start (this session's blocks)
 
 assign cl_active = (st != IDLE);
 
@@ -107,7 +125,7 @@ always @(posedge clk) begin
     if (img_mounted) begin mounted_rw <= ~img_readonly; image_size <= img_size; end
 
     if (reset) begin
-        st<=IDLE; sdram_req<=0; sd_rd<=0; sd_wr<=0; dirty<='0; pw_q<=0; load_pending<=0;
+        st<=IDLE; sdram_req<=0; sd_rd<=0; sd_wr<=0; dirty<='0; pw_q<=0; load_pending<=0; merge_save<=0;
     end else begin
         // ---- dirty capture (passive snoop, live in IDLE only) ----
         if (log_clear) dirty <= '0;
@@ -122,9 +140,14 @@ always @(posedge clk) begin
         IDLE: begin
             sdram_req<=0; sd_rd<=0; sd_wr<=0;
             if (save_start & any_dirty) begin
-                bi<=0; st<=SV_HDR;
+                // SAVE-MERGE phase 1: read the existing .sav header and restore the
+                // previously-saved blocks we did NOT change this session into SDRAM,
+                // then fall through to the normal SAVE dump (UNION) -- reuses LD_*.
+                merge_save<=1'b1; dsave<=dirty;
+                sd_lba<=32'd0; sd_rd<=1'b1; sd_to<='0; st<=LD_HDR_RD;
             end else if (load_ready) begin
-                load_pending<=1'b0; sd_lba<=32'd0; sd_rd<=1'b1; sd_to<='0; st<=LD_HDR_RD;
+                merge_save<=1'b0; load_pending<=1'b0;
+                sd_lba<=32'd0; sd_rd<=1'b1; sd_to<='0; st<=LD_HDR_RD;
             end
         end
 
@@ -187,14 +210,24 @@ always @(posedge clk) begin
         end
         LD_HDR: begin
             if (hdr_magic==MAGIC) begin
-                dirty <= dirty | ld_bm;                 // keep loaded blocks for future saves
+                dirty <= dirty | ld_bm;                 // UNION: keep previously-saved blocks (re-emitted on SAVE)
                 sd_lba<=32'd1; scan<=8'd0; st<=LD_SCAN;
+            end else if (merge_save) begin
+                bi<=0; st<=SV_HDR;                      // no valid old .sav -> just save this session's dirty
             end else st<=IDLE;
         end
         LD_SCAN: begin
-            if (scan[7]) st<=DONE;
-            else if (ld_bm[scan[6:0]]) begin
-                cur_block<=scan[6:0]; sec_in_block<=7'd0; sd_rd<=1'b1; sd_to<='0; st<=LD_SD_RD;
+            if (scan[7]) begin
+                if (merge_save) begin bi<=0; st<=SV_HDR; end  // restore done -> dump UNION from SDRAM
+                else st<=DONE;
+            end else if (ld_bm[scan[6:0]]) begin
+                if (merge_save & dsave[scan[6:0]]) begin
+                    // block changed THIS session: skip restore (keep current SDRAM data),
+                    // but still consume its 128 sectors in the old .sav layout.
+                    sd_lba<=sd_lba+32'd128; scan<=scan+1'b1;
+                end else begin
+                    cur_block<=scan[6:0]; sec_in_block<=7'd0; sd_rd<=1'b1; sd_to<='0; st<=LD_SD_RD;
+                end
             end else scan<=scan+1'b1;
         end
         LD_SD_RD: begin

@@ -280,6 +280,8 @@ logic [20:0] cache_tagA [0:23];
 logic [20:0] cache_tagB [0:23];
 logic [15:0] cache_w0 [0:23], cache_w1 [0:23], cache_w2 [0:23], cache_w3 [0:23];
 logic [23:0] cache_vld;
+// Periodic cache-scrub round-robin pointer (see scrub block in the slot FSM).
+logic [4:0]  cache_rr;
 
 // CPU mem service request lines (driven by the CPU-mem block below; serviced
 // by the service FSM and opportunistically in slot-window idle tails)
@@ -379,6 +381,7 @@ always_ff @(posedge clk or negedge rst_n) begin
         accum_l   <= '0;
         accum_r   <= '0;
         cache_vld <= '0;
+        cache_rr  <= '0;
         key_on_prev <= '0;
         pcm_left  <= '0;
         pcm_right <= '0;
@@ -412,6 +415,25 @@ always_ff @(posedge clk or negedge rst_n) begin
             accum_r   <= '0;
             sl_state  <= SL_IDLE;     // abandon any in-flight slot at frame end
             cur_slot  <= '0;
+
+            // ── Periodic cache scrub (bug mitigation, NOT a root fix) ──────────
+            // A rare MARGINAL physical ch4 read can be latched into one slot's
+            // word cache under a VALID tag.  For a sustained low-pitch voice the
+            // absolute-address tag stays constant, so that single corrupt word
+            // would replay every frame for SECONDS (one channel breaks up) until
+            // pos advances past the tag or a CPU sample write invalidates the
+            // cache.  To bound that, force-refetch one slot's cache every 32
+            // frames in round-robin: every cached entry is refreshed within
+            // 24×32 = 768 frames ≈ 17 ms, turning a multi-second breakup into a
+            // brief tick.  The refetch returns identical data on a good read, so
+            // playback (and the golden output) is bit-exact unchanged; this only
+            // adds one forced refetch per 32 frames (~0.13 % extra ch4 reads).
+            // The slot FSM is forced idle during the frame-end reserve, so no
+            // cache_vld SET races this clear at sample_start.
+            if (eg_cnt[4:0] == 5'd0) begin
+                cache_vld[cache_rr] <= 1'b0;
+                cache_rr <= (cache_rr == 5'd23) ? 5'd0 : cache_rr + 5'd1;
+            end
         end
 
         case (sl_state)
