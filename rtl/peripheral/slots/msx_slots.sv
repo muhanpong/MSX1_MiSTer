@@ -224,6 +224,9 @@ flash flash
    .sdram_done(flash_done),
    .sdram_offset(mapper_ascii16x_flash_rq ? 27'(base_ram) : mfrsd_base_ram[0]),
    .is_ascii16x(mapper_ascii16x_flash_rq & ~mapper_mfrsd0_flash_rq & ~mapper_mfrsd3_flash_rq),
+   // Region byte-size the erase may not exceed: the ASCII16X cart's own ROM area,
+   // or the full 8MB chip window for the MFRSD paths (their region is 8MB).
+   .erase_limit(mapper_ascii16x_flash_rq & ~mapper_mfrsd0_flash_rq & ~mapper_mfrsd3_flash_rq ? 27'(size) << 14 : 27'h800000),
    .debug_erase(debug_erase)
 );
 

@@ -14,6 +14,7 @@ module flash (
 	output reg        sdram_req,
 	input      [26:0] sdram_offset,
 	input             is_ascii16x,   // ASCII16X cart selected: use 8KB boot-sector erase
+	input      [26:0] erase_limit,   // bytes in the owner's region: an erase may never write past it
 	output            debug_erase
 );
 /*verilator tracing_off*/
@@ -27,19 +28,36 @@ module flash (
 		index = 3'd0;
 	end
 	
+	// CFI query (ASCII16-X only).  Real MegaFlashROM-class drivers probe CFI
+	// BEFORE autoselect: write 98h to word offset 55h (byte 0AAh) and expect the
+	// "QRY" signature at word offsets 10h/11h/12h (byte 20h/22h/24h).  Without it
+	// the read falls through to the ROM copy and the driver reports
+	// "Flash support not found, save games will not work" (MSXdev25 GoFigure).
+	// Only the 3 signature bytes are served — that is all such probes read.
+	reg cfi_state = 0;
+
 	assign dout = ~ce     		     ? 8'hFF :
 	              erase              ? 8'h00 :
+	              cfi_state          ? (addr[11:1] == 11'h010 ? 8'h51 :   // 'Q'
+	                                    addr[11:1] == 11'h011 ? 8'h52 :   // 'R'
+	                                    addr[11:1] == 11'h012 ? 8'h59 :   // 'Y'
+	                                                            8'h00) :
 	 			  ~state             ? 8'hFF :
-				  addr[2:1] == 2'b00 ? 8'h20 : 
-                  addr[2:1] == 2'b01 ? 8'h7e : 
-				  addr[2:1] == 2'b10 ? 8'h00 : 
+	              // Manufacturer: ASCII16-X drivers check for AMD/Spansion (01h);
+	              // MFRSD software expects the legacy ST id (20h) -> keep it split.
+				  addr[2:1] == 2'b00 ? (is_ascii16x ? 8'h01 : 8'h20) :
+                  addr[2:1] == 2'b01 ? 8'h7e :
+				  addr[2:1] == 2'b10 ? 8'h00 :
 				                       8'h01 ;
 
-	assign data_valid = ce & ~we & (state | erase);
+	assign data_valid = ce & ~we & (state | erase | cfi_state);
 
 	reg       erase_block = 0;
 	reg [7:0] erase_block_num;
 	reg       erase_boot = 0;   // ASCII16X 8KB boot-sector erase (M29W640 bottom-boot: 0x0-0xFFFF = 8x8KB)
+	// Sector base/length of the pending erase (used by the bounds clamp below).
+	wire [26:0] erase_base = erase_boot ? (27'(erase_block_num) << 13) : (27'(erase_block_num) << 16);
+	wire [15:0] erase_span = erase_boot ? 16'h1FFF : 16'hFFFF;   // write_cnt = bytes-1
 //	reg       erase_chip = 0;
 
 	reg old_we;
@@ -65,13 +83,23 @@ module flash (
 					index <= 0;
 				end	
 			end
-			if (reset) begin 
+			// CFI query enter/exit.  Enter on 98h at the CFI entry offset (ASCII16X
+			// only); any F0h (read-array/reset) or an autoselect leaves CFI mode.
+			// The 98h write itself cannot disturb the command FSM above: cmd[0]=98h
+			// is not in the int_valid1 whitelist and the offset check clears index.
+			if (we & ~old_we & ce) begin
+				if (is_ascii16x & din == 8'h98 & addr[11:1] == 11'h055) cfi_state <= 1'b1;
+				else if (din == 8'hF0)                                  cfi_state <= 1'b0;
+			end
+			if (reset) begin
 				index <= 0;
 				state <= 0;
+				cfi_state <= 1'b0;
 			end
-			if (ident) begin 
+			if (ident) begin
 				index <= 0;
 				state <= 1;
+				cfi_state <= 1'b0;
 			end
 		end
 	end
@@ -127,11 +155,21 @@ module flash (
 			sdram_req <= 1;
 		end
 		if (erase_block) begin
-			write_cnt <= erase_boot ? 16'h1FFF : 16'hFFFF;   // 8KB boot sector vs 64KB sector
-			sdram_din <=  8'hFF;
-			sdram_need_wr <= 1;
-			sdram_addr <= sdram_offset + (erase_boot ? (27'(erase_block_num) << 13) : (27'(erase_block_num) << 16));
-			erase <= 1;
+			// BOUNDS CLAMP: the erase address comes straight from the cart's bank
+			// register, so a cart that erases above its loaded image (e.g. a 7.86MB
+			// image on an 8MB chip saving into the top sectors) would otherwise fill
+			// 0xFF over whatever region follows this one in SDRAM — main RAM / SUB
+			// ROM.  Skip a sector that starts past the region, and truncate one that
+			// straddles the end.  Reads there already return 0xFF, so the cart still
+			// sees an "erased" sector; only the corruption is removed.
+			if (erase_base < erase_limit) begin
+				write_cnt <= (27'(erase_span) <= (erase_limit - erase_base)) ? erase_span
+				                                                            : 16'(erase_limit - erase_base - 27'd1);
+				sdram_din <=  8'hFF;
+				sdram_need_wr <= 1;
+				sdram_addr <= sdram_offset + erase_base;
+				erase <= 1;
+			end
 		end else
 		if ((quadrupleProgram | write_cnt > 0) & we & ~old_we & ce ) begin
 			//Zkontrolovat zda je writable sector num1 a num2 vypocet
