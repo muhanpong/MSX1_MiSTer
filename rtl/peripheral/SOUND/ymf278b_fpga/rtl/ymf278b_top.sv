@@ -89,7 +89,16 @@ logic        new2;
 // Register file from OPL3 (we tap register 0x105 via a small shadow)
 logic [7:0]  opl3_reg_shadow [0:1];  // bank1[0x05]
 always_ff @(posedge clk) begin
-    if (opl3_reg_wr && opl3_reg_addr == 9'h105)
+    // MUST clear on reset: a real YMF278B powers up / resets with NEW2 = 0.  If the
+    // shadow survives a warm MSX reset, NEW2 stays 1, so a driver that re-runs its
+    // detection writes reg 105h = 03h and produces NO rising edge -> the one-shot
+    // device-ID (status = 02h) is never re-armed, and the first status read (the
+    // driver's earlier BUSY check) has already consumed the one armed at reset.
+    // Detection then reads 00h where it requires 02h and reports the chip as broken
+    // until the core is reloaded (MSXdev25 GoFigure: ":-( Incomplete OPL4 support").
+    if (!rst_n)
+        opl3_reg_shadow[0] <= 8'h00;
+    else if (opl3_reg_wr && opl3_reg_addr == 9'h105)
         opl3_reg_shadow[0] <= opl3_reg_data;
 end
 assign new2 = opl3_reg_shadow[0][1];

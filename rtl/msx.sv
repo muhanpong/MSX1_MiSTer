@@ -712,6 +712,9 @@ logic [11:0] ms_wait_cnt;           // safety timeout so a lost ack can't hang t
                                     // releases the CPU while the op is still in flight → the next
                                     // I/O overlaps it → ack-toggle desync / latch corruption.
                                     // 4000 clk21m ≈ 186µs: ~15× the normal worst case.
+logic [7:0] ms_status_hold = 8'h00; // clk21m: FM status frozen at the read's start edge, so a
+                                    // read-consumed bit (NEW2 one-shot 0x02) is still present when
+                                    // the T80 latches the byte at T3 (~700-980 ns later).
 
 always_ff @(posedge clk21m) begin
     ms_wr_n_prev <= wr_n;
@@ -740,6 +743,14 @@ always_ff @(posedge clk21m) begin
                 // handler's status read is the one access that must NEVER
                 // return stale data (a single stale bit6=0 sends vgmplay
                 // down its no-EI OldHook exit = interrupts silently die).
+                // Freeze the byte the CPU will latch. The notify below consumes the
+                // NEW2 one-shot 0x02, and that clear comes back through the CDC in
+                // ~130-240 ns — but the T80 samples IN data only at T3, ~700-980 ns
+                // after rd_n falls.  Serving the LIVE status would hand the CPU the
+                // post-consume 0x00, so a detect that requires "0x02 then 0x00"
+                // (GoFigure gate 2: OUT C6,05 / OUT C7,03 / IN C4 / CP 2) always
+                // failed.  Latching here matches real-chip read semantics.
+                ms_status_hold <= ms_status_s2;
                 ms_strd_toggle <= ~ms_strd_toggle;   // notify: consume NEW2 one-shot
             end else begin
                 // Falling edge of rd_n — bridge read (wave ports + FM data port)
@@ -1002,7 +1013,7 @@ end
 // wave-123 header @0x5C4): GREEN(0) = header words read clean → corruption is
 // NOT the header read; RED(>0) = ch4 returns corrupt header bytes under the
 // wave-change contention = root cause.  Saturate to the 10-bit overlay field.
-assign dbg_env_min = (hdr_errs[15:10] != 6'd0) ? 10'h3FF : hdr_errs[9:0];
+assign dbg_env_min = (can_errs[15:10] != 6'd0) ? 10'h3FF : can_errs[9:0];  // overlay canary = ch4 SDRAM read errors (Cause B diag)
 
 // ─── ymf278b_top instance ────────────────────────────────────────────────────
 wire        ms_io_ack;
@@ -1226,7 +1237,7 @@ assign ms_audio_r = msxConfig.moonsound_en ? ms_out_r : 16'sh0;
 
 // Read data back to the CPU: FM status (0xC4/0xC6) comes straight from the
 // live synced byte; everything else from the bridge latch.
-assign ms_dout = (ms_fm_cs & ~a[0])       ? ms_status_s2   :
+assign ms_dout = (ms_fm_cs & ~a[0])       ? ms_status_hold :
                  (ms_wave_cs | ms_fm_cs)  ? ms_io_dout_lat : 8'h00;
 
 endmodule
