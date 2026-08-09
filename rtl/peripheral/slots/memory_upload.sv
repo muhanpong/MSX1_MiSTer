@@ -33,6 +33,7 @@ module memory_upload
    output MSX::bios_config_t   bios_config,
    input  MSX::config_cart_t   cart_conf[2],
    output                [1:0] rom_loaded,
+   output                [1:0] rom_big,      // slot A/B ROM > 4MB (8-bit-bank ASCII16 tops out at 4MB => must be ASCII16X)
    output dev_typ_t            cart_device[2],
    output dev_typ_t            msx_device,
    output                [3:0] msx_dev_ref_ram[8],
@@ -65,6 +66,7 @@ module memory_upload
    end 
 
    assign rom_loaded = {|ioctl_size[3],|ioctl_size[2]};
+   assign rom_big    = {ioctl_size[3] > 27'h400000, ioctl_size[2] > 27'h400000};
 
    typedef enum logic [3:0] {STATE_IDLE, STATE_CLEAN, STATE_READ_CONF, STATE_READ_CONF2, STATE_CHECK_CONFIG, STATE_FILL_RAM, STATE_FILL_RAM2, STATE_STORE_SLOT_CONFIG, STATE_FIND_ROM, STATE_FILL_KBD, STATE_ERROR} state_t;
    state_t state;
@@ -105,6 +107,7 @@ module memory_upload
       logic        ms_reserve_pending;   // (legacy, unused) — replaced by ms_zerofill_active below
       logic        ms_zerofill_active;   // after yrw801, fill the 2MB custom-wave RAM with 0x00 (match openMSX clearRam: empty slots = silent, not garbage)
       logic        ms_zerofill_jump;     // one-shot: snap ram_addr to the FIXED custom-RAM base (pcm_rom_base+0x200000) before zero-filling, regardless of where the yrw801 fill ended
+      logic [24:0] x16_pad;             // ASCII16X: bytes of 0xFF padding still owed so the cart occupies a FULL 8MB flash chip (an image shorter than the chip must still be erasable/programmable in its top sectors)
       ddr3_wr   <= 1'b0;
       load_sram <= 1'b0;
       if (ram_ce) begin
@@ -143,6 +146,7 @@ module memory_upload
          ms_reserve_pending    <= 1'b0;
          ms_zerofill_active    <= 1'b0;
          ms_zerofill_jump      <= 1'b0;
+         x16_pad               <= 25'd0;
       end
       if (ddr3_ready & ~ddr3_rd) begin
          case(state)
@@ -226,6 +230,15 @@ module memory_upload
                                     save_addr <= ddr3_addr;   
                                     ddr3_addr <= curr_conf == CONFIG_SLOT_A ? 28'hC00000 : 28'h1100000 ;    //ROM Store
                                     data_size <= ioctl_size[curr_conf == CONFIG_SLOT_A ? 2 : 3][24:0];
+                                    // An ASCII16-X cart IS an 8MB flash chip: reserve the whole chip and
+                                    // 0xFF-fill ("erased") whatever the image does not cover, so the game
+                                    // can erase/program its save sectors at the TOP of the chip.  Without
+                                    // this a short image (e.g. GoFigure 0x7DC000) has its top-sector
+                                    // programs suppressed by the rom_size bound and the save silently fails.
+                                    x16_pad <= (cart_mapper == MAPPER_ASCII16X
+                                                & ioctl_size[curr_conf == CONFIG_SLOT_A ? 2 : 3][24:0] < 25'h800000)
+                                             ? 25'h800000 - ioctl_size[curr_conf == CONFIG_SLOT_A ? 2 : 3][24:0]
+                                             : 25'd0;
                                  end else begin
                                     state     <= STATE_READ_CONF;
                                  end
@@ -381,7 +394,7 @@ module memory_upload
                   if (data_size != 25'd0) begin
                      refAdd                   <= 1'b1; // Add reference po ulozeni
                      lookup_RAM[ref_ram].addr <= curr_ram_addr;
-                     lookup_RAM[ref_ram].size <= 16'(data_size[24:14]);               
+                     lookup_RAM[ref_ram].size <= 16'((data_size + x16_pad) >> 14);   // incl. ASCII16X 8MB chip padding
                      $display("           FILL RAM ID:%d addr:%x size:%d kB (save:%x)",ref_ram, curr_ram_addr, 16'(data_size[24:14])*16, save_ram_addr);
                      case(data_id)
                         ROM_RAM: begin
@@ -440,6 +453,14 @@ module memory_upload
                      data_id            <= ROM_RAM;       // → no ddr3 prefetch during fill
                      ms_zerofill_active <= 1'b1;
                      ms_zerofill_jump   <= 1'b1;          // next ram_ce snaps ram_addr to pcm_rom_base+0x200000
+                  end else if (data_size == 25'd1 && x16_pad != 25'd0) begin
+                     // ASCII16X: the image is written; keep filling contiguously with
+                     // 0xFF up to the full 8MB chip.  data_id<=ROM_RAM stops the ddr3
+                     // prefetch (line ~463) exactly like the MoonSound zero-fill does.
+                     data_size <= x16_pad;
+                     pattern   <= 3'd1;      // 0xFF = erased flash
+                     data_id   <= ROM_RAM;
+                     x16_pad   <= 25'd0;
                   end else if (data_size == 25'd1) begin
                      // End of fill (a normal ROM/RAM fill, or the custom-RAM zero-fill).
                      state    <= STATE_FILL_RAM;

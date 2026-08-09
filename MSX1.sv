@@ -184,8 +184,10 @@ assign HDMI_FREEZE = 0;
 assign HDMI_BLACKOUT = 0;
 
 assign AUDIO_S = 1;
-assign AUDIO_L = audio_l;
-assign AUDIO_R = audio_r;
+// Silence audio while paused (CPU is frozen but MoonSound runs on clk_sdram and would
+// otherwise sustain/howl; PSG holds a DC level). Covers OSD pause and DMA save/load.
+assign AUDIO_L = msx_pause ? 16'sd0 : audio_l;
+assign AUDIO_R = msx_pause ? 16'sd0 : audio_r;
 assign AUDIO_MIX = 0;
 
 assign LED_POWER = 0;
@@ -362,6 +364,7 @@ msx_config msx_config
    .cart_conf(cart_conf),
    .reload(reload),
    .rom_loaded(rom_loaded),
+   .rom_big(rom_big),
    .sram_A_select_hide(sram_A_select_hide),
    .ROM_A_load_hide(ROM_A_load_hide),
    .ROM_B_load_hide(ROM_B_load_hide),
@@ -733,6 +736,7 @@ wire  [8:0] kbd_addr;
 wire        kbd_request, kbd_we;
 wire        load_sram;
 wire  [1:0] rom_loaded;
+wire  [1:0] rom_big;
 memory_upload memory_upload(
     .clk(clk21m),
     .reset_rq(reset_rq),
@@ -765,6 +769,7 @@ memory_upload memory_upload(
     .bios_config(bios_config),
     .cart_conf(cart_conf),
     .rom_loaded(rom_loaded),
+    .rom_big(rom_big),
     .cart_device(cart_device),
     .msx_device(msx_device),
     .msx_dev_ref_ram(msx_dev_ref_ram),
