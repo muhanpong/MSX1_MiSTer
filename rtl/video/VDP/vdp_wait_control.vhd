@@ -67,6 +67,7 @@ ENTITY VDP_WAIT_CONTROL IS
         REG_R1_DISP_ON  : IN    STD_LOGIC;      -- 0=Display Off, 1=Display On
         REG_R8_SP_OFF   : IN    STD_LOGIC;      -- 0=Sprite On, 1=Sprite Off
         REG_R9_Y_DOTS   : IN    STD_LOGIC;      -- 0=192 Lines, 1=212 Lines
+        PREWINDOW_Y     : IN    STD_LOGIC;      -- scan is inside the vertical display window
 
         VDPSPEEDMODE    : IN    STD_LOGIC;
         DRIVE           : IN    STD_LOGIC;
@@ -119,9 +120,25 @@ ARCHITECTURE RTL OF VDP_WAIT_CONTROL IS
         X"13DC", X"15B4", X"8000", X"8000", X"14CC", X"1A44", X"182C", X"8000"
     );
     -- Sprite On, 192 Lines, 60Hz
+    -- (2026-08-15) HMMM 0x1864 -> 0x1650, paired with the per-scanline blank
+    -- gating below (PREWINDOW_Y).  GHDL-calibrated against openMSX on the
+    -- GoFigure boot workload (HMMM 3080 bytes, SCREEN5, display+sprites on):
+    --   real chip: 11.73 bytes/line during display scanlines, 13.93 during
+    --   blanking, 251.5 lines total.  Ours was a constant-duty 238.8 (-5%),
+    --   masked by the vblank IRQ firing 22 lines late (see vdp_ssg.vhd).
+    -- With this entry the DISPLAY-phase rate measures 11.72 bytes/line (real-
+    -- exact), so a command's write front tracks the real chip through the
+    -- visible area -- races against the beam resolve like real hardware
+    -- (a constant per-frame rate matched totals but drew a moving row of
+    -- ghost dots where the front trailed the beam).  The blank-phase rate
+    -- stays at table 605's 12.26 bytes/line (12% slower than real): invisible
+    -- by definition, and it places the boot workload at 259.6 lines total --
+    -- the HW-verified pass point of the game's "command still running at line
+    -- 188?" check, under the 262-line frame period.
+    -- Reproduce/re-tune with rtl/video/VDP/sim/tb_vdpcmd.vhd.
     CONSTANT C_WAIT_TABLE_602 : WAIT_TABLE_T :=(
         X"8000", X"8000", X"8000", X"8000", X"8000", X"8000", X"18E4", X"0FC0",
-        X"1274", X"1424", X"8000", X"8000", X"1318", X"1864", X"16FC", X"8000"
+        X"1274", X"1424", X"8000", X"8000", X"1318", X"1650", X"16FC", X"8000"
     );
     -- Sprite Off, 212 Lines, 60Hz
     CONSTANT C_WAIT_TABLE_603 : WAIT_TABLE_T :=(
@@ -149,8 +166,17 @@ BEGIN
                 IF( DRIVE = '1' )THEN
                     -- 50Hz (PAL)
                     IF( VDPR9PALMODE = '1' )THEN
-                        -- Display On
-                        IF( REG_R1_DISP_ON = '1' )THEN
+                        -- Display On, and the scan is inside the vertical display
+                        -- window.  The real V9938 executes commands faster during
+                        -- the vertical border/blanking scanlines (no display
+                        -- fetches steal access slots) even while R#1 display
+                        -- stays enabled; selecting the "Blank" table per-scanline
+                        -- mirrors that.  A constant per-frame rate matches total
+                        -- durations but puts the command's write front at the
+                        -- wrong scanline mid-frame, losing races against the
+                        -- beam that the real chip wins (2026-08-15: GoFigure
+                        -- ghost-dot rows -- see the C_WAIT_TABLE_602 note).
+                        IF( REG_R1_DISP_ON = '1' AND PREWINDOW_Y = '1' )THEN
                             -- Sprite On
                             IF( REG_R8_SP_OFF = '0' )THEN
                                 -- 212 Lines
@@ -176,8 +202,9 @@ BEGIN
                         END IF;
                     -- 60Hz (NTSC)
                     ELSE
-                        -- Display On
-                        IF( REG_R1_DISP_ON = '1' )THEN
+                        -- Display On and inside the vertical display window
+                        -- (see the PAL branch comment)
+                        IF( REG_R1_DISP_ON = '1' AND PREWINDOW_Y = '1' )THEN
                             -- Sprite On
                             IF( REG_R8_SP_OFF = '0' )THEN
                                 -- 212 Lines

@@ -525,6 +525,7 @@ ARCHITECTURE RTL OF VDP IS
             REG_R1_DISP_ON  : IN    STD_LOGIC;      -- 0=Display Off, 1=Display On
             REG_R8_SP_OFF   : IN    STD_LOGIC;      -- 0=Sprite On, 1=Sprite Off
             REG_R9_Y_DOTS   : IN    STD_LOGIC;      -- 0=192 Lines, 1=212 Lines
+            PREWINDOW_Y     : IN    STD_LOGIC;      -- scan inside vertical display window
 
             VDPSPEEDMODE    : IN    STD_LOGIC;
             DRIVE           : IN    STD_LOGIC;
@@ -1174,7 +1175,7 @@ BEGIN
         IVIDEOVS_N              => IVIDEOVS_N               ,
 
         HD                      => HD                       ,
-        VD                      => VD                       ,
+        VD                      => OPEN                     ,
         HSYNC                   => HSYNC                    ,
         ENAHSYNC                => ENAHSYNC                 ,
         V_BLANKING_START        => V_BLANKING_START         ,
@@ -1263,6 +1264,24 @@ BEGIN
     -- GENERATE PREWINDOW, WINDOW
     WINDOW      <=  WINDOW_X    AND PREWINDOW_Y;
     PREWINDOW   <=  PREWINDOW_X AND PREWINDOW_Y;
+
+    -- S#2 VR flag (bit6).  The real V9938 raises VR at the END OF THE DISPLAY
+    -- AREA (line 192/212) and drops it at display line 0; it is also 1 while
+    -- the display is disabled.  The SSG's W_V_BLANK is the OFFSET_Y-based
+    -- output blanking (rises 22 lines later, falls 26 lines early with the
+    -- MiSTer OFFSET_Y=0 geometry) -- using it here made VR late.  Zanac-EX's
+    -- split ISR (line interrupt at monitor 212) only performs its scroll/HUD
+    -- writes when it sees VR=1: with the late VR it depended on interrupt
+    -- service latency to slip past line 214 (occasionally missing = the
+    -- long-standing upward-drift glitch), and after the vblank IRQ was fixed
+    -- to fire at display end the ISR always sampled early -> VR=0 -> scroll
+    -- died completely.  Deriving VR from the vertical display window matches
+    -- the real chip and fixes both.
+    -- NOTE: VR is purely POSITIONAL -- it must keep toggling even while the
+    -- display is disabled (the BIOS polls for VR=0 during boot to find the
+    -- frame phase; an "OR NOT REG_R1_DISP_ON" term froze VR at 1 with the
+    -- display off and the machine never booted).
+    VD          <=  NOT PREWINDOW_Y;
 
     PROCESS( RESET, CLK21M )
     BEGIN
@@ -1855,6 +1874,7 @@ BEGIN
         REG_R1_DISP_ON      => REG_R1_DISP_ON       ,
         REG_R8_SP_OFF       => REG_R8_SP_OFF        ,
         REG_R9_Y_DOTS       => REG_R9_Y_DOTS        ,
+        PREWINDOW_Y         => PREWINDOW_Y          ,
 
         VDPSPEEDMODE        => VDPSPEEDMODE         ,
         DRIVE               => VDP_COMMAND_DRIVE    ,

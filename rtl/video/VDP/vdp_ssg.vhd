@@ -134,6 +134,14 @@ ARCHITECTURE RTL OF VDP_SSG IS
     SIGNAL FF_X_CNT             : STD_LOGIC_VECTOR(  8 DOWNTO 0 );
     SIGNAL FF_PRE_Y_CNT         : STD_LOGIC_VECTOR(  8 DOWNTO 0 );
     SIGNAL FF_MONITOR_LINE      : STD_LOGIC_VECTOR(  8 DOWNTO 0 );
+    -- R#23 (vertical offset) latched at HSYNC.  The V9938 samples the vertical
+    -- offset once per line: a mid-line write must not move the line currently being
+    -- drawn.  Feeding REG_R23 straight into FF_PRE_Y_CNT (which is PREDOTCOUNTER_Y =
+    -- the graphics modules' DOTCOUNTERY, and therefore part of the VRAM address) made
+    -- a mid-line R#23 write jump the fetch address mid-scanline, so the rest of that
+    -- line came from a different VRAM row -- one corrupted line exactly at a raster
+    -- split (MSXdev25 GoFigure writes R#23 mid-line at the HUD/playfield boundary).
+    SIGNAL FF_R23_LATCH         : STD_LOGIC_VECTOR(  7 DOWNTO 0 );
     SIGNAL FF_VIDEO_DH_CLK      : STD_LOGIC;
     SIGNAL FF_VIDEO_DL_CLK      : STD_LOGIC;
     SIGNAL FF_PRE_X_CNT_START1  : STD_LOGIC_VECTOR(  5 DOWNTO 0 );
@@ -386,10 +394,12 @@ BEGIN
         IF (RESET = '1') THEN
             FF_PRE_Y_CNT        <= (OTHERS =>'0');
             FF_MONITOR_LINE     <= (OTHERS =>'0');
+            FF_R23_LATCH        <= (OTHERS =>'0');
             PREWINDOW_Y         <= '0';
         ELSIF( CLK21M'EVENT AND CLK21M = '1' )THEN
 
             IF( W_HSYNC = '1' )THEN
+                FF_R23_LATCH <= REG_R23_VSTART_LINE;    -- sample R#23 once per line
                 -- JP: PREWINDOW_Xが 1になるタイミングと同じタイミングでY座標の計算
                 IF( W_V_BLANKING_END = '1' )THEN
                     IF(    REG_R9_Y_DOTS = '0' AND VDPR9PALMODE = '0' )THEN
@@ -426,7 +436,7 @@ BEGIN
                 END IF;
             END IF;
 
-            FF_PRE_Y_CNT <= FF_MONITOR_LINE + ("0" & REG_R23_VSTART_LINE);
+            FF_PRE_Y_CNT <= FF_MONITOR_LINE + ("0" & FF_R23_LATCH);
         END IF;
     END PROCESS;
 
@@ -445,8 +455,25 @@ BEGIN
     W_V_BLANKING_END    <=  '1' WHEN( (W_V_CNT_IN_FIELD = ("00" & (OFFSET_Y + LED_TV_Y_NTSC) & (W_FIELD AND REG_R9_INTERLACE_MODE)) AND VDPR9PALMODE = '0') OR
                                       (W_V_CNT_IN_FIELD = ("00" & (OFFSET_Y + LED_TV_Y_PAL) & (W_FIELD AND REG_R9_INTERLACE_MODE)) AND VDPR9PALMODE = '1') )ELSE
                             '0';
-    W_V_BLANKING_START  <=  '1' WHEN( (W_V_CNT_IN_FIELD = ((W_V_SYNC_INTR_START_LINE + LED_TV_Y_NTSC) & (W_FIELD AND REG_R9_INTERLACE_MODE)) AND VDPR9PALMODE = '0') OR
-                                      (W_V_CNT_IN_FIELD = ((W_V_SYNC_INTR_START_LINE + LED_TV_Y_PAL) & (W_FIELD AND REG_R9_INTERLACE_MODE)) AND VDPR9PALMODE = '1') )ELSE
+    -- (2026-08-15) Fire the vblank interrupt on the first line AFTER the display
+    -- area, like the real chip.  The V_BLANKING_START_* constants only line up
+    -- with the display window when OFFSET_Y carries its intended value (19); the
+    -- top level leaves OFFSET_Y unconnected (GND) to keep a 240-line output
+    -- window, which made the IRQ land 22 lines (192-mode) / 14 lines (212) into
+    -- the bottom border.  That shifted a game's whole IRQ chain late: GoFigure's
+    -- vblank ISR was still running when its armed line-IRQ split (R#19) fired, so
+    -- the R#23 rewrite landed ~30 lines into the display -> band of the pre-split
+    -- page below the HUD.  Deriving the IRQ from FF_MONITOR_LINE is automatically
+    -- consistent with OFFSET_Y, R#18 adjust, NTSC/PAL and 192/212.
+    -- PAIRED CHANGE: vdp_wait_control.vhd HMMM entry (table 602).  GoFigure's
+    -- boot check starts an HMMM at vblank and requires CE still set when the beam
+    -- reaches line 188 of the next frame ("Abnormal fast VDP execution" if not).
+    -- With the late IRQ the gap was 235 lines and our too-fast HMMM (239 lines
+    -- vs 251.5 real, GHDL-measured) passed by luck; the corrected IRQ widens the
+    -- gap to 257, so the command speed had to be corrected together (see
+    -- rtl/video/VDP/sim/tb_vdpcmd.vhd for the full in-sim reproduction).
+    W_V_BLANKING_START  <=  '1' WHEN( (REG_R9_Y_DOTS = '0' AND FF_MONITOR_LINE = CONV_STD_LOGIC_VECTOR( 192, 9 )) OR
+                                      (REG_R9_Y_DOTS = '1' AND FF_MONITOR_LINE = CONV_STD_LOGIC_VECTOR( 212, 9 )) )ELSE
                             '0';
 
 END RTL;
