@@ -298,6 +298,10 @@ logic [23:0] cache_vld;
 // slot's leftovers) and a cache_tagB, so a later need_b==1 request could match both tags
 // and consume words that were never read.
 logic [23:0] cache_hasb;
+// Sequential cache-invalidate sweep state (see the walk in the slot always_ff).
+logic [20:0] inv_word;
+logic  [4:0] inv_idx;
+logic        inv_run;
 // Periodic cache-scrub round-robin pointer (see scrub block in the slot FSM).
 logic [4:0]  cache_rr;
 
@@ -400,6 +404,8 @@ always_ff @(posedge clk or negedge rst_n) begin
         accum_r   <= '0;
         cache_vld <= '0;
         cache_hasb <= '0;
+        inv_run    <= 1'b0;
+        inv_idx    <= 5'd0;
         cache_rr  <= '0;
         key_on_prev <= '0;
         pcm_left  <= '0;
@@ -415,24 +421,35 @@ always_ff @(posedge clk or negedge rst_n) begin
         sl_rd_req <= 1'b0;
         pcm_valid <= 1'b0;
 
-        // CPU wrote sample RAM → invalidate ONLY the slots whose cached words cover
-        // the written address.  A blanket flush here is catastrophic under a streaming
-        // upload: a driver may rewrite a wave-table header block on every screen
-        // transition and do it BEFORE muting, so all 24 voices are still keyed on.
-        // Flushing every cache on every byte then forces all of them to refetch for
-        // the whole upload, and ch4 is LAST in the SDRAM arbiter — voices lose their
-        // slot budget and drop out, i.e. the music breaks up until the upload ends
-        // (MSXdev25 GoFigure: 1536 bytes ≈ 18 ms at our write pacing).
+        // CPU wrote sample RAM -> invalidate ONLY the entries whose cached words
+        // cover the written address.  A blanket flush is catastrophic under a
+        // streaming upload: a driver may rewrite a wave-table header block on every
+        // screen transition and do it BEFORE muting, so all 24 voices are still keyed
+        // on; flushing every cache on every byte then forces all of them to refetch
+        // for the whole upload, and ch4 is LAST in the SDRAM arbiter -> voices lose
+        // their slot budget and drop out (MSXdev25 GoFigure: 1536 bytes ~ 18 ms).
+        //
+        // Done SEQUENTIALLY: latch the written word address and walk one entry per
+        // cycle with a SINGLE comparator.  CPU wave writes arrive at most ~1 per frame
+        // (12 us pacing) so the 24-cycle sweep costs 1.2% of a 1948-cycle frame and
+        // always finishes long before the next write, while the parallel form cost
+        // ~2000 ALMs (24 entries x 4 words x 21 bits) and ate into the design's
+        // worst-case slack.  An entry caches FOUR words -- w0@tagA, w1@tagA+1,
+        // w2@tagB, w3@tagB+1 -- so all four are compared; tagB only counts when the
+        // fill actually fetched the B pair (cache_hasb).
         if (cpu_wr_issue) begin
-            // The entry caches FOUR words: w0@tagA, w1@tagA+1, w2@tagB, w3@tagB+1,
-            // so all four must be compared or a write to an odd word leaves a stale
-            // entry valid until the tag moves or the 32-frame scrub reaches it.
-            for (int i = 0; i < 24; i++)
-                if (cache_tagA[i]            == sv_wr_addr[21:1]
-                 || (cache_tagA[i] + 21'd1)  == sv_wr_addr[21:1]
-                 || (cache_hasb[i] && (cache_tagB[i]           == sv_wr_addr[21:1]
-                                    || (cache_tagB[i] + 21'd1) == sv_wr_addr[21:1])))
-                    cache_vld[i] <= 1'b0;
+            inv_word <= sv_wr_addr[21:1];
+            inv_idx  <= 5'd0;
+            inv_run  <= 1'b1;
+        end else if (inv_run) begin
+            if (cache_tagA[inv_idx[4:0]]           == inv_word
+             || (cache_tagA[inv_idx[4:0]] + 21'd1) == inv_word
+             || (cache_hasb[inv_idx[4:0]]
+                 && (cache_tagB[inv_idx[4:0]]           == inv_word
+                  || (cache_tagB[inv_idx[4:0]] + 21'd1) == inv_word)))
+                cache_vld[inv_idx[4:0]] <= 1'b0;
+            if (inv_idx == 5'd23) inv_run <= 1'b0;
+            else                  inv_idx <= inv_idx + 5'd1;
         end
 
         // ── frame output (independent of slot FSM state) ──
@@ -624,7 +641,13 @@ always_ff @(posedge clk or negedge rst_n) begin
                         cache_w1[w_slot] <= (w_fidx == 2'd1) ? mem_rd_data16 : w_word[1];
                         cache_w2[w_slot] <= (w_fidx == 2'd2) ? mem_rd_data16 : w_word[2];
                         cache_w3[w_slot] <= (w_fidx == 2'd3) ? mem_rd_data16 : w_word[3];
-                        cache_vld[w_slot] <= 1'b1;
+                        // Don't validate a fill that completed while an invalidate
+                        // sweep is in flight: its words may predate the CPU write the
+                        // sweep is reacting to, and the sweep may already have passed
+                        // this entry.  Costs at most one refetch per CPU write (which
+                        // arrive ~1 per frame) and is stricter than the old 1-cycle
+                        // blanket flush, which could re-validate such a fill.
+                        cache_vld[w_slot] <= ~inv_run;
                         cache_hasb[w_slot] <= w_need_b;
                         sl_state <= SL_DECODE;
                     end else begin
