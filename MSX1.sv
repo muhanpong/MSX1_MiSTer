@@ -457,10 +457,17 @@ wire msx_pause = nvbak_dma_active | dump_active | (status[43] & OSD_STATUS) | pa
 
 msx MSX
 (
-   .ce_10m7_p(ce_10m7_p & ~msx_pause),
+   // ce_10m7_p / ce_5m39_n are NOT pause-gated: their only consumers inside
+   // msx.sv are the vdp18 core and ce_pix (video timing/pixel stream).  The
+   // V9938 path was never gated (CLK21M direct), so on MSX2 machines the
+   // display already free-runs during pause; ungating these aligns vdp18
+   // machines with that, keeps the scaler fed (a paused CPU means VRAM is
+   // static, so the picture is the same frozen image), and lets the pause
+   // symbol overlay render/decay on MSX1 machines (A4 review HIGH-1).
+   .ce_10m7_p(ce_10m7_p),
    .ce_3m58_p(ce_3m58_p & ~msx_pause),
    .ce_3m58_n(ce_3m58_n & ~msx_pause),
-   .ce_5m39_n(ce_5m39_n & ~msx_pause),
+   .ce_5m39_n(ce_5m39_n),
    .ce_10hz  (ce_10hz   & ~msx_pause),
    .HS(hsync),
    .DE(blank_n),
@@ -655,6 +662,13 @@ debug_overlay u_overlay (
    .G_out          (G_ovl),
    .B_out          (B_ovl),
    .en             (status[48]),
+   // pause symbol overlay (docs/pause_overlay_design.md §5) — independent of en/status[48]
+   .pause_in       (msx_pause),
+   .osd_in         (OSD_STATUS),
+   .key_tgl_in     (ps2_key[10]),
+   .mouse_tgl_in   (ps2_mouse[24]),
+   .joy0_in        (joy0[5:0]),
+   .joy1_in        (joy1[5:0]),
    .dbg_pcm_valid  (dbg_pcm_valid),
    .dbg_opl3_valid (dbg_opl3_valid),
    .dbg_mem_nonzero(dbg_mem_nonzero),

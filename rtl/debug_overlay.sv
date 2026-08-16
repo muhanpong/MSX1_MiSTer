@@ -35,7 +35,14 @@ module debug_overlay (
     input  wire [15:0] dbg_im_i,              // {IM, 6'b0, I} at last INTA
     input  wire [15:0] dbg_watch_pc,          // PC of last write to table byte 257
     input  wire [15:0] dbg_watch_dc,          // {data, count} of that write
-    input  wire        dbg_int_ghost          // fatal IFF1-fall had no INTA
+    input  wire        dbg_int_ghost,         // fatal IFF1-fall had no INTA
+    // ── Pause-symbol inputs (docs/pause_overlay_design.md §5 wiring table) ──
+    input  wire        pause_in,              // msx_pause (level)
+    input  wire        osd_in,                // OSD_STATUS (level)
+    input  wire        key_tgl_in,            // ps2_key[10] — flips per keyboard event
+    input  wire        mouse_tgl_in,          // ps2_mouse[24] — flips per mouse packet
+    input  wire [5:0]  joy0_in,               // joypad 0 (all-digital momentary bits)
+    input  wire [5:0]  joy1_in                // joypad 1 (all-digital momentary bits)
 );
 
 // ─── CDC sync ───────────────────────────────────────────────────────────────────────
@@ -118,6 +125,94 @@ always_ff @(posedge CLK_VIDEO) begin
     if (hblank) begin h_cnt <= '0; drew_this_line <= 1'b0; end
     else if (ce_pix && h_cnt < 11'd2047) h_cnt <= h_cnt + 11'd1;
 end
+
+// ─── Pause symbol (⏸, top-right) ─────────────────────────────────────────────
+// Fully independent of the `en`/status[48] panel gate (spec S4).
+// NOTE (design §6): all six *_in ports are sourced in the clk21m domain and
+// CLK_VIDEO == clk21m (MSX1.sv:609), so the 2-FF stages below are a defensive
+// pipeline, not a true CDC.  The multi-bit joy inequality compares are only
+// safe because source and destination clocks are identical; if CLK_VIDEO is
+// ever separated from clk21m, the joy compares must be redesigned
+// (source-domain toggle or gray coding / handshake).
+logic       pause_q1, pause_q2;
+logic       osd_q1,   osd_q2;
+logic       key_q1,   key_q2,   key_q3;
+logic       mouse_q1, mouse_q2, mouse_q3;
+logic [5:0] joy0_q1,  joy0_q2,  joy0_q3;
+logic [5:0] joy1_q1,  joy1_q2,  joy1_q3;
+
+always_ff @(posedge CLK_VIDEO) begin
+    pause_q1 <= pause_in;     pause_q2 <= pause_q1;
+    osd_q1   <= osd_in;       osd_q2   <= osd_q1;
+    key_q1   <= key_tgl_in;   key_q2   <= key_q1;    key_q3   <= key_q2;
+    mouse_q1 <= mouse_tgl_in; mouse_q2 <= mouse_q1;  mouse_q3 <= mouse_q2;
+    joy0_q1  <= joy0_in;      joy0_q2  <= joy0_q1;   joy0_q3  <= joy0_q2;
+    joy1_q1  <= joy1_in;      joy1_q2  <= joy1_q1;   joy1_q3  <= joy1_q2;
+end
+
+// Input event = keyboard/mouse event-toggle flip or any joypad bit change.
+wire sym_input_evt = (key_q2 ^ key_q3) | (mouse_q2 ^ mouse_q3)
+                   | (joy0_q2 != joy0_q3) | (joy1_q2 != joy1_q3);
+
+// 18-frame reload counter (design §7).  Frame tick = vblank rising edge (C5,
+// reuses vblank_prev above).  Priority: pause-OFF clear > OSD-open constant
+// reload > input reload > per-frame decay.  Reload value 18 caps the counter,
+// so input spam cannot overflow the 5-bit register.
+logic [5:0] sym_hold;                            // 36 frames ≈ 0.6 s @60 Hz
+always_ff @(posedge CLK_VIDEO) begin
+    if (!pause_q2)          sym_hold <= 6'd0;    // pause OFF → clear
+    else if (osd_q2)        sym_hold <= 6'd36;   // OSD open → constant reload
+    else if (sym_input_evt) sym_hold <= 6'd36;   // input event → reload
+    else if (!vblank_prev && vblank && sym_hold != 6'd0)
+                            sym_hold <= sym_hold - 6'd1;
+end
+
+// pause_q2 gate makes unpause hide the symbol combinationally, same clock.
+wire symbol_on = pause_q2 && (osd_q2 || sym_hold != 6'd0);
+
+// Fade-out: 4 discrete alpha steps over the last 8 frames of the hold
+// (remaining >=8 or OSD open → opaque; 7..6 → 3/4; 5..4 → 2/4; 3..0 → 1/4).
+// Blend is shift-add only (x1/4, x2/4, x3/4, x4/4) — no multipliers.
+wire [1:0] sym_alpha = (osd_q2 || sym_hold >= 6'd8) ? 2'd3 :
+                       (sym_hold >= 6'd6)           ? 2'd2 :
+                       (sym_hold >= 6'd4)           ? 2'd1 : 2'd0;
+
+function automatic [7:0] sym_blend(input [7:0] fg, input [7:0] bg,
+                                   input [1:0] a);
+    logic signed [9:0] d;
+    logic signed [9:0] t;
+    begin
+        d = $signed({2'b00, fg}) - $signed({2'b00, bg});
+        case (a)
+            2'd3: t = d;                       // 4/4
+            2'd2: t = (d >>> 1) + (d >>> 2);   // 3/4
+            2'd1: t = (d >>> 1);               // 2/4
+            default: t = (d >>> 2);            // 1/4
+        endcase
+        sym_blend = 8'($signed({2'b00, bg}) + t);
+    end
+endfunction
+
+// Line-width self-measurement → X scale (design §3.4): latch h_cnt at hblank
+// entry (first hblank cycle still holds the final count; h_cnt clears next
+// cycle, so the h_cnt!=0 guard yields one capture per line).  wide=1 means
+// 2 h_cnt counts per display pixel (V9938/V9958 ~DHClk path, line_w 480..583
+// vs 240..284 for vdp18 — threshold 384 splits the two clusters).
+logic [10:0] line_w = 11'd256;
+always_ff @(posedge CLK_VIDEO) begin
+    if (hblank && h_cnt != 11'd0) line_w <= h_cnt;
+end
+wire        sym_wide = (line_w >= 11'd384);
+wire [10:0] sym_px   = sym_wide ? {1'b0, h_cnt[10:1]} : h_cnt;
+
+// Symbol geometry in display-pixel units (design §3.4):
+//   black box  x∈[226,242) y∈[26,45]; white bars x∈[228,232)∪[236,240) y∈[28,43].
+wire in_sym  = symbol_on && !hblank && !vblank
+            && (v_cnt >= 8'd26)    && (v_cnt <= 8'd45)
+            && (sym_px >= 11'd226) && (sym_px < 11'd242);
+wire sym_bar = (v_cnt >= 8'd28) && (v_cnt <= 8'd43)
+            && ((sym_px >= 11'd228 && sym_px < 11'd232)
+             || (sym_px >= 11'd236 && sym_px < 11'd240));
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 localparam PW = 11'd66;
@@ -254,6 +349,19 @@ always_comb begin
                 end else begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
             end
 `endif
+        end
+    end
+    // Pause symbol — independent of the in_panel/`en` gate above (spec S4);
+    // regions never overlap (panel h_cnt<66, symbol sym_px>=226).
+    if (in_sym) begin
+        if (sym_bar) begin
+            R_out = sym_blend(8'hFF, R_in, sym_alpha);
+            G_out = sym_blend(8'hFF, G_in, sym_alpha);
+            B_out = sym_blend(8'hFF, B_in, sym_alpha);
+        end else begin
+            R_out = sym_blend(8'h00, R_in, sym_alpha);
+            G_out = sym_blend(8'h00, G_in, sym_alpha);
+            B_out = sym_blend(8'h00, B_in, sym_alpha);
         end
     end
 end
