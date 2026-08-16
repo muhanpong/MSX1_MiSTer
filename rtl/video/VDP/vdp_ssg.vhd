@@ -80,6 +80,10 @@ ENTITY VDP_SSG IS
         PREDOTCOUNTER_YP        : OUT   STD_LOGIC_VECTOR(  8 DOWNTO 0 );
         PREWINDOW_Y             : OUT   STD_LOGIC;
         PREWINDOW_Y_SP          : OUT   STD_LOGIC;
+        -- '1' on the single line right before the display area (monitor -1);
+        -- lets the S#2 VR flag drop one line early like the real chip
+        -- (openMSX: vr = ticks < displayStart - TICKS_PER_LINE || ...).
+        VD_LEAD                 : OUT   STD_LOGIC;
         FIELD                   : OUT   STD_LOGIC;
         WINDOW_X                : OUT   STD_LOGIC;
         PVIDEODHCLK             : OUT   STD_LOGIC;
@@ -178,6 +182,7 @@ BEGIN
     PVIDEODLCLK         <= FF_VIDEO_DL_CLK;
     PREDOTCOUNTER_X     <= FF_PRE_X_CNT;
     PREDOTCOUNTER_Y     <= FF_PRE_Y_CNT;
+    VD_LEAD             <= '1' WHEN( FF_MONITOR_LINE = "111111111" )ELSE '0';   -- monitor -1
     PREDOTCOUNTER_YP    <= FF_MONITOR_LINE;
     HD                  <= W_H_BLANK;
     VD                  <= W_V_BLANK;

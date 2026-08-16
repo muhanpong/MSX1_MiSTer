@@ -323,6 +323,7 @@ ARCHITECTURE RTL OF VDP IS
             PREDOTCOUNTER_YP        : OUT   STD_LOGIC_VECTOR(  8 DOWNTO 0 );
             PREWINDOW_Y             : OUT   STD_LOGIC;
             PREWINDOW_Y_SP          : OUT   STD_LOGIC;
+            VD_LEAD                 : OUT   STD_LOGIC;
             FIELD                   : OUT   STD_LOGIC;
             WINDOW_X                : OUT   STD_LOGIC;
             PVIDEODHCLK             : OUT   STD_LOGIC;
@@ -834,6 +835,7 @@ ARCHITECTURE RTL OF VDP IS
     SIGNAL WINDOW_X                     : STD_LOGIC;
     SIGNAL PREWINDOW_X                  : STD_LOGIC;
     SIGNAL PREWINDOW_Y                  : STD_LOGIC;
+    SIGNAL W_VD_LEAD                    : STD_LOGIC;
     SIGNAL PREWINDOW_Y_SP               : STD_LOGIC;
     SIGNAL PREWINDOW                    : STD_LOGIC;
     SIGNAL PREWINDOW_SP                 : STD_LOGIC;
@@ -1167,6 +1169,7 @@ BEGIN
         PREDOTCOUNTER_Y         => PREDOTCOUNTER_Y          ,
         PREDOTCOUNTER_YP        => PREDOTCOUNTER_YP         ,
         PREWINDOW_Y             => PREWINDOW_Y              ,
+        VD_LEAD                 => W_VD_LEAD                ,
         PREWINDOW_Y_SP          => PREWINDOW_Y_SP           ,
         FIELD                   => FIELD                    ,
         WINDOW_X                => WINDOW_X                 ,
@@ -1281,7 +1284,12 @@ BEGIN
     -- display is disabled (the BIOS polls for VR=0 during boot to find the
     -- frame phase; an "OR NOT REG_R1_DISP_ON" term froze VR at 1 with the
     -- display off and the machine never booted).
-    VD          <=  NOT PREWINDOW_Y;
+    -- One-line lead before display start, like the real chip (openMSX:
+    -- vr = ticks < displayStart - TICKS_PER_LINE || ticks >= displayEnd):
+    -- software that waits for VR to drop and then races to finish VRAM work
+    -- before the visible area gets the same one-line grace it gets on real
+    -- hardware (MFRSD firmware text output depended on it).
+    VD          <=  NOT (PREWINDOW_Y OR W_VD_LEAD);
 
     PROCESS( RESET, CLK21M )
     BEGIN
