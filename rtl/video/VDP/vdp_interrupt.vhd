@@ -75,7 +75,8 @@ ENTITY VDP_INTERRUPT IS
         CLR_HSYNC_INT           : IN    STD_LOGIC;
         REQ_VSYNC_INT_N         : OUT   STD_LOGIC;
         REQ_HSYNC_INT_N         : OUT   STD_LOGIC;
-        REG_R19_HSYNC_INT_LINE  : IN    STD_LOGIC_VECTOR(  7 DOWNTO 0 )
+        REG_R19_HSYNC_INT_LINE  : IN    STD_LOGIC_VECTOR(  7 DOWNTO 0 );
+        REG_R0_HSYNC_INT_EN     : IN    STD_LOGIC
     );
 END VDP_INTERRUPT;
 
@@ -121,7 +122,18 @@ BEGIN
             IF( CLR_HSYNC_INT = '1' OR (W_VSYNC_INTR_TIMING = '1' AND V_BLANKING_START = '1') )THEN
                 -- H-BLANKING INTERRUPT CLEAR
                 FF_HSYNC_INT_N <= '1';
-            ELSIF( ACTIVE_LINE = '1' AND Y_CNT = REG_R19_HSYNC_INT_LINE )THEN
+            -- The FH flag only arms while IE1 (R#0 bit4) is enabled: with IE1
+            -- off the real chip never schedules the horizontal scan point, so
+            -- S#1 bit0 stays 0 (openMSX scheduleHScan gates on controlRegs[0]
+            -- & 0x10).  We latched the flag regardless, and software that
+            -- dispatches its interrupt handler on the S#1 FH bit (Zanac-EX)
+            -- ran its raster-split handler from the VBLANK interrupt while
+            -- IE1 was off -- during its game-over R#23 roll the wandering
+            -- Y_CNT==R#19 match set the flag and the split handler then
+            -- overwrote the title-screen R#2 with the gameplay page (=63),
+            -- leaving the title permanently garbled.
+            ELSIF( ACTIVE_LINE = '1' AND Y_CNT = REG_R19_HSYNC_INT_LINE
+                   AND REG_R0_HSYNC_INT_EN = '1' )THEN
                 -- H-BLANKING INTERRUPT REQUEST
                 FF_HSYNC_INT_N <= '0';
             END IF;

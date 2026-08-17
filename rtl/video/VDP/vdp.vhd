@@ -362,7 +362,8 @@ ARCHITECTURE RTL OF VDP IS
             CLR_HSYNC_INT           : IN    STD_LOGIC;
             REQ_VSYNC_INT_N         : OUT   STD_LOGIC;
             REQ_HSYNC_INT_N         : OUT   STD_LOGIC;
-            REG_R19_HSYNC_INT_LINE  : IN    STD_LOGIC_VECTOR(  7 DOWNTO 0 )
+            REG_R19_HSYNC_INT_LINE  : IN    STD_LOGIC_VECTOR(  7 DOWNTO 0 );
+            REG_R0_HSYNC_INT_EN     : IN    STD_LOGIC
         );
     END COMPONENT;
 
@@ -1139,7 +1140,8 @@ BEGIN
         CLR_HSYNC_INT           => CLR_HSYNC_INT                    ,
         REQ_VSYNC_INT_N         => REQ_VSYNC_INT_N                  ,
         REQ_HSYNC_INT_N         => REQ_HSYNC_INT_N                  ,
-        REG_R19_HSYNC_INT_LINE  => REG_R19_HSYNC_INT_LINE
+        REG_R19_HSYNC_INT_LINE  => REG_R19_HSYNC_INT_LINE      ,
+        REG_R0_HSYNC_INT_EN     => REG_R0_HSYNC_INT_EN
     );
 
     PROCESS( CLK21M )

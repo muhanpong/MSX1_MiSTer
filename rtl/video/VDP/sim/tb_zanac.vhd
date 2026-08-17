@@ -187,6 +187,28 @@ BEGIN
         WRITE(L, STRING'("VBLANK-INT at raw "));
         WRITE(L, (CYCLES / 1368) MOD 262);
         WRITELINE(OUTPUT, L);
+
+        -- FH flag gating: with IE1 OFF an armed R#19 match must NOT set S#1.0
+        VREG(0, 16#06#);              -- IE1 off
+        VREG(19, 100);                -- arm a display line
+        VREG(15, 1); PRD(1, ST);      -- clear any stale flag
+        FOR I IN 0 TO 3*262*1368/58 LOOP
+            FOR J IN 0 TO 56 LOOP WAIT UNTIL RISING_EDGE(CLK21M); END LOOP;
+        END LOOP;
+        PRD(1, ST);
+        WRITE(L, STRING'("FH-flag IE1-off: "));
+        WRITE(L, STD_LOGIC'IMAGE(ST(0)));
+        WRITE(L, STRING'("  (must be '0')"));
+        WRITELINE(OUTPUT, L);
+        VREG(0, 16#16#);              -- IE1 on
+        FOR I IN 0 TO 3*262*1368/58 LOOP
+            FOR J IN 0 TO 56 LOOP WAIT UNTIL RISING_EDGE(CLK21M); END LOOP;
+        END LOOP;
+        VREG(15, 1); PRD(1, ST);
+        WRITE(L, STRING'("FH-flag IE1-on:  "));
+        WRITE(L, STD_LOGIC'IMAGE(ST(0)));
+        WRITE(L, STRING'("  (must be '1')"));
+        WRITELINE(OUTPUT, L);
         ASSERT FALSE REPORT "done" SEVERITY FAILURE;
     END PROCESS;
 END SIM;
