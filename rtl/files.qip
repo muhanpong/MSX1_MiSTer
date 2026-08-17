@@ -11,3 +11,5 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) n
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) flash_dump_test.sv                    ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) flash_changelog.sv                    ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) flash_dirtysave.sv                    ]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) vdp_regprobe.sv]
+

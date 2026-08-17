@@ -42,7 +42,12 @@ module debug_overlay (
     input  wire        key_tgl_in,            // ps2_key[10] — flips per keyboard event
     input  wire        mouse_tgl_in,          // ps2_mouse[24] — flips per mouse packet
     input  wire [5:0]  joy0_in,               // joypad 0 (all-digital momentary bits)
-    input  wire [5:0]  joy1_in                // joypad 1 (all-digital momentary bits)
+    input  wire [5:0]  joy1_in,               // joypad 1 (all-digital momentary bits)
+    // reg-probe display (Zanac R#2 wedge hunt): {val8, frame16} + live frame
+    input  wire [23:0] probe_r2,
+    input  wire [23:0] probe_r23,
+    input  wire [23:0] probe_r0,
+    input  wire [15:0] probe_frame
 );
 
 // ─── CDC sync ───────────────────────────────────────────────────────────────────────
@@ -214,6 +219,9 @@ wire sym_bar = (v_cnt >= 8'd28) && (v_cnt <= 8'd43)
             && ((sym_px >= 11'd228 && sym_px < 11'd232)
              || (sym_px >= 11'd236 && sym_px < 11'd240));
 
+logic [23:0] pv;      // reg-probe panel row value (comb temp)
+logic        pb;      // current bit
+
 // ─── Render ──────────────────────────────────────────────────────────────────
 localparam PW = 11'd66;
 `ifdef MOONSOUND_DIAG
@@ -251,6 +259,7 @@ wire       lat_hi   = can_err;   // red
 
 always_comb begin
     R_out = R_in; G_out = G_in; B_out = B_in;
+    pv = 24'd0; pb = 1'b0;
     if (in_panel) begin
         if (border) begin
             R_out = 8'h00; G_out = 8'h00; B_out = 8'h00;
@@ -351,6 +360,26 @@ always_comb begin
 `endif
         end
     end
+    // ── reg-probe panel (diagnostic): 4 bit-strip rows, bottom-left, en-gated.
+    // rows y 120..151 (8px each), 24 bits x 2px (MSB left), colors:
+    //   row0 probe_r2 (red), row1 probe_r23 (green), row2 probe_r0 (amber),
+    //   row3 {8'h00, probe_frame} (cyan).  bit=1 -> bright, 0 -> dim.
+    if (en && !hblank && !vblank && v_cnt >= 8'd120 && v_cnt < 8'd152 && h_cnt < 11'd48) begin
+        case (v_cnt[4:3])
+            2'd0: pv = probe_r2;
+            2'd1: pv = probe_r23;
+            2'd2: pv = probe_r0;
+            default: pv = {8'h00, probe_frame};
+        endcase
+        pb = pv[5'd23 - h_cnt[5:1]];
+        case (v_cnt[4:3])
+            2'd0: begin R_out = pb ? 8'hFF : 8'h30; G_out = 8'h00; B_out = 8'h00; end
+            2'd1: begin R_out = 8'h00; G_out = pb ? 8'hFF : 8'h30; B_out = 8'h00; end
+            2'd2: begin R_out = pb ? 8'hFF : 8'h30; G_out = pb ? 8'hC0 : 8'h24; B_out = 8'h00; end
+            default: begin R_out = 8'h00; G_out = pb ? 8'hFF : 8'h30; B_out = pb ? 8'hFF : 8'h30; end
+        endcase
+    end
+
     // Pause symbol — independent of the in_panel/`en` gate above (spec S4);
     // regions never overlap (panel h_cnt<66, symbol sym_px>=226).
     if (in_sym) begin

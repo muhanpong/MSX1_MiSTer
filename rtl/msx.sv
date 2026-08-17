@@ -8,6 +8,11 @@ module msx
    input                    ce_3m58_n,
    input                    ce_5m39_n,
    input                    ce_10hz,
+   input                    probe_freeze,        // diagnostic: freeze vdp_regprobe ring (msx_pause)
+   output            [23:0] probe_r2,
+   output            [23:0] probe_r23,
+   output            [23:0] probe_r0,
+   output            [15:0] probe_frame,
    input                    clk_sdram,
    input                    dma_active,
    //Video
@@ -583,6 +588,15 @@ vdp vdp_vdp
    .FORCED_V_MODE(msxConfig.video_mode == PAL),
    .BORDER(msxConfig.border),
    .VDP_ID(5'b00000 | msxConfig.vdp_id << 1)
+);
+
+vdp_regprobe u_regprobe (
+   .clk(clk21m), .reset(reset),
+   .a(a), .din(d_from_cpu),
+   .wr_n(wr_n), .rd_n(rd_n), .iorq_n(iorq_n), .m1_n(m1_n),
+   .vdp_en(vdp_en), .vblank(vblank), .hblank(hblank),
+   .msx_pause(probe_freeze),
+   .p_r2(probe_r2), .p_r23(probe_r23), .p_r0(probe_r0), .p_frame(probe_frame)
 );
 
 wire [15:0] VRAM_address;
