@@ -155,6 +155,18 @@ ARCHITECTURE RTL OF VDP_WAIT_CONTROL IS
         X"8000", X"8000", X"8000", X"8000", X"8000", X"8000", X"1278", X"08F0",
         X"0D58", X"0EFC", X"8000", X"8000", X"0D38", X"11F8", X"13D4", X"8000"
     );
+    -- Vertical border with the display ENABLED, 60Hz.  (2026-08-17) The sprite
+    -- ghost-collision fix (afde2e4) stopped the sprite pipeline from claiming
+    -- VRAM slots on ~24 top-border lines, which sped the boot-scenario HMMM
+    -- from 259.6 to 253.2 lines -- back under GoFigure's "Abnormal fast VDP"
+    -- threshold (HW-measured: 255.8 fails, 259.5 passes).  Border scanlines
+    -- are invisible, so this phase absorbs the compensation; the display table
+    -- (602, race-critical) and the true display-off table (605, loading
+    -- screens) stay untouched.  Only the HMMM entry is calibrated.
+    CONSTANT C_WAIT_TABLE_606 : WAIT_TABLE_T :=(
+        X"8000", X"8000", X"8000", X"8000", X"8000", X"8000", X"1278", X"08F0",
+        X"0D58", X"0EFC", X"8000", X"8000", X"0D38", X"1040", X"13D4", X"8000"
+    );
 BEGIN
 
     PROCESS( RESET, CLK21M )
@@ -224,6 +236,9 @@ BEGIN
                                     FF_WAIT_CNT <= ('0' & FF_WAIT_CNT(14 DOWNTO  0)) + C_WAIT_TABLE_604( CONV_INTEGER( VDP_COMMAND ) );
                                 END IF;
                             END IF;
+                        -- Vertical border, display enabled
+                        ELSIF( REG_R1_DISP_ON = '1' )THEN
+                            FF_WAIT_CNT <= ('0' & FF_WAIT_CNT(14 DOWNTO  0)) + C_WAIT_TABLE_606( CONV_INTEGER( VDP_COMMAND ) );
                         -- Display Off (Blank)
                         ELSE
                             FF_WAIT_CNT <= ('0' & FF_WAIT_CNT(14 DOWNTO  0)) + C_WAIT_TABLE_605( CONV_INTEGER( VDP_COMMAND ) );
