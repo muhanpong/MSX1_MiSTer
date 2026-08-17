@@ -1690,7 +1690,11 @@ BEGIN
         EIGHTDOTSTATE               => EIGHTDOTSTATE,
         DOTCOUNTERX                 => PREDOTCOUNTER_X,
         DOTCOUNTERYP                => PREDOTCOUNTER_YP,
-        BWINDOW_Y                   => BWINDOW_Y,
+        -- Sprite pipeline must follow the same Y window as the VRAM arbiter
+        -- (PREWINDOW_Y_SP, top border..line 191). With BWINDOW_Y it kept
+        -- running through the bottom border without VRAM grants, consuming
+        -- stale PRAMDAT as attribute/pattern data -> ghost S#0 collisions.
+        BWINDOW_Y                   => PREWINDOW_Y_SP,
         PVDPS0SPCOLLISIONINCIDENCE  => VDPS0SPCOLLISIONINCIDENCE,
         PVDPS0SPOVERMAPPED          => VDPS0SPOVERMAPPED,
         PVDPS0SPOVERMAPPEDNUM       => VDPS0SPOVERMAPPEDNUM,

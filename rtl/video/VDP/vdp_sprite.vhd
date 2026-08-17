@@ -542,7 +542,16 @@ BEGIN
                         '0';
 
     -- [Y_TEST]表示中のラインか否か
-    W_ACTIVE        <=  BWINDOW_Y;
+    -- Restrict the sprite pipeline to lines whose Y-test target (YP+1) lies
+    -- inside the display area: YP = -2..190 (192-line) / -2..210 (212-line).
+    -- A border-wide window is wrong: FF_CUR_Y's 8-bit alias makes sprites
+    -- parked at Y=209 match again on border lines (top: YP -48..-17, bottom:
+    -- YP 208..239) -> ghost S#0 collisions the real chip never produces.
+    W_ACTIVE        <=  BWINDOW_Y WHEN(
+                            (DOTCOUNTERYP(8) = '1' AND DOTCOUNTERYP(7 DOWNTO 0) >= 254) OR
+                            (DOTCOUNTERYP(8) = '0' AND REG_R9_Y_DOTS = '0' AND DOTCOUNTERYP(7 DOWNTO 0) <= 190) OR
+                            (DOTCOUNTERYP(8) = '0' AND REG_R9_Y_DOTS = '1' AND DOTCOUNTERYP(7 DOWNTO 0) <= 210) )ELSE
+                        '0';
 
     -----------------------------------------------------------------------------
     -- [SPWINDOW_Y]
@@ -571,7 +580,11 @@ BEGIN
         ELSIF( CLK21M'EVENT AND CLK21M = '1' )THEN
             IF( DOTSTATE = "01" )THEN
                 IF( DOTCOUNTERX = 0 ) THEN
-                    FF_Y_TEST_EN <= FF_SP_EN;
+                    -- Re-check the window at load time as well: FF_SP_EN is
+                    -- sampled near the end of the previous line, so without
+                    -- this AND the Y-test would run one extra line after the
+                    -- sprite window closes (stale-data ghost collisions).
+                    FF_Y_TEST_EN <= FF_SP_EN AND W_ACTIVE;
                 ELSIF( EIGHTDOTSTATE = "110" )THEN
                     IF( W_SP_OFF = '1' OR (W_SP_OVERMAP AND W_TARGET_SP_EN) = '1' OR FF_Y_TEST_SP_NUM = "11111" )THEN
                         FF_Y_TEST_EN <= '0';
