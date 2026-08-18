@@ -1,3 +1,17 @@
+/*
+    MSX1_MiSTer modification (SCC+ / SCC-I support, see docs/sccplus_spec.md S1):
+    - Added mode port i_SCCP_MODE[1:0] (0=Real SCC, 1=SCC+ chip in SCC-compatible mode, 2=SCC+ mode).
+      Left unconnected (synthesis ties to GND) -> Real, i.e. original IKASCC behavior.
+    - Added ch5 independent wave RAM (u_mem_ch5) driven by u_ctrl_ch5, whose RAM CPU R/W ports were
+      previously unconnected. Internal ch5 RAM window is 0xA0-0xBF (ADDR_RAM_BASE=8'hA0); the wrapper
+      remaps SCC+ addresses onto this window.
+    - Real mode: ch5 wave latch keeps sampling the shared ch4/ch5 RAM (ch5 = ch4 mirror) and ch5 RAM
+      R/W requests are suppressed, so ch1-4 / ch4-ch5 time-division paths stay bit-identical.
+    - Compat mode: ch5 is still a ch4 mirror on real SCC-I (openMSX SCC::writeWave copies wave4->wave5
+      whenever mode != Plus), so the private RAM stays disabled and the wrapper points the 0xA0-0xBF
+      read window at the shared ch4 RAM (0x60-0x7F) instead.
+    - Plus mode only: ch5 wave latch samples the ch5 private RAM; 0xA0-0xBF reads return ch5 RAM data.
+*/
 module IKASCC_player_s #(
     parameter RAM_TYPE = 1,
     parameter FAST_CLOCK = 0,
@@ -13,6 +27,8 @@ module IKASCC_player_s #(
     input   wire    [7:0]   i_ABLO,
     input   wire    [7:0]   i_DB,
     output  reg     [7:0]   o_DB,
+
+    input   wire    [1:0]   i_SCCP_MODE, //SCC+ mode: 0=Real(SCC), 1=Compatible, 2=Plus (unconnected -> 0)
 
     output  reg             o_TEST,
 
@@ -267,11 +283,30 @@ always @(*) begin
 end
 wire    [7:0]   ch45_ram_d, ch45_ram_q;
 
+//SCC+ ch5 independent wave RAM (window 0xA0-0xBF), active only in Compatible/Plus mode
+wire            sccp_ch5_indep = (i_SCCP_MODE == 2'd2); //Plus only; Real/Compat keep ch5 = ch4 mirror
+wire            ch5_ram_rdrq_raw, ch5_ram_wrrq_raw;
+wire            ch5_ram_rdrq = ch5_ram_rdrq_raw & sccp_ch5_indep;
+wire            ch5_ram_wrrq = ch5_ram_wrrq_raw & sccp_ch5_indep;
+wire    [4:0]   ch5_ram_addr_cpu;
+wire    [4:0]   ch5_ram_addr = ch5_ram_rdrq ? ch5_ram_addr_cpu : ch5_ram_addr_cntr;
+wire    [7:0]   ch5_ram_d, ch5_ram_q;
+
+IKASCC_player_memory_s #(.RAM_TYPE(RAM_TYPE), .INITFILE()) u_mem_ch5 (
+    .i_EMUCLK                   (emuclk                     ),
+    .i_MCLK_PCEN_n              (mclkpcen_n                 ),
+
+    .i_RAM_WRRQ                 (ch5_ram_wrrq & ~test[6]    ),
+    .i_RAM_ADDR                 (ch5_ram_addr               ),
+    .i_RAM_D                    (ch5_ram_d                  ),
+    .o_RAM_Q                    (ch5_ram_q                  )
+);
+
 //wave data latch
 reg     [7:0]   ch4_wavelatch, ch5_wavelatch;
 always @(posedge emuclk) if(!mclkpcen_n) begin
     if(ch4_wavelatch_tick_pcen) ch4_wavelatch <= ch45_ram_q;
-    if(ch5_wavelatch_tick_pcen) ch5_wavelatch <= ch45_ram_q;
+    if(ch5_wavelatch_tick_pcen) ch5_wavelatch <= sccp_ch5_indep ? ch5_ram_q : ch45_ram_q; //Real: ch4 mirror
 end
 
 IKASCC_player_memory_s #(.RAM_TYPE(RAM_TYPE), .INITFILE()) u_mem_ch45 (
@@ -317,7 +352,7 @@ IKASCC_player_control_s #(
 
 IKASCC_player_control_s #(
     .RAMCTRL_ASYNC              (RAMCTRL_ASYNC              ), //depends on the TC22SC characteristics
-    .ADDR_RAM_BASE              (8'h60                      ),
+    .ADDR_RAM_BASE              (8'hA0                      ), //SCC+ ch5 private RAM window (was 8'h60, ports unused)
     .ADDR_FREQ_BASE             (8'h88                      ),
     .ADDR_VOL                   (8'h8E                      ),
     .ADDR_MUTE                  (8'h8F                      ),
@@ -334,11 +369,11 @@ IKASCC_player_control_s #(
     .i_DB                       (i_DB                       ),
     .i_TEST                     (test                       ),
 
-    .o_RAM_RDRQ                 (                           ),
-    .o_RAM_WRRQ                 (                           ),
+    .o_RAM_RDRQ                 (ch5_ram_rdrq_raw           ),
+    .o_RAM_WRRQ                 (ch5_ram_wrrq_raw           ),
     .o_RAM_ADDR_CNTR            (ch5_ram_addr_cntr          ),
-    .o_RAM_ADDR_CPU             (                           ),
-    .o_RAM_D                    (                           ),
+    .o_RAM_ADDR_CPU             (ch5_ram_addr_cpu           ),
+    .o_RAM_D                    (ch5_ram_d                  ),
     .i_RAM_Q                    (ch5_wavelatch              ),
 
     .o_FRACCNTR_LD_n            (fraccntr_ld_n[4]           ),
@@ -359,6 +394,7 @@ always @(*) begin
     else if(ch2_ram_rdrq) o_DB = ch2_ram_q;
     else if(ch3_ram_rdrq) o_DB = ch3_ram_q;
     else if(ch45_ram_rdrq) o_DB = ch45_ram_q;
+    else if(ch5_ram_rdrq) o_DB = ch5_ram_q; //SCC+ ch5 RAM readback (Compat/Plus only, gated)
 end
 
 endmodule
