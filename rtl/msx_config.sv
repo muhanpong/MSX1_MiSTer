@@ -9,10 +9,10 @@ parameter CONF_STR_SLOT_B = {
 // ROM > 4MB -> ASCII16X flash mapper (8-bit-bank ASCII16 cannot exceed 4MB; per the
 // ASCII16-X spec the X mapper is "mostly backwards compatible" for plain ROM banking).
 parameter CONF_STR_MAPPER_A = {
-    "H3O[23:20],Mapper type,auto,none,ASCII8,ASCII16X,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY;"
+    "H3O[23:20],Mapper type,auto,none,ASCII8,ASCII16X,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY,Yamanooto;"
 };
 parameter CONF_STR_MAPPER_B = {
-    "H4O[35:32],Mapper type,auto,none,ASCII8,ASCII16X,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY;"
+    "H4O[35:32],Mapper type,auto,none,ASCII8,ASCII16X,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY,Yamanooto;"
 };
 parameter CONF_STR_SRAM_SIZE_A = {
     "H5O[28:26],SRAM size,auto,1kB,2kB,4kB,8kB,16kB,32kB,none;"
@@ -54,9 +54,13 @@ assign cart_conf[1].typ                = slot_B_select < CART_TYP_MFRSD ? cart_t
 // 10-entry list maps uniformly +2 onto the enum (auto..WIZARDRY). The "ASCII16X"
 // entry (index 3) resolves by ROM size: >4MB -> MAPPER_ASCII16X (flash), else
 // classic MAPPER_ASCII16 (SRAM/banking as before).
-assign cart_conf[0].selected_mapper    = rom_loaded[0] ? mapper_typ_t'((mapper_A_select == 4'd3 & rom_big[0]) ? 5'(MAPPER_ASCII16X) : (mapper_A_select + 4'd2)) : MAPPER_UNUSED;
-assign cart_conf[1].selected_mapper    = rom_loaded[1] ? mapper_typ_t'((mapper_B_select == 4'd3 & rom_big[1]) ? 5'(MAPPER_ASCII16X) : (mapper_B_select + 4'd2)) : MAPPER_UNUSED;
-assign cart_conf[0].selected_sram_size = typ_A == CART_TYP_ROM & mapper_A_select > 4'd1 & ~(mapper_A_select == 4'd3 & rom_big[0]) & sram_A_select > 3'd0 & sram_A_select < 3'd7 ? (8'd1 << (sram_A_select - 1'd1)) : 8'd0;
+assign cart_conf[0].selected_mapper    = rom_loaded[0] ? mapper_typ_t'(mapper_A_select == 4'd10                ? 5'(MAPPER_YAMANOOTO) :
+                                                                     (mapper_A_select == 4'd3 & rom_big[0]) ? 5'(MAPPER_ASCII16X)  :
+                                                                                               (mapper_A_select + 4'd2)) : MAPPER_UNUSED;
+assign cart_conf[1].selected_mapper    = rom_loaded[1] ? mapper_typ_t'(mapper_B_select == 4'd10                ? 5'(MAPPER_YAMANOOTO) :
+                                                                     (mapper_B_select == 4'd3 & rom_big[1]) ? 5'(MAPPER_ASCII16X)  :
+                                                                                               (mapper_B_select + 4'd2)) : MAPPER_UNUSED;
+assign cart_conf[0].selected_sram_size = typ_A == CART_TYP_ROM & mapper_A_select > 4'd1 & mapper_A_select != 4'd10 & ~(mapper_A_select == 4'd3 & rom_big[0]) & sram_A_select > 3'd0 & sram_A_select < 3'd7 ? (8'd1 << (sram_A_select - 1'd1)) : 8'd0;
 assign cart_conf[1].selected_sram_size = 8'd0;
 
 assign msxConfig.typ = bios_config.MSX_typ;
@@ -69,7 +73,7 @@ assign msxConfig.moonsound_en = HPS_status[45];
 
 assign ROM_A_load_hide    = cart_conf[0].typ != CART_TYP_ROM;
 assign ROM_B_load_hide    = cart_conf[1].typ != CART_TYP_ROM;
-assign sram_A_select_hide = cart_conf[0].typ != CART_TYP_ROM | mapper_A_select == 4'd0 | (mapper_A_select == 4'd3 & rom_big[0]);
+assign sram_A_select_hide = cart_conf[0].typ != CART_TYP_ROM | mapper_A_select == 4'd0 | mapper_A_select == 4'd10 | (mapper_A_select == 4'd3 & rom_big[0]);
 assign fdc_enabled = bios_config.use_FDC | cart_conf[0].typ == CART_TYP_FDC;
 
 

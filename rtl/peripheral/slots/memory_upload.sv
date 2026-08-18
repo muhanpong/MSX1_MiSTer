@@ -235,7 +235,7 @@ module memory_upload
                                     // can erase/program its save sectors at the TOP of the chip.  Without
                                     // this a short image (e.g. GoFigure 0x7DC000) has its top-sector
                                     // programs suppressed by the rom_size bound and the save silently fails.
-                                    x16_pad <= (cart_mapper == MAPPER_ASCII16X
+                                    x16_pad <= ((cart_mapper == MAPPER_ASCII16X | cart_mapper == MAPPER_YAMANOOTO)
                                                 & ioctl_size[curr_conf == CONFIG_SLOT_A ? 2 : 3][24:0] < 25'h800000)
                                              ? 25'h800000 - ioctl_size[curr_conf == CONFIG_SLOT_A ? 2 : 3][24:0]
                                              : 25'd0;
@@ -633,7 +633,11 @@ dev_typ_t rom_device;
 
 assign rom_mapper = selected_mapper  == MAPPER_AUTO ? detected_mapper : selected_mapper;
 
-assign rom_device = rom_mapper == MAPPER_KONAMI_SCC ? DEV_SCC  :
+// Yamanooto is a flat primary-slot cartridge (no subslot expander chip on the real
+// board): one 8MB flash the user loads a ROM image into, plus an SCC-I and a PSG.
+// See docs/yamanooto_spec.md S6.
+assign rom_device = rom_mapper == MAPPER_KONAMI_SCC ? DEV_SCC                             :
+                    rom_mapper == MAPPER_YAMANOOTO  ? (DEV_SCC2 | DEV_PSG | DEV_FLASH)    :
                                                       DEV_NONE ;     
 
 

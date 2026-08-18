@@ -80,6 +80,7 @@ assign debug_FDC_req = FDC_req;
 logic [7:0] mapper_slot[4];
 wire mapper_en, mapper_rd;
 wire [7:0] slot_mapper_dout;
+wire [7:0] yamanooto_dout = mapper_yamanooto_dout_en ? mapper_yamanooto_dout : 8'hFF;
 
 assign mapper_en = (cpu_addr == 16'hFFFF & bios_config.slot_expander_en[active_slot] & mapper_mask[active_slot] & cpu_mreq );
 assign mapper_rd =  mapper_en & cpu_rd;
@@ -139,6 +140,7 @@ wire [26:0] mapper_addr = mem_unmaped                 ? 27'hDEAD                
                           cart_ascii8                 ? 27'(mapper_ascii8_addr)     :
                           cart_ascii16                ? 27'(mapper_ascii16_addr)    :
                           mapper == MAPPER_ASCII16X   ? 27'(mapper_ascii16x_addr)   :
+                          mapper == MAPPER_YAMANOOTO  ? 27'(mapper_yamanooto_addr)  :
                           mapper == MAPPER_GM2        ? 27'(mapper_gm2_addr)        :
                                                         27'hDEAD                    ;
 
@@ -149,6 +151,7 @@ assign cpu_din          = mapper_ram_dout                        //IO
                         & fm_pac_dout                            //UNMAPPED
                         & d_to_cpu_FDC                           //UNMAPPED
                         & scc_sound_dout                         //UNMAPPED
+                        & yamanooto_dout                         //UNMAPPED
                         & flash_dout
                         & d_to_cpu_reset_status                  //IO
                         & (mem_unmaped  ? 8'hFF : ram_dout);
@@ -167,6 +170,7 @@ wire mem_unmaped = mapper_konami_unmaped     |
                    mapper_ascii8_unmaped     | 
                    mapper_ascii16_unmaped    |
                    mapper_ascii16x_unmaped   |
+                   mapper_yamanooto_unmaped  |
                    mapper_halnote_unmaped    | 
                    mapper_rd                 | 
                    FDC_req                   |
@@ -373,6 +377,28 @@ cart_ascii16x ascii16x
    .*
 );
 
+wire [24:0] mapper_yamanooto_addr;
+wire        mapper_yamanooto_unmaped;
+wire  [7:0] mapper_yamanooto_dout;
+wire        mapper_yamanooto_dout_en;
+wire        mapper_yamanooto_sccReq;
+wire        mapper_yamanooto_sccMode;
+wire        mapper_yamanooto_wren;
+cart_yamanooto yamanooto
+(
+   .mem_size(25'(size) << 14),
+   .din(cpu_dout),
+   .cs(mapper == MAPPER_YAMANOOTO),
+   .mem_unmaped(mapper_yamanooto_unmaped),
+   .mem_addr(mapper_yamanooto_addr),
+   .cart_dout(mapper_yamanooto_dout),
+   .cart_dout_en(mapper_yamanooto_dout_en),
+   .scc_req(mapper_yamanooto_sccReq),
+   .scc_mode(mapper_yamanooto_sccMode),
+   .flash_wr_en(mapper_yamanooto_wren),
+   .*
+);
+
 wire [20:0] mapper_konami_scc_addr;
 wire        mapper_konami_scc_unmaped;
 wire        mapper_konami_scc_sccReq;
@@ -394,7 +420,7 @@ wire        [7:0] scc_sound_dout;
 wire signed [15:0] scc_wave;
 scc_sound scc_sound
 (
-   .cs(mapper_konami_scc_sccReq | mapper_mfrdsd1_sccReq),  
+   .cs(mapper_konami_scc_sccReq | mapper_mfrdsd1_sccReq | mapper_yamanooto_sccReq),  
    .cpu_rd(cpu_rd),
    .cpu_wr(cpu_wr),
    .cpu_mreq(cpu_mreq),
@@ -404,7 +430,8 @@ scc_sound scc_sound
    .oe({|(cart_device[1] & (DEV_SCC | DEV_SCC2)), |(cart_device[0] & (DEV_SCC | DEV_SCC2))}),
    .wave(scc_wave),
    .sccPlusChip({|(cart_device[1] & DEV_SCC2), |(cart_device[0] & DEV_SCC2)}),
-   .sccPlusMode(mapper_mfrdsd1_sccReq ? {1'b0,mapper_mfrdsd1_sccMode} : mapper_konami_scc_sccMode),
+   .sccPlusMode(mapper_yamanooto_sccReq ? {1'b0,mapper_yamanooto_sccMode} :
+                mapper_mfrdsd1_sccReq  ? {1'b0,mapper_mfrdsd1_sccMode}  : mapper_konami_scc_sccMode),
    .debug_scc_wr(debug_scc_wr),
    .*
 );

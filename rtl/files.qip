@@ -13,3 +13,4 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) f
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) flash_dirtysave.sv                    ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) vdp_regprobe.sv]
 
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) peripheral/slots/yamanooto.sv]
