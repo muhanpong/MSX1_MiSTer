@@ -1,7 +1,8 @@
 module psg
 (
    input clk,
-   input clk_en,
+   input clk_en,       // 3.58MHz: sets the PSG pitch - must never change
+   input clk_en_cpu,   // CPU rate: bus strobe generator only (== clk_en unless turbo)
    input reset,
    input [7:0] cpu_dout,
    input [7:0] cpu_addr,
@@ -18,11 +19,14 @@ assign sound = (cs[0] ? {2'b00, sound_PSG1, 4'b0000} : 16'd0) +
                (cs[1] ? {2'b00, sound_PSG2, 4'b0000} : 16'd0);
 
 wire psg_n  = ~((cpu_addr[7:3] == 5'b00010) & cpu_iorq & ~cpu_m1);
+// Bus strobe generator on clk_en_cpu (see the identical note in msx.sv): it
+// needs two enable edges inside the I/O window, which the turbo bus guard does
+// not promise on the 3.58MHz train.  jt49_bus below keeps clk_en -> pitch fixed.
 logic u21_1_q = 1'b0;
 always @(posedge clk,  posedge psg_n) begin
    if (psg_n)
       u21_1_q <= 1'b0;
-   else if (clk_en)
+   else if (clk_en_cpu)
       u21_1_q <= ~psg_n;
 end
 
@@ -30,11 +34,11 @@ logic u21_2_q = 1'b0;
 always @(posedge clk, posedge psg_n) begin
    if (psg_n)
       u21_2_q <= 1'b0;
-   else if (clk_en)
+   else if (clk_en_cpu)
       u21_2_q <= u21_1_q;
 end
 
-wire psg_e = !(!u21_2_q | clk_en) | psg_n;
+wire psg_e = !(!u21_2_q | clk_en_cpu) | psg_n;
 wire psg_bc   = !(cpu_addr[0] | psg_e);
 wire psg_bdir = !(cpu_addr[1] | psg_e);
 

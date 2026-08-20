@@ -2,7 +2,8 @@ module msx_slots
 (
    input                       clk,
    input                       clk_sdram,
-   input                       clk_en,
+   input                       clk_en,       // 3.58MHz - sound chips (pitch), chip-internal timing
+   input                       clk_en_cpu,   // CPU rate (== clk_en unless turbo): PSG bus strobe + FDC
    input                       reset,
    //BASE                
    input                [15:0] cpu_addr,
@@ -524,11 +525,24 @@ end
 
 wire        FDC_req;
 wire  [7:0] d_to_cpu_FDC;
+// FDC on clk_en_cpu, NOT clk_en.  wd1793's `ce` port is documented as "ce at
+// CPU clock rate" (wd1793.sv:28) and it EDGE-DETECTS the bus on that enable
+// (wd1793.sv:271-387: old_wr/old_rd sampled under `if(ce)`, the write is only
+// committed on the old_wr && !wre falling edge).  Unlike the SCC's level-based
+// register capture, a single clock-enable edge inside the write window is NOT
+// enough for it - it needs an edge with the strobe idle before AND after, i.e.
+// a guaranteed idle gap, which WAIT_n fundamentally cannot create (WAIT_n can
+// only lengthen the current cycle, never delay the next one's strobe).
+// Clocking the whole wd1793 from the CPU rate keeps every CPU<->FDC timing
+// RATIO identical to stock (bus handshake, watchdog, index counter and the
+// main FSM all scale together), and is bit-identical when turbo is off.
+// A dropped FDC write corrupts the user's disk image, so this one is not
+// negotiable.
 fdc fdc
 (
    .clk(clk),
    .reset(reset),
-   .clk_en(clk_en),
+   .clk_en(clk_en_cpu),
    .cs(device == DEVICE_FDC),
    .addr(cpu_addr[13:0]),
    .d_from_cpu(cpu_dout),

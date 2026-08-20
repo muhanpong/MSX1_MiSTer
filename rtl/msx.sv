@@ -6,6 +6,11 @@ module msx
    input                    ce_10m7_p,
    input                    ce_3m58_p,
    input                    ce_3m58_n,
+   input                    ce_cpu_p,            // turbo: CPU clock enable (>= ce_3m58_p)
+   input                    ce_cpu_n,
+   input                    cpu_turbo,           // 1 while ce_cpu_* runs faster than ce_3m58_*
+   input              [1:0] cpu_speed_q,         // LATCHED speed, selects the guard limit
+   output                   cpu_bus_idle,        // -> clock.sv: safe point to change speed
    input                    ce_5m39_n,
    input                    ce_10hz,
    input                    probe_freeze,        // diagnostic: freeze vdp_regprobe ring (msx_pause)
@@ -110,6 +115,7 @@ module msx
    input                     pcm_mute,
    input                     fm_mute,
    input               [1:0] pcm_vol,
+   input               [1:0] fm_vol,
 
    // MoonSound debug outputs (clk_sdram domain)
    output wire               dbg_pcm_valid,
@@ -171,8 +177,8 @@ t80pa #(.Mode(0)) T80
 (
    .RESET_n(~reset),
    .CLK(clk21m),
-   .CEN_p(ce_3m58_p),
-   .CEN_n(ce_3m58_n),
+   .CEN_p(ce_cpu_p),
+   .CEN_n(ce_cpu_n),
    .WAIT_n(wait_n),
    // Z80 /INT is shared (wired-AND, active-low) between the VDP and the
    // MoonSound (YMF278B/OPL4) Timer-1 IRQ.  MoonSound music players (e.g.
@@ -206,23 +212,185 @@ wire [211:0] t80_reg;
 // safety timeout (ms_wait_cnt) so a lost ack cannot hang the CPU.
 wire exwait_n = ~ms_io_pending;
 
-logic wait_n = 1'b0;
+// The MSX2 M1 wait pair (74LS74 equivalent).  It is clocked from ce_cpu_p, not
+// ce_3m58_p: it is CPU-cycle logic, so it must scale WITH the CPU.  Left on
+// ce_3m58_p it would stretch the single M1 wait into 2 or 3 CPU T-states in
+// turbo, i.e. it would silently become a different machine.  On ce_cpu_p the
+// whole CPU+wait subsystem is a pure time-scaling of the stock design, and with
+// cpu_speed==0 (ce_cpu_p === ce_3m58_p) it is bit-identical to it.
+logic wait_m1_n = 1'b0;
 always @(posedge clk21m, negedge exwait_n, negedge u1_2_q) begin
    if (~exwait_n)
-      wait_n <= 1'b0;
+      wait_m1_n <= 1'b0;
    else if (~u1_2_q)
-      wait_n <= 1'b1;
-   else if (ce_3m58_p)
-      wait_n <= m1_n;
+      wait_m1_n <= 1'b1;
+   else if (ce_cpu_p)
+      wait_m1_n <= m1_n;
 end
 
 logic u1_2_q = 1'b0;
 always @(posedge clk21m, negedge exwait_n) begin
    if (~exwait_n)
       u1_2_q <= 1'b1;
-   else if (ce_3m58_p)
-      u1_2_q <= wait_n;
+   else if (ce_cpu_p)
+      u1_2_q <= wait_m1_n;
 end
+
+//  -----------------------------------------------------------------------------
+//  -- TURBO BUS GUARD
+//  -----------------------------------------------------------------------------
+// A turbo T-state is shorter than a 3.58MHz T-state, so a bus-transfer window
+// can shrink below two hard limits that the rest of the machine silently
+// assumes.  Both are fatal, not cosmetic:
+//
+//   (a) clk_en-gated capture.  IKASCC latches the SCC FREQ/VOL/deform registers
+//       inside `if(!mclkpcen_n)` (= ce_3m58_p), opll latches on .cen, fdc on
+//       .ce.  A write window that contains no ce_3m58_p edge is simply DROPPED
+//       -> SCC/OPLL music dies.  (SCC wave RAM is RAMCTRL_ASYNC=1 and jt49's
+//       register file runs on raw clk21m, so those two are already immune.)
+//   (b) SDRAM ch2 read latency.  ch2 is OPEN LOOP - sdram.sv states plainly
+//       "ch2 has NO handshake" and ch2_ready is left unconnected in MSX1.sv.
+//       The CPU must not latch DI before the fixed ~24 clk_sdram (~6 clk21m)
+//       consumption deadline, or it eats the PREVIOUS read's byte.  That exact
+//       failure already cost this project the vgmplay freeze hunt.
+//
+// The guard holds WAIT_n until the current window has lasted at least
+// GUARD_RD / GUARD_WR clk21m cycles AND has contained at least one ce_3m58_p,
+// so from the peripheral side of the bus a turbo cycle is indistinguishable
+// from a 3.58MHz one.  `req` is the core's own pre-existing bus-cycle wire, so
+// this adds no new address decode and cannot miss a device.
+//
+// Deadlock-free: WAIT_n is only ever sampled in TState 2 (T80pa.vhd:169),
+// ce_3m58_p is free-running (it stops only under msx_pause, which freezes
+// ce_cpu_* too), and guard_cnt saturates.
+//
+// Thresholds are the clk21m counts that reproduce the STOCK 3.58MHz window
+// lengths, so the invariant is exact rather than approximate:
+//   at 3.58MHz a read window (RD_n low, T1n..T3n) is 12 clk21m
+//   at 3.58MHz a write window (WR_n low, T2n..T3n) is  6 clk21m
+// The CPU still needs ~1 T-state after the guard releases before it closes the
+// window, hence 8/2 rather than 12/6 (measured: sim/tb_turbo_guard.sv).
+// wr_n is still high at the T2 CEN_n edge on which a write is decided, so a
+// write is first held with the read threshold and released on the next edge
+// once wr_n has gone low - conservative in the safe direction.
+// GUARD_RD is SPEED-DEPENDENT.  8 reproduces the stock 12-clk21m read window at
+// /3 and /2, but at /4 a T-state is 4 clk21m and 8 is first satisfied a whole
+// T-state late, stretching the window to 16 and throwing away most of the gain:
+// measured 1.09x at /4 with 8, against 1.24x with 5 (and 1.50x unguarded).
+// 5, 6 and 7 all give exactly the stock 12 at /4; 5 is taken as the midpoint of
+// the safe plateau.  Re-sweep sim/tb_turbo_guard.sv if anything here changes --
+// the "one constant fits every speed" property is gone.
+localparam int GUARD_RD_DIV4 = 5;
+localparam int GUARD_RD      = 8;
+localparam int GUARD_WR      = 2;
+
+// ARM on the M-cycle (MREQ/IORQ), MEASURE on the transfer strobe (`req`).
+// The two must be separate: T80pa samples WAIT_n at the SAME CEN_n edge on
+// which it asserts WR_n (T80pa.vhd:169+180), so a guard armed on `req` alone
+// is one edge too late for every write cycle and never stalls it.  MREQ_n /
+// IORQ_n go active one T-state earlier, which is the arming signal we need.
+// (Verified: with the `req`-armed version, 7.16MHz still produced 845 windows
+// with no ce_3m58_p edge in them; with this version, zero.)
+wire bus_cycle = ~(mreq_n & iorq_n);
+assign cpu_bus_idle = mreq_n & iorq_n;
+
+// COUNT on the transfer strobe, which is a LEVEL.  It must NOT be `req`:
+// msx.sv's `req` is a one-shot -- `iack` below latches one clk21m after it
+// rises and holds it until the M-cycle ends, so `req` is high for exactly one
+// cycle per bus cycle (that is what makes it usable as the V9938's REQ
+// one-shot, and `rtc.vhd:132` depends on it too, so it must stay that way).
+// Counting on it caps guard_cnt at 1, below both thresholds, and WAIT_n then
+// never releases -- a hard hang on the first bus cycle in turbo.
+wire bus_xfer = ~((iorq_n & mreq_n) | (wr_n & rd_n));
+
+logic [3:0] guard_cnt = 4'd0;
+logic       guard_ce  = 1'b0;
+always @(posedge clk21m) begin
+   if (reset | ~bus_cycle) begin
+      guard_cnt <= 4'd0;
+      guard_ce  <= 1'b0;
+   end else if (bus_xfer) begin
+      if (guard_cnt != 4'hF) guard_cnt <= guard_cnt + 4'd1;
+      if (ce_3m58_p)         guard_ce  <= 1'b1;
+   end
+end
+
+// The interrupt-acknowledge cycle asserts IORQ_n ONLY -- RD_n and WR_n both
+// stay high (T80.vhd:1165-1179 holds TState=1 for three ticks and
+// T80pa.vhd:178-182 drops IORQ_n on the third, i.e. just before WAIT_n is
+// sampled at TState 2).  So bus_cycle is 1 while bus_xfer is 0 and nothing can
+// ever advance the counter: a SECOND, independent hang that surviving the fix
+// above does not cure.  `mreq_n & rd_n & wr_n` is unique to that cycle -- any
+// memory cycle has mreq_n=0 at that edge, and a real I/O cycle already has its
+// strobe asserted by the time IORQ_n drops (T80pa.vhd:162-166).
+//
+// Do NOT reduce this to `(rd_n & wr_n)`: on a memory WRITE, T80pa asserts WR_n
+// on the very edge at which it samples WAIT_n, so wr_n is still high there and
+// the guard would release immediately.  Measured: minimum write window back to
+// 2 clk21m with 1010 of 13131 write windows containing no ce_3m58_p at all.
+//
+// cpu_turbo == 0 short-circuits the whole guard, so wait_n === wait_m1_n and
+// the stock core is reproduced exactly.
+wire [3:0] guard_rd   = (cpu_speed_q == 2'd1) ? GUARD_RD_DIV4[3:0] : GUARD_RD[3:0];
+wire [3:0] guard_min  = wr_n ? guard_rd : GUARD_WR[3:0];
+wire bus_guard_n = ~cpu_turbo | ~bus_cycle | (mreq_n & rd_n & wr_n)
+                              | (guard_ce & (guard_cnt >= guard_min));
+
+//  -----------------------------------------------------------------------------
+//  -- TURBO VDP PACER
+//  -----------------------------------------------------------------------------
+// The bus guard above fixes the WINDOW of one transfer, but not the GAP between
+// consecutive ones.  A tight OTIR to port 0x98 hits the VDP ~2-3x more often at
+// turbo, and both VDP paths swallow a missed slot silently:
+//   - V9938 is driven by .REQ(req & vdp_en & vdp) with .ACK() UNCONNECTED, so a
+//     request that arrives before the previous VRAM slot completed is simply
+//     lost -> corrupted tiles/sprites, no hang.
+//   - vdp18_cpuio schedules VRAM into CPU slots and needs a minimum strobe width.
+// The VDP's own arbiter grants a CPU slot at worst every 7 units of 4 clk21m =
+// 28 clk21m; at 3.58MHz the tightest pair of Z80 VDP accesses (OUT (C),r x2 =
+// 12T) is 72 clk21m apart, which is why this never mattered before.
+//
+// vdp_gap enforces that minimum spacing, vdp_hold defers the one-shot the V9938
+// samples, and vdp_stall holds the CPU meanwhile (plus, on MSX1, the vdp18_cpuio
+// strobe-width minimum).  All three are ANDed with cpu_turbo, so at stock speed
+// the expressions reduce to the original ones exactly.
+// MSX1: vdp18_cpuio holds exactly ONE write-back byte (buffer_q, vdp18_cpuio.vhd:176-220);
+// a second write while one is pending overwrites it AND desynchronises addr_q.  Access
+// slots are one per 8 clk21m (vdp18_ctrl.vhd:368) but Graphics 1/2/Multicolor pattern
+// fetches claim three of every four (vdp18_ctrl.vhd:150-186), so a CPU slot arrives once
+// per 32 clk21m -- worse during the sprite phase.  12 did not cover it.
+localparam [5:0] VDP_GAP18 = 6'd32;
+localparam [5:0] VDP_GAP38 = 6'd32;   // MSX2: >= worst-case VRAM slot period (28)
+wire  [5:0] vdp_gap_rld = vdp18 ? VDP_GAP18 : VDP_GAP38;
+wire        vdp_bus     = ~iorq_n & m1_n & vdp_en & (~rd_n | ~wr_n);
+
+logic [5:0] vdp_gap   = 6'd0;
+logic [2:0] vdp_hcnt  = 3'd0;         // ce_10m7_p ticks this strobe has spanned
+logic       vdp_grant = 1'b0;
+always @(posedge clk21m) begin
+   if (reset) begin
+      vdp_grant <= 1'b0;
+      vdp_hcnt  <= 3'd0;
+      vdp_gap   <= 6'd0;
+   end
+   else if (!vdp_bus) begin
+      vdp_grant <= 1'b0;
+      vdp_hcnt  <= 3'd0;
+      if (|vdp_gap) vdp_gap <= vdp_gap - 1'd1;
+   end
+   else begin
+      if (ce_10m7_p & ~&vdp_hcnt) vdp_hcnt <= vdp_hcnt + 1'd1;
+      if (~vdp_grant & ~|vdp_gap) begin
+         vdp_grant <= 1'b1;
+         vdp_gap   <= vdp_gap_rld;
+      end
+      else if (|vdp_gap) vdp_gap <= vdp_gap - 1'd1;
+   end
+end
+wire vdp_hold  = cpu_turbo & vdp_bus & ~vdp_grant;
+wire vdp_pace_n = ~(cpu_turbo & vdp_bus & (~vdp_grant | (vdp18 & (vdp_hcnt < 3'd4))));
+
+wire wait_n      = wait_m1_n & bus_guard_n & vdp_pace_n;
 
 logic map_valid = 0;
 wire ppi_en = ~ppi_n;
@@ -395,11 +563,19 @@ wire [5:0] joyB = joy_b & {psg_iob[2], psg_iob[3], 4'b1111};
 assign psg_ioa = {cas_audio_in,1'b0, psg_iob[6] ? joyB : joyA};
 wire [9:0] ay_ch_mix;
 
+// PSG *bus strobe* generator, clocked from ce_cpu_p.  It needs TWO clock-enable
+// edges inside the I/O window before it opens BDIR/BC1; the turbo bus guard only
+// promises ONE ce_3m58_p, so on ce_3m58_p this circuit would stop emitting a
+// strobe in turbo and every PSG write would be lost.  On ce_cpu_p it scales with
+// the CPU and always fires.  The PSG *sound generator* (jt49_bus .clk_en below)
+// stays on ce_3m58_p - that is what sets the pitch, and it must not move.
+// jt49_bus decodes BDIR/BC1 on raw clk21m ("I/O cannot use clk_en"), so a
+// shorter strobe is captured correctly.
 logic u21_1_q = 1'b0;
 always @(posedge clk21m,  posedge psg_n) begin
    if (psg_n)
       u21_1_q <= 1'b0;
-   else if (ce_3m58_p)
+   else if (ce_cpu_p)
       u21_1_q <= ~psg_n;
 end
 
@@ -407,11 +583,11 @@ logic u21_2_q = 1'b0;
 always @(posedge clk21m, posedge psg_n) begin
    if (psg_n)
       u21_2_q <= 1'b0;
-   else if (ce_3m58_p)
+   else if (ce_cpu_p)
       u21_2_q <= u21_1_q;
 end
 
-wire psg_e = !(!u21_2_q | ce_3m58_p) | psg_n;
+wire psg_e = !(!u21_2_q | ce_cpu_p) | psg_n;
 wire psg_bc   = !(a[0] | psg_e);
 wire psg_bdir = !(a[1] | psg_e);
 jt49_bus PSG
@@ -508,7 +684,9 @@ always @(posedge clk21m) begin
             iack <= 1;
    end
 end
-wire req = ~((iorq_n & mreq_n) | (wr_n & rd_n) | iack);
+// vdp_hold (turbo only) defers this one-shot so two consecutive CPU VDP-port
+// accesses can never land closer than one VRAM slot.  Zero at stock speed.
+wire req = ~((iorq_n & mreq_n) | (wr_n & rd_n) | iack | vdp_hold);
 
 wire        int_n_vdp18;
 wire  [7:0] d_from_vdp18;
@@ -624,7 +802,8 @@ wire signed [15:0] cart_sound;
 msx_slots msx_slots
 (
    .clk(clk21m),
-   .clk_en(ce_3m58_p),
+   .clk_en(ce_3m58_p),      // audio / chip rate - NEVER changes
+   .clk_en_cpu(ce_cpu_p),   // CPU rate - PSG bus strobe + FDC (see msx_slots.sv)
    .reset(reset),
    .cpu_addr(a),
    .cpu_din(d_from_slots),  
@@ -1226,6 +1405,7 @@ ymf278b_top #(
     .pcm_mute       (pcm_mute),
     .fm_mute        (fm_mute),
     .pcm_vol        (pcm_vol),
+    .fm_vol         (fm_vol),
     .dbg_pcm_valid  (dbg_pcm_valid),
     .dbg_opl3_valid (dbg_opl3_valid),
     .dbg_pcm_level  (dbg_pcm_level),

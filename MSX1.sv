@@ -248,8 +248,10 @@ wire      [64:0] rtc;
 //[28:26] SRAM SIZE 
 //[31:29] SLOT B CART TYPE
 //[34:32] ROM B TYPE MAPPER
-//[37:35] RESERVA
+//[35]    RESERVA
+//[37:36] CPU SPEED (turbo)
 //[38]    BORDER
+//[53:52] OPL4 FM VOLUME
 `include "build_id.v" 
 localparam CONF_STR = {
    "MSX1;",
@@ -292,10 +294,13 @@ localparam CONF_STR = {
    "O[43],Pause on OSD,No,Yes;",
    "T[44],Pause;",
    "-;",
+   "O[37:36],CPU Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz;",
+   "-;",
    "O[45],MoonSound,Off,On;",
    "O[46],PCM Mute,Off,On;",
    "O[47],FM Mute,Off,On;",
-   "O[50:49],PCM Volume,+6dB,+12dB,+18dB,+24dB;",
+   "O[50:49],OPL4 PCM Volume,0dB,-4dB,-8dB,-12dB;",
+   "O[53:52],OPL4 FM Volume,0dB,-4dB,-8dB,-12dB;",
    "O[48],Debug Overlay,Off,On;",
    "-;",
    "T[0],Reset;",
@@ -375,6 +380,13 @@ msx_config msx_config
 /////////////////   CLOCKS   /////////////////
 wire clk21m, clk_sdram, locked_sdram;
 wire ce_10m7_p, ce_10m7_n, ce_5m39_p, ce_5m39_n, ce_3m58_p, ce_3m58_n, ce_10hz;
+// CPU turbo.  status[37:36]: 0 = 3.58MHz (stock), 1 = 7.16MHz, 2 = 10.74MHz.
+// Bound by name into `clock clock (.*)` below.
+wire  [1:0] cpu_speed = status[37:36];
+wire        cpu_turbo;              // driven by clock.sv from the latched speed
+wire  [1:0] cpu_speed_q;            // latched speed, back out of clock.sv
+wire        cpu_bus_idle;           // from msx.sv, gates the speed latch
+wire        ce_cpu_p, ce_cpu_n;
 pll pll
 (
    .refclk(CLK_50M),
@@ -469,6 +481,13 @@ msx MSX
    .ce_10m7_p(ce_10m7_p),
    .ce_3m58_p(ce_3m58_p & ~msx_pause),
    .ce_3m58_n(ce_3m58_n & ~msx_pause),
+   // CPU clock enable.  Pause-gated exactly like ce_3m58_*, so the pause
+   // mechanism is unchanged; with cpu_speed==0 these ARE ce_3m58_p/n.
+   .ce_cpu_p (ce_cpu_p  & ~msx_pause),
+   .ce_cpu_n (ce_cpu_n  & ~msx_pause),
+   .cpu_turbo(cpu_turbo),
+   .cpu_speed_q(cpu_speed_q),
+   .cpu_bus_idle(cpu_bus_idle),
    .ce_5m39_n(ce_5m39_n),
    .ce_10hz  (ce_10hz   & ~msx_pause),
    .probe_freeze(msx_pause),
@@ -530,6 +549,7 @@ msx MSX
    .pcm_mute       (status[46]),
    .fm_mute        (status[47]),
    .pcm_vol        (status[50:49]),
+   .fm_vol         (status[53:52]),
    .dbg_pcm_valid  (dbg_pcm_valid),
    .dbg_opl3_valid (dbg_opl3_valid),
    .dbg_pcm_level  (dbg_pcm_level),

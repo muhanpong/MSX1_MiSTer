@@ -45,7 +45,8 @@ module ymf278b_top #(
     // Audio mute controls (for debugging)
     input  wire        pcm_mute,
     input  wire        fm_mute,
-    input  wire  [1:0] pcm_vol,    // OSD master PCM gain select
+    input  wire  [1:0] pcm_vol,    // OSD OPL4 PCM trim, see gain_mul()
+    input  wire  [1:0] fm_vol,     // OSD OPL4 FM  trim, see gain_mul()
 
     // Debug outputs (clk_sdram domain)
     output wire        dbg_pcm_valid,
@@ -217,7 +218,7 @@ ymf278_pcm_engine2 #(
     .mem_busy        (mem_busy),
 
     // Audio Output
-    .pcm_vol         (pcm_vol),
+    .pcm_vol         (2'd3),          // shift 0 = hardware-accurate; OSD gain is applied below
     .pcm_left        (pcm_left),
     .pcm_right       (pcm_right),
     .pcm_valid       (pcm_valid),
@@ -312,8 +313,36 @@ assign opl3_status = opl3_status_s2;
 
 // ─── Audio mixing ─────────────────────────────────────────────────────
 // OPL3 at ~49.7kHz drives the output rate; latest PCM sample is held and added.
-logic signed [16:0] mix_left_tmp, mix_right_tmp;
 logic signed [15:0] pcm_left_hold, pcm_right_hold;
+
+// ── OPL4 output gain (OSD) ───────────────────────────────────────────────
+// Applied per path, NOT to the sum, and measured rather than guessed:
+//   * FM at unity already peaks at -0.5 dBFS on real OPL3 music (MoonDriver),
+//     so a fixed boost there would clip.  GoFigure, by contrast, sets wave
+//     register 0xF8 to x3/8 itself and leaves its FM ~20 dB down, so it has
+//     plenty of room.  Only the user knows which they are playing -> option.
+//   * PCM's engine shift is pinned to 0 (hardware-accurate, the level the
+//     ref278 golden model reproduces); every step here is on top of that.
+// The scale runs DOWNWARD only: 0 / -4 / -8 / -12 dB as x/128.  0 dB is the
+// hardware-accurate level the ref278 golden model reproduces and is confirmed
+// correct by ear, so there is nothing to gain above it -- GoFigure's title song
+// already peaks at full scale there.  What varies is how HOT a piece is:
+// MoonDriver's TIME'S UP! needs about -12 dB to sit level with the SCC.  The multiply gets its own
+// pipeline stage: chained onto fm_mix_gain()'s x3 it would grow a
+// combinational cloud in the clk_sdram domain, which is exactly what broke
+// SDRAM_DQ IOB packing once before.  11.6 ns against a 49.7 kHz sample rate.
+function automatic [11:0] gain_mul(input [1:0] sel);
+    case (sel)
+        2'd0: gain_mul = 12'd128;   //  x1.000    0.00 dB  <- default, hardware-accurate
+        2'd1: gain_mul = 12'd81;    //  x0.633   -3.98 dB
+        2'd2: gain_mul = 12'd51;    //  x0.398   -8.00 dB
+        default: gain_mul = 12'd32; //  x0.250  -12.04 dB
+    endcase
+endfunction
+localparam int GAIN_SH = 7;
+logic signed [29:0] fm_l_mul, fm_r_mul, pc_l_mul, pc_r_mul;  // stage-1 registered products
+logic signed [21:0] sum_l, sum_r;                            // stage-2 combinational
+logic               gain_v_q;
 
 // FM/PCM mute mux — zero the respective path when muted.
 // The FM level also follows wave register 0xF8 (FM MIX_CTRL), the FM twin of the
@@ -381,16 +410,31 @@ assign dbg_new2       = new2;
 
 always_ff @(posedge clk) begin
     audio_valid <= 1'b0;
+    gain_v_q    <= 1'b0;
     if (pcm_valid) begin
         pcm_left_hold  <= pcm_left;
         pcm_right_hold <= pcm_right;
     end
+    // Stage 1 — apply the per-path OSD gain.  Nothing else shares this cycle,
+    // so the multiply never chains onto fm_mix_gain()'s x3.
     if (opl3_sample_valid) begin
-        mix_left_tmp  = opl3_l_eff + (pcm_mute ? 17'sh0 : $signed({pcm_left_hold[15],  pcm_left_hold}));
-        mix_right_tmp = opl3_r_eff + (pcm_mute ? 17'sh0 : $signed({pcm_right_hold[15], pcm_right_hold}));
-        // Saturate 17-bit signed → 16-bit signed
-        audio_left  <= (mix_left_tmp[16]  == mix_left_tmp[15])  ? mix_left_tmp[15:0]  : (mix_left_tmp[16]  ? 16'sh8000 : 16'sh7FFF);
-        audio_right <= (mix_right_tmp[16] == mix_right_tmp[15]) ? mix_right_tmp[15:0] : (mix_right_tmp[16] ? 16'sh8000 : 16'sh7FFF);
+        fm_l_mul <= $signed(opl3_l_eff) * $signed({1'b0, gain_mul(fm_vol)});
+        fm_r_mul <= $signed(opl3_r_eff) * $signed({1'b0, gain_mul(fm_vol)});
+        pc_l_mul <= (pcm_mute ? 30'sh0 : $signed({pcm_left_hold [15], pcm_left_hold })
+                                         * $signed({1'b0, gain_mul(pcm_vol)}));
+        pc_r_mul <= (pcm_mute ? 30'sh0 : $signed({pcm_right_hold[15], pcm_right_hold})
+                                         * $signed({1'b0, gain_mul(pcm_vol)}));
+        gain_v_q <= 1'b1;
+    end
+    // Stage 2 — descale, sum, saturate ONCE to 16-bit signed.  Each path is at
+    // most +-130560 after >>>7, so the sum needs 19 bits; 22 is comfortable.
+    if (gain_v_q) begin
+        sum_l = 22'(fm_l_mul >>> GAIN_SH) + 22'(pc_l_mul >>> GAIN_SH);
+        sum_r = 22'(fm_r_mul >>> GAIN_SH) + 22'(pc_r_mul >>> GAIN_SH);
+        audio_left  <= (sum_l >  22'sd32767) ? 16'sh7FFF :
+                       (sum_l < -22'sd32768) ? 16'sh8000 : sum_l[15:0];
+        audio_right <= (sum_r >  22'sd32767) ? 16'sh7FFF :
+                       (sum_r < -22'sd32768) ? 16'sh8000 : sum_r[15:0];
         audio_valid <= 1'b1;
     end
 end
