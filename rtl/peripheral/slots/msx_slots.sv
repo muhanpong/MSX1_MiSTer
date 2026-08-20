@@ -439,12 +439,10 @@ scc_sound scc_sound
    // by another route.  Yamanooto and konami_scc both emit a stable per-cart pair,
    // and for a given cart only one mapper is ever active so the others sit at
    // their reset 0; OR-ing them is therefore exact.
-   // MFRSD keeps its old gated term on purpose: mfrsd.sv holds ONE sccMode
-   // register with no cart index, so placing its bit correctly needs a latched
-   // slot number, not just a wider output.  It has the same two defects and
-   // wants the same treatment -- tracked separately, behaviour unchanged here.
+   // MFRSD is reached through its own SD-card menu, not the slot-B mapper
+   // dropdown, so it only ever occupies cart 0 and {1'b0, ...} is correct for it.
    .sccPlusMode(mapper_yamanooto_sccMode | mapper_konami_scc_sccMode
-                | (mapper_mfrdsd1_sccReq ? {1'b0, mapper_mfrdsd1_sccMode} : 2'b00)),
+                | {1'b0, mapper_mfrdsd1_sccMode}),
    .debug_scc_wr(debug_scc_wr),
    .*
 );

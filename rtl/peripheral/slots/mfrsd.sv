@@ -100,7 +100,14 @@ wire EN_SCC         = ~sccMode[5] & sccBanks[2][5:0] == 6'b111111 & cpu_addr[15:
 wire isRamSegment2  = (sccMode[5] & sccMode[2]) | sccMode[4];
 wire isRamSegment3  = sccMode[4];
 assign scc_req      = cs & cpu_mreq & (cpu_rd | cpu_wr) & ((cpu_wr & ((EN_SCC & ~isRamSegment2) | (EN_SCCPLUS & ~isRamSegment3))) | (cpu_rd & (EN_SCC | EN_SCCPLUS)));
-assign scc_mode     = EN_SCCPLUS;
+// The MODE, not the window enable.  EN_SCCPLUS folds in cpu_addr[15:8]==0xB8, so
+// exporting it made scc_mode true only while the CPU was addressing the SCC+
+// window.  IKASCC consumes i_SCCP_MODE continuously in its audio path
+// (IKASCC_player_s.v:309 latches ch5's waveform from the shared ch4 RAM unless the
+// mode reads Plus), so between accesses it read Compatible and ch5 played ch4's
+// waveform.  Same defect be52736 fixed for konami_scc; scc_req below keeps using
+// EN_SCCPLUS because the window decode is exactly what it wants.
+assign scc_mode     = sccMode[5] & sccBanks[3][7];
 
 wire [2:0] page8kB  = cpu_addr[15:13] - 3'd2;
 logic [7:0] bank[4], sccBanks[4];
