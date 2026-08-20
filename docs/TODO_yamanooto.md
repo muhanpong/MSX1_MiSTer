@@ -84,20 +84,7 @@ OFFR write at `yamanooto.sv:141` with `~enar[2] & ~enar[1]`.
 Not urgent for what we run: neither `PACK_K.ROM` nor the Neo-Ultimate Collection
 ever sets those bits — every `LD (7FFF),A` site in both writes 0x80 or 0x81.
 
-## 4. ECHO and the HOME-key boot — the two go together or neither does
-
-ECHO (CFGR bit1) makes the cartridge PSG also answer the internal PSG's ports
-0xA0/0xA1, so internal-PSG music is doubled through the cartridge's stereo output.
-Manual: *"This is set **only** during boot when you press the HOME key"*, and the
-bit table marks it **`RC`** (read/clear) alone among CFGR bits — **software cannot
-set it.** We have no HOME-boot path, so ECHO can never legitimately become 1.
-
-Implementing the aliasing without the HOME path therefore buys nothing. If it is
-ever done: openMSX registers it **out-only** (`Yamanooto.cc:96`,
-`register_IO_Out_range(0xA0, 2, ...)`) — duplicating reads would break
-joystick/keyboard input through the PSG. And CFGR bit1 should become clear-only.
-
-## 5. RAM-mode deviation — soften the comment, change no code
+## 4. RAM-mode deviation — soften the comment, change no code
 
 `yamanooto.sv:101-102` closes the SCC window when the mode register selects RAM
 mode; openMSX has no such test. Our header comment at `:25-28` presents this as
@@ -143,3 +130,6 @@ correct for the path we emulate.
   regardless of image size**, so slot A at DDR3 `0xC00000` unconditionally overruns
   slot B at `0x1100000` by 3 MB. See `docs/TODO_boot_flakiness.md` — this
   invalidates that document's discriminating test 2.
+* **ECHO / HOME-key boot** moved out to `docs/TODO_someday.md`: on current
+  firmware ECHO is read/clear and set only by a HOME boot, so software cannot
+  reach it and implementing half of it buys nothing.
