@@ -46,7 +46,7 @@ module cart_yamanooto
    output      [7:0] cart_dout,     // register readback (0xFF when not addressed/readable)
    output            cart_dout_en,
    output            scc_req,       // SCC register window hit  -> scc_sound cs
-   output            scc_mode,      // 0 = Compatible, 1 = Plus  -> scc_sound sccPlusMode
+   output      [1:0] scc_mode,      // per cart: 0 = Compatible, 1 = Plus -> scc_sound
    output            flash_wr_en    // WREN: writes may reach the flash
 );
 
@@ -57,6 +57,8 @@ localparam [15:0] CFGR = 16'h7FFD;
 
 localparam [7:0] REGEN  = 8'h01;   // ENAR bit0
 localparam [7:0] WREN   = 8'h10;   // ENAR bit4
+localparam [7:0] SPIEN  = 8'h02;   // ENAR bit1 - SPI/SD enable   (not implemented)
+localparam [7:0] MSTEN  = 8'h04;   // ENAR bit2 - master offset   (not implemented)
 localparam [7:0] MDIS   = 8'h01;   // CFGR bit0
 localparam [7:0] ECHO   = 8'h02;   // CFGR bit1
 localparam [7:0] ROMDIS = 8'h04;   // CFGR bit2
@@ -93,7 +95,18 @@ assign cart_dout_en = reg_rd;
 assign cart_dout    = !reg_rd            ? 8'hFF :
                       cpu_addr == CFGR   ? cfgr  :
                       cpu_addr == OFFR   ? offr  :
-                      cpu_addr == ENAR   ? enar  :
+                      // Bits 1 (SPIEN/SDEN) and 2 (MSTEN) are real hardware features
+                      // -- the SPI path to the SD card and the master-offset
+                      // register -- that we do not implement.  The vendor's probe
+                      // (YAMDET) writes REGEN|SDEN and compares the readback: echo
+                      // those bits and it concludes the core supports SD, then
+                      // busy-waits on 0x7FFE bit7 in a loop its own source marks
+                      // "NO TIMEOUT!!!" -- a dead machine.  Reading them back as 0
+                      // makes it take its own "old core, no SD" path instead.
+                      // Every other bit, bit7 included, must read back as written:
+                      // the Neo-Ultimate launcher writes ENAR=0x81/0x80 and relies
+                      // on that.
+                      cpu_addr == ENAR   ? (enar & ~(SPIEN | MSTEN)) :
                                            8'hFF;     // 0x7FFC: FPGA channel not implemented
 
 // ── SCC visibility ───────────────────────────────────────────────────────
@@ -101,9 +114,15 @@ assign cart_dout    = !reg_rd            ? 8'hFF :
 wire        scc_ram_mode = |(sccm & 8'h10);
 wire        scc_on       = ~|(cfgr & K4) & ~scc_ram_mode;
 
-assign scc_mode = |(sccm & 8'h20);
+// Per-cartridge and REGISTERED, mirroring konami_scc.sv:61.  IKASCC samples
+// i_SCCP_MODE continuously in its audio path (IKASCC_player_s.v:309 latches ch5's
+// waveform from the shared ch4 RAM unless the mode reads Plus), so a value that is
+// only valid during a bus cycle makes ch5 play ch4's waveform even in Plus mode.
+// Emitting both carts also stops slot B being hard-wired to bit 0.
+assign scc_mode = {|(sccModeReg[1] & 8'h20), |(sccModeReg[0] & 8'h20)};
+wire   scc_plus = |(sccm & 8'h20);   // this cart, for the window decode below
 assign scc_req  = cs & cpu_mreq & (cpu_rd | cpu_wr) & scc_on &
-                  (scc_mode
+                  (scc_plus
                      // SCC+  0xB800-0xBFFD  (0xBFFE/0xBFFF are the mode register)
                      ? ( rawBank[cart_num][3][7]            & (cpu_addr >= 16'hB800) & (cpu_addr < 16'hBFFE))
                      // SCC   0x9800-0x9FFF
@@ -153,7 +172,15 @@ end
 wire romdis = |(cfgr & ROMDIS);
 
 // The register window and the SCC window are not flash; ROMDIS hides the flash entirely.
-assign mem_unmaped = cs & (~page_ok | romdis | scc_req | reg_hit
+// reg_rd, NOT reg_hit: the register window only SHADOWS the flash while REGEN is
+// set.  With REGEN clear the spec says no register is *readable* -- the ROM must
+// still show through, and openMSX's readMem (Yamanooto.cc:170) tests
+// (enableReg & REGEN) before intercepting, falling through to flash.read().
+// Using the address-only reg_hit made 0x7FFC-0x7FFF read 0xFF instead of ROM,
+// which corrupts 588 of the 770 used 8KB segments in an 8MB multi-ROM: Vampire
+// Killer's ground-item pickup is INC (HL) at 0x7FFC, so items could be walked
+// over but never collected.  Writes stay covered by the cpu_wr term below.
+assign mem_unmaped = cs & (~page_ok | romdis | scc_req | reg_rd
                            | (cpu_wr & cpu_mreq & ~flash_wr_en));
 
 // 10-bit bank x 8KB already bounds this to the 8MB chip, exactly like openMSX's

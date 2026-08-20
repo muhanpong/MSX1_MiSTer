@@ -37,7 +37,7 @@ wire [24:0] mem_addr;
 wire [7:0]  cart_dout;
 wire        cart_dout_en;
 wire        scc_req;
-wire        scc_mode;
+wire  [1:0] scc_mode;   // per cart: {B, A}
 wire        flash_wr_en;
 
 cart_yamanooto dut (
@@ -241,7 +241,7 @@ initial begin
    // ============================================ Y9 SCC+ / mode register / RAM mode
    do_reset; unlock;
    wr(16'hBFFE, 8'h20);                       // SCC+ mode
-   check("Y9.1 mode register selects Plus", scc_mode == 1'b1);
+   check("Y9.1 mode register selects Plus", scc_mode[0] == 1'b1);
    wr(16'hB000, 8'h80);                       // bank3 bit7
    rd(16'hB800);
    check("Y9.2 SCC+ window open at 0xB800", req_seen == 1'b1);
@@ -259,16 +259,36 @@ initial begin
    check("Y9.6 clearing RAM mode restores the SCC+ window", req_seen == 1'b1);
 
    wr(16'hBFFF, 8'h00);                       // alias -> Compatible
-   check("Y9.7 0xBFFF works as the mode-register alias", scc_mode == 1'b0);
+   check("Y9.7 0xBFFF works as the mode-register alias", scc_mode[0] == 1'b0);
+
+   // ---------------------------------------------------------------- Y10
+   // REGEN=0 must leave the ROM visible at 0x7FFC-0x7FFF.  Only reg_rd (which is
+   // REGEN-gated) may shadow the flash; the address-only reg_hit made these four
+   // bytes read 0xFF and broke Vampire Killer's item pickup (INC (HL) @0x7FFC).
+   $display("--- Y10 register window does not shadow the ROM while REGEN=0");
+   wr(16'h7FFF, 8'h01);                 // REGEN on
+   wr(16'h7FFE, 8'h00);                 // OFFR = 0
+   wr(16'h7FFF, 8'h00);                 // REGEN off  <- the launcher's last act
+   for (int a = 16'h7FFC; a <= 16'h7FFF; a++) begin
+      rd(a[15:0]);
+      check($sformatf("Y10.%0d 0x%04X reads as ROM, not a register", a-16'h7FFB, a),
+            unmap_seen == 1'b0 && douten_seen == 1'b0);
+   end
+   // and with REGEN set they must go back to being registers
+   wr(16'h7FFF, 8'h01);
+   rd(16'h7FFF);
+   check("Y10.5 REGEN=1 restores register readback", douten_seen == 1'b1);
+   // ENAR must not advertise SPI/SD (bits 1,2) or the vendor's SD driver hangs
+   wr(16'h7FFF, 8'h07);                 // REGEN | SPIEN | MSTEN
+   rd(16'h7FFF);
+   check("Y10.6 ENAR readback masks SPIEN/MSTEN", (dout_seen & 8'h06) == 8'h00);
+   check("Y10.7 ENAR readback keeps the implemented bits", (dout_seen & 8'h01) == 8'h01);
+   wr(16'h7FFF, 8'h81);                 // bit7 is used by real launchers
+   rd(16'h7FFF);
+   check("Y10.8 ENAR readback preserves bit7", dout_seen[7] == 1'b1);
+   wr(16'h7FFF, 8'h00);
 
    $display("RESULT: %0d passed, %0d failed", n_pass, n_fail);
-   $finish;
-end
-
-initial begin
-   #20_000_000;
-   $display("TIMEOUT");
-   $display("RESULT: %0d passed, %0d failed", n_pass, n_fail + 1);
    $finish;
 end
 

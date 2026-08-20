@@ -383,7 +383,7 @@ wire        mapper_yamanooto_unmaped;
 wire  [7:0] mapper_yamanooto_dout;
 wire        mapper_yamanooto_dout_en;
 wire        mapper_yamanooto_sccReq;
-wire        mapper_yamanooto_sccMode;
+wire  [1:0] mapper_yamanooto_sccMode;
 wire        mapper_yamanooto_wren;
 cart_yamanooto yamanooto
 (
@@ -431,8 +431,19 @@ scc_sound scc_sound
    .oe({|(cart_device[1] & (DEV_SCC | DEV_SCC2)), |(cart_device[0] & (DEV_SCC | DEV_SCC2))}),
    .wave(scc_wave),
    .sccPlusChip({|(cart_device[1] & DEV_SCC2), |(cart_device[0] & DEV_SCC2)}),
-   .sccPlusMode(mapper_yamanooto_sccReq ? {1'b0,mapper_yamanooto_sccMode} :
-                mapper_mfrdsd1_sccReq  ? {1'b0,mapper_mfrdsd1_sccMode}  : mapper_konami_scc_sccMode),
+   // NOT gated on the *_sccReq strobes.  Those are only true during a bus cycle,
+   // but IKASCC consumes i_SCCP_MODE continuously in its audio path, so a gated
+   // value reads Compatible between accesses and ch5 then latches ch4's waveform
+   // (IKASCC_player_s.v:309) -- the defect be52736 fixed for konami_scc, reached
+   // by another route.  Yamanooto and konami_scc both emit a stable per-cart pair,
+   // and for a given cart only one mapper is ever active so the others sit at
+   // their reset 0; OR-ing them is therefore exact.
+   // MFRSD keeps its old gated term on purpose: mfrsd.sv holds ONE sccMode
+   // register with no cart index, so placing its bit correctly needs a latched
+   // slot number, not just a wider output.  It has the same two defects and
+   // wants the same treatment -- tracked separately, behaviour unchanged here.
+   .sccPlusMode(mapper_yamanooto_sccMode | mapper_konami_scc_sccMode
+                | (mapper_mfrdsd1_sccReq ? {1'b0, mapper_mfrdsd1_sccMode} : 2'b00)),
    .debug_scc_wr(debug_scc_wr),
    .*
 );
