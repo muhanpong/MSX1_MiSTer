@@ -153,6 +153,7 @@ assign cpu_din          = mapper_ram_dout                        //IO
                         & d_to_cpu_FDC                           //UNMAPPED
                         & scc_sound_dout                         //UNMAPPED
                         & yamanooto_dout                         //UNMAPPED
+                        & psg_dout                               //IO (cart PSG read, port 12H)
                         & flash_dout
                         & d_to_cpu_reset_status                  //IO
                         & (mem_unmaped  ? 8'hFF : ram_dout);
@@ -516,11 +517,13 @@ dev_reset_status dev_reset_status
 );
 
 wire signed [15:0] sound_psg;
+wire  [7:0] psg_dout;
 psg psg
 (
    .cpu_addr(cpu_addr[7:0]),
    .cs({|(cart_device[1] & DEV_PSG), |(cart_device[0] & DEV_PSG)}),
    .sound(sound_psg),
+   .dout(psg_dout),
    .*
 );
 

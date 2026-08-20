@@ -10,6 +10,7 @@ module psg
    input       cpu_iorq,
    input       cpu_m1,
    input [1:0] cs,
+   output        [7:0] dout,     // 0xFF when this cart is not answering
    output signed [15:0] sound
 );
 
@@ -42,6 +43,7 @@ wire psg_e = !(!u21_2_q | clk_en_cpu) | psg_n;
 wire psg_bc   = !(cpu_addr[0] | psg_e);
 wire psg_bdir = !(cpu_addr[1] | psg_e);
 
+wire [7:0] dout_PSG1, dout_PSG2;
 wire [9:0] sound_PSG1;
 jt49_bus psg1
 (
@@ -52,7 +54,7 @@ jt49_bus psg1
     .bc1(psg_bc & cs[0]),
     .din(cpu_dout),
     .sel(0),
-    .dout(),
+    .dout(dout_PSG1),
     .sound(sound_PSG1),
     .A(),
     .B(),
@@ -74,7 +76,7 @@ jt49_bus psg2
     .bc1(psg_bc & cs[1]),
     .din(cpu_dout),
     .sel(0),
-    .dout(),
+    .dout(dout_PSG2),
     .sound(sound_PSG2),
     .A(),
     .B(),
@@ -85,5 +87,19 @@ jt49_bus psg2
     .IOB_in(),
     .IOB_out()
 );
+
+// Register readback.  The Yamanooto User Manual lists its PSG at "port 10H-12H",
+// and 12H is the AY read strobe (BC1=1, BDIR=0) that psg_bc/psg_bdir above already
+// decode -- only the data path back to the CPU was missing, so reads returned 0xFF
+// off the wired-AND in msx_slots.  Write-then-read-back is how software detects a
+// second PSG, so without this the cartridge PSG is found to be absent and never
+// used, silently.  openMSX has the same gap ("PSG is not readable", Yamanooto.cc),
+// so this cannot be found by diffing against it -- only against the manual.
+// Gated exactly like the internal PSG at msx.sv:533: port decode only, because
+// jt49_bus presents the latched register on dout continuously.
+wire psg_rd = ~psg_n & ~cpu_wr;
+assign dout = !psg_rd ? 8'hFF :
+              cs[0]   ? dout_PSG1 :
+              cs[1]   ? dout_PSG2 : 8'hFF;
 
 endmodule
