@@ -207,7 +207,10 @@ MSX::lookup_SRAM_t lookup_SRAM[4];
 wire             forced_scandoubler;
 wire      [21:0] gamma_bus;
 wire       [1:0] buttons;
-wire      [63:0] status;
+// hps_io drives [127:0]; we only ever took the low 64 and had run out -- bits
+// 49,50,52,53,63 were all that remained.  Widening costs nothing (the upper bits
+// are already generated) and gives the audio trims room.
+wire     [127:0] status;
 wire      [10:0] ps2_key;
 wire      [24:0] ps2_mouse;
 wire       [5:0] joy0, joy1;
@@ -308,11 +311,18 @@ localparam CONF_STR = {
    "-;",
    "O[37:36],CPU Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz;",
    "-;",
-   "O[45],MoonSound,Off,On;",
-   "O[46],PCM Mute,Off,On;",
-   "O[47],FM Mute,Off,On;",
-   "O[56:54],OPL4 PCM Volume,-4dB,-8dB,0dB,+4dB,+8dB;",
-   "O[59:57],OPL4 FM Volume,0dB,-4dB,-8dB,+4dB,+8dB;",
+   "P2,Audio settings;",
+   "P2O[45],MoonSound,Off,On;",
+   "P2O[46],PCM Mute,Off,On;",
+   "P2O[47],FM Mute,Off,On;",
+   "P2O[56:54],OPL4 PCM Volume,-4dB,-8dB,0dB,+4dB,+8dB;",
+   "P2O[59:57],OPL4 FM Volume,0dB,-4dB,-8dB,+4dB,+8dB;",
+   "P2-;",
+   "P2O[66:65],PSG Volume,0dB,+4dB,-4dB,-8dB;",
+   "P2O[68:67],OPLL Volume,0dB,+4dB,-4dB,-8dB;",
+   "P2O[70:69],SCC Volume,0dB,+4dB,-4dB,-8dB;",
+   "-;",
+   "O[64],Reset on ROM change,Yes,No;",
    "O[48],Debug Overlay,Off,On;",
    "-;",
    "T[0],Reset;",
@@ -425,7 +435,17 @@ clock clock
 );
 
 /////////////////    RESET   /////////////////
-wire reset = RESET | status[0] | status[10] | reset_rq;
+// "Reset on ROM change" (O[64], default Yes) -- when set to No the machine is held
+// rather than reset while memory_upload streams, so a mapper or ROM can be swapped
+// under a running program.  The hold is essential: reset_rq is what keeps the CPU
+// off the bus while SDRAM and the slot layout change underneath it, so dropping it
+// outright would be a genuine hazard, not a cosmetic one.  msx_pause already gates
+// every CPU clock enable and is used the same way by the nvram DMA.
+// Power-on is unaffected either way -- RESET covers it.
+// Caveat, and it is why the default is Yes: across a no-reset swap the slot/subslot
+// select registers and the mapper's own bank registers keep their old values.
+wire upload_hold = reset_rq & status[64];
+wire reset = RESET | status[0] | status[10] | (reset_rq & ~status[64]);
 
 ///////////////// Computer /////////////////
 wire  [7:0] R, G, B, cpu_din, cpu_dout;
@@ -455,6 +475,12 @@ wire [15:0] dbg_im_i;
 wire [15:0] dbg_watch_pc;
 wire [15:0] dbg_watch_dc;
 wire        dbg_int_ghost;
+
+// Audio trims for the msx instance, which connects by `.*` -- these are wired by
+// name, not in its port list.  4 steps each; entry 0 is exactly unity.
+wire  [1:0] psg_vol  = status[66:65];
+wire  [1:0] opll_vol = status[68:67];
+wire  [1:0] scc_vol  = status[70:69];
 wire [15:0] cpu_addr;
 wire signed [15:0] audio_l, audio_r;
 wire        hsync, vsync, blank_n, hblank, vblank, ce_pix;
@@ -490,7 +516,7 @@ wire  [7:0] flash16x_prog_data;
 wire        log_clear;
 wire [23:0] probe_r2, probe_r23, probe_r0;
 wire [15:0] probe_frame;
-wire msx_pause = nvbak_dma_active | dump_active | (status[43] & OSD_STATUS) | pause_toggle;
+wire msx_pause = nvbak_dma_active | dump_active | (status[43] & OSD_STATUS) | pause_toggle | upload_hold;
 
 msx MSX
 (

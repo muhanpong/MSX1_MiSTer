@@ -1,6 +1,9 @@
 # TODO — the MSX numeric keypad is unmapped (16 matrix positions dead)
 
-Status: **known, deliberately deferred** (2026-08-21). Not a regression — inherited
+Status: **known, deliberately deferred** (2026-08-21; re-confirmed 2026-08-23 when
+asked to implement it "if lightweight" — it is not, for the reason in
+*Why it is not a one-byte fix* below: 44 machine XMLs and the ROM PACKs would have
+to be regenerated, and that is the `FC1` path). Not a regression — inherited
 from upstream. No action taken; recorded so it is not re-discovered from scratch.
 
 ---

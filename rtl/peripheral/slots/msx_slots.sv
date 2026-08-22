@@ -16,6 +16,8 @@ module msx_slots
    input                       cpu_m1,
    input                 [1:0] active_slot,
    output signed        [15:0] sound,
+   input                 [1:0] opll_vol,          // 0=0dB 1=+4dB 2=-4dB 3=-8dB
+   input                 [1:0] scc_vol,
    //RAM
    output               [26:0] ram_addr,
    output                [7:0] ram_din,
@@ -75,7 +77,30 @@ assign flash16x_prog_addr = mapper_yamanooto_prog_we ? mapper_yamanooto_flash_ad
                                                        : mapper_ascii16x_addr[22:0];
 assign flash16x_prog_data = cpu_dout;
 
-assign sound = sound_opll + scc_wave + sound_psg;
+// Per-source trim, then a WIDE sum that saturates.  The old one-line 16-bit add
+// could already wrap silently when three loud sources coincided; scaling makes that
+// more reachable, so the sum is done in 18 bits and clipped instead of wrapping.
+// Multipliers are x/128: 128=0dB, 203=+4dB, 81=-4dB, 51=-8dB (same table the OPL4
+// trim uses).  Entry 0 is 0dB so an untouched menu is bit-identical to before --
+// x128>>>7 is exact, not an approximation.
+function automatic signed [8:0] vol_mul(input [1:0] v);
+   case (v)
+      2'd0: vol_mul = 9'sd128;   // 0dB
+      2'd1: vol_mul = 9'sd203;   // +4dB
+      2'd2: vol_mul = 9'sd81;    // -4dB
+      default: vol_mul = 9'sd51; // -8dB
+   endcase
+endfunction
+
+wire signed [24:0] opll_scaled = $signed(sound_opll) * vol_mul(opll_vol);
+wire signed [24:0] scc_scaled  = $signed(scc_wave)   * vol_mul(scc_vol);
+// 19 bits, not 18: worst case is 51966 + 51966 + 32767 = 136699, which overflows
+// an 18-bit signed sum and would wrap BEFORE the clamp could see it.
+wire signed [18:0] snd_sum     = 19'($signed(opll_scaled) >>> 7)
+                               + 19'($signed(scc_scaled)  >>> 7)
+                               + 19'(sound_psg);
+assign sound = (snd_sum > 19'sd32767)  ? 16'sh7FFF :
+               (snd_sum < -19'sd32768) ? 16'sh8000 : 16'(snd_sum);
 assign d_to_sd = cpu_dout;
 assign debug_FDC_req = FDC_req;
 

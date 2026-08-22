@@ -144,14 +144,26 @@ module msx
    output logic       [15:0] dbg_im_i,          // {IM[1:0], 6'b0, I[7:0]} at last INTA
    output logic       [15:0] dbg_watch_pc,      // PC of last write to IM2 table byte 257
    output logic       [15:0] dbg_watch_dc,      // {written data, write count} for that byte
-   output logic              dbg_int_ghost      // fatal IFF1-fall had NO INTA (DI-death / ghost)
+   output logic              dbg_int_ghost,     // fatal IFF1-fall had NO INTA (DI-death / ghost)
+   input               [1:0] psg_vol,           // 0=0dB 1=+4dB 2=-4dB 3=-8dB
+   input               [1:0] opll_vol,
+   input               [1:0] scc_vol
 );
 
 //  -----------------------------------------------------------------------------
 //  -- Audio MIX  (stereo; MoonSound is mixed in after instantiation below)
 //  -----------------------------------------------------------------------------
 wire  [9:0] audioPSG = ay_ch_mix + {keybeep,5'b00000} + {(cas_audio_in & ~cas_motor),4'b0000};
-wire [16:0] fm       = {3'b00, audioPSG, 4'b0000};
+// Internal PSG trim (x/128: 128=0dB, 203=+4dB, 81=-4dB, 51=-8dB).  audioPSG is
+// UNSIGNED with silence at 0, so scaling it is a plain multiply -- no sign handling.
+// Entry 0 is x128>>>7, exactly the old value, so an untouched menu is bit-identical.
+// Clamped to 10 bits because +4dB can overflow the field `fm` expects.
+wire [8:0]  psg_mul   = psg_vol == 2'd0 ? 9'd128 :
+                        psg_vol == 2'd1 ? 9'd203 :
+                        psg_vol == 2'd2 ? 9'd81  : 9'd51;
+wire [18:0] psg_scl   = audioPSG * psg_mul;
+wire [9:0]  psg_trim  = |psg_scl[18:17] ? 10'h3FF : psg_scl[16:7];
+wire [16:0] fm       = {3'b00, psg_trim, 4'b0000};
 wire [16:0] mono_mix = {cart_sound[15], cart_sound} + fm;
 // Saturating compressor (same as original `compr[7:0]` lookup, inline)
 // Index audio_mix[16:14]: 000→linear-pos, 111→linear-neg, others→clamp
@@ -814,6 +826,8 @@ msx_slots msx_slots
    .cpu_rd(~rd_n),
    .cpu_wr(~wr_n),
    .sound(cart_sound),
+   .opll_vol(opll_vol),
+   .scc_vol(scc_vol),
    .ram_addr(ram_addr),
    .ram_din(ram_din),
    .ram_rnw(ram_rnw),
