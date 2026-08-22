@@ -114,8 +114,8 @@ module msx
    // MoonSound audio mute (debug)
    input                     pcm_mute,
    input                     fm_mute,
-   input               [1:0] pcm_vol,
-   input               [1:0] fm_vol,
+   input               [2:0] pcm_vol,
+   input               [2:0] fm_vol,
 
    // MoonSound debug outputs (clk_sdram domain)
    output wire               dbg_pcm_valid,

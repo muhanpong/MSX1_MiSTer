@@ -45,8 +45,8 @@ module ymf278b_top #(
     // Audio mute controls (for debugging)
     input  wire        pcm_mute,
     input  wire        fm_mute,
-    input  wire  [1:0] pcm_vol,    // OSD OPL4 PCM trim, see gain_mul()
-    input  wire  [1:0] fm_vol,     // OSD OPL4 FM  trim, see gain_mul()
+    input  wire  [2:0] pcm_vol,    // OSD OPL4 PCM trim, 5 steps; see pcm_pre()/pcm_post()
+    input  wire  [2:0] fm_vol,     // OSD OPL4 FM  trim, 5 steps; see fm_gain()
 
     // Debug outputs (clk_sdram domain)
     output wire        dbg_pcm_valid,
@@ -218,7 +218,7 @@ ymf278_pcm_engine2 #(
     .mem_busy        (mem_busy),
 
     // Audio Output
-    .pcm_vol         (2'd3),          // shift 0 = hardware-accurate; OSD gain is applied below
+    .pcm_vol         (pcm_pre(pcm_vol)),  // pre-saturation shift (sh = 3 - this); see pcm_pre()
     .pcm_left        (pcm_left),
     .pcm_right       (pcm_right),
     .pcm_valid       (pcm_valid),
@@ -315,28 +315,71 @@ assign opl3_status = opl3_status_s2;
 // OPL3 at ~49.7kHz drives the output rate; latest PCM sample is held and added.
 logic signed [15:0] pcm_left_hold, pcm_right_hold;
 
-// ── OPL4 output gain (OSD) ───────────────────────────────────────────────
-// Applied per path, NOT to the sum, and measured rather than guessed:
-//   * FM at unity already peaks at -0.5 dBFS on real OPL3 music (MoonDriver),
-//     so a fixed boost there would clip.  GoFigure, by contrast, sets wave
-//     register 0xF8 to x3/8 itself and leaves its FM ~20 dB down, so it has
-//     plenty of room.  Only the user knows which they are playing -> option.
-//   * PCM's engine shift is pinned to 0 (hardware-accurate, the level the
-//     ref278 golden model reproduces); every step here is on top of that.
-// The scale runs DOWNWARD only: 0 / -4 / -8 / -12 dB as x/128.  0 dB is the
-// hardware-accurate level the ref278 golden model reproduces and is confirmed
-// correct by ear, so there is nothing to gain above it -- GoFigure's title song
-// already peaks at full scale there.  What varies is how HOT a piece is:
-// MoonDriver's TIME'S UP! needs about -12 dB to sit level with the SCC.  The multiply gets its own
-// pipeline stage: chained onto fm_mix_gain()'s x3 it would grow a
-// combinational cloud in the clk_sdram domain, which is exactly what broke
-// SDRAM_DQ IOB packing once before.  11.6 ns against a 49.7 kHz sample rate.
-function automatic [11:0] gain_mul(input [1:0] sel);
+// ── OPL4 output gain (OSD) ────────────────────────────────────
+// Calibrated 2026-08-21 against a measured reference, not by ear.
+//
+// Reference level: openMSX playing SCMD "Out Run -Passing Breeze-" on an
+// FS-A1ST -- the balance that sounds right -- gives SCC RMS -22.6 dBFS and
+// MSX-MUSIC RMS -21.6 dBFS.  openMSX's own extension configs weight MoonSound
+// <volume>17000 against SCC+/FMPAC 13000, i.e. +2.3 dB, so MoonSound's target
+// is RMS ~= -20.3 dBFS.
+//
+// Measured source levels (golden model re-rendered WITHOUT saturation, so the
+// true pre-clip amplitude is visible; FM via Nuked-OPL3):
+//                       PCM peak   PCM RMS   FM RMS
+//   MoonDriver TIME'S UP!  +11.0     -5.9     (no FM)
+//   encounter the unkn.    +11.4     -5.9      -20.6
+//   GoFigure (game)         +1.0    -20.1      -31.4
+// The two music-disk pieces agree to 0.1 dB and overshoot full scale by 11 dB;
+// GoFigure is simply mixed ~12 dB quieter in BOTH chips (its own choice, and
+// it is quiet on real hardware too).  Hence a 5-step scale whose ends cover
+// both camps: -8 lands the music disks at -22.0 dBFS clip-free, +8 lands
+// GoFigure at -20.1 dBFS.
+//
+// PCM net gain is split in two, because the engine saturates to 16 bit
+// INTERNALLY (ymf278_pcm_engine2.sv, frame output) -- a post-saturation trim
+// would only make the clipping quieter, never undo it.  So most of the
+// attenuation is done by the engine's own pre-saturation shift (6 dB steps,
+// sh = 3 - pcm_vol) and the remainder by the multiplier here.  That way the
+// clip point always sits at the final level instead of 12 dB above it.
+//
+// Defaults are the FIRST menu entry (MiSTer status resets to 0):
+//   PCM -4dB  = net -12 dB, the loudest setting that clips 0.00% on all three
+//   FM   0dB  = net  -4 dB, music-disk median lands at -21.7 dBFS
+//
+// The multiply keeps its own pipeline stage: chained onto fm_mix_gain()'s x3
+// it would grow a combinational cloud in the clk_sdram domain, which is
+// exactly what broke SDRAM_DQ IOB packing once before.
+
+// Engine pre-saturation shift selector: engine computes sh = 3 - pcm_vol,
+// so 2'd3 -> 0 dB, 2'd2 -> -6.02, 2'd1 -> -12.04, 2'd0 -> -18.06 dB.
+function automatic [1:0] pcm_pre(input [2:0] sel);
     case (sel)
-        2'd0: gain_mul = 12'd128;   //  x1.000    0.00 dB  <- default, hardware-accurate
-        2'd1: gain_mul = 12'd81;    //  x0.633   -3.98 dB
-        2'd2: gain_mul = 12'd51;    //  x0.398   -8.00 dB
-        default: gain_mul = 12'd32; //  x0.250  -12.04 dB
+        3'd1: pcm_pre = 2'd0;   // "-8dB"  sh 3  -18.06
+        3'd2: pcm_pre = 2'd2;   // "0dB"   sh 1   -6.02
+        3'd3: pcm_pre = 2'd2;   // "+4dB"  sh 1   -6.02
+        3'd4: pcm_pre = 2'd3;   // "+8dB"  sh 0    0.00
+        default: pcm_pre = 2'd1;// "-4dB"  sh 2  -12.04  <- default / out of range
+    endcase
+endfunction
+// Post-saturation remainder, x/128.  net = pre + 20*log10(post/128).
+function automatic [11:0] pcm_post(input [2:0] sel);
+    case (sel)
+        3'd1: pcm_post = 12'd162;   // "-8dB"  +2.06 -> net -16.0
+        3'd2: pcm_post = 12'd102;   // "0dB"   -1.98 -> net  -8.0
+        3'd3: pcm_post = 12'd162;   // "+4dB"  +2.06 -> net  -4.0
+        3'd4: pcm_post = 12'd128;   // "+8dB"   0.00 -> net   0.0
+        default: pcm_post = 12'd129;// "-4dB"  +0.07 -> net -12.0  <- default
+    endcase
+endfunction
+// FM has no internal saturation stage of its own, so one multiplier suffices.
+function automatic [11:0] fm_gain(input [2:0] sel);
+    case (sel)
+        3'd1: fm_gain = 12'd51;     // "-4dB"   -8.00 dB
+        3'd2: fm_gain = 12'd32;     // "-8dB"  -12.04 dB
+        3'd3: fm_gain = 12'd128;    // "+4dB"    0.00 dB
+        3'd4: fm_gain = 12'd203;    // "+8dB"   +4.02 dB
+        default: fm_gain = 12'd81;  // "0dB"    -3.98 dB  <- default / out of range
     endcase
 endfunction
 localparam int GAIN_SH = 7;
@@ -418,16 +461,17 @@ always_ff @(posedge clk) begin
     // Stage 1 — apply the per-path OSD gain.  Nothing else shares this cycle,
     // so the multiply never chains onto fm_mix_gain()'s x3.
     if (opl3_sample_valid) begin
-        fm_l_mul <= $signed(opl3_l_eff) * $signed({1'b0, gain_mul(fm_vol)});
-        fm_r_mul <= $signed(opl3_r_eff) * $signed({1'b0, gain_mul(fm_vol)});
+        fm_l_mul <= $signed(opl3_l_eff) * $signed({1'b0, fm_gain(fm_vol)});
+        fm_r_mul <= $signed(opl3_r_eff) * $signed({1'b0, fm_gain(fm_vol)});
         pc_l_mul <= (pcm_mute ? 30'sh0 : $signed({pcm_left_hold [15], pcm_left_hold })
-                                         * $signed({1'b0, gain_mul(pcm_vol)}));
+                                         * $signed({1'b0, pcm_post(pcm_vol)}));
         pc_r_mul <= (pcm_mute ? 30'sh0 : $signed({pcm_right_hold[15], pcm_right_hold})
-                                         * $signed({1'b0, gain_mul(pcm_vol)}));
+                                         * $signed({1'b0, pcm_post(pcm_vol)}));
         gain_v_q <= 1'b1;
     end
-    // Stage 2 — descale, sum, saturate ONCE to 16-bit signed.  Each path is at
-    // most +-130560 after >>>7, so the sum needs 19 bits; 22 is comfortable.
+    // Stage 2 — descale, sum, saturate ONCE to 16-bit signed.  Worst case after
+    // >>>7 is FM +-65536*203/128 = +-103936 and PCM +-32768*162/128 = +-41472,
+    // so the sum needs 19 bits incl. sign; 22 is comfortable.
     if (gain_v_q) begin
         sum_l = 22'(fm_l_mul >>> GAIN_SH) + 22'(pc_l_mul >>> GAIN_SH);
         sum_r = 22'(fm_r_mul >>> GAIN_SH) + 22'(pc_r_mul >>> GAIN_SH);

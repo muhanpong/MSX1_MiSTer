@@ -10,6 +10,12 @@
 set -u
 cd "$(dirname "$0")/.."
 OUT=${OUT:-/tmp/opl4_gain_sim}; mkdir -p "$OUT"
+# The TB models the datapath instead of instantiating ymf278b_top, so it cannot
+# see an edit to the RTL tables alone.  Check those against the calibration
+# first (skipped for the negative control, which deliberately deviates).
+if [ "${NEGCTL:-0}" != "1" ]; then
+   python3 sim/check_opl4_gain_consts.py || { echo "tb_opl4_gain: RTL CONSTANTS FAILED"; exit 1; }
+fi
 DEF=""; [ "${NEGCTL:-0}" = "1" ] && DEF="+define+NEGCTL"
 verilator --binary --timing -Wno-fatal $DEF --top-module tb_opl4_gain \
    -o tb_opl4_gain -Mdir "$OUT/tb" sim/tb_opl4_gain.sv > "$OUT/build.log" 2>&1 \
