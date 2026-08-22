@@ -251,7 +251,12 @@ wire      [64:0] rtc;
 //[35]    RESERVA
 //[37:36] CPU SPEED (turbo)
 //[38]    BORDER
-//[53:52] OPL4 FM VOLUME
+//[48]    DEBUG OVERLAY
+//[50:49] free (was OPL4 PCM VOLUME, 2-bit)
+//[51]    CHEATS
+//[53:52] free (was OPL4 FM VOLUME, 2-bit)
+//[56:54] OPL4 PCM VOLUME (5 steps, first entry = default)
+//[59:57] OPL4 FM VOLUME  (5 steps, first entry = default)
 `include "build_id.v" 
 localparam CONF_STR = {
    "MSX1;",
@@ -264,8 +269,15 @@ localparam CONF_STR = {
    CONF_STR_SRAM_SIZE_A,
    "-;",
    CONF_STR_SLOT_B,
-   "H4F4,ROM,Load,31100000;",
+   // FS, not F: the S is what makes the HPS mount the companion <rom>.sav.
+   // Slot A has always been FS3 and its save works; slot B was plain F4, which is
+   // why nothing ever appeared for it -- nvram_backup:163 requires image_mounted[num]
+   // and the HPS was never asked to provide the image.  The RTL side was already
+   // complete (memory_upload:223 gives slot B SRAM index 2, nvram_backup walks all
+   // four lookup_SRAM entries against VD0-3).
+   "H4FS4,ROM,Load,33000000;",
    CONF_STR_MAPPER_B,
+   CONF_STR_SRAM_SIZE_B,
    "H6-;",
    "H6R[38],SRAM Save;",
    "H6R[39],SRAM Load;",
@@ -299,8 +311,8 @@ localparam CONF_STR = {
    "O[45],MoonSound,Off,On;",
    "O[46],PCM Mute,Off,On;",
    "O[47],FM Mute,Off,On;",
-   "O[50:49],OPL4 PCM Volume,0dB,-4dB,-8dB,-12dB;",
-   "O[53:52],OPL4 FM Volume,0dB,-4dB,-8dB,-12dB;",
+   "O[56:54],OPL4 PCM Volume,-4dB,-8dB,0dB,+4dB,+8dB;",
+   "O[59:57],OPL4 FM Volume,0dB,-4dB,-8dB,+4dB,+8dB;",
    "O[48],Debug Overlay,Off,On;",
    "-;",
    "T[0],Reset;",
@@ -317,7 +329,17 @@ assign status_menumask[2] = bios_config.use_FDC;
 assign status_menumask[3] = ROM_A_load_hide;
 assign status_menumask[4] = ROM_B_load_hide;
 assign status_menumask[5] = sram_A_select_hide;
-assign status_menumask[6] = (lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0) & (cart_conf[0].selected_mapper != MAPPER_ASCII16X);
+// H6 hides SRAM Save / SRAM Load.  A flash cartridge has no SRAM region at all --
+// its persistence goes through flash_dirtysave -- so the size sum is 0 and the
+// buttons would be hidden, leaving the user no way to trigger a save.  ASCII16X
+// was already excepted for exactly this reason; Yamanooto needs the same, or its
+// newly-wired flash write path is unreachable from the UI.
+assign status_menumask[7] = sram_B_select_hide;
+assign status_menumask[6] = (lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0)
+                          & (cart_conf[0].selected_mapper != MAPPER_ASCII16X)
+                          & (cart_conf[0].selected_mapper != MAPPER_YAMANOOTO)
+                          & (cart_conf[1].selected_mapper != MAPPER_ASCII16X)
+                          & (cart_conf[1].selected_mapper != MAPPER_YAMANOOTO);
 assign sdram_size         = sdram_sz[15] ? sdram_sz[1:0] : 2'b00;
 
 hps_io #(.CONF_STR(CONF_STR),.VDNUM(VDNUM)) hps_io
@@ -356,7 +378,7 @@ hps_io #(.CONF_STR(CONF_STR),.VDNUM(VDNUM)) hps_io
 
 /////////////////   CONFIG   /////////////////
 wire [5:0] mapper_A, mapper_B;
-wire       reload, sram_A_select_hide, fdc_enabled, ROM_A_load_hide, ROM_B_load_hide;
+wire       reload, sram_A_select_hide, sram_B_select_hide, fdc_enabled, ROM_A_load_hide, ROM_B_load_hide;
 
 msx_config msx_config 
 (
@@ -371,6 +393,7 @@ msx_config msx_config
    .rom_loaded(rom_loaded),
    .rom_big(rom_big),
    .sram_A_select_hide(sram_A_select_hide),
+   .sram_B_select_hide(sram_B_select_hide),
    .ROM_A_load_hide(ROM_A_load_hide),
    .ROM_B_load_hide(ROM_B_load_hide),
    .fdc_enabled(fdc_enabled),
@@ -548,8 +571,8 @@ msx MSX
    // MoonSound mute / debug
    .pcm_mute       (status[46]),
    .fm_mute        (status[47]),
-   .pcm_vol        (status[50:49]),
-   .fm_vol         (status[53:52]),
+   .pcm_vol        (status[56:54]),
+   .fm_vol         (status[59:57]),
    .dbg_pcm_valid  (dbg_pcm_valid),
    .dbg_opl3_valid (dbg_opl3_valid),
    .dbg_pcm_level  (dbg_pcm_level),
@@ -931,6 +954,13 @@ dpram #(.addr_width(16)) systemRAM
 
 ///////////////// NVRAM BACKUP ////////////////
 wire  [1:0] flash16x_active;
+// Which cart the flash persistence engines serve.  The firmware mounts exactly one
+// companion <rom>.sav, always on drive 0 (user_io.cpp: `if (opensave)
+// user_io_file_mount(buf, 0, 1)`), so only one flash cart can ever be persisted --
+// there is no second VD to give slot B.  Pick slot B only when it is the sole flash
+// cart; with a flash cart in both slots slot A keeps the engine exactly as before,
+// because we cannot tell which of the two the single mounted .sav belongs to.
+wire        flash16x_sel = flash16x_active[1] & ~flash16x_active[0];
 wire [26:0] flash16x_base[2];
 wire [15:0] flash16x_size[2];
 
@@ -981,9 +1011,9 @@ nvram_backup nvram_backup
    .ram_addr(sram_addr),
    .ram_dout(sram_dout),
    .ram_we(sram_we),
-   .flash16x_active(flash16x_active[0]),
-   .flash16x_base(flash16x_base[0]),
-   .flash16x_size(flash16x_size[0]),
+   .flash16x_active(flash16x_active[flash16x_sel]),
+   .flash16x_base(flash16x_base[flash16x_sel]),
+   .flash16x_size(flash16x_size[flash16x_sel]),
    .sdram_req (nvbak_sdram_req),
    .sdram_rnw (nvbak_sdram_rnw),
    .sdram_addr(nvbak_sdram_addr),
@@ -1001,9 +1031,9 @@ flash_dirtysave flash_dirtysave
 (
    .clk(clk21m),
    .reset(reset),
-   .flash16x_active(flash16x_active[0]),
-   .flash16x_base(flash16x_base[0]),
-   .flash16x_size(flash16x_size[0]),
+   .flash16x_active(flash16x_active[flash16x_sel]),
+   .flash16x_base(flash16x_base[flash16x_sel]),
+   .flash16x_size(flash16x_size[flash16x_sel]),
    .prog_we(flash16x_prog_we),
    .prog_addr(flash16x_prog_addr),
    .save_req(status[38]),

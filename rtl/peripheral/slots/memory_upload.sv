@@ -214,10 +214,16 @@ module memory_upload
                            data_id     <= cart_rom_id;
                            external    <= 1'd1;
                            if (cart_rom_id == ROM_ROM) begin
-                              if (curr_conf == CONFIG_SLOT_A) begin
-                                 sram_size <= 25'({cart_sram_size, 10'd0});
-                                 ref_sram  <= 2'd0;
-                              end
+                              // Both slots use SRAM index 0, because the firmware gives us no
+                              // choice: user_io.cpp's `if (opensave) user_io_file_mount(buf, 0, 1)`
+                              // always mounts the companion <rom>.sav on drive 0.  There is only
+                              // ever ONE save image mounted, and it belongs to whichever FS file
+                              // was loaded last -- so the cart loaded last is the one that can
+                              // save, and it must look at VD0.  Slot B previously fell through
+                              // this if with sram_size and ref_sram never assigned at all, which
+                              // is why it could never save regardless of the menu setting.
+                              sram_size <= 25'({cart_sram_size, 10'd0});
+                              ref_sram  <= 2'd0;
                            end else begin
                               sram_size   <= 25'({cart_sram_size, 10'd0});
                               ref_sram <= curr_conf == CONFIG_SLOT_A ? 2'd1 : 2'd2;   
@@ -228,7 +234,13 @@ module memory_upload
                               ROM_ROM: begin
                                  if (ioctl_size[curr_conf == CONFIG_SLOT_A ? 2 : 3] > 0) begin                           
                                     save_addr <= ddr3_addr;   
-                                    ddr3_addr <= curr_conf == CONFIG_SLOT_A ? 28'hC00000 : 28'h1100000 ;    //ROM Store
+                                    // Slot B moved 0x1100000 -> 0x3000000 (above the 9MB FW PACK at 0x2000000).
+                                    // The old 5MB gap meant an 8MB slot-A cart ended at 0x1400000 and
+                                    // trampled 3MB of slot B's staging.  Slot A now has 10MB to CAS at
+                                    // 0x1600000.  This constant and the CONF_STR load address in MSX1.sv
+                                    // must ALWAYS move together -- that is exactly how the FW PACK
+                                    // relocation went wrong before (see the note further down).
+                                    ddr3_addr <= curr_conf == CONFIG_SLOT_A ? 28'hC00000 : 28'h3000000 ;    //ROM Store
                                     data_size <= ioctl_size[curr_conf == CONFIG_SLOT_A ? 2 : 3][24:0];
                                     // An ASCII16-X cart IS an 8MB flash chip: reserve the whole chip and
                                     // 0xFF-fill ("erased") whatever the image does not cover, so the game
