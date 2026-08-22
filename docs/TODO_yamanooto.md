@@ -152,7 +152,18 @@ every behavioural change back to xp1 and contains **no RAM-mode entry** — exac
 consistent with the test being added later. Obtaining the **yimmi9rc2 release
 notes** would settle #1964 from the vendor's own changelog.
 
-## 5. Slot B saving — the firmware only ever mounts ONE .sav, on VD0
+## 5. PARKED — Slot B saving: built and deployed, NOT hardware-tested
+
+Shipped in `20260823b_slotBsave2`. **No hardware test has been run** — the user
+parked slot B work entirely on 2026-08-23, together with item 6. Treat slot B
+saving as unproven: the reasoning below is sound and the firmware constraint is
+read straight from `Main_MiSTer`, but nothing has been observed on the board.
+
+Tests to run when this is picked up:
+- Ohke no Tani in slot B with `SRAM SIZE` set manually (not AUTO) -> `SRAM SAVE`
+  -> a new `.sav` should appear in `/media/fat/saves/MSX1/`.
+- Final Fantasy (KR) in slot B -> continue should appear, and saving should work.
+Both failed on `20260823a`, which is what led to the fixes below.
 
 Slot B could not save anything. Two separate things were wrong, and the second one
 invalidates an assumption this document previously recorded.
