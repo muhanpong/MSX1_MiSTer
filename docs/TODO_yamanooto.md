@@ -11,45 +11,94 @@ See `project-yamanooto-scc` in memory for the full history.
 
 ---
 
-## 1. Flash write path is entirely unwired — HIGHEST IMPACT
+## 1. Flash write path — DONE and HARDWARE-VERIFIED (2026-08-22)
 
-`flash_wr_en` (`yamanooto.sv:80`) is produced, connected at `msx_slots.sv:399`, and
-**consumed nowhere**. The `flash` instance at `msx_slots.sv:211-236` has no
-Yamanooto term in `.ce`, `.addr`, `.sdram_offset`, `.is_ascii16x` or `.erase_limit`.
-`memory_upload.sv:640` grants `DEV_FLASH`, but that bit is only tested inside the
-MFRSD term, so the grant is inert. The cartridge is read-only in our core.
+Implemented as `cart_yamanooto`'s own JEDEC state machine, mirroring the proven
+`ascii16x.sv` path.  Shipped as `20260822b_yamawrite`.
 
-**Who this hurts, concretely:** `Final Fantasy (KR)`, `Golvellius 2 (KR)` and
-`Jikuu no Hanayome (KR)` — the Celica Korean translations in
-`/media/fat/games/MSX1/00_Celica_KOR/` — all save by writing `#12` to `#7FFF`
-(REGEN+WREN) and then issuing JEDEC commands through the `#4AAA`/`#4555` unlock
-pair. They are Yamanooto ROMs, so **their saves do not work at all today.**
+**Hardware verification (2026-08-22, board .86):**
+- Final Fantasy (KR) save written, core reloaded, save read back correctly.
+- Yamanooto ROM loads in slot B.
+- MFRSD still boots — this is what clears the `flash.sv` erase-decode change
+  below, whose only real risk was the boot-failure class that forced a revert once
+  before.  An actual MFRSD *erase* is still untested (it only fires after a full
+  AA/55/80/AA/55/30), but that failure mode is "wrong sector erased", not "no boot".
 
-What it needs:
-1. a `flash_rq` / `flash_addr` output on `cart_yamanooto` (neither exists yet);
-2. Yamanooto terms in the four `flash` muxes. Note the defaults are actively
-   wrong, not merely absent: `.sdram_offset` falls through to the **MFRSD base**
-   (an erase would land in another cart's region) and `.erase_limit` falls through
-   to the MFRSD default, disabling the clamp added by `bf56cf4`;
-3. **`flash.sv`'s byte-program (0xA0) path is structurally dead.** `flash.sv:174`
-   guards on `(quadrupleProgram | write_cnt > 0)`, but `write_cnt <= 1` for
-   `bytePrgram` can only execute from inside the block it is trying to enter. Only
-   0x56 (quadruple) and 0x50 (double) can program. **0xA0 is the only program
-   command a JEDEC/AMD flasher uses**, so wiring (2) without this still yields a
-   cartridge that cannot be programmed. Confirmed absent from this branch and both
-   worktrees (`git log --all -S allow_byteprog` is empty);
-4. `.is_ascii16x` really means "AMD-family chip" — it selects manufacturer ID, CFI
-   availability *and* boot-sector erase granularity. Rename or split it;
-5. persistence: hook `flash_dirtysave` up. That engine already works — GoFigure's
-   `.sav` is live at `/media/fat/saves/MSX1/MSXdev25_GoFigure_v1.2.sav` — so this
-   is reuse, not new design.
+The save succeeding is itself the proof that the `MSX1.sv` menumask fix landed:
+without it the `SRAM Save` button is hidden and there is no way to press it.
 
-Also latent, worth knowing before two flash carts can coexist: there is **one**
-`flash` instance with **one** command FSM (`flash.sv:22-23`) shared by every cart,
-so an MFRSD and a Yamanooto would interleave into the same unlock sequence.
+Test suites (all with working negative controls):
+`run_yamanooto_flash` 23 · `run_flash_seam` 0 attacks · `run_erase_hijack` 0
+hijacked · `run_flash_erase` 7.
 
-Reference for correct behaviour: `openMSX/src/memory/Yamanooto.cc:235-240` plus
-`AmdFlash.cc`. openMSX persists an 8 MB SRAM file; the real cartridge is flash.
+What landed:
+- `yamanooto.sv` gained `flash_addr` / `flash_rq` / `prog_we` and a JEDEC FSM
+  (AA/55/A0 -> program, AA/55/80/AA/55/30 -> erase), gated on `WREN & ~ROMDIS`
+  exactly like `Yamanooto.cc:235-240`.
+- `msx_slots.sv`: Yamanooto terms in all four `flash` muxes; `prog_we` added to
+  `sdram_ce` / `ram_rnw` (this is what gets the data byte past the region's
+  read-only flag); `flash16x_*` extended so `flash_dirtysave` persists it.
+- `flash.sv`: `is_ascii16x` split into `amd_family` and `boot_sector`.
+
+**Five defects found by a three-lens review (advocate / neutral / critic) after the
+first implementation, all reproduced independently before fixing, all shipped:**
+
+| # | Defect | Why it mattered |
+|---|---|---|
+| F1 | `flash_rq` had no WREN term | An ordinary K5 bank write `LD (0x50AA),A` with A=0x98 walked the SHARED `flash.sv` FSM into CFI — the whole 8MB ROM window then read 0x00. `flash.sv` has no reset port (`reset` there is an internal wire meaning "an F0 arrived"), so a wedged cart does NOT recover on MSX reset. |
+| F3 | erase fill could be hijacked | `write_cnt > 0` guards the program branch, but the erase loop borrows that same counter, so ONE CPU write during the 64KB fill retargeted `sdram_addr` and substituted its byte for 0xFF — measured 65528/65536 bytes wrong, running past the sector and bypassing the `erase_limit` clamp. Gating `flash_rq` on WREN does NOT cover it: a driver holds WREN set across the erase by construction. Fixed with `& ~erase`. |
+| F4 | `flash_rq` had no `cpu_mreq` | `IN A,(0x12)` puts {A,port} on `cpu_addr`, so A=0x50 gives 0x5012 — inside `page_ok`, `cpu_rd` set, `cpu_mreq` clear. The flash dout then ANDs into the shared `cpu_din` tree. |
+| F5 | `SRAM Save`/`Load` hidden | `MSX1.sv` menumask excepted only `MAPPER_ASCII16X`, so the whole feature was unreachable from the UI. |
+| F2 | erase sector scale | Pre-existing MFRSD defect, see the correction below. |
+
+New regression suites cover the `flash.sv` + `msx_slots.sv` seam, which nothing
+tested before — and which is exactly where F1, F2 and F3 all hid.
+
+**Three corrections to what this TODO originally said:**
+
+1. **Item 3 was wrong — `flash.sv`'s dead 0xA0 branch does not need fixing.**
+   ASCII16X never used it: the mapper detects the sequence itself and the data
+   byte rides the ordinary SDRAM write path.  Yamanooto now does the same.  The
+   shared command FSM was left untouched, which matters — widening it once before
+   caused a boot failure that had to be reverted.
+2. **Item 4 was a real defect, but NOT for the reason first recorded here.**
+   The original text claimed Yamanooto's S29GL064 is "uniform 64KB". **That is
+   false** — openMSX's chip table gives all three parts the SAME bottom-boot map,
+   8 x 8KB then 127 x 64KB:
+
+   | cart | chip | source |
+   |---|---|---|
+   | ASCII16X | S29GL064S70TFI040 | `RomAscii16X.cc:25` (AMD) |
+   | Yamanooto | S29GL064N90TFI04 | `Yamanooto.cc:38` (AMD) |
+   | MFRSD-SD | M29W640GB | `MegaFlashRomSCCPlusSD.cc:274` (STM) |
+
+   They differ only in manufacturer id — which is the `amd_family` half. So
+   `boot_sector` is **not** a per-cart discriminator and is driven `1'b1`. The real
+   defect was that `erase_boot` (the `<<13` scaling) was gated on the ASCII16X path
+   alone, leaving MFRSD with the correct 8KB index scaled as if it were 64KB: a
+   confirm at flash 0x2000 erased 0x10000-0x1FFFF and left the target intact.
+   A first fix built on the "uniform" premise was reverted once the chip table was
+   actually read. `sim/run_flash_erase.sh` pins the geometry, its negative control
+   re-injecting the historical ASCII16X-only gating.
+3. **`#12` to `#7FFF` is not "REGEN+WREN".** 0x12 = WREN(bit4) | SPIEN(bit1);
+   REGEN(bit0) is clear.  WREN alone opens the flash, which is why the Celica
+   games work without ever setting REGEN.  (Their unlock pair `#4AAA`/`#4555` is
+   the same 0x555/0x2AA word offset ASCII16X already used.)
+
+**Still open on this path:**
+- `flash_dirtysave` is wired to `flash16x_active[0]` only (`MSX1.sv:1009`), so
+  **flash** persistence covers cart A only. A Yamanooto in slot B programs
+  correctly but will not survive a power cycle. (Classic SRAM in slot B is a
+  different path and now works — see below.)
+- ~~Whether the HPS auto-mounts `<rom>.sav` for a Yamanooto ROM~~ — **VERIFIED
+  2026-08-22**: Final Fantasy (KR) saved, survived a core reload. The mount is
+  per-ROM, not per-mapper, as expected.
+- Still latent: one `flash` instance with one command FSM (`flash.sv:22-23`)
+  shared by every cart, so an MFRSD and a Yamanooto in the two slots would
+  interleave into the same unlock sequence.
+
+Hardware targets in `/media/fat/games/MSX1/00_Celica_KOR/`: `Final Fantasy (KR)`
+**tested OK**; `Golvellius 2 (KR)` and `Jikuu no Hanayome (KR)` not yet tried.
 
 ## 2. Konami DAC in K4 mode — absent
 
@@ -66,23 +115,20 @@ digitised speech is completely silent; the Konami Synthesizer produces nothing.
 disagree (`0x5000-0x5FFF` vs `(address & 0xC010) == 0x4000`) and the note covers
 both use cases. Needs the yimmi9 documentation or a hardware test.
 
-## 3. 0x7FFE is three registers; we implement one
+## 3. 0x7FFE is three registers — corruption stopped (2026-08-23)
 
-Per the vendor's own sources (`yamacore/SRC/YAMASPI.Z8A:9-30`), ENAR bit1 = SPIEN,
-bit2 = MSTEN, and 0x7FFE is `OFFR` / `MOFFR` (when MSTEN) / `SPICON` (when SPIEN).
-We treat every write as OFFR, so a MOFFR or SPICON write silently destroys it.
-**openMSX has the identical defect** (`Yamanooto.cc:223-225`).
+Per the vendor's sources (`yamacore/SRC/YAMASPI.Z8A:9-30`), 0x7FFE is `OFFR`, or
+`MOFFR` when MSTEN (ENAR bit2), or `SPICON` when SPIEN (ENAR bit1). We implement
+only OFFR, and the write was unqualified, so a MOFFR or SPICON write silently
+destroyed it. **openMSX has the identical defect** (`Yamanooto.cc:223-225`).
 
-Consequence: the genuine Yamanooto firmware cannot launch a game. Its boot ROM
-(`boot/SRC/YAMABOOT.Z8A:175`) writes `ENAR=%101` (MSTEN), then MOFFR, then clears
-MSTEN and writes `OFFR=0` — on our core the second write overwrites the first.
-`YAMAFL.COM` is affected the same way.
+Fixed by qualifying the write with `~|(enar & (MSTEN | SPIEN))` — this does NOT
+add MOFFR/SPICON, it only stops the corruption. `sim/run_offr.sh` pins it,
+including the real `YAMABOOT.Z8A:175` sequence (ENAR=%101 -> MOFFR -> clear MSTEN
+-> OFFR=0); the negative control fails 2 as required.
 
-Minimum honest fix (does not add MOFFR, just stops the corruption): qualify the
-OFFR write at `yamanooto.sv:141` with `~enar[2] & ~enar[1]`.
-
-Not urgent for what we run: neither `PACK_K.ROM` nor the Neo-Ultimate Collection
-ever sets those bits — every `LD (7FFF),A` site in both writes 0x80 or 0x81.
+Still not implemented: MOFFR and SPICON themselves. Neither `PACK_K.ROM` nor the
+Neo-Ultimate Collection ever sets those bits, so nothing we run needs them.
 
 ## 4. RAM-mode deviation — soften the comment, change no code
 
@@ -105,6 +151,108 @@ firmware set on this machine stops at yimmi8beta3, whose `release_notes.txt` lis
 every behavioural change back to xp1 and contains **no RAM-mode entry** — exactly
 consistent with the test being added later. Obtaining the **yimmi9rc2 release
 notes** would settle #1964 from the vendor's own changelog.
+
+## 5. Slot B saving — the firmware only ever mounts ONE .sav, on VD0
+
+Slot B could not save anything. Two separate things were wrong, and the second one
+invalidates an assumption this document previously recorded.
+
+**The firmware constraint (decisive).** `Main_MiSTer/user_io.cpp:2937`:
+
+```c
+if (opensave) { FileGenerateSavePath(name, buf); user_io_file_mount(buf, 0, 1); }
+```
+
+The `0` is the drive index. **The companion `<rom>.sav` is always mounted on VD0**,
+and only one is ever mounted — it belongs to whichever `FS` file was loaded last.
+`opensave` comes from the `S` in an `FS<n>` CONF_STR tag (`menu.cpp:2412`); `C` is
+`store_name`, a different flag. So there is no second VD to hand slot B, and the
+earlier idea of mapping slot B to VD2 could never have worked.
+
+**What was actually broken.** `memory_upload.sv`:
+
+```systemverilog
+if (cart_rom_id == ROM_ROM) begin
+   if (curr_conf == CONFIG_SLOT_A) begin        // <- slot B fell straight through
+      sram_size <= ...;  ref_sram <= 2'd0;      //    with NOTHING assigned
+   end
+end else begin
+   ref_sram <= curr_conf == CONFIG_SLOT_A ? 2'd1 : 2'd2;   // non-ROM devices only
+end
+```
+
+A plain ROM cart in slot B never had `sram_size` or `ref_sram` assigned at all, so
+`nvram_backup:163` (`lookup_SRAM[num].size > 0 & image_mounted[num]`) could not fire
+no matter what the menu said. **Correction to what this file said before:** the
+`2'd1`/`2'd2` line is for FMPAC-class devices, not ROM carts — it was NOT already
+giving slot B a working SRAM index.
+
+Fixed by dropping the slot-A-only guard so both slots take `ref_sram = 2'd0`,
+matching the firmware's fixed VD0. Slot A is unchanged.
+
+**Flash carts too.** `flash16x_active/base/size` were hardwired to index `[0]` at
+both consumers, so a Yamanooto or ASCII16X in slot B programmed correctly but had no
+save or load path — the reported symptom was Final Fantasy (KR) in slot B showing no
+continue and producing no file. Now selected by `flash16x_sel = active[1] &
+~active[0]`: slot B is served when it is the only flash cart. With a flash cart in
+BOTH slots slot A keeps the engine as before, because the single mounted `.sav`
+cannot be attributed to one of them.
+
+`status_menumask[6]` also only excepted `cart_conf[0]`, so the Save/Load buttons hid
+themselves when the flash cart was in slot B; it now checks both slots.
+
+**Menu.** `CONF_STR_SRAM_SIZE_B` on `O[62:60]`, hidden by `status_menumask[7]` via
+`sram_B_select_hide`, mirroring slot A. `sram_B_select` joins `act_config` so a size
+change triggers a reload. `H4F4` became `H4FS4` so the HPS is asked for the save at
+all.
+
+**Consequence worth knowing:** only the cart loaded LAST can be saved, because its
+`.sav` is the one occupying VD0. That is a firmware property, not something the core
+can work around.
+
+## 6. PARKED — Yamanooto in slot B boots less than half the time
+
+Reported 2026-08-23 by the user, who chose to park it rather than chase it now.
+**Do not treat slot B Yamanooto as working.** Slot A is the supported configuration
+and is hardware-verified.
+
+Symptom: a Yamanooto-mapper ROM loaded into slot B starts correctly under ~50% of
+attempts. Slot A with the same class of image is reliable.
+
+What is already known that a future session should NOT re-derive:
+
+- Persistence for slot B was wired this same day (`flash16x_sel`, section 5). That
+  is a *save/load* path and is unrelated to a cart failing to start, so it is
+  unlikely to be the cause — but it also has not been cleared, because the boot
+  failures and the persistence change landed in the same build.
+- Slot B DDR3 staging moved `0x1100000` -> `0x3000000` on the same day (see below).
+  That fixed slot A's 8MB cart trampling slot B, so it should have made slot B MORE
+  reliable, not less. **Whether the <50% figure was measured before or after that
+  move is not recorded** — establishing that is the first thing to do, because the
+  two hypotheses point in opposite directions.
+- `docs/TODO_boot_flakiness.md` describes intermittent boot failures whose top
+  hypothesis was exactly that DDR3 overlap. That document needs re-testing against
+  the relocation regardless, and this symptom may be the same underlying fault
+  rather than a new one.
+- Both slots reserve a full 8MB for a Yamanooto/ASCII16X image
+  (`memory_upload.sv` `x16_pad`), so the runtime SDRAM budget — not just the DDR3
+  staging map — is worth checking for slot B. The DDR3 relocation did not touch
+  SDRAM placement.
+
+Suggested first step when this is picked up: pin down whether the failure rate
+differs between `20260822b_yamawrite` (pre-relocation) and `20260823b_slotBsave2`
+(post-relocation) with the identical ROM in slot B. That single A/B splits the
+hypothesis space in half before any RTL is read.
+
+## Also fixed alongside (2026-08-23)
+
+**DDR3 staging overlap.** Slot A staged at `0xC00000` with slot B at `0x1100000` —
+a 5MB gap, so an 8MB slot-A cart ended at `0x1400000` and trampled 3MB of slot B.
+Slot B moved to `0x3000000` (above the 9MB FW PACK at `0x2000000`), giving slot A
+10MB up to CAS at `0x1600000`. `MSX1.sv`'s CONF_STR load address and
+`memory_upload.sv`'s constant were changed **together** — the FW PACK relocation
+went wrong once by moving only one. This was the 1st-ranked hypothesis in
+`docs/TODO_boot_flakiness.md`; that document now needs re-testing against this fix.
 
 ## Verified clean — do not re-audit
 
