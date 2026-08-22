@@ -47,7 +47,10 @@ module cart_yamanooto
    output            cart_dout_en,
    output            scc_req,       // SCC register window hit  -> scc_sound cs
    output      [1:0] scc_mode,      // per cart: 0 = Compatible, 1 = Plus -> scc_sound
-   output            flash_wr_en    // WREN: writes may reach the flash
+   output            flash_wr_en,   // WREN: writes may reach the flash
+   output     [22:0] flash_addr,    // banked flash byte address -> flash.sv
+   output            flash_rq,      // this cart is addressing the flash chip
+   output            prog_we        // validated JEDEC byte-program data write -> SDRAM
 );
 
 // ── register addresses / bits ────────────────────────────────────────────
@@ -157,7 +160,14 @@ always @(posedge clk) begin
       // configuration registers: ENAR always writable, the rest only once REGEN is set
       if (cpu_addr == ENAR)                 enableReg [cart_num] <= din;
       else if (regen & cpu_addr == CFGR)    configReg [cart_num] <= din;
-      else if (regen & cpu_addr == OFFR)    offsetReg [cart_num] <= din;
+      // 0x7FFE is three registers on real hardware: OFFR, or MOFFR when MSTEN
+      // (ENAR bit2), or SPICON when SPIEN (ENAR bit1).  We only implement OFFR, so
+      // qualify the write -- otherwise the genuine firmware's MOFFR write silently
+      // destroys OFFR.  YAMABOOT.Z8A:175 sets ENAR=%101, writes MOFFR, clears MSTEN,
+      // then writes OFFR=0; without this guard the second write clobbers the first.
+      // openMSX has the identical defect (Yamanooto.cc:223-225).
+      else if (regen & cpu_addr == OFFR & ~|(enar & (MSTEN | SPIEN)))
+                                            offsetReg [cart_num] <= din;
 
       if (modereg_hit)                      sccModeReg[cart_num] <= din;
 
@@ -187,6 +197,84 @@ assign mem_unmaped = cs & (~page_ok | romdis | scc_req | reg_rd
 // `bankRegs[page8kB] & 0x3ff`.  mem_size is not necessarily a power of two, so it is
 // deliberately not used as a mask here.
 assign mem_addr = {2'd0, bankReg[cart_num][page8kB], cpu_addr[12:0]};
+
+// ── JEDEC flash programming ──────────────────────────────────────────────
+// Modelled on ascii16x.sv, which is the proven path in this core: flash.sv's own
+// byte-program (0xA0) branch is structurally dead -- its guard is
+// `(quadrupleProgram | write_cnt > 0)` and `bytePrgram` can only set write_cnt
+// from INSIDE that block -- so the mapper detects the sequence itself and the
+// data byte rides the ordinary SDRAM write path (`prog_we` in msx_slots.sv
+// forces sdram_ce / ram_rnw past the region's read-only flag).  Erase is left to
+// flash.sv, which does the 0xFF fill with its bounds clamp.
+//
+// openMSX gates the same way (Yamanooto.cc writeMem): registers 0x7FFC-0x7FFF are
+// handled FIRST (ENAR unconditionally, CFGR/OFFR behind REGEN) and the write then
+// falls through to flash.write() only while WREN is set and ROMDIS is clear.
+// The Celica Korean translations (Final Fantasy, Golvellius 2, Jikuu no Hanayome)
+// write #12 to #7FFF -- that is WREN|SPIEN, REGEN stays CLEAR -- and then unlock
+// through #4AAA / #4555, which is exactly the 0x555 / 0x2AA word-offset pair
+// below.  WREN alone opens the flash; REGEN is not required for programming.
+wire        cart_wr  = cs & cpu_mreq & cpu_wr & page_ok & flash_wr_en & ~romdis;
+wire        unlock_a = (cpu_addr[11:1] == 11'h555);   // unlock cycles 1 & 3
+wire        unlock_b = (cpu_addr[11:1] == 11'h2AA);   // unlock cycle 2
+
+logic       old_cart_wr;
+wire        wr_rise = cart_wr & ~old_cart_wr;         // one event per CPU write
+wire        wr_fall = ~cart_wr & old_cart_wr;
+
+typedef enum logic [2:0] {J_IDLE, J_AA, J_55, J_PROG, J_E1, J_E2, J_E3} jedec_t;
+jedec_t     jedec_st;
+logic       prog_arm;
+
+always @(posedge clk) begin
+   if (reset) begin
+      jedec_st    <= J_IDLE;
+      prog_arm    <= 1'b0;
+      old_cart_wr <= 1'b0;
+   end else begin
+      old_cart_wr <= cart_wr;
+      if (wr_fall) prog_arm <= 1'b0;                  // program write finished
+      if (wr_rise) begin
+         case (jedec_st)
+            J_IDLE: jedec_st <= ((din == 8'hAA) & unlock_a) ? J_AA : J_IDLE;
+            J_AA:   jedec_st <= ((din == 8'h55) & unlock_b) ? J_55 :
+                                ((din == 8'hAA) & unlock_a) ? J_AA : J_IDLE;
+            J_55:   jedec_st <= ((din == 8'hA0) & unlock_a) ? J_PROG :
+                                ((din == 8'h80) & unlock_a) ? J_E1   :
+                                ((din == 8'hAA) & unlock_a) ? J_AA   : J_IDLE;
+            J_PROG: begin                             // this write = program data
+                       prog_arm <= ~mem_unmaped;      // only program in-bounds
+                       jedec_st <= J_IDLE;
+                    end
+            J_E1:   jedec_st <= ((din == 8'hAA) & unlock_a) ? J_E2 : J_IDLE;
+            J_E2:   jedec_st <= ((din == 8'h55) & unlock_b) ? J_E3 :
+                                ((din == 8'hAA) & unlock_a) ? J_AA : J_IDLE;
+            J_E3:   jedec_st <= J_IDLE;               // 30/10 confirm: flash.sv fills
+            default: jedec_st <= J_IDLE;
+         endcase
+      end
+   end
+end
+
+assign prog_we   = prog_arm & cart_wr;                // held across the program write
+assign flash_addr = 23'(mem_addr);
+// The register and SCC windows are not the flash chip, and ROMDIS hides it
+// entirely -- keep those cycles out of flash.sv's shared command FSM.
+// WRITES are additionally gated on WREN, matching openMSX (Yamanooto.cc writeMem
+// only reaches flash.write() inside `if (enableReg & WREN)`).  Without this, an
+// ordinary K4 bank write that happens to carry 0xAA at word offset 0x555 can walk
+// the SHARED flash command FSM into autoselect, after which every cart read
+// returns manufacturer id bytes until an 0xF0.  K4 banking covers 0x6000-0xBFFF
+// in full, so 0x?AAA is reachable there -- a much larger surface than ASCII16X's
+// two bank addresses.  Reads stay ungated: openMSX's readMem has no WREN test,
+// and autoselect/CFI results must still be readable.
+// cpu_mreq is essential, not decoration: an I/O read such as `IN A,(0x12)` puts
+// {A,port} on cpu_addr, so A=0x50 gives 0x5012 -- inside page_ok, with cpu_rd
+// asserted and cpu_mreq clear.  Without the mreq term that IORQ cycle asserts
+// flash_rq, and while a driver legitimately has autoselect or CFI active the
+// flash's dout is ANDed into the shared cpu_din tree, corrupting the IN result.
+assign flash_rq  = cs & cpu_mreq & page_ok & ~romdis & ~scc_req & ~reg_rd
+                 & (cpu_rd | flash_wr_en);
 
 endmodule
 `default_nettype wire

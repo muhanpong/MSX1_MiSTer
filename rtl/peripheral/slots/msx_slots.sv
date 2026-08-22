@@ -70,8 +70,9 @@ module msx_slots
    output             [7:0] flash16x_prog_data
 );
 
-assign flash16x_prog_we   = mapper_ascii16x_prog_we;
-assign flash16x_prog_addr = mapper_ascii16x_addr[22:0];
+assign flash16x_prog_we   = mapper_ascii16x_prog_we | mapper_yamanooto_prog_we;
+assign flash16x_prog_addr = mapper_yamanooto_prog_we ? mapper_yamanooto_flash_addr
+                                                       : mapper_ascii16x_addr[22:0];
 assign flash16x_prog_data = cpu_dout;
 
 assign sound = sound_opll + scc_wave + sound_psg;
@@ -158,9 +159,9 @@ assign cpu_din          = mapper_ram_dout                        //IO
                         & d_to_cpu_reset_status                  //IO
                         & (mem_unmaped  ? 8'hFF : ram_dout);
 
-assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce | mapper_ascii16x_prog_we);
+assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
 assign bram_ce  = (sdram_size == 2'd0 | sram_cs)  & ((cpu_mreq & (cpu_rd | (cpu_wr & (~ram_ro | sram_cs))) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce);
-assign ram_rnw  = ~((sram_cs & sram_wr) | (~sram_cs & cpu_wr & cpu_mreq & ~ram_ro) | mapper_ascii16x_prog_we);
+assign ram_rnw  = ~((sram_cs & sram_wr) | (~sram_cs & cpu_wr & cpu_mreq & ~ram_ro) | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
 
 assign ram_din  = cpu_dout;
 
@@ -209,30 +210,41 @@ mapper_halnote halnote
 
 wire flash_rq;
 wire [7:0] flash_dout;
+// A cart that owns its own SDRAM region (not the shared MFRSD chip window): its
+// erase must be clamped to that region and it reports the AMD manufacturer id.
+wire own_flash_rq = (mapper_ascii16x_flash_rq | mapper_yamanooto_flash_rq)
+                  & ~mapper_mfrsd0_flash_rq & ~mapper_mfrsd3_flash_rq;
 flash flash 
 (
    .clk(clk),
    .clk_sdram(clk_sdram),
-   .addr(23'(mapper_mfrsd0_flash_rq  ? flash_mfrsd0_addr             :
-             mapper_mfrsd3_flash_rq  ? flash_mfrsd3_addr             :
+   .addr(23'(mapper_mfrsd0_flash_rq   ? flash_mfrsd0_addr            :
+             mapper_mfrsd3_flash_rq   ? flash_mfrsd3_addr            :
              mapper_ascii16x_flash_rq ? mapper_ascii16x_flash_addr   :
+             mapper_yamanooto_flash_rq ? mapper_yamanooto_flash_addr :
                                         flash_mfrsd1_addr             )),
    .din(cpu_dout),
    .dout(flash_dout),
    .data_valid(flash_rq),
    .we(cpu_mreq & cpu_wr),
    .ce(((mapper_mfrsd3_flash_rq | mapper_mfrsd1_flash_rq | mapper_mfrsd0_flash_rq) & |(cart_device[cart_num] & DEV_FLASH)) |
-       mapper_ascii16x_flash_rq),
+       mapper_ascii16x_flash_rq | mapper_yamanooto_flash_rq),
    .sdram_addr(flash_addr),
    .sdram_din(flash_din),
    .sdram_req(flash_req),
    .sdram_ready(flash_ready),
    .sdram_done(flash_done),
-   .sdram_offset(mapper_ascii16x_flash_rq ? 27'(base_ram) : mfrsd_base_ram[0]),
-   .is_ascii16x(mapper_ascii16x_flash_rq & ~mapper_mfrsd0_flash_rq & ~mapper_mfrsd3_flash_rq),
-   // Region byte-size the erase may not exceed: the ASCII16X cart's own ROM area,
+   .sdram_offset((mapper_ascii16x_flash_rq | mapper_yamanooto_flash_rq) ? 27'(base_ram) : mfrsd_base_ram[0]),
+   // AMD/Spansion id + CFI: both the ASCII16X cart and Yamanooto are AMD-family.
+   .amd_family(own_flash_rq),
+   // Bottom-boot is NOT a per-cart property here: openMSX models all three parts
+   // with the same map -- 8 x 8KB then 127 x 64KB.  ASCII16X S29GL064S70TFI040,
+   // Yamanooto S29GL064N90TFI04, MFRSD-SD M29W640GB.  Gating this on the ASCII16X
+   // path alone is what left MFRSD scaling an 8KB sector index by 16 bits.
+   .boot_sector(1'b1),
+   // Region byte-size the erase may not exceed: the owning cart's own ROM area,
    // or the full 8MB chip window for the MFRSD paths (their region is 8MB).
-   .erase_limit(mapper_ascii16x_flash_rq & ~mapper_mfrsd0_flash_rq & ~mapper_mfrsd3_flash_rq ? 27'(size) << 14 : 27'h800000),
+   .erase_limit(own_flash_rq ? 27'(size) << 14 : 27'h800000),
    .debug_erase(debug_erase)
 );
 
@@ -386,6 +398,9 @@ wire        mapper_yamanooto_dout_en;
 wire        mapper_yamanooto_sccReq;
 wire  [1:0] mapper_yamanooto_sccMode;
 wire        mapper_yamanooto_wren;
+wire [22:0] mapper_yamanooto_flash_addr;
+wire        mapper_yamanooto_flash_rq;
+wire        mapper_yamanooto_prog_we;   // validated JEDEC byte-program data write -> SDRAM
 cart_yamanooto yamanooto
 (
    .mem_size(25'(size) << 14),
@@ -398,6 +413,9 @@ cart_yamanooto yamanooto
    .scc_req(mapper_yamanooto_sccReq),
    .scc_mode(mapper_yamanooto_sccMode),
    .flash_wr_en(mapper_yamanooto_wren),
+   .flash_addr(mapper_yamanooto_flash_addr),
+   .flash_rq(mapper_yamanooto_flash_rq),
+   .prog_we(mapper_yamanooto_prog_we),
    .*
 );
 
@@ -528,7 +546,7 @@ psg psg
 always @(posedge clk) begin
     if (reset) begin
         flash16x_active <= 2'b00;
-    end else if (mapper == MAPPER_ASCII16X & cpu_mreq) begin
+    end else if ((mapper == MAPPER_ASCII16X | mapper == MAPPER_YAMANOOTO) & cpu_mreq) begin
         flash16x_base[cart_num]   <= base_ram;
         flash16x_size[cart_num]   <= size;
         flash16x_active[cart_num] <= 1'b1;
