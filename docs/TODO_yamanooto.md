@@ -127,6 +127,13 @@ add MOFFR/SPICON, it only stops the corruption. `sim/run_offr.sh` pins it,
 including the real `YAMABOOT.Z8A:175` sequence (ENAR=%101 -> MOFFR -> clear MSTEN
 -> OFFR=0); the negative control fails 2 as required.
 
+**HARDWARE-VERIFIED 2026-08-23** on `20260823d_critfix`, with the purpose-built
+`tools/yamanooto_savetest.rom`: border came up light green = all five tests pass,
+including T5, which is the guard itself (`REGEN|SPIEN` set, write 0x7FFE, offset
+must NOT change). This closes the one item that was shipping on reasoning alone --
+no software we own reaches this path, which is exactly why the cart exists.
+openMSX has no such guard, so the same cart is expected to fail T5 there.
+
 Still not implemented: MOFFR and SPICON themselves. Neither `PACK_K.ROM` nor the
 Neo-Ultimate Collection ever sets those bits, so nothing we run needs them.
 
@@ -254,6 +261,33 @@ Suggested first step when this is picked up: pin down whether the failure rate
 differs between `20260822b_yamawrite` (pre-relocation) and `20260823b_slotBsave2`
 (post-relocation) with the identical ROM in slot B. That single A/B splits the
 hypothesis space in half before any RTL is read.
+
+## 7. Test cart — `tools/yamanooto_savetest.s`
+
+Built because the OFFR guard was otherwise untestable: Selica's saves go straight
+through JEDEC and never touch 0x7FFE with REGEN+SPIEN set. Border colour is the
+result; green = all pass. Covers erase, byte program, the WREN gate, OFFR, and the
+OFFR guard.
+
+`sim/run_yamanooto_savetest.sh` runs the cart's exact bus sequence against the real
+`cart_yamanooto` + `flash` so the expected outcome is known before hardware. Its
+prediction (green) matched the board, which is the first evidence that this bench
+can be trusted.
+
+**Two limits of that bench, learned the hard way.** It injects the bus sequence and
+never executes the Z80, so it cannot see cart-side bugs. Running the cart under
+openMSX found two the bench could not:
+- the resident routine was linked at 0x4000 and merely copied to RAM, so its
+  `call`/`jp` targets still pointed into the cart, which it had itself re-banked
+  to 0xFF -- the CPU ran off into the BIOS;
+- it read once after a byte program instead of data-polling; a program is not
+  instantaneous on a real part.
+
+**openMSX still reports T2 there and that is unexplained.** Its own flash
+debuggable shows the byte programmed and the CPU able to read it back, which
+contradicts a T2 failure, and a progress marker read back as 0 though the routine
+demonstrably ran -- so the introspection is untrustworthy and no conclusion was
+drawn from it. Hardware says green.
 
 ## Also fixed alongside (2026-08-23)
 
