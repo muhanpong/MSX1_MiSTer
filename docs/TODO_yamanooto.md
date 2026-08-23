@@ -269,6 +269,10 @@ through JEDEC and never touch 0x7FFE with REGEN+SPIEN set. Border colour is the
 result; green = all pass. Covers erase, byte program, the WREN gate, OFFR, and the
 OFFR guard.
 
+**HARDWARE-VERIFIED 2026-08-23**: green on `20260823d_critfix`, 8/8 including T6.
+So the low-64KB 8KB sector map, the WREN gate, the OFFR guard, erase and byte
+program are all confirmed on the board, not just in simulation.
+
 **T6 covers the sector-map change itself.** T1-T5 all work at flash 0x100000, i.e.
 the >64KB branch, which `boot_sector(1'b1)` did not touch. The branch it DID change
 is below 0x10000, and for Yamanooto that is a real behaviour change on a path that
