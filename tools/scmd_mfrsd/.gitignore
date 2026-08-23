@@ -1,0 +1,4 @@
+# SCMD/MFRSD 상용 소프트웨어에서 파생된 파일은 커밋하지 않는다.
+# 로컬 보존용 원본 일습: ~/msx_archive/mfrsd_scmd_20260823/binaries/
+*.DSK
+*.SYS

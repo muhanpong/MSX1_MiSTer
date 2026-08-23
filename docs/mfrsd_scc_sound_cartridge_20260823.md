@@ -438,18 +438,12 @@ BASIC POKE로 `mapperReg=0`, `0xBFFE=0x20`을 세팅해도 **RAM이 생기지 �
 
 ## 12. 남은 것
 
-- [ ] **실기 검증**: `SLOT B = SCC+`로 SCMD 동작 확인 (배포된 RBF로 바로 가능, RTL 수정 불요)
-- [ ] `scc-rtl`이 찾은 **D1~D6 divergence** — 이 증상과 무관한 **별개의 실제 결함**
-  - **D5 (내가 독립 확인)**: `mfrsd.sv:110` `scc_mode = sccMode[5] & sccBanks[3][7]`가
-    칩 모드와 창 가시성을 섞고 있다. openMSX는 `setMode`에 **bit5만**(`:621`),
-    `getSCCEnable`에만 `bank3[7]`(`:503`). 재생 중 ROM 페이징 시 **ch5가 ch4 미러로
-    떨어지는 가청 결함.** `cc183c9`가 절반만 고친 상태.
-  - **D1 방증**: openMSX `invalidateDeviceRWCache(0xB800, 0x800)` = SCC+ 창 **2KB**
-    (우리는 `mfrsd.sv:98` / `konami_scc.sv:66`에서 `cpu_addr[15:8] == 8'hB8` = 256B)
-- [ ] `msx1-mister-e9`에 `MFRSDSCC.BAS` 배치 취소 통지
-- [ ] `tools/scmd_mfrsd/CORE2P.SYS`, `MFRSDSCC.BAS` 처리 (기록 보존 vs 삭제)
+**D1~D6은 `docs/TODO_scc_divergences.md`로 분리했다** — 항목별 파일:행, openMSX 대응,
+확인 상태(VERIFIED / 대조 미완), 작업 순서 원칙이 거기에 있다.
 
----
+- [ ] **실기 검증**: `SLOT B = SCC+`로 SCMD 동작 확인 (배포된 RBF로 바로 가능, RTL 수정 불요)
+- [ ] `msx1-mister-e9`에 `MFRSDSCC.BAS` 배치 취소 통지
+- [x] `tools/scmd_mfrsd/` 산출물 처리 → **유지 + `README.md`로 사용 비권고 명시** (2026-08-23)
 
 ## 13. 조사 자료 위치
 
