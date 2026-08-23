@@ -15,6 +15,7 @@
 ;     9  light red     T3 FAIL  a program with WREN CLEAR got through
 ;    10  dark yellow   T4 FAIL  OFFR write had no effect
 ;    13  magenta       T5 FAIL  OFFR was written while SPIEN was set
+;    11  light yellow  T6 FAIL  low-64KB erase hit the wrong span
 ;
 ; Why each test exists
 ; --------------------
@@ -23,6 +24,13 @@
 ; T3     the WREN gate.  An ordinary K5 bank write of 0x98 to 0x50AA once
 ;        walked the SHARED flash command FSM into CFI and made the whole
 ;        ROM window read 0x00; flash_rq now carries (cpu_rd | flash_wr_en).
+; T6     the low-64KB sector map.  boot_sector is now hardwired 1, so an erase
+;        confirmed below 0x10000 uses the 8KB bottom-boot map instead of the
+;        64KB one.  For Yamanooto that is a REAL behaviour change on a path that
+;        persists -- before the fix it took the 64KB branch, computed the sector
+;        index from addr[15:13] and then scaled it by 16 bits, so an erase at
+;        0x8000 wiped 0x40000 and left the target intact.  T1-T5 all work at
+;        0x100000 and cannot see any of this.
 ; T4/T5  the OFFR guard.  0x7FFE is three registers on real hardware --
 ;        OFFR, or MOFFR when MSTEN, or SPICON when SPIEN -- and we only
 ;        implement OFFR, so the write is now qualified.  T4 proves OFFR
@@ -92,6 +100,7 @@ C_T2    = 8
 C_T3    = 9
 C_T4    = 10
 C_T5    = 13
+C_T6    = 11
 
         .db     0x41, 0x42
         .dw     init
@@ -245,6 +254,57 @@ t4_ok:
         ld      a, #C_T5
         jp      show
 t5_ok:
+        ; restore OFFR=0 so T6's segment numbers mean what they say
+        ld      a, #REGEN
+        ld      (#ENAR), a
+        xor     a
+        ld      (#OFFR), a
+        xor     a
+        ld      (#ENAR), a
+
+;----------------------------------------------------------------------
+; T6  an erase below 0x10000 must clear ONE 8KB sector, not 64KB and not
+;     some unrelated span.  Segments 4 and 5 (flash 0x8000 / 0xA000) are
+;     adjacent 8KB sectors inside the low 64KB and are clear of this 32KB
+;     ROM, which occupies segments 0-3.
+;
+;     Erase both, mark both, then erase segment 4 only:
+;       seg4 must read 0xFF   (it was the target)
+;       seg5 must still read its marker  (it must NOT have been swept up)
+;     Under the old 64KB branch the erase at 0x8000 landed on 0x40000, so
+;     seg4 would still hold its marker and this fails on the first check.
+;----------------------------------------------------------------------
+        ld      a, #4
+        call    setbank
+        call    erase_here
+        ld      a, #5
+        call    setbank
+        call    erase_here
+
+        ld      a, #4
+        call    setbank
+        ld      c, #0x5A
+        call    prog_c
+        ld      a, #5
+        call    setbank
+        ld      c, #0x3C
+        call    prog_c
+
+        ld      a, #4
+        call    setbank
+        call    erase_here
+        ld      a, (#TARGET)
+        inc     a                       ; target must now be 0xFF
+        jr      nz, t6_fail
+        ld      a, #5
+        call    setbank
+        ld      a, (#TARGET)
+        cp      #0x3C                   ; neighbour must have survived
+        jr      z, t6_ok
+t6_fail:
+        ld      a, #C_T6
+        jp      show
+t6_ok:
         ld      a, #C_PASS
 
 ;----------------------------------------------------------------------
@@ -264,6 +324,59 @@ wren_off:
         xor     a
         ld      (#ENAR), a
         ret
+setbank:                                ; A = segment;  needs WREN/REGEN clear
+        push    af
+        xor     a
+        ld      (#ENAR), a
+        pop     af
+        ld      (#BANK0), a
+        ret
+
+erase_here:                             ; erase the sector holding TARGET, wait for 0xFF
+        call    wren_on
+        ld      a, #0xAA
+        ld      (#UNLK_A), a
+        ld      a, #0x55
+        ld      (#UNLK_B), a
+        ld      a, #0x80
+        ld      (#UNLK_A), a
+        ld      a, #0xAA
+        ld      (#UNLK_A), a
+        ld      a, #0x55
+        ld      (#UNLK_B), a
+        ld      a, #0x30
+        ld      (#TARGET), a
+        call    wren_off
+        ld      bc, #0
+eh_poll:
+        ld      a, (#TARGET)
+        inc     a
+        ret     z                       ; reached 0xFF
+        dec     bc
+        ld      a, b
+        or      c
+        jr      nz, eh_poll
+        ret                             ; timed out; the caller's check catches it
+
+prog_c:                                 ; program C at TARGET, wait for it
+        call    wren_on
+        ld      a, #0xAA
+        ld      (#UNLK_A), a
+        ld      a, #0x55
+        ld      (#UNLK_B), a
+        ld      a, #0xA0
+        ld      (#UNLK_A), a
+        ld      a, c
+        ld      (#TARGET), a
+        call    wren_off
+        ld      b, #0
+pc_poll:
+        ld      a, (#TARGET)
+        cp      c
+        ret     z
+        djnz    pc_poll
+        ret
+
 prog_a5:
         ld      a, #0xAA
         ld      (#UNLK_A), a

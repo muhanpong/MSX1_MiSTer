@@ -269,6 +269,21 @@ through JEDEC and never touch 0x7FFE with REGEN+SPIEN set. Border colour is the
 result; green = all pass. Covers erase, byte program, the WREN gate, OFFR, and the
 OFFR guard.
 
+**T6 covers the sector-map change itself.** T1-T5 all work at flash 0x100000, i.e.
+the >64KB branch, which `boot_sector(1'b1)` did not touch. The branch it DID change
+is below 0x10000, and for Yamanooto that is a real behaviour change on a path that
+persists: before the fix Yamanooto took the 64KB branch, took the sector index from
+`addr[15:13]` and scaled it by 16 bits, so an erase at 0x8000 wiped 0x40000 and left
+the target intact. T6 erases segment 4 and checks that segment 5 (the adjacent 8KB
+sector) survives; `NEGCTL2=1` re-injects the old branch and T6 duly fails with the
+target still holding its marker.
+
+Worth stating plainly: **MFRSD is NOT the reason this matters.** MFRSD flash writes
+do not persist anywhere -- no `flash16x_active`, `sram_size = 0` on all four
+subslots, no save file -- so any MFRSD flash operation is undone by a reboot and
+nobody has reason to perform one. An earlier plan to verify this change via
+`OPFXSD /I34` was dropped for that reason.
+
 `sim/run_yamanooto_savetest.sh` runs the cart's exact bus sequence against the real
 `cart_yamanooto` + `flash` so the expected outcome is known before hardware. Its
 prediction (green) matched the board, which is the first evidence that this bench

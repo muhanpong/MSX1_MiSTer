@@ -11,6 +11,7 @@
 //   T3  the same program with WREN CLEAR must do nothing
 //   T4  OFFR must still work normally
 //   T5  OFFR must be IGNORED while SPIEN is set (the guard)
+//   T6  an erase below 0x10000 clears ONE 8KB sector, neighbour survives
 //
 // Reads are modelled the way msx_slots does it: the flash supplies the byte
 // while data_valid is high (status / id / erase-busy), otherwise it comes from
@@ -94,6 +95,26 @@ module tb_yamanooto_savetest;
             else begin $display("  FAIL: %s", n); errors++; end end
    endtask
 
+   task automatic erase_here();
+      begin
+         w(ENAR, 8'h10);
+         w(UNLK_A, 8'hAA); w(UNLK_B, 8'h55); w(UNLK_A, 8'h80);
+         w(UNLK_A, 8'hAA); w(UNLK_B, 8'h55); w(TARGET, 8'h30);
+         w(ENAR, 8'h00);
+         begin automatic int g = 0;
+            while (dbg_erase && g < 400000) begin @(posedge clk); g++; end
+         end
+      end
+   endtask
+
+   task automatic prog_at(input [7:0] d);
+      begin
+         w(ENAR, 8'h10);
+         w(UNLK_A, 8'hAA); w(UNLK_B, 8'h55); w(UNLK_A, 8'hA0); w(TARGET, d);
+         w(ENAR, 8'h00);
+      end
+   endtask
+
    logic [7:0] v;  int guard;
    initial begin
       repeat(4) @(posedge clk); reset = 0; repeat(4) @(posedge clk);
@@ -142,6 +163,23 @@ module tb_yamanooto_savetest;
       r(TARGET, v);
       chk($sformatf("T5 SPIEN blocks the OFFR write (got %02h)", v), v !== 8'hA5);
 
+      // ---- T6 low-64KB erase must clear ONE 8KB sector -------------------
+      // Segments 4 and 5 (flash 0x8000 / 0xA000) are adjacent 8KB sectors inside
+      // the low 64KB and clear of the 32KB ROM at segments 0-3.  This is the
+      // path boot_sector(1'b1) actually changed for Yamanooto, and it persists;
+      // T1-T5 all work at 0x100000 and cannot see it.
+      w(ENAR, 8'h01); w(OFFR, 8'h00); w(ENAR, 8'h00);   // offset back to 0
+      w(BANK0, 8'd4);  erase_here();
+      w(BANK0, 8'd5);  erase_here();
+      w(BANK0, 8'd4);  prog_at(8'h5A);
+      w(BANK0, 8'd5);  prog_at(8'h3C);
+      w(BANK0, 8'd4);  erase_here();
+      r(TARGET, v);
+      chk($sformatf("T6 target sector erased (got %02h)", v), v === 8'hFF);
+      w(BANK0, 8'd5);
+      r(TARGET, v);
+      chk($sformatf("T6 neighbour sector survived (got %02h)", v), v === 8'h3C);
+
       $display("");
       $display("tb_yamanooto_savetest: %0d failures", errors);
 `ifdef NEGCTL
@@ -151,7 +189,7 @@ module tb_yamanooto_savetest;
       $finish;
 `else
       if (errors)
-         $fatal(1, "tb_yamanooto_savetest: %0d of 6 FAILED -- the cart would NOT show green", errors);
+         $fatal(1, "tb_yamanooto_savetest: %0d FAILED -- the cart would NOT show green", errors);
       $display("the cart should show BORDER = 3 (light green) on hardware");
       $finish;
 `endif
