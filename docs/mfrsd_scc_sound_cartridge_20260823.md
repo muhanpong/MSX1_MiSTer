@@ -355,7 +355,11 @@ memory_upload.sv:661
 | **우리 `SLOT A/B = SCC+`** | **비확장** | **128KB RAM (`ro=0`)** | SCC-I |
 | MFRSD 서브슬롯 1 | 확장(0~3) | 플래시 | SCC-I |
 
-**두 축 모두 실기와 일치한다.** (⚠ 실기 SCMD 검증은 아직 안 했다 — §11)
+**두 축 모두 실기와 일치한다.**
+
+**실기 확인됨** (사용자, 2026-08-23). `SLOT A/B = SCC+`는 이미 상시 사용 중이고,
+A·B 두 슬롯에 동시에 둘 수도 있다. 이 건은 열린 질문이 아니다 — 조사의 출발점은
+"왜 **MFRSD**로는 안 되는가"였고, 그 답이 §3·§6이다.
 
 ---
 
@@ -441,7 +445,6 @@ BASIC POKE로 `mapperReg=0`, `0xBFFE=0x20`을 세팅해도 **RAM이 생기지 �
 **D1~D6은 `docs/TODO_scc_divergences.md`로 분리했다** — 항목별 파일:행, openMSX 대응,
 확인 상태(VERIFIED / 대조 미완), 작업 순서 원칙이 거기에 있다.
 
-- [ ] **실기 검증**: `SLOT B = SCC+`로 SCMD 동작 확인 (배포된 RBF로 바로 가능, RTL 수정 불요)
 - [ ] `msx1-mister-e9`에 `MFRSDSCC.BAS` 배치 취소 통지
 - [x] `tools/scmd_mfrsd/` 산출물 처리 → **유지 + `README.md`로 사용 비권고 명시** (2026-08-23)
 

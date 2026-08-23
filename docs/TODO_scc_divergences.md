@@ -160,7 +160,4 @@ D1과 묶여 보고됐으므로, D1 작업 시 함께 닫힌 것으로 처리한
 
 ## 함께 처리할 검증 항목
 
-- [ ] **`SLOT B = SCC+`로 SCMD 실기 확인.** RTL 수정 불필요, 현재 배포 RBF로 가능.
-      기대: `SC` 실행 시 "SCC cartridge is not mounted." 없이 드라이버 설치.
-      실패하면 `konami_scc`의 RAM 경로에 실제 결함이 있다는 뜻 → 최우선 조사.
 - [ ] **`docs/sccplus_spec.md`의 "창 256B 무해" 절 재판정** (D1의 선결 조건)
