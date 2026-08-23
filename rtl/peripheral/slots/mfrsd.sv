@@ -44,8 +44,7 @@ module mapper_mfrsd1
    output       [22:0] flash_addr,
    output              flash_rq, 
    output              scc_req,
-   output              scc_mode,
-   output              ram_we
+   output              scc_mode
 );
 /*verilator tracing_off*/
 logic [7:0] mapperReg, sccMode;
@@ -108,12 +107,6 @@ assign scc_req      = cs & cpu_mreq & (cpu_rd | cpu_wr) & ((cpu_wr & ((EN_SCC & 
 // mode reads Plus), so between accesses it read Compatible and ch5 played ch4's
 // waveform.  Same defect be52736 fixed for konami_scc; scc_req below keeps using
 // EN_SCCPLUS because the window decode is exactly what it wants.
-// A RAM-mode write must land in memory (openMSX MSXSCCPlusCart::writeMem), and
-// msx_slots gates cart writes on ~ram_ro, which is 1 here.  Segments 2 and 3 are
-// the ones the SCC+ mode register can turn into RAM.
-wire ram_seg       = (cpu_addr[15:13] == 3'b100 & isRamSegment2)
-                   | (cpu_addr[15:13] == 3'b101 & isRamSegment3);
-assign ram_we      = cs & cpu_mreq & cpu_wr & ram_seg & flashAddrValid & ~scc_req;
 assign scc_mode     = sccMode[5] & sccBanks[3][7];
 
 wire [2:0] page8kB  = cpu_addr[15:13] - 3'd2;
@@ -176,11 +169,7 @@ wire [15:0] bankValue = configReg[4] & page[1:0] == 2'b00 & bank[page[1:0]] == 8
                                                                                       16'(bank[page[1:0]]) + 16'(offsetReg);
 wire flashAddrValid   = page < 3'd4;
 assign flash_addr     = 23'h010000 + 23'(mapperReg[7:6] == 2'b01 ? {bankValue, cpu_addr[13:0]} : {1'b0,bankValue, cpu_addr[12:0]});
-// Keep RAM-mode writes out of the SHARED flash command FSM.  Without this a
-// byte written as plain RAM is also fed to flash.sv as a JEDEC command byte --
-// the same defect the Yamanooto review found, where an ordinary write walked the
-// FSM into CFI and every cart read returned 0x00 until an 0xF0.
-assign flash_rq       = cs & flashAddrValid & ~ram_we;
+assign flash_rq       = cs & flashAddrValid;
 assign mem_addr       = mfrsd_base_ram + 27'(flash_addr);
 
 endmodule

@@ -19,7 +19,6 @@
 //       CPU is elsewhere -- the actual regression
 //   M2  mode follows the SCC+ enable bit, not the address bus
 //   M3  clearing bit5 returns it to Compatible
-//   M4  the chip is really in the loop (a wave write reaches IKASCC)
 //
 // Negative control (NEGCTL=1) restores the old `EN_SCCPLUS` export; M1 must fail.
 `timescale 1ns/1ps
@@ -37,7 +36,7 @@ module tb_mfrsd_sccsound;
 
    wire  [7:0] configReg;   wire [3:0] mapper_mask;
    wire [26:0] mem_addr;    wire mem_unmaped;
-   wire [22:0] flash_addr;  wire flash_rq, scc_req, scc_mode, ram_we;
+   wire [22:0] flash_addr;  wire flash_rq, scc_req, scc_mode;
 
    mapper_mfrsd1 u_map (
       .clk(clk), .reset(reset), .cs(cs), .slot(slot),
@@ -47,7 +46,7 @@ module tb_mfrsd_sccsound;
       .configReg(configReg), .mapper_mask(mapper_mask),
       .mem_addr(mem_addr), .mem_unmaped(mem_unmaped),
       .flash_addr(flash_addr), .flash_rq(flash_rq),
-      .scc_req(scc_req), .scc_mode(scc_mode), .ram_we(ram_we));
+      .scc_req(scc_req), .scc_mode(scc_mode));
 
    wire [7:0] scc_dout;  wire signed [15:0] wave;  wire debug_scc_wr;
 
@@ -107,11 +106,14 @@ module tb_mfrsd_sccsound;
       idle_elsewhere();
       chk("M3 clearing bit5 returns Compatible", scc_mode === 1'b0);
 
-      // chip really in the loop: back to SCC mode and write a waveform byte
-      w(16'h9000, 8'h3F);                 // bank2 = 0x3F enables the SCC window
-      w(16'h9800, 8'h5A);                 // waveform RAM
-      chk("M4 the write reached IKASCC (scc_req asserted for it)", debug_scc_wr === 1'b1
-          || scc_req === 1'b1);
+      // NO M4 here.  The obvious "prove the chip is in the loop" check --
+      // `debug_scc_wr || scc_req` -- is theatre: debug_scc_wr is a sticky
+      // ~21,000,000-cycle counter inside scc_sound (scc_sound.sv:105
+      // `assign debug_scc_wr = (dbg_cnt > 0)`), not an IKASCC signal, so once any
+      // earlier SCC-window write sets it the check cannot fail for the rest of the
+      // run -- it would pass with IKASCC entirely disconnected.  A reviewer caught
+      // that.  M1-M3 already require the chain, because scc_mode is only meaningful
+      // as an input to scc_sound/IKASCC and the negative control makes them fail.
 
       $display("");
       $display("tb_mfrsd_sccsound: %0d passed, %0d failed", n_pass, n_fail);

@@ -213,3 +213,57 @@ One reviewer also reported Verilator giving a vacuous pass on their own harness
 `tb_audio_trim` is not vacuous — an injected fault is caught, and iverilog and
 Verilator agree exactly (28,099 checks). iverilog is installed and fast; worth
 using as a routine second opinion.
+
+
+---
+
+# Reverted: SCC+ "RAM mode" writes (`e867ae2`, backed out same day)
+
+Two hostile reviewers independently returned DO NOT SHIP, and both were right.
+The RTL is back to its pre-`e867ae2` state; only `sim/tb_mfrsd_sccsound.sv`
+survives, which is unrelated and good.
+
+**The premise was false.** The commit claimed `ram_ro` is 1 for every cart image
+so a 128KB SCC+ sound cartridge could not be detected by write-then-read-back.
+But `memory_upload.sv:661` gives `CART_TYP_SCC2` the data id `ROM_RAM`, and
+`memory_upload.sv:414-415` clears `ro` for exactly that id. And `sccMode` — hence
+`en_ram`, hence `ram_we` — can only be written under `sccDevice`, which only
+`CART_TYP_SCC2` sets. So `ram_we` could only ever assert in the one case where
+`ram_ro` was already 0: **the write already landed and detection already worked.**
+A reviewer proved the redundancy exhaustively (256 mode values x 64 addresses,
+zero differing cycles).
+
+**The MFRSD half was worse than redundant — it inverted the reference.**
+`MegaFlashRomSCCPlusSD.cc:627-636`: `isRamSegment2/3` are function-local bools
+that exist solely to close the SCC *register window*; control then falls through
+to `writeToFlash(flashAddr, value, time)` at `:720-722`. There is no
+`internalMemoryBank`, no store of any kind — **subslot 1 of a real MFRSD is a
+flash chip and there is no SRAM behind it.** The commit invented a RAM the
+hardware does not have, and its `flash_rq & ~ram_we` change simultaneously
+withheld the byte the reference always delivers, which would have broken flash
+programming whenever `sccMode` bit 4 happened to be set.
+
+**Other findings worth keeping** (not fixed here; pre-existing):
+* `konami_scc.sv` declares `mem_size` and never reads it. `mem_addr` uses the raw
+  8-bit bank register, so a RAM-mode write can land ~2MB past a 128KB cart's base.
+  openMSX masks (`registerMask = 0x0F`, so bank 0x10 mirrors bank 0x00) and honours
+  `isMapped`, dropping writes that select no block. `docs/sccplus_spec.md` **S8-2**
+  already records this and still says 미수정. **The out-of-bounds path predates this
+  commit and is still there** — reverting removed the blessing, not the hazard.
+* `sccMode` is cleared only by `reset`. With "Reset on ROM change = No" it survives
+  a cart swap, so a mode set by an SCC+ cart stays live for the next cart.
+* `mfrsd.sv` computes `isRamSegment2/3` unconditionally; openMSX wraps the whole
+  SCC block in `isKonamiSCCmapperConfigured()`.
+
+**Two lessons about the benches, which matter more than the code.**
+
+1. `tb_sccram.sv` hardcoded `localparam bit RAM_RO = 1'b1` — the false premise, as
+   a parameter — and then confirmed it. Set it to the real value and every check
+   passes WITHOUT the change, and the bench's own negative control fires
+   "NEGCTL BROKEN". A test that encodes the assumption it is meant to check is
+   worse than no test: it manufactures evidence. Deleted.
+2. `tb_mfrsd_sccsound`'s M4 was theatre. `debug_scc_wr` is not an IKASCC signal —
+   `scc_sound.sv:105` makes it a sticky ~21,000,000-cycle counter, so once any
+   earlier SCC-window write sets it the check cannot fail, and it would pass with
+   IKASCC entirely disconnected. Removed rather than repaired; M1-M3 already
+   require the chain and their negative control proves it.

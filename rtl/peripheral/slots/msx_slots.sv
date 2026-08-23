@@ -189,13 +189,9 @@ assign cpu_din          = mapper_ram_dout                        //IO
                         & d_to_cpu_reset_status                  //IO
                         & (mem_unmaped  ? 8'hFF : ram_dout);
 
-// SCC+ RAM mode: cart writes are gated on ~ram_ro and ram_ro is 1 for every cart
-// image, so a RAM-mode byte would be discarded and an SCC+ sound cartridge could
-// not be detected by write-then-read-back.  NOT added to flash16x_prog_we above --
-// that is the flash persistence path and this is plain RAM.
-assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we | mapper_konami_scc_ram_we | mapper_mfrsd1_ram_we);
+assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
 assign bram_ce  = (sdram_size == 2'd0 | sram_cs)  & ((cpu_mreq & (cpu_rd | (cpu_wr & (~ram_ro | sram_cs))) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce);
-assign ram_rnw  = ~((sram_cs & sram_wr) | (~sram_cs & cpu_wr & cpu_mreq & ~ram_ro) | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we | mapper_konami_scc_ram_we | mapper_mfrsd1_ram_we);
+assign ram_rnw  = ~((sram_cs & sram_wr) | (~sram_cs & cpu_wr & cpu_mreq & ~ram_ro) | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
 
 assign ram_din  = cpu_dout;
 
@@ -301,7 +297,6 @@ wire        mapper_mfrsd1_unmaped;
 wire  [7:0] mfrsd_configReg; 
 wire [22:0] flash_mfrsd1_addr;
 wire        mapper_mfrsd1_flash_rq;
-wire        mapper_mfrsd1_ram_we;
 wire        mapper_mfrdsd1_sccMode, mapper_mfrdsd1_sccReq;
 mapper_mfrsd1 mfrsd1
 (
@@ -458,7 +453,6 @@ wire [20:0] mapper_konami_scc_addr;
 wire        mapper_konami_scc_unmaped;
 wire        mapper_konami_scc_sccReq;
 wire  [1:0] mapper_konami_scc_sccMode;
-wire        mapper_konami_scc_ram_we;
 cart_konami_scc konami_scc
 (
    .mem_size(25'(size) << 14),
