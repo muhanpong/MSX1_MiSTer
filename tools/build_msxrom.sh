@@ -12,8 +12,16 @@ W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 cp "$SRC.s" "$W/"
 ( cd "$W"
   sdasz80 -l -o "$SRC.rel" "$SRC.s"
-  sdldz80 -n -i "$SRC.ihx" -b _CODE=0x4000 "$SRC.rel"
+  # _RESID is linked for 0xC000 because it EXECUTES there -- copying position
+  # dependent code is not enough, its call/jp targets must resolve to RAM.
+  sdldz80 -n -i "$SRC.ihx" -b _CODE=0x4000 -b _RESID=0xC000 "$SRC.rel"
   makebin -s 65536 "$SRC.ihx" full.bin )
 dd if="$W/full.bin" of="$OUT" bs=1 skip=$((0x4000)) count=$((0x8000)) status=none
+# stage the 0xC000 blob into the cart at offset 0x2000 (CPU 0x6000) so init can
+# copy it; without this the cart would contain no copy of the routine at all.
+if [ -s "$W/full.bin" ]; then
+   dd if="$W/full.bin" of="$OUT" bs=1 skip=$((0xC000)) seek=$((0x2000)) \
+      count=$((0x1000)) conv=notrunc status=none
+fi
 printf 'built %s  %s bytes\n' "$OUT" "$(stat -c %s "$OUT")"
 printf 'header: '; head -c 16 "$OUT" | od -An -tx1 | tr -s ' '

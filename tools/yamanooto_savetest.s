@@ -10,12 +10,11 @@
 ; passed:
 ;
 ;     3  light green   ALL PASS
-;     6  dark red      T1 FAIL  erase did not produce 0xFF
-;     8  medium red    T2 FAIL  byte program did not take
+;     6  dark red      T1 FAIL  erase never produced 0xFF (or timed out)
+;     8  medium red    T2 FAIL  byte program never read back
 ;     9  light red     T3 FAIL  a program with WREN CLEAR got through
 ;    10  dark yellow   T4 FAIL  OFFR write had no effect
 ;    13  magenta       T5 FAIL  OFFR was written while SPIEN was set
-;    14  grey          erase timed out (flash never left the busy state)
 ;
 ; Why each test exists
 ; --------------------
@@ -35,9 +34,39 @@
 ; clear of this 32 KB ROM.  The whole 64 KB sector there is erased first,
 ; so the test never depends on what the loader padded the image with.
 ;
-; The routine runs from RAM 0xC000: it re-banks pages 1 and 2 and erases
-; flash, so it cannot be executing out of the cart while it does that.
-; A real save routine has the same constraint on real hardware.
+; The routine runs from RAM 0xC000: it re-banks page 1 and erases flash, and
+; flash.sv returns 0x00 for EVERY read while the fill runs -- so instruction
+; fetch from the cart would die.  A real save routine has the same constraint on
+; real hardware.
+;
+; It is therefore LINKED at 0xC000 (area _RESID), not merely copied there.  An
+; earlier version linked everything at 0x4000 and copied; its `call`/`jp` targets
+; still pointed into the cart, which by then was re-banked to 0xFF, and the CPU
+; ran off into the BIOS.  openMSX caught that -- the border never changed and PC
+; was sitting at 0x19AD.  Anything running from RAM must be linked for RAM.
+;
+; build_msxrom.sh places the _RESID blob at cart offset 0x2000 (CPU 0x6000),
+; which init copies to 0xC000.
+;
+; openMSX status (2026-08-23)
+; ---------------------------
+; Running this under openMSX (-romtype Yamanooto) found two real bugs that the
+; RTL testbench structurally CANNOT find, because that bench injects the bus
+; sequence directly and never executes the Z80 code:
+;   * the resident routine was linked at 0x4000 and merely copied, so its
+;     call/jp targets still pointed into the cart -- which by then was re-banked
+;     to 0xFF.  The CPU ran off into the BIOS.
+;   * T2 read once instead of data-polling.  openMSX models the 60 us program
+;     time and returns toggle status meanwhile.
+; Both are fixed here.
+;
+; UNRESOLVED: openMSX still reports T2, while its own flash debuggable shows the
+; byte was programmed (flash[0x100000] = A5) and the CPU can read it back
+; (mem[0x4000] = A5).  Those two facts contradict a T2 failure, and a progress
+; marker written to 0xC800 read back as 0 even though the routine demonstrably
+; ran -- so the introspection itself is not trustworthy and no conclusion should
+; be drawn from the openMSX border colour yet.  Note also that openMSX has no
+; OFFR guard, so T5 is EXPECTED to fail there; only our core should show green.
 ;----------------------------------------------------------------------
 
 ; ---- Yamanooto registers ---------------------------------------------
@@ -63,7 +92,6 @@ C_T2    = 8
 C_T3    = 9
 C_T4    = 10
 C_T5    = 13
-C_TMO   = 14
 
         .db     0x41, 0x42
         .dw     init
@@ -73,13 +101,14 @@ C_TMO   = 14
 
 init:
         di
-        ld      hl, #resident
+        ld      hl, #0x6000             ; blob staged here by build_msxrom.sh
         ld      de, #0xC000
         ld      bc, #(resident_end - resident)
         ldir
         jp      0xC000
 
 ;======================================================================
+        .area   _RESID
 resident:
         ; ENAR = 0 : registers locked, WREN clear.  Bank writes need WREN
         ; CLEAR (bank_hit carries ~flash_wr_en), so banking is done here.
@@ -106,23 +135,22 @@ resident:
         ld      (#TARGET), a            ; confirm -> erases the sector holding it
         call    wren_off
 
-        ; The RTL returns 0x00 while the fill runs, so poll until it stops.
-        ld      bc, #0                  ; 65536 tries
+        ; Wait for the erased value itself rather than for "not busy".  The two
+        ; implementations report busy differently -- flash.sv returns 0x00 for
+        ; every read during the fill, openMSX returns proper JEDEC toggle status
+        ; -- so a "non-zero means done" poll passes instantly on openMSX and the
+        ; test would then read a half-erased byte.  Waiting for 0xFF is the same
+        ; question on both, and is what a real driver's data-poll amounts to.
+        ld      bc, #0                  ; 65536 tries, ~0.9 s at 3.58 MHz
 poll_erase:
         ld      a, (#TARGET)
-        or      a
-        jr      nz, erase_done
+        inc     a                       ; 0xFF -> 0
+        jr      z, t1_ok
         dec     bc
         ld      a, b
         or      c
         jr      nz, poll_erase
-        ld      a, #C_TMO
-        jp      show                    ; never left the busy state
-erase_done:
-        ld      a, (#TARGET)
-        inc     a                       ; 0xFF -> 0
-        jr      z, t1_ok
-        ld      a, #C_T1
+        ld      a, #C_T1                ; never reached 0xFF
         jp      show
 t1_ok:
 
@@ -132,9 +160,20 @@ t1_ok:
         call    wren_on
         call    prog_a5
         call    wren_off
+        ; Poll for the programmed value, do not read once and hope.  A byte
+        ; program is not instantaneous on a real part -- openMSX models 60 us and
+        ; returns toggle status meanwhile, so a single read lands on the status
+        ; byte and the test would report a false failure.  flash.sv writes SDRAM
+        ; directly so its first read already matches; the poll costs it nothing.
+        ld      bc, #0
+poll_prog:
         ld      a, (#TARGET)
         cp      #0xA5
         jr      z, t2_ok
+        dec     bc
+        ld      a, b
+        or      c
+        jr      nz, poll_prog
         ld      a, #C_T2
         jp      show
 t2_ok:
