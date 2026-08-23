@@ -14,7 +14,13 @@ module cart_konami_scc
    output           mem_unmaped,
    output    [20:0] mem_addr,
    output           scc_req,
-   output    [1:0]  scc_mode
+   output    [1:0]  scc_mode,
+   // A RAM-mode write.  msx_slots gates ordinary cart writes on ~ram_ro, and
+   // ram_ro is 1 for every cart image, so without this the byte is discarded and
+   // an SCC+ sound cartridge cannot be detected by write-then-read-back.
+   // openMSX MSXSCCPlusCart::writeMem does store the byte (isRamSegment ->
+   // internalMemoryBank[...] = value) and returns before the bank decode.
+   output           ram_we
 );
    /*verilator tracing_off*/
    logic [7:0] sccMode[2];
@@ -77,6 +83,7 @@ module cart_konami_scc
 
    wire modereg_wr = cpu_wr & cpu_mreq & sccDevice & ({cpu_addr[15:1],1'b0} == 16'hBFFE);
    assign mem_unmaped = cs & (scc_req  | ~maped | modereg_wr | (cpu_wr & cpu_mreq & ~en_ram));
+   assign ram_we   = cs & cpu_mreq & cpu_wr & maped & en_ram & ~scc_req & ~modereg_wr;
    assign mem_addr = {bank_base, cpu_addr[12:0]};
 
 endmodule

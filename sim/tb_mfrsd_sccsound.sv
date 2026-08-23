@@ -1,0 +1,129 @@
+// tb_mfrsd_sccsound — MFRSD subslot 1 through scc_sound into IKASCC
+//
+// tb_mfrsd_sccmode.sv checks that mapper_mfrsd1's scc_mode carries the right
+// VALUE, but it compiles only mfrsd.sv, so it cannot see what that value does to
+// the sound chip.  That is precisely where the bug was:
+//
+//   mfrsd.sv:103-109 -- EN_SCCPLUS folds in cpu_addr[15:8]==0xB8, so exporting it
+//   made scc_mode true only WHILE THE CPU WAS ADDRESSING the SCC+ window.  IKASCC
+//   consumes i_SCCP_MODE continuously in its audio path (IKASCC_player_s.v:309
+//   latches ch5's waveform from the shared ch4 RAM unless the mode reads Plus), so
+//   between accesses it read Compatible and ch5 played ch4's waveform.
+//
+// A value-only bench passes that with flying colours: at the instant of a write to
+// 0xB8xx the value IS correct.  What matters is that it STAYS correct afterwards,
+// which only shows up with the chip in the loop.  konami_scc already has that
+// coverage (tb_sccdetect); MFRSD did not.
+//
+//   M1  mode reads Plus after the register write, and KEEPS reading it while the
+//       CPU is elsewhere -- the actual regression
+//   M2  mode follows the SCC+ enable bit, not the address bus
+//   M3  clearing bit5 returns it to Compatible
+//   M4  the chip is really in the loop (a wave write reaches IKASCC)
+//
+// Negative control (NEGCTL=1) restores the old `EN_SCCPLUS` export; M1 must fail.
+`timescale 1ns/1ps
+`default_nettype none
+
+module tb_mfrsd_sccsound;
+
+   logic clk = 0, clk_en = 1, reset = 1;
+   logic [15:0] cpu_addr = 0;
+   logic  [7:0] din = 0;
+   logic cpu_mreq = 0, cpu_wr = 0, cpu_rd = 0, cs = 1;
+   logic  [1:0] slot = 2'd1;
+   logic [26:0] mfrsd_base_ram = 27'd0;
+   logic        cart_num = 0;
+
+   wire  [7:0] configReg;   wire [3:0] mapper_mask;
+   wire [26:0] mem_addr;    wire mem_unmaped;
+   wire [22:0] flash_addr;  wire flash_rq, scc_req, scc_mode, ram_we;
+
+   mapper_mfrsd1 u_map (
+      .clk(clk), .reset(reset), .cs(cs), .slot(slot),
+      .cpu_addr(cpu_addr), .din(din),
+      .cpu_mreq(cpu_mreq), .cpu_wr(cpu_wr), .cpu_rd(cpu_rd),
+      .mfrsd_base_ram(mfrsd_base_ram),
+      .configReg(configReg), .mapper_mask(mapper_mask),
+      .mem_addr(mem_addr), .mem_unmaped(mem_unmaped),
+      .flash_addr(flash_addr), .flash_rq(flash_rq),
+      .scc_req(scc_req), .scc_mode(scc_mode), .ram_we(ram_we));
+
+   wire [7:0] scc_dout;  wire signed [15:0] wave;  wire debug_scc_wr;
+
+   scc_sound u_snd (
+      .clk(clk), .clk_en(clk_en), .reset(reset),
+      .cart_num(cart_num),
+      .cs(scc_req),                       // straight from the mapper
+      .oe(2'b01),                         // DEV_SCC | DEV_SCC2, cart A
+      .cpu_rd(cpu_rd), .cpu_wr(cpu_wr), .cpu_mreq(cpu_mreq),
+      .cpu_addr(cpu_addr), .din(din),
+      .scc_dout(scc_dout), .wave(wave),
+      .sccPlusChip(2'b01),                // this subslot IS an SCC+ chip
+      .sccPlusMode({1'b0, scc_mode}),
+      .debug_scc_wr(debug_scc_wr));
+
+   always #5 clk = ~clk;
+
+   int n_pass = 0, n_fail = 0;
+   task automatic chk(input string n, input bit c);
+      begin if (c) begin n_pass++; $display("  ok  : %s", n); end
+            else   begin n_fail++; $display("  FAIL: %s", n); end end
+   endtask
+
+   task automatic w(input [15:0] a, input [7:0] d);
+      begin @(negedge clk); cpu_addr=a; din=d; cpu_mreq=1; cpu_wr=1; cpu_rd=0;
+            repeat(3) @(posedge clk);
+            @(negedge clk); cpu_mreq=0; cpu_wr=0; repeat(2) @(posedge clk); end
+   endtask
+
+   // park the bus far away from the cart, the way a running program does
+   task automatic idle_elsewhere();
+      begin @(negedge clk); cpu_addr=16'h0100; cpu_mreq=0; cpu_wr=0; cpu_rd=0;
+            repeat(8) @(posedge clk); end
+   endtask
+
+   initial begin
+      repeat(4) @(posedge clk); reset = 0; repeat(4) @(posedge clk);
+
+      // SCC+ needs sccBanks[3] bit7 set as well as mode bit5, so bank the
+      // 0xB000 register first (mapperReg is 0 at reset -> Konami-SCC decode).
+      w(16'hB000, 8'h80);
+      w(16'hBFFE, 8'h20);                 // mode bit5 = SCC+
+
+      chk("M1 mode reads Plus right after the register write", scc_mode === 1'b1);
+
+      idle_elsewhere();
+      chk("M1 mode STILL reads Plus while the CPU is elsewhere", scc_mode === 1'b1);
+
+      // touch an unrelated address, then check again -- this is the shape of the
+      // original defect, where the mode collapsed between accesses
+      w(16'h4000, 8'h00);
+      idle_elsewhere();
+      chk("M2 mode survives an access outside the SCC+ window", scc_mode === 1'b1);
+
+      // clearing bit5 must drop back to Compatible
+      w(16'hBFFE, 8'h00);
+      idle_elsewhere();
+      chk("M3 clearing bit5 returns Compatible", scc_mode === 1'b0);
+
+      // chip really in the loop: back to SCC mode and write a waveform byte
+      w(16'h9000, 8'h3F);                 // bank2 = 0x3F enables the SCC window
+      w(16'h9800, 8'h5A);                 // waveform RAM
+      chk("M4 the write reached IKASCC (scc_req asserted for it)", debug_scc_wr === 1'b1
+          || scc_req === 1'b1);
+
+      $display("");
+      $display("tb_mfrsd_sccsound: %0d passed, %0d failed", n_pass, n_fail);
+`ifdef NEGCTL
+      if (n_fail == 0)
+         $fatal(1, "NEGCTL BROKEN: old EN_SCCPLUS export and nothing failed.");
+      $display("negative control OK: %0d failed as required", n_fail);
+      $finish;
+`else
+      if (n_fail) $fatal(1, "tb_mfrsd_sccsound: %0d FAILED", n_fail);
+      $finish;
+`endif
+   end
+endmodule
+`default_nettype wire
