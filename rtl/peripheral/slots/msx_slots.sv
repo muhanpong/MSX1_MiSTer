@@ -83,12 +83,17 @@ assign flash16x_prog_data = cpu_dout;
 // Multipliers are x/128: 128=0dB, 203=+4dB, 81=-4dB, 51=-8dB (same table the OPL4
 // trim uses).  Entry 0 is 0dB so an untouched menu is bit-identical to before --
 // x128>>>7 is exact, not an approximation.
-function automatic signed [8:0] vol_mul(input [1:0] v);
+// signed [9:0], not [8:0].  A signed 9-bit field tops out at 255, so a future
+// "+8dB" entry (x322) would read as -190 -- a SIGN INVERSION of the whole channel
+// that nothing downstream can detect.  msx.sv's psg_mul is UNSIGNED [8:0] (max
+// 511) and would not have that problem, so the two "identical" tables did not
+// actually have identical headroom.  Widen here rather than rely on a comment.
+function automatic signed [9:0] vol_mul(input [1:0] v);
    case (v)
-      2'd0: vol_mul = 9'sd128;   // 0dB
-      2'd1: vol_mul = 9'sd203;   // +4dB
-      2'd2: vol_mul = 9'sd81;    // -4dB
-      default: vol_mul = 9'sd51; // -8dB
+      2'd0: vol_mul = 10'sd128;   // 0dB
+      2'd1: vol_mul = 10'sd203;   // +4dB
+      2'd2: vol_mul = 10'sd81;    // -4dB
+      default: vol_mul = 10'sd51; // -8dB
    endcase
 endfunction
 

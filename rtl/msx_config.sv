@@ -17,28 +17,20 @@ parameter CONF_STR_MAPPER_B = {
 parameter CONF_STR_SRAM_SIZE_A = {
     "H5O[28:26],SRAM size,auto,1kB,2kB,4kB,8kB,16kB,32kB,none;"
 };
-// Slot B gets the same control.  The plumbing underneath was always complete:
-// memory_upload assigns slot B SRAM index 2 (`ref_sram <= ... : 2'd2`), and
-// nvram_backup walks all four lookup_SRAM entries against VD0-3.  The only thing
-// stopping slot B from saving was selected_sram_size being hardcoded to 0 here
-// plus the absent menu -- not any structural limit.
-parameter CONF_STR_SRAM_SIZE_B = {
-    "H7O[62:60],SRAM size,auto,1kB,2kB,4kB,8kB,16kB,32kB,none;"
-};
 
 module msx_config
 (
     input                     clk,
     input                     reset,
     input MSX::bios_config_t  bios_config,
-    input              [63:0] HPS_status,
+    input             [127:0] HPS_status,   // hps_io drives [127:0]; taking 64 here
+                                             // silently zeroed any future option at bit >= 64
     input                     scandoubler,
     input               [1:0] sdram_size,
     input               [1:0] rom_loaded,
     input               [1:0] rom_big,     // ROM > 4MB per slot -> promote ASCII16X entry to the flash mapper
     output MSX::config_cart_t cart_conf[2],
     output                    sram_A_select_hide,
-    output                    sram_B_select_hide,
     output                    ROM_A_load_hide, //3 
     output                    ROM_B_load_hide, //4
     output                    fdc_enabled,
@@ -49,7 +41,6 @@ module msx_config
 wire [2:0] slot_A_select   = HPS_status[19:17];
 wire [2:0] slot_B_select   = HPS_status[31:29];
 wire [2:0] sram_A_select   = HPS_status[28:26];
-wire [2:0] sram_B_select   = HPS_status[62:60];
 wire [3:0] mapper_A_select = HPS_status[23:20];
 wire [3:0] mapper_B_select = HPS_status[35:32]; 
 
@@ -71,7 +62,11 @@ assign cart_conf[1].selected_mapper    = rom_loaded[1] ? mapper_typ_t'(mapper_B_
                                                                      (mapper_B_select == 4'd3 & rom_big[1]) ? 5'(MAPPER_ASCII16X)  :
                                                                                                (mapper_B_select + 4'd2)) : MAPPER_UNUSED;
 assign cart_conf[0].selected_sram_size = typ_A == CART_TYP_ROM & mapper_A_select > 4'd1 & mapper_A_select != 4'd10 & ~(mapper_A_select == 4'd3 & rom_big[0]) & sram_A_select > 3'd0 & sram_A_select < 3'd7 ? (8'd1 << (sram_A_select - 1'd1)) : 8'd0;
-assign cart_conf[1].selected_sram_size = cart_conf[1].typ == CART_TYP_ROM & mapper_B_select > 4'd1 & mapper_B_select != 4'd10 & ~(mapper_B_select == 4'd3 & rom_big[1]) & sram_B_select > 3'd0 & sram_B_select < 3'd7 ? (8'd1 << (sram_B_select - 1'd1)) : 8'd0;
+// Slot B gets no SRAM.  Not an oversight: the firmware mounts exactly one
+// <rom>.sav and always on VD0 (user_io.cpp:2937), so a second saveable cart has
+// nowhere to go, and giving slot B a nonzero size makes memory_upload write
+// lookup_SRAM[0] a second time -- aliasing slot A's SRAM onto slot B's buffer.
+assign cart_conf[1].selected_sram_size = 8'd0;
 
 assign msxConfig.typ = bios_config.MSX_typ;
 assign msxConfig.scandoubler = scandoubler;
@@ -84,12 +79,11 @@ assign msxConfig.moonsound_en = HPS_status[45];
 assign ROM_A_load_hide    = cart_conf[0].typ != CART_TYP_ROM;
 assign ROM_B_load_hide    = cart_conf[1].typ != CART_TYP_ROM;
 assign sram_A_select_hide = cart_conf[0].typ != CART_TYP_ROM | mapper_A_select == 4'd0 | mapper_A_select == 4'd10 | (mapper_A_select == 4'd3 & rom_big[0]);
-assign sram_B_select_hide = cart_conf[1].typ != CART_TYP_ROM | mapper_B_select == 4'd0 | mapper_B_select == 4'd10 | (mapper_B_select == 4'd3 & rom_big[1]);
 assign fdc_enabled = bios_config.use_FDC | cart_conf[0].typ == CART_TYP_FDC;
 
 
-logic  [21:0] lastConfig;
-wire [21:0] act_config = {cart_conf[1].typ, cart_conf[0].typ, cart_conf[0].selected_mapper, cart_conf[1].selected_mapper, sram_A_select, sram_B_select};
+logic  [18:0] lastConfig;
+wire [18:0] act_config = {cart_conf[1].typ, cart_conf[0].typ, cart_conf[0].selected_mapper, cart_conf[1].selected_mapper, sram_A_select};
 
 always @(posedge clk) begin
     if (reload) lastConfig <= act_config;

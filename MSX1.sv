@@ -272,15 +272,17 @@ localparam CONF_STR = {
    CONF_STR_SRAM_SIZE_A,
    "-;",
    CONF_STR_SLOT_B,
-   // FS, not F: the S is what makes the HPS mount the companion <rom>.sav.
-   // Slot A has always been FS3 and its save works; slot B was plain F4, which is
-   // why nothing ever appeared for it -- nvram_backup:163 requires image_mounted[num]
-   // and the HPS was never asked to provide the image.  The RTL side was already
-   // complete (memory_upload:223 gives slot B SRAM index 2, nvram_backup walks all
-   // four lookup_SRAM entries against VD0-3).
-   "H4FS4,ROM,Load,33000000;",
+   // Deliberately F, NOT FS.  The S would set `opensave`, and user_io.cpp:2937
+   // mounts the companion <rom>.sav with a HARDCODED drive index 0 -- there is only
+   // ever ONE save image and it is on VD0.  Adding S to slot B therefore does not
+   // give slot B a save, it STEALS VD0 from slot A: loading any slot-B ROM unmounts
+   // <romA>.sav, and the end-of-upload load_sram then reads <romB>.sav into slot A's
+   // SRAM / flash region, after which the next SRAM Save writes slot A's data into
+   // <romB>.sav.  Both files are destroyed.  Verified against the firmware source
+   // and reachable in the DEFAULT configuration.  Slot B saving needs a firmware
+   // answer, not a CONF_STR flag.
+   "H4F4,ROM,Load,33000000;",
    CONF_STR_MAPPER_B,
-   CONF_STR_SRAM_SIZE_B,
    "H6-;",
    "H6R[38],SRAM Save;",
    "H6R[39],SRAM Load;",
@@ -344,7 +346,6 @@ assign status_menumask[5] = sram_A_select_hide;
 // buttons would be hidden, leaving the user no way to trigger a save.  ASCII16X
 // was already excepted for exactly this reason; Yamanooto needs the same, or its
 // newly-wired flash write path is unreachable from the UI.
-assign status_menumask[7] = sram_B_select_hide;
 assign status_menumask[6] = (lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0)
                           & (cart_conf[0].selected_mapper != MAPPER_ASCII16X)
                           & (cart_conf[0].selected_mapper != MAPPER_YAMANOOTO)
@@ -388,7 +389,7 @@ hps_io #(.CONF_STR(CONF_STR),.VDNUM(VDNUM)) hps_io
 
 /////////////////   CONFIG   /////////////////
 wire [5:0] mapper_A, mapper_B;
-wire       reload, sram_A_select_hide, sram_B_select_hide, fdc_enabled, ROM_A_load_hide, ROM_B_load_hide;
+wire       reload, sram_A_select_hide, fdc_enabled, ROM_A_load_hide, ROM_B_load_hide;
 
 msx_config msx_config 
 (
@@ -403,7 +404,6 @@ msx_config msx_config
    .rom_loaded(rom_loaded),
    .rom_big(rom_big),
    .sram_A_select_hide(sram_A_select_hide),
-   .sram_B_select_hide(sram_B_select_hide),
    .ROM_A_load_hide(ROM_A_load_hide),
    .ROM_B_load_hide(ROM_B_load_hide),
    .fdc_enabled(fdc_enabled),
@@ -444,7 +444,22 @@ clock clock
 // Power-on is unaffected either way -- RESET covers it.
 // Caveat, and it is why the default is Yes: across a no-reset swap the slot/subslot
 // select registers and the mapper's own bank registers keep their old values.
-wire upload_hold = reset_rq & status[64];
+// S3 guard: `flash16x_active`/`base`/`size` (msx_slots.sv) are cleared ONLY by
+// reset, and flash_dirtysave reads flash16x_base LIVE.  With the hold path taken
+// they would survive a cart swap and point the next .sav DMA at the departed
+// cart's SDRAM region.  Rather than thread a clear signal through two modules,
+// simply refuse the no-reset path whenever a flash cart is involved -- that is the
+// case where getting it wrong destroys a save, and it is not the case the toggle
+// exists for (comparing mappers on a running program).
+wire upload_hold = reset_rq & status[64] & ~|flash16x_active;
+// msx_pause freezes the CPU clock enables, but MoonSound runs on clk_sdram and is
+// held only by `reset`.  With the toggle at No it would keep issuing SDRAM ch4
+// traffic while memory_upload streams megabytes into ch1 -- and a FW PACK upload
+// moves pcm_rom_base under a live PCM fetch.  This core has twice been bitten by
+// sustained multi-channel SDRAM pressure, so keep the OPL4 in reset for the whole
+// transfer regardless of the toggle.  It loses its state, which is the right
+// trade against corrupting the transfer.
+wire reset_ms = reset | upload_hold;
 wire reset = RESET | status[0] | status[10] | (reset_rq & ~status[64]);
 
 ///////////////// Computer /////////////////

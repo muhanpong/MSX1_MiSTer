@@ -1,6 +1,11 @@
 module msx
 (
    input                    reset,
+   // Held for the whole memory_upload transfer even when the machine itself is not
+   // reset (the "Reset on ROM change = No" path).  MoonSound runs on clk_sdram and
+   // is not covered by msx_pause, so without this it keeps hammering SDRAM ch4
+   // while megabytes stream into ch1.
+   input                    reset_ms,
    //Clock
    input                    clk21m,
    input                    ce_10m7_p,
@@ -1395,7 +1400,7 @@ ymf278b_top #(
 ) u_moonsound (
     .clk          (clk_sdram),
     .clk_opl3     (clk_opl3),
-    .rst_n        (~reset),
+    .rst_n        (~reset_ms),
     .io_port      (ms_io_port_lat),
     .io_data_in   (ms_io_data_lat),
     .io_wr        (ms_io_wr_sdram),

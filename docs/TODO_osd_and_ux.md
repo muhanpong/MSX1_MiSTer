@@ -134,3 +134,82 @@ by `.*`, and the new ports were wired into `debug_overlay` by mistake. Verilator
 `--lint-only` did NOT catch it — it never elaborates the submodules here, and this
 project's lint invocations pass `-Wno-PINMISSING`. **A clean lint is not evidence of
 port correctness in this repo; only synthesis is.**
+
+
+---
+
+# Three-critic re-review, 2026-08-23 — `20260823d_critfix`
+
+Three hostile reviewers (regression / semantics / arithmetic lenses) went over
+`c361934..2699405` before any hardware test. **13 findings; 6 were defects
+introduced that same day.** Every one below was independently re-verified here
+before acting on it.
+
+## Fixed
+
+| finding | defect | fix |
+|---|---|---|
+| F1/S1 | `H4FS4` steals VD0. The firmware mounts exactly one `<rom>.sav`, hardcoded to drive 0 (`user_io.cpp:2937`), so the `S` did not give slot B a save — it unmounted slot A's. `load_sram` then read `<romB>.sav` into slot A's SRAM/flash region, and the next save wrote slot A's data into `<romB>.sav`. **Both files destroyed, in the DEFAULT configuration.** | reverted to `H4F4` |
+| F3/S2 | `ref_sram <= 2'd0` for both slots. `lookup_SRAM[0]` is both the save target AND the runtime BRAM allocation, so slot B overwrote it and slot A's cart then read/wrote SLOT B's buffer. Turned an inert gap into live mutual corruption. | restored the slot-A-only guard; slot B SRAM menu withdrawn |
+| S3 | `flash16x_active`/`base`/`size` are cleared only by `reset`, and `flash_dirtysave` reads the base LIVE — so with the hold path they survive a cart swap and aim the next DMA at the departed cart's region. | `upload_hold &= ~\|flash16x_active` — refuse the no-reset path whenever a flash cart is present, rather than thread a clear through two modules |
+| S4 | `msx_pause` gates CPU clock enables but MoonSound runs on `clk_sdram` and is held only by `reset`. It would keep hammering SDRAM ch4 through a multi-MB ch1 upload, and a FW PACK upload moves `pcm_rom_base` under a live PCM fetch. | new `reset_ms = reset \| upload_hold`; the OPL4 stays in reset for the whole transfer |
+| F6 | `.HPS_status(status)` silently truncated 128->64. Harmless today (highest read is bit 62) but the next option at bit >= 64 read inside `msx_config` would be a constant 0 with no error anywhere. | port widened to `[127:0]` |
+| A2 | `vol_mul` returned `signed [8:0]`, max 255. A future "+8dB" entry (322) reads as **-190** — a sign inversion of the whole channel. `msx.sv`'s `psg_mul` is UNSIGNED [8:0], so the two "identical" tables did not have identical headroom. | widened to `signed [9:0]` |
+| A3 | `check_audio_trim_consts.py` and its runner hook were never committed, so the shipped commit had a copy-TB with no binding to the RTL. | committed |
+
+## Deliberately NOT changed (user decision)
+
+* **`+4dB` on PSG/OPLL/SCC stays.** The reviewer measured 36.9% of the SCC input
+  range clipping at +4dB, and that is correct — the compressor's linear window is
+  ±16384 (`msx.sv`) and SCC's 0dB full scale is *exactly* ±16384 by construction
+  (`scc_sound.sv:23`, `wave_A` signed[10:0] << 4). But that figure is over the
+  input RANGE, not over playing TIME: clipping starts at 63% of full scale, and
+  quiet material never gets there. For a quietly-mixed game +4dB is a real,
+  useful gain. Presenting a range statistic as if it were a time statistic
+  overstated the case.
+* **The OFFR guard stays.** It newly blocks OFFR writes when `REGEN` is set
+  together with `SPIEN` or `MSTEN` — which is what real hardware does, since
+  0x7FFE is SPICON/MOFFR in those states. openMSX lacks the guard, so the usual
+  cross-check will not catch a divergence here. (The reviewer's specific worry
+  about `#12` = `WREN|SPIEN` does not apply: REGEN is clear there, so the write
+  was already blocked.) **Needs a Celica hardware regression test** — the
+  hardware-verified `20260822b` did not have this guard.
+
+## Still open from the review
+
+* **OPL4 menu labels use two different anchors** — PCM label X = net X−8 dB, FM
+  label X = net X−4 dB, and neither menu's "0dB" is unity. Flagged independently
+  by two reviewers on two days. Display only; no sound change.
+* **FW PACK is now capped at 16 MB** by slot B at `0x3000000`, with no build-time
+  check. The current pack is 10.5 MB, up from 8.4 MB — a real growth trend.
+  Crossing 16 MB would silently corrupt slot B staging.
+* **No TB instantiates the real `msx_slots`.** `check_audio_trim_consts.py` pins
+  the constants and widths, which is the mitigation this repo already uses, but it
+  is not the same as a regression test against the shipped module.
+
+## Two corrections to claims made in earlier commit messages
+
+1. **"sccplus golden still matches" is not evidence for the audio trims.**
+   `run_sccplus.sh` compiles only `scc_sound.sv` and the two IKASCC files —
+   `msx_slots.sv` is not in its file list — and it defaults `GOLD_REF=HEAD`, so it
+   diffs the commit against itself. Entry-0 unity *is* genuinely bit-exact (proven
+   exhaustively over all 65,536 inputs, and `-32768*128>>>7 == -32768`), but not by
+   that test. This claim was repeated several times before anyone checked it.
+2. **"an untouched menu is bit-identical" is false where the old sum overflowed.**
+   The previous 16-bit `sound_opll + scc_wave + sound_psg` wrapped; the new 19-bit
+   sum saturates. On those inputs the output legitimately differs — that is the
+   point of the change, but it means prior recordings will not reproduce.
+
+## Method note
+
+`verilator --lint-only` does **not** catch port errors here: it never elaborates the
+submodules, and this project's lint invocations pass `-Wno-PINMISSING`. The first
+audio build failed because new ports were wired into `debug_overlay` while the
+`msx` instance connects by `.*`. **A clean lint is not evidence of port
+correctness in this repo; only synthesis is.**
+
+One reviewer also reported Verilator giving a vacuous pass on their own harness
+(0 of 729 where the right answer is 276) while iverilog was correct. Checked here:
+`tb_audio_trim` is not vacuous — an injected fault is caught, and iverilog and
+Verilator agree exactly (28,099 checks). iverilog is installed and fast; worth
+using as a routine second opinion.

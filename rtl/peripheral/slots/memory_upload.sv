@@ -214,16 +214,18 @@ module memory_upload
                            data_id     <= cart_rom_id;
                            external    <= 1'd1;
                            if (cart_rom_id == ROM_ROM) begin
-                              // Both slots use SRAM index 0, because the firmware gives us no
-                              // choice: user_io.cpp's `if (opensave) user_io_file_mount(buf, 0, 1)`
-                              // always mounts the companion <rom>.sav on drive 0.  There is only
-                              // ever ONE save image mounted, and it belongs to whichever FS file
-                              // was loaded last -- so the cart loaded last is the one that can
-                              // save, and it must look at VD0.  Slot B previously fell through
-                              // this if with sram_size and ref_sram never assigned at all, which
-                              // is why it could never save regardless of the menu setting.
-                              sram_size <= 25'({cart_sram_size, 10'd0});
-                              ref_sram  <= 2'd0;
+                              // Slot A ONLY, and that is deliberate.  lookup_SRAM[0] is both the
+                              // save target (VD0, the single .sav the firmware mounts) AND the
+                              // runtime BRAM allocation read back through slot_layout[].ref_sram.
+                              // Letting slot B take index 0 as well makes this write fire twice:
+                              // the second one wins, both slots' slot_layout point at index 0, and
+                              // slot A's cart then reads and writes SLOT B's buffer.  An earlier
+                              // attempt to enable slot B saving did exactly that and turned an
+                              // inert gap into live mutual corruption.
+                              if (curr_conf == CONFIG_SLOT_A) begin
+                                 sram_size <= 25'({cart_sram_size, 10'd0});
+                                 ref_sram  <= 2'd0;
+                              end
                            end else begin
                               sram_size   <= 25'({cart_sram_size, 10'd0});
                               ref_sram <= curr_conf == CONFIG_SLOT_A ? 2'd1 : 2'd2;   

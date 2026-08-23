@@ -16,12 +16,12 @@
 module tb_audio_trim;
    int errors = 0, checks = 0;
 
-   function automatic signed [8:0] vol_mul(input [1:0] v);
+   function automatic signed [9:0] vol_mul(input [1:0] v);
       case (v)
-         2'd0: vol_mul = 9'sd128;
-         2'd1: vol_mul = 9'sd203;
-         2'd2: vol_mul = 9'sd81;
-         default: vol_mul = 9'sd51;
+         2'd0: vol_mul = 10'sd128;
+         2'd1: vol_mul = 10'sd203;
+         2'd2: vol_mul = 10'sd81;
+         default: vol_mul = 10'sd51;
       endcase
    endfunction
 
