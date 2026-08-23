@@ -229,6 +229,7 @@ all.
 can work around.
 
 ## 6. PARKED — Yamanooto in slot B boots less than half the time
+### (`docs/TODO_boot_flakiness.md` is parked with this one — same root)
 
 Reported 2026-08-23 by the user, who chose to park it rather than chase it now.
 **Do not treat slot B Yamanooto as working.** Slot A is the supported configuration
