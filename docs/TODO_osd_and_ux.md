@@ -262,8 +262,41 @@ programming whenever `sccMode` bit 4 happened to be set.
    passes WITHOUT the change, and the bench's own negative control fires
    "NEGCTL BROKEN". A test that encodes the assumption it is meant to check is
    worse than no test: it manufactures evidence. Deleted.
-2. `tb_mfrsd_sccsound`'s M4 was theatre. `debug_scc_wr` is not an IKASCC signal —
+2. `tb_mfrsd_sccsound`'s M4 was theatre, and the replacement had to be proven by
+   severing the chip. `debug_scc_wr` is not an IKASCC signal —
    `scc_sound.sv:105` makes it a sticky ~21,000,000-cycle counter, so once any
    earlier SCC-window write sets it the check cannot fail, and it would pass with
    IKASCC entirely disconnected. Removed rather than repaired; M1-M3 already
    require the chain and their negative control proves it.
+
+
+## Follow-up: `tb_mfrsd_sccsound` M4, rewritten and mutation-proven
+
+A third reviewer showed the whole bench was theatre, not just M4: hardwiring
+`scc_sound`'s `.i_SCCP_MODE` to `2'd0` — severing the mode from IKASCC entirely —
+still passed 4/4, because M1-M3 read `scc_mode`, a **port of `mapper_mfrsd1`**, the
+same signal `tb_mfrsd_sccmode` already reads. Compiling `scc_sound` and two
+`IKASCC_player_s` observed nothing.
+
+M4 now writes ch5's waveform and reads it back **through** `scc_sound`/IKASCC
+(`scc_dout` is IKASCC's `o_DB`, `scc_sound.sv:89,125`), and checks it differs from
+ch1's. Proven by severing each interface in turn:
+
+| severed | caught? |
+|---|---|
+| `i_SCCP_MODE` | yes |
+| `i_WRRQ` **and** `i_WR_n` | yes |
+| `i_ABLO` | yes |
+| `i_DB` | yes |
+
+The reviewer's own mutation of `i_WRRQ` alone passed, and they read that as the
+bench being blind. It is not: `scc_sound.sv:119` drives `i_WR_n(~scc_wr_A)` as a
+second, independent write path, so cutting `i_WRRQ` leaves writes working. The
+finding was right about the old M4 and overstated about the new one — worth
+recording, because "the mutation passed" only means something if the mutation
+actually severs the thing.
+
+Writing this check also surfaced a real error of mine: ch5's waveform sits at ABLO
+`0x80-0x9F` in **Plus** mode, not `0xA0-0xBF` (that is the **Compat** layout —
+`tb_sccplus`'s T2/T3 headers state both). The first version used the Compat address
+and failed. The previous M4 could not have caught that, because it could not fail.
