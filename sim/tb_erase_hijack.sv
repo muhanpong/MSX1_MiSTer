@@ -10,7 +10,7 @@
 //
 // Gating flash_rq on WREN does NOT cover this: a flash driver holds WREN set
 // across the whole erase by construction, which is what this TB reproduces --
-// ENAR <- 0x12, the value the Celica translations use.
+// ENAR <- 0x12, the value the Selica translations use.
 //
 // Measured before the fix: 65528 of 65536 bytes written as the CPU's data,
 // range running past the 64KB sector end.  After: 65536 x 0xFF, exact sector.
@@ -54,7 +54,7 @@ module tb_erase_hijack;
    endtask
    initial begin
       repeat(4) @(posedge clk); reset=0; repeat(4) @(posedge clk);
-      w(16'h7FFF, 8'h12);                       // ENAR <- WREN|SPIEN (Celica 값)
+      w(16'h7FFF, 8'h12);                       // ENAR <- WREN|SPIEN (Selica 값)
       $display("WREN=%0b (드라이버는 소거 내내 이 상태를 유지한다)", flash_wr_en);
       // 소거 시퀀스
       w(16'h4AAA,8'hAA); w(16'h4555,8'h55); w(16'h4AAA,8'h80);

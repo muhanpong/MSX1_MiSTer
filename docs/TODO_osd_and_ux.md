@@ -172,7 +172,7 @@ before acting on it.
   0x7FFE is SPICON/MOFFR in those states. openMSX lacks the guard, so the usual
   cross-check will not catch a divergence here. (The reviewer's specific worry
   about `#12` = `WREN|SPIEN` does not apply: REGEN is clear there, so the write
-  was already blocked.) **Needs a Celica hardware regression test** — the
+  was already blocked.) **Needs a Selica hardware regression test** — the
   hardware-verified `20260822b` did not have this guard.
 
 ## Still open from the review

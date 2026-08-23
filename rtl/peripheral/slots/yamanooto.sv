@@ -210,7 +210,7 @@ assign mem_addr = {2'd0, bankReg[cart_num][page8kB], cpu_addr[12:0]};
 // openMSX gates the same way (Yamanooto.cc writeMem): registers 0x7FFC-0x7FFF are
 // handled FIRST (ENAR unconditionally, CFGR/OFFR behind REGEN) and the write then
 // falls through to flash.write() only while WREN is set and ROMDIS is clear.
-// The Celica Korean translations (Final Fantasy, Golvellius 2, Jikuu no Hanayome)
+// The Selica Korean translations (Final Fantasy, Golvellius 2, Jikuu no Hanayome)
 // write #12 to #7FFF -- that is WREN|SPIEN, REGEN stays CLEAR -- and then unlock
 // through #4AAA / #4555, which is exactly the 0x555 / 0x2AA word-offset pair
 // below.  WREN alone opens the flash; REGEN is not required for programming.

@@ -3,7 +3,7 @@
 // Instantiates the REAL cart_yamanooto (not a copy) and drives CPU writes at it.
 //
 //   Y1  WREN clear -> no program, ever (openMSX: Yamanooto.cc:235 gates on WREN)
-//   Y2  the Celica sequence works: #12 -> #7FFF, then AA/55/A0 at #4AAA/#4555
+//   Y2  the Selica sequence works: #12 -> #7FFF, then AA/55/A0 at #4AAA/#4555
 //   Y3  prog_we is exactly one CPU write wide and carries the banked address
 //   Y4  ROMDIS blocks programming (openMSX gates on !(configReg & ROMDIS))
 //   Y5  a broken unlock (wrong address / wrong byte) never arms
@@ -83,7 +83,7 @@ module tb_yamanooto_flash;
       chk("Y1 WREN clear must block programming", !saw);
 `endif
 
-      // ---- Y2: the Celica sequence: #12 -> #7FFF -------------------------
+      // ---- Y2: the Selica sequence: #12 -> #7FFF -------------------------
       // NB #12 is WREN(bit4)|SPIEN(bit1); REGEN(bit0) is NOT in it.  WREN alone
       // is what opens the flash, which is why the games work without REGEN.
       cpu_write(16'h7FFF, 8'h12, s);

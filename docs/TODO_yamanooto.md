@@ -81,7 +81,7 @@ tested before — and which is exactly where F1, F2 and F3 all hid.
    actually read. `sim/run_flash_erase.sh` pins the geometry, its negative control
    re-injecting the historical ASCII16X-only gating.
 3. **`#12` to `#7FFF` is not "REGEN+WREN".** 0x12 = WREN(bit4) | SPIEN(bit1);
-   REGEN(bit0) is clear.  WREN alone opens the flash, which is why the Celica
+   REGEN(bit0) is clear.  WREN alone opens the flash, which is why the Selica
    games work without ever setting REGEN.  (Their unlock pair `#4AAA`/`#4555` is
    the same 0x555/0x2AA word offset ASCII16X already used.)
 
@@ -97,7 +97,7 @@ tested before — and which is exactly where F1, F2 and F3 all hid.
   shared by every cart, so an MFRSD and a Yamanooto in the two slots would
   interleave into the same unlock sequence.
 
-Hardware targets in `/media/fat/games/MSX1/00_Celica_KOR/`: `Final Fantasy (KR)`
+Hardware targets in `/media/fat/games/MSX1/00_Selica_KOR/`: `Final Fantasy (KR)`
 **tested OK**; `Golvellius 2 (KR)` and `Jikuu no Hanayome (KR)` not yet tried.
 
 ## 2. Konami DAC in K4 mode — absent
