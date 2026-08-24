@@ -73,6 +73,8 @@ module msx_slots
 );
 
 assign flash16x_prog_we   = mapper_ascii16x_prog_we | mapper_yamanooto_prog_we;
+// Edge-valid form of the same thing, for flash.sv's command-decode inhibit.
+wire flash16x_prog_phase  = mapper_ascii16x_prog_phase | mapper_yamanooto_prog_phase;
 assign flash16x_prog_addr = mapper_yamanooto_prog_we ? mapper_yamanooto_flash_addr
                                                        : mapper_ascii16x_addr[22:0];
 assign flash16x_prog_data = cpu_dout;
@@ -257,6 +259,9 @@ flash flash
    .dout(flash_dout),
    .data_valid(flash_rq),
    .we(cpu_mreq & cpu_wr),
+   // The mappers that run their own program FSM already know which write is
+   // data; flash.sv must not decode those as command cycles (flash.sv data_phase).
+   .data_phase(flash16x_prog_phase),
    .ce(((mapper_mfrsd3_flash_rq | mapper_mfrsd1_flash_rq | mapper_mfrsd0_flash_rq) & |(cart_device[cart_num] & DEV_FLASH)) |
        mapper_ascii16x_flash_rq | mapper_yamanooto_flash_rq),
    .sdram_addr(flash_addr),
@@ -408,6 +413,7 @@ wire        mapper_ascii16x_unmaped;
 wire [22:0] mapper_ascii16x_flash_addr;
 wire        mapper_ascii16x_flash_rq;
 wire        mapper_ascii16x_prog_we;   // validated JEDEC byte-program data write -> SDRAM
+wire        mapper_ascii16x_prog_phase;
 cart_ascii16x ascii16x
 (
    .rom_size(25'(size) << 14),
@@ -418,6 +424,7 @@ cart_ascii16x ascii16x
    .flash_addr(mapper_ascii16x_flash_addr),
    .flash_rq(mapper_ascii16x_flash_rq),
    .prog_we(mapper_ascii16x_prog_we),
+   .prog_phase(mapper_ascii16x_prog_phase),
    .*
 );
 
@@ -431,6 +438,7 @@ wire        mapper_yamanooto_wren;
 wire [22:0] mapper_yamanooto_flash_addr;
 wire        mapper_yamanooto_flash_rq;
 wire        mapper_yamanooto_prog_we;   // validated JEDEC byte-program data write -> SDRAM
+wire        mapper_yamanooto_prog_phase;
 cart_yamanooto yamanooto
 (
    .mem_size(25'(size) << 14),
@@ -446,6 +454,7 @@ cart_yamanooto yamanooto
    .flash_addr(mapper_yamanooto_flash_addr),
    .flash_rq(mapper_yamanooto_flash_rq),
    .prog_we(mapper_yamanooto_prog_we),
+   .prog_phase(mapper_yamanooto_prog_phase),
    .*
 );
 

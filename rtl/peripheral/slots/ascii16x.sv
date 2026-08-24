@@ -44,7 +44,12 @@ module cart_ascii16x
     output       [24:0] mem_addr,
     output       [22:0] flash_addr,
     output              flash_rq,
-    output              prog_we      // this CPU write is a validated byte-program -> write SDRAM
+    output              prog_we,     // this CPU write is a validated byte-program -> write SDRAM
+    // Same fact, but valid on the write's FIRST clock: prog_we rides prog_arm,
+    // which is only latched at that write's wr_rise, so it is one clock late for
+    // flash.sv's `we & ~old_we` edge.  flash.sv needs to know at the edge that
+    // this write is data, not a command cycle.
+    output              prog_phase
 );
 /*verilator tracing_off*/
 logic [11:0] bankRegs[2][2]; // [cart_num][bank_index]
@@ -136,6 +141,7 @@ always @(posedge clk) begin
     end
 end
 
-assign prog_we = prog_arm & cart_wr;                    // held across the program write
+assign prog_we    = prog_arm & cart_wr;                 // held across the program write
+assign prog_phase = (jedec_st == S_PROG) & cart_wr;     // combinational: true from clock 1
 
 endmodule

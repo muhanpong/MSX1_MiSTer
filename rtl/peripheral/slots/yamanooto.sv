@@ -50,7 +50,10 @@ module cart_yamanooto
    output            flash_wr_en,   // WREN: writes may reach the flash
    output     [22:0] flash_addr,    // banked flash byte address -> flash.sv
    output            flash_rq,      // this cart is addressing the flash chip
-   output            prog_we        // validated JEDEC byte-program data write -> SDRAM
+   output            prog_we,       // validated JEDEC byte-program data write -> SDRAM
+   // Same fact, valid on the write's FIRST clock (prog_we rides prog_arm, latched
+   // only at that write's wr_rise -- one clock late for flash.sv's edge detect).
+   output            prog_phase
 );
 
 // ── register addresses / bits ────────────────────────────────────────────
@@ -256,7 +259,8 @@ always @(posedge clk) begin
    end
 end
 
-assign prog_we   = prog_arm & cart_wr;                // held across the program write
+assign prog_we    = prog_arm & cart_wr;               // held across the program write
+assign prog_phase = (jedec_st == J_PROG) & cart_wr;   // combinational: true from clock 1
 assign flash_addr = 23'(mem_addr);
 // The register and SCC windows are not the flash chip, and ROMDIS hides it
 // entirely -- keep those cycles out of flash.sv's shared command FSM.

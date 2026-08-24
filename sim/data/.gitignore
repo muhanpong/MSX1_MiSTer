@@ -1,0 +1,3 @@
+# Slices of commercial software (SCMD110A.DSK, Metal Gear 2) -- not committed,
+# same policy as tools/scmd_mfrsd/.gitignore.  Regenerate with make_blocks.py.
+*.hex

@@ -17,6 +17,19 @@ module flash (
 	// manufacturer id and the sector map are independent: every part served here
 	// is bottom-boot (8 x 8KB then 127 x 64KB) but they are not all AMD.
 	input             amd_family,    // AMD/Spansion: manufacturer id 01h + CFI query
+	// "this CPU write is program DATA, not a command cycle".  The command FSM
+	// below decodes EVERY write in the cart window, and the unlock-address
+	// compare is only addr[11:1] -- correct for the part (openMSX AmdFlash masks
+	// (addr>>1)&0x7FF the same way; the upper bits really are don't-care), but it
+	// means a data byte whose value is a command opener and whose address happens
+	// to alias 0x555/0x2AA restarts the sequence and eats the NEXT command.
+	// A real part cannot do that: the data cycles of a program are consumed
+	// positionally, not re-decoded (openMSX checkCommandProgramHelper keeps its
+	// anchored cmd[] buffer while cmd.size() < cmdSeq.size()+numBytes).
+	// Carts that run their own program FSM (ASCII16X, Yamanooto) already know
+	// which write is data and say so here; the MFRSD path derives it internally
+	// from prog_cnt/prog_grp below.
+	input             data_phase,
 	input             boot_sector,   // bottom-boot device: 0x0-0xFFFF is 8 x 8KB
 	input      [26:0] erase_limit,   // bytes in the owner's region: an erase may never write past it
 	output            debug_erase
@@ -75,7 +88,27 @@ module flash (
 		   erase_block <= 0;
 //			erase_chip  <= 0;
 			if (~valid) index <= 0;
-			if (we & ~old_we & ce) begin
+			if (we & ~old_we & ce & cmd_inhibit) begin
+				// DATA cycle: consume it, never decode it.  This is the whole fix
+				// -- without it a data byte in {50,56,AA} landing on an aliased
+				// unlock offset becomes cmd[0], survives the `~valid` sweep above,
+				// and the NEXT write (the following group's 0x56) lands in cmd[1],
+				// so quadrupleProgram never asserts and that whole group is lost.
+				// (F0 was harmless even before: it self-heals via `reset` below.)
+				if (prog_start) begin
+					prog_cnt <= 3'd3;              // three more bytes after this one
+					prog_grp <= addr[22:2];
+					// The command has been consumed; drop index so quadrupleProgram
+					// cannot stay asserted and swallow the next group's command.
+					index    <= 0;
+				end else if (prog_more) begin
+					prog_cnt <= prog_cnt - 1'b1;
+				end
+			end else if (we & ~old_we & ce) begin
+				// Not data -> a command cycle.  Any half-finished program phase
+				// ends here: this covers both a driver that abandoned a group and
+				// the erase sequence, whose six writes all arrive on this path.
+				prog_cnt <= 3'd0;
 				cmd[index] <= din;
 				index <= index + 1'b1;
 				if (int_valid5) begin
@@ -107,7 +140,11 @@ module flash (
 			// only); any F0h (read-array/reset) or an autoselect leaves CFI mode.
 			// The 98h write itself cannot disturb the command FSM above: cmd[0]=98h
 			// is not in the int_valid1 whitelist and the offset check clears index.
-			if (we & ~old_we & ce) begin
+			// This is a SEPARATE if from the command FSM above, so it needs its own
+			// data-phase guard: entry is a single unsequenced write of 0x98, so a
+			// program-data byte of that value on an aliased offset would otherwise
+			// hijack the whole read window (data_valid below then masks the ROM).
+			if (we & ~old_we & ce & ~cmd_inhibit) begin
 				if (amd_family  & din == 8'h98 & addr[11:1] == 11'h055) cfi_state <= 1'b1;
 				else if (din == 8'hF0)                                  cfi_state <= 1'b0;
 			end
@@ -126,12 +163,37 @@ module flash (
 	
 	//TODO potřebuji valid ?
 	wire reset            = valid & int_valid1 & cmd[0] == 8'hF0;
-	wire doubleProgram    = valid & int_valid1 & cmd[0] == 8'h50;
 	wire quadrupleProgram = valid & int_valid1 & cmd[0] == 8'h56;
-	wire bytePrgram       = valid & int_valid3 & cmd[2] == 8'hA0;
+	// doubleProgram (0x50) and bytePrgram (0xA0) used to be decoded here but could
+	// never fire: the write gate was `(quadrupleProgram | write_cnt > 0)` and they
+	// could only set write_cnt from INSIDE that gate.  That was not an oversight --
+	// ascii16x.sv:24 and yamanooto.sv:202-207 say so and run their own byte-program
+	// FSM, driving the data byte through msx_slots' prog_we with the mapper's
+	// in-bounds check.  Deleted rather than revived so that touching the gate here
+	// cannot resurrect a second, unchecked write path.  0x50 stays in int_valid1
+	// and 0xA0 in int_valid3 below: those are real M29W640 openers and dropping
+	// them would only paper over one trigger value of the bug fixed above.
 	wire ident            = valid & int_valid3 & cmd[2] == 8'h90;
     
 
+
+	// ---- program data phase (this instance's own 0x56 path) -------------------
+	// prog_cnt = data bytes still owed AFTER the current one.  It is decremented
+	// per accepted CPU write, NOT per SDRAM completion -- the old counter did the
+	// latter, so an SDRAM stall could let a 5th write in.
+	// prog_grp closes the phase by ADDRESS as well as by count.  M29W640's
+	// quadruple program requires the four bytes to differ only in A1/A0, so
+	// addr[22:2] is invariant across a group by spec, not by luck.  A driver that
+	// abandons a group mid-way therefore closes the phase on its very next write
+	// instead of wedging the FSM -- which matters because flash.sv has no reset
+	// port at all (msx_slots.sv's reset is not connected here).
+	reg  [2:0]  prog_cnt = 3'd0;
+	reg  [20:0] prog_grp;
+	wire        prog_start = quadrupleProgram & ~erase;        // this write is data byte 1
+	wire        prog_more  = (prog_cnt != 3'd0) & (addr[22:2] == prog_grp);
+	wire        prog_data  = prog_start | prog_more;           // flash.sv owns this write
+	// Commands are not decoded while any owner says "this is data".
+	wire        cmd_inhibit = prog_data | data_phase;
 
 	wire int_valid1 =              index > 3'd0 & (cmd[0] == 8'hF0 | cmd[0] == 8'h50 | cmd[0] == 8'h56 | cmd[0] == 8'hAA);
 	wire int_valid2 = int_valid1 & index > 3'd1 & (cmd[1] == 8'h55);
@@ -153,18 +215,20 @@ module flash (
 //write to SDRAM
 	always @(posedge clk) begin
 		reg sdram_need_wr;
-		reg [15:0] write_cnt;
-		
+		// Erase fill only.  The program byte count is prog_cnt above, counted per
+		// CPU write; this one counts SDRAM completions and the two must not be the
+		// same register.  Loaded with erase_span = bytes-1, so it retires exactly
+		// erase_span+1 bytes (0xFFFF -> 0 inclusive = 64KB, 0x1FFF = 8KB).
+		reg [15:0] erase_cnt;
+
 		if (sdram_req & sdram_done) begin
 			sdram_req <= 0; //request se zpracovava
-			write_cnt <= write_cnt - 1'b1;
 			if (erase) begin
-				if (write_cnt == 0) begin
+				erase_cnt <= erase_cnt - 1'b1;
+				if (erase_cnt == 0) begin
 					erase <= 0;
-					write_cnt <= 0;
+					erase_cnt <= 0;
 				end else begin
-				//	write_cnt <= write_cnt - 1'b1;
-				//if (erase) begin
 					sdram_addr <= sdram_addr + 1'b1;
 					sdram_need_wr <= 1;
 				end
@@ -182,8 +246,14 @@ module flash (
 			// ROM.  Skip a sector that starts past the region, and truncate one that
 			// straddles the end.  Reads there already return 0xFF, so the cart still
 			// sees an "erased" sector; only the corruption is removed.
+			// The `<=` is deliberate but only safe because of an alignment
+			// invariant that is worth stating: erase_limit is either 27'(size)<<14
+			// or 27'h800000, so a multiple of 0x4000, and erase_base is a multiple
+			// of 0x10000 (or 0x2000 for a boot sector).  The remainder is therefore
+			// never exactly erase_span (0xFFFF / 0x1FFF), which is the one input
+			// where `<=` would write span+1 bytes and overrun by one.
 			if (erase_base < erase_limit) begin
-				write_cnt <= (27'(erase_span) <= (erase_limit - erase_base)) ? erase_span
+				erase_cnt <= (27'(erase_span) <= (erase_limit - erase_base)) ? erase_span
 				                                                            : 16'(erase_limit - erase_base - 27'd1);
 				sdram_din <=  8'hFF;
 				sdram_need_wr <= 1;
@@ -191,17 +261,21 @@ module flash (
 				erase <= 1;
 			end
 		end else
-		// `write_cnt > 0` is NOT a safe proxy for "a program is in progress": the
-		// erase loop borrows the same counter (it is loaded with erase_span above),
-		// so without `~erase` a single ordinary CPU write during the 64KB fill
-		// retargets sdram_addr and substitutes its own byte for 0xFF -- measured
-		// 65528 of 65536 bytes written as the CPU's data, running past the sector
-		// end, and the erase_limit clamp is bypassed because it only runs in the
-		// one erase_block cycle.  A driver holds WREN set across the erase by
-		// construction, so gating flash_rq on WREN does not cover this.
+		// KEEP the `~erase` term even though the counters are now separate.  Its
+		// reason is NOT the shared counter: the erase_block branch above has
+		// priority and unconditionally retargets sdram_addr / sdram_din, so a CPU
+		// write accepted during the 64KB fill hijacks the fill -- measured 65528 of
+		// 65536 bytes written as the CPU's data, running past the sector end, with
+		// the erase_limit clamp bypassed because it only runs in the one
+		// erase_block cycle (fixed in c361934).  A driver holds WREN set across the
+		// erase by construction, so gating flash_rq on WREN does not cover this.
 		// Real AMD parts likewise ignore writes during an erase (bar erase-suspend).
-		if ((quadrupleProgram | write_cnt > 0) & we & ~old_we & ce & ~erase) begin
-			//Zkontrolovat zda je writable sector num1 a num2 vypocet
+		//
+		// Only this instance's own program path writes here.  data_phase means
+		// "the MAPPER is doing the program" (ASCII16X / Yamanooto drive the byte
+		// through msx_slots' prog_we), so it must NOT open this gate or the byte
+		// would be written twice, and without the mapper's in-bounds check.
+		if (prog_data & we & ~old_we & ce & ~erase) begin
 			sdram_addr <= sdram_offset + 27'(addr);
 			sdram_din <= din;
 			if (sdram_ready) begin
@@ -209,10 +283,6 @@ module flash (
 			end else begin
 				sdram_need_wr <= 1;
 			end
-			if (quadrupleProgram) write_cnt <= 4;
-			if (doubleProgram) write_cnt <= 2;
-			if (bytePrgram) write_cnt <= 1;
-			if (erase_block) write_cnt <= 16'hFFFF;
 		end
 	end
 	
