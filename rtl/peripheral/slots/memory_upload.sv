@@ -649,6 +649,7 @@ cart_confDecoder cart_decoder
    .detected_mapper(detect_mapper),
    .selected_sram_size(cart_conf[curr_conf == CONFIG_SLOT_B].selected_sram_size),
    .subslot(subslot),
+   .subslot_dev(cart_conf[curr_conf == CONFIG_SLOT_B].selected_subslot_dev),
    .mapper(cart_mapper), 
    .mem_device(cart_mem_device),
    .rom_id(cart_rom_id),
@@ -668,6 +669,7 @@ module cart_confDecoder
    input  mapper_typ_t detected_mapper,
    input  logic  [7:0] selected_sram_size,
    input         [1:0] subslot,
+   input         [1:0] subslot_dev,
    output mapper_typ_t mapper, 
    output device_typ_t mem_device,
    output data_ID_t    rom_id,
@@ -699,6 +701,16 @@ assign                                        {mapper             , mem_device  
    typ == CART_TYP_MFRSD  & subslot == 2'd1 ? {MAPPER_MFRSD1      , DEVICE_NONE   , ROM_NONE           , 8'hAA , 8'h00 , 8'd0               , 8'd0    ,   DEV_SCC2 | DEV_FLASH } :
    typ == CART_TYP_MFRSD  & subslot == 2'd2 ? {MAPPER_MFRSD2      , DEVICE_NONE   , ROM_RAM            , 8'hAA , 8'h00 , 8'd0               , 8'd32   ,   DEV_MFRSD2 | DEV_PSG } :
    typ == CART_TYP_MFRSD  & subslot == 2'd3 ? {MAPPER_MFRSD3      , DEVICE_NONE   , ROM_NONE           , 8'hAA , 8'h00 , 8'd0               , 8'd0    ,   DEV_FLASH            } :
+   // ---- user-selected sub-slot device (expanded cart slot) ----------------
+   // Only for a plain ROM cart: subslot 0 stays the ROM, subslot 1 gets this.
+   // memory_upload sets cart_slot_expander_en on its own the moment a config line
+   // with subslot != 0 appears (:306), and cart_device[] is OR-accumulated across
+   // subslots (:537), so nothing else has to change.  Same two rows the MFRSD entries
+   // above use, with the values copied from the CART_TYP_FM_PAC / CART_TYP_GM2 rows.
+   typ == CART_TYP_ROM    & subslot == 2'd1
+                          & subslot_dev == 2'd1 ? {MAPPER_FMPAC       , DEVICE_NONE   , ROM_FMPAC          , 8'h08 , 8'h00 , 8'd8               , 8'd0    ,   DEV_OPL3             } : //4000 - 7FFF
+   typ == CART_TYP_ROM    & subslot == 2'd1
+                          & subslot_dev == 2'd2 ? {MAPPER_GM2         , DEVICE_NONE   , ROM_GM2            , 8'hAA , 8'h00 , 8'd8               , 8'd0    ,   DEV_NONE             } :
    typ == CART_TYP_GM2    & subslot == 2'd0 ? {MAPPER_GM2         , DEVICE_NONE   , ROM_GM2            , 8'hAA , 8'h00 , 8'd8               , 8'd0    ,   DEV_NONE             } :
    typ == CART_TYP_FDC    & subslot == 2'd0 ? {MAPPER_NONE        , DEVICE_FDC    , ROM_FDC            , 8'h08 , 8'h00 , 8'd0               , 8'd0    ,   DEV_NONE             } :
    /*typ == CART_TYP_EMPTY*/                  {MAPPER_UNUSED      , DEVICE_NONE   , ROM_NONE           , 8'h00 , 8'h00 , 8'd0               , 8'd0    ,   DEV_NONE             } ;

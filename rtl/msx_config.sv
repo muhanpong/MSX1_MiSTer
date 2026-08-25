@@ -5,6 +5,20 @@ parameter CONF_STR_SLOT_A = {
 parameter CONF_STR_SLOT_B = {
     "O[31:29],SLOT B,ROM,SCC,SCC+,FM-PAC,Empty;"
 };
+// Sub-slot device: turns the cart slot into an EXPANDED slot (subslot 0 = the ROM,
+// subslot 1 = this device).  The machinery already existed -- MFRSD fills all four
+// subslots of a cart slot the same way -- only the menu was missing.
+// Restricted to typ == CART_TYP_ROM (so it shares the H3/H4 mask with "ROM,Load"),
+// which is also what keeps it safe: FM-PAC and GameMaster2 are the only devices whose
+// mappers (MAPPER_FMPAC / MAPPER_GM2, both "NEXT INTERNAL" in package.sv:4) can be
+// neither picked from the mapper menu nor produced by mapper_detect, so the subslot
+// device can never collide with the ROM's own mapper state.
+parameter CONF_STR_SUBSLOT_A = {
+    "H3O[50:49],SLOT A sub-slot,None,FM-PAC,GameMaster2;"
+};
+parameter CONF_STR_SUBSLOT_B = {
+    "H4O[53:52],SLOT B sub-slot,None,FM-PAC,GameMaster2;"
+};
 // Single "ASCII16X" entry covers both: ROM <= 4MB -> classic ASCII16 (SRAM etc.),
 // ROM > 4MB -> ASCII16X flash mapper (8-bit-bank ASCII16 cannot exceed 4MB; per the
 // ASCII16-X spec the X mapper is "mostly backwards compatible" for plain ROM banking).
@@ -43,6 +57,8 @@ wire [2:0] slot_B_select   = HPS_status[31:29];
 wire [2:0] sram_A_select   = HPS_status[28:26];
 wire [3:0] mapper_A_select = HPS_status[23:20];
 wire [3:0] mapper_B_select = HPS_status[35:32]; 
+wire [1:0] subslot_A_select = HPS_status[50:49];
+wire [1:0] subslot_B_select = HPS_status[53:52];
 
 cart_typ_t typ_A;
 assign typ_A = cart_typ_t'(slot_A_select < CART_TYP_FDC  ? slot_A_select   :
@@ -68,6 +84,11 @@ assign cart_conf[0].selected_sram_size = typ_A == CART_TYP_ROM & mapper_A_select
 // lookup_SRAM[0] a second time -- aliasing slot A's SRAM onto slot B's buffer.
 assign cart_conf[1].selected_sram_size = 8'd0;
 
+// Honoured only for a plain ROM cart -- every other cart type either already owns
+// its subslots (MFRSD) or would clash with the subslot device's mapper.
+assign cart_conf[0].selected_subslot_dev = cart_conf[0].typ == CART_TYP_ROM ? subslot_A_select : 2'd0;
+assign cart_conf[1].selected_subslot_dev = cart_conf[1].typ == CART_TYP_ROM ? subslot_B_select : 2'd0;
+
 assign msxConfig.typ = bios_config.MSX_typ;
 assign msxConfig.scandoubler = scandoubler;
 assign msxConfig.video_mode = video_mode_t'(bios_config.MSX_typ == MSX1 ? (HPS_status[12] ? 2'd2 : 2'd1) : HPS_status[14:13]);
@@ -82,8 +103,9 @@ assign sram_A_select_hide = cart_conf[0].typ != CART_TYP_ROM | mapper_A_select =
 assign fdc_enabled = bios_config.use_FDC | cart_conf[0].typ == CART_TYP_FDC;
 
 
-logic  [18:0] lastConfig;
-wire [18:0] act_config = {cart_conf[1].typ, cart_conf[0].typ, cart_conf[0].selected_mapper, cart_conf[1].selected_mapper, sram_A_select};
+logic  [22:0] lastConfig;
+wire [22:0] act_config = {cart_conf[1].typ, cart_conf[0].typ, cart_conf[0].selected_mapper, cart_conf[1].selected_mapper, sram_A_select,
+                          cart_conf[0].selected_subslot_dev, cart_conf[1].selected_subslot_dev};
 
 always @(posedge clk) begin
     if (reload) lastConfig <= act_config;

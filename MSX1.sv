@@ -255,9 +255,9 @@ wire      [64:0] rtc;
 //[37:36] CPU SPEED (turbo)
 //[38]    BORDER
 //[48]    DEBUG OVERLAY
-//[50:49] free (was OPL4 PCM VOLUME, 2-bit)
+//[50:49] SLOT A SUB-SLOT DEVICE (expanded cart slot; was OPL4 PCM VOLUME)
 //[51]    CHEATS
-//[53:52] free (was OPL4 FM VOLUME, 2-bit)
+//[53:52] SLOT B SUB-SLOT DEVICE (expanded cart slot; was OPL4 FM VOLUME)
 //[56:54] OPL4 PCM VOLUME (5 steps, first entry = default)
 //[59:57] OPL4 FM VOLUME  (5 steps, first entry = default)
 `include "build_id.v" 
@@ -270,6 +270,7 @@ localparam CONF_STR = {
    "H3FS3,ROM,Load,30C00000;",
    CONF_STR_MAPPER_A,
    CONF_STR_SRAM_SIZE_A,
+   CONF_STR_SUBSLOT_A,
    "-;",
    CONF_STR_SLOT_B,
    // Deliberately F, NOT FS.  The S would set `opensave`, and user_io.cpp:2937
@@ -283,6 +284,7 @@ localparam CONF_STR = {
    // answer, not a CONF_STR flag.
    "H4F4,ROM,Load,33000000;",
    CONF_STR_MAPPER_B,
+   CONF_STR_SUBSLOT_B,
    "H6-;",
    "H6R[38],SRAM Save;",
    "H6R[39],SRAM Load;",

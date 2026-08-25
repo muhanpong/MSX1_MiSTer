@@ -66,6 +66,9 @@ package MSX;
         cart_typ_t   typ;
         mapper_typ_t selected_mapper;
         logic [7:0]  selected_sram_size;
+        // Device the user placed in SUB-SLOT 1 of this cart slot (0 = none).
+        // Only honoured when typ == CART_TYP_ROM; see cart_confDecoder.
+        logic [1:0]  selected_subslot_dev;
     } config_cart_t;
         
 endpackage
