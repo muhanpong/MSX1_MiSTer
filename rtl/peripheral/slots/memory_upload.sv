@@ -69,6 +69,41 @@ module memory_upload
    assign rom_big    = {ioctl_size[3] > 27'h400000, ioctl_size[2] > 27'h400000};
 
    typedef enum logic [3:0] {STATE_IDLE, STATE_CLEAN, STATE_READ_CONF, STATE_READ_CONF2, STATE_CHECK_CONFIG, STATE_FILL_RAM, STATE_FILL_RAM2, STATE_STORE_SLOT_CONFIG, STATE_FIND_ROM, STATE_FILL_KBD, STATE_ERROR} state_t;
+
+   // ---- MSX numeric keypad (matrix rows 9 and 10) ------------------------
+   // All 44 machine packs ship the *same* 512-byte keymap, and it leaves the
+   // keypad unmapped -- so patching rtl/peripheral/kbd.mif alone is not enough:
+   // STATE_FILL_KBD below overwrites the whole table from the pack.  Fill the
+   // keypad in here too, but only where the pack itself says 0xFF, so a pack
+   // that *does* define those keys (Sony_HB-F1XV_128KB) still wins.
+   // Values are lifted verbatim from that pack; format is {row[3:0], col[3:0]}.
+   function [7:0] kbd_keypad(input [8:0] a);
+      case (a)
+         9'h07C : kbd_keypad = 8'h90;  // keypad *
+         9'h079 : kbd_keypad = 8'h91;  // keypad +
+         9'h14A : kbd_keypad = 8'h92;  // keypad /   (E0 4A)
+         9'h070 : kbd_keypad = 8'h93;  // keypad 0
+         9'h069 : kbd_keypad = 8'h94;  // keypad 1
+         9'h072 : kbd_keypad = 8'h95;  // keypad 2
+         9'h07A : kbd_keypad = 8'h96;  // keypad 3
+         9'h06B : kbd_keypad = 8'h97;  // keypad 4
+         9'h073 : kbd_keypad = 8'hA0;  // keypad 5
+         9'h074 : kbd_keypad = 8'hA1;  // keypad 6
+         9'h06C : kbd_keypad = 8'hA2;  // keypad 7
+         9'h075 : kbd_keypad = 8'hA3;  // keypad 8
+         9'h07D : kbd_keypad = 8'hA4;  // keypad 9
+         9'h07B : kbd_keypad = 8'hA5;  // keypad -
+         9'h07E : kbd_keypad = 8'hA6;  // keypad ,  <- ScrollLock (no PC key for it;
+                                       //    NumLock 0x77 is unusable: the Pause
+                                       //    sequence makes hps_io emit a plain 0x77
+                                       //    press whose release comes back as 0x377,
+                                       //    so the bit would latch stuck-down)
+         9'h071 : kbd_keypad = 8'hA7;  // keypad .
+         9'h15A : kbd_keypad = 8'h77;  // keypad Enter (E0 5A) -> alias of RET
+         9'h06A : kbd_keypad = 8'h14;  // JIS yen  (also in the reference pack)
+         default: kbd_keypad = 8'hFF;
+      endcase
+   endfunction
    state_t state;
    logic  [7:0] conf[16];
    logic  [7:0] fw_conf[8];
@@ -347,7 +382,7 @@ module memory_upload
                      state <= STATE_READ_CONF;
                   end
                end else begin
-                  kbd_din <= ddr3_dout;
+                  kbd_din <= (ddr3_dout == 8'hFF) ? kbd_keypad(kbd_addr) : ddr3_dout;
                   kbd_we  <= 1'b1;
                   if (kbd_addr != 9'h1FF) begin
                      ddr3_rd <= 1'b1;
