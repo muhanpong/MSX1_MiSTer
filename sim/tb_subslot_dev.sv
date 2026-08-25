@@ -140,6 +140,19 @@ module tb_subslot_dev;
       drive(CART_TYP_ROM, 2'd3, 2'd1);  expect_empty("ROM ss3 dev=FM-PAC");
       drive(CART_TYP_ROM, 2'd2, 2'd2);  expect_empty("ROM ss2 dev=GameMaster2");
 
+      // ---- a Yamanooto ROM in subslot 0 coexists with a sub-slot device ----
+      // Yamanooto is a MAPPER for the slot's loaded ROM, not a cart type, and it
+      // is a flat primary-slot cartridge (no subslot expander of its own), so it
+      // sits in subslot 0 like any other ROM.  MAPPER_YAMANOOTO vs MAPPER_FMPAC
+      // are different modules, so nothing is shared -- this already works.
+      selected_mapper = MAPPER_YAMANOOTO;
+      drive(CART_TYP_ROM, 2'd0, 2'd1);
+      expect_mapper("Yamanooto ROM ss0", MAPPER_YAMANOOTO);
+      expect_rom   ("Yamanooto ROM ss0", ROM_ROM);
+      drive(CART_TYP_ROM, 2'd1, 2'd1);
+      expect_mapper("Yamanooto + FM-PAC in ss1", MAPPER_FMPAC);
+      selected_mapper = MAPPER_ASCII8;
+
       // ---- MFRSD owns its own subslots: must be untouched -----------------
       // This is the regression that would silently break a working cartridge.
       drive(CART_TYP_MFRSD, 2'd1, 2'd1);

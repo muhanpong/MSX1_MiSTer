@@ -173,6 +173,50 @@ slot" opens up — which is exactly the configuration the SCMD investigation nee
 (SCC-I and its RAM in the *same* subslot, see
 `docs/mfrsd_scc_sound_cartridge_20260823.md`).
 
+### Yamanooto specifically
+
+Worth its own note, because two things about it invite wrong inferences.
+
+**`SUBOFF` is not "subslot off".** It is *SUB-OFFset* — CFGR bit5:4, the low two
+bits of the segment offset that give 8KB granularity:
+`offset = OFFR*4 + SUBOFF` (`yamanooto.sv:72,90`; `docs/yamanooto_spec.md:53`,
+which already warns that a merged 2-bit cell in the vendor PDF makes this table
+easy to misread). It has nothing to do with slot expansion.
+
+**Its state is properly per cart slot** — `enableReg[2]`, `offsetReg[2]`,
+`configReg[2]`, `sccModeReg[2]`, `bankReg[2][4]`, `rawBank[2][4]`, 14 `cart_num`
+references (`yamanooto.sv:75-85`). Same family as `konami_scc`/`ascii8`/`ascii16x`,
+so option A applies to it unchanged: **125 ALUT / 154 reg** today, `154 -> 616`
+registers if indexed per subslot.
+
+**Yamanooto in subslot 0 already coexists with a sub-slot device — today.** It is a
+*mapper* for the slot's loaded ROM, not a cart type, so `SLOT A = ROM` +
+`Mapper type = Yamanooto` + `SLOT A sub-slot = FM-PAC` works on the current build:
+`MAPPER_YAMANOOTO` and `MAPPER_FMPAC` are different modules with separate state,
+the ROM file count is still one, and the sound chips do not contend (Yamanooto
+drives the cart slot's IKASCC via its own `sccReq`, FM-PAC drives that slot's
+IKAOPLL). Its registers live at `0x7FFC-0x7FFF` — page 1, so they never meet the
+expanded slot's `0xFFFF`, which is page 3. `tb_subslot_dev` covers this case.
+
+**Yamanooto as the sub-slot *device* is a different matter** — three blockers, in
+descending order of difficulty:
+
+1. **It needs the slot's ROM file.** Unlike FM-PAC and GameMaster2, its 8MB flash
+   image comes from a user file, and `memory_upload.sv:287` even pads it out to
+   `0x800000`. There is no FW PACK copy to point at, so this runs straight into
+   the one-ROM-file-per-slot limit — the hardest of the four in §3.
+2. **Mapper-collision class.** `MAPPER_YAMANOOTO` is selectable from the mapper
+   menu (`msx_config.sv:39,42`), so subslot 0's ROM may already be Yamanooto.
+   Needs option A.
+3. **Device contention.** It carries `DEV_SCC2 | DEV_PSG | DEV_FLASH`
+   (`memory_upload.sv:691`) and there is one IKASCC and one cart PSG per cart
+   slot, so it would fight anything else in the slot wanting those — option B.
+
+But note what is *not* on that list: **there is no architectural objection.**
+Yamanooto is a flat primary-slot cartridge with no subslot expander of its own
+(`memory_upload.sv:686-687`), so unlike MFRSD it is perfectly legal inside someone
+else's subslot. Every blocker above is ours.
+
 ### What the menu offers today, and why those two are safe now
 
 `FM-PAC` (slots A and B) and `GameMaster2` (slot A only). Both are safe under the
