@@ -3,6 +3,11 @@
 Implemented 2026-08-25. Simulated with a working negative control, full sim suite
 green, **not yet tested on hardware**.
 
+> **First build carrying this:** `MSX1_20260826b_opllpace.rbf` (built by the turbo
+> session from the tree at `3567edf`, timing closed, worst slack +0.321). Defaults
+> are Off, so it is a regression check for the classic path until someone turns
+> the switch on. Hardware results pending.
+
 Each cart slot can be switched, independently, into an **expanded slot** whose
 four subslots each carry a device the user picks. The classic one-device line for
 that slot disappears and a sub-menu page takes its place.

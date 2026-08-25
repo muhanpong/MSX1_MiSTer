@@ -5,6 +5,11 @@ Status: **implemented 2026-08-25**, simulated with a working negative control,
 2026-08-23) on the belief that it required regenerating 44 machine XMLs and the
 ROM PACKs. **That belief was wrong** — see *What the earlier analysis got wrong*.
 
+> **First build carrying this:** `MSX1_20260826b_opllpace.rbf` (built by the turbo
+> session from the tree at `3567edf`, timing closed, worst slack +0.321). Defaults
+> are Off, so it is a regression check for the classic path until someone turns
+> the switch on. Hardware results pending.
+
 ---
 
 ## What was missing
