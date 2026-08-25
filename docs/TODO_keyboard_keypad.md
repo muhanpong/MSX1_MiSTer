@@ -1,14 +1,14 @@
 # DONE — the MSX numeric keypad (matrix rows 9 and 10) is mapped
 
-Status: **implemented 2026-08-25**, simulated with a working negative control,
-**not yet tested on hardware**. Previously deferred twice (2026-08-21, re-confirmed
-2026-08-23) on the belief that it required regenerating 44 machine XMLs and the
-ROM PACKs. **That belief was wrong** — see *What the earlier analysis got wrong*.
+Status: **DONE and HARDWARE-VERIFIED** (implemented 2026-08-25, verified on board
+2026-08-26 in `MSX1_20260826b_opllpace`, tree at `3567edf`): the numeric keypad
+types correctly in BASIC, and ordinary keys / boot showed no regression.
+Previously deferred twice (2026-08-21, re-confirmed 2026-08-23) on the belief that
+it required regenerating 44 machine XMLs and the ROM PACKs. **That belief was
+wrong** — see *What the earlier analysis got wrong*.
 
-> **First build carrying this:** `MSX1_20260826b_opllpace.rbf` (built by the turbo
-> session from the tree at `3567edf`, timing closed, worst slack +0.321). Defaults
-> are Off, so it is a regression check for the classic path until someone turns
-> the switch on. Hardware results pending.
+> Verified in `MSX1_20260826b_opllpace.rbf` (tree `3567edf`, timing closed, worst
+> slack +0.321), built and tested by the concurrent turbo session.
 
 ---
 
@@ -128,10 +128,11 @@ touching them means a pack rebuild, which needs the BIOS ROM set and is the
 
 ## Still to do
 
-* **Hardware test.** BASIC `A$=INKEY$` loop, or read rows 9/10 directly. Also
-  re-verify a normal-key sweep and that Pause sticks nothing — per this project's
-  own history, any refit can perturb placement, so boot the whole thing, do not
-  just press keypad keys.
+* ~~**Hardware test.**~~ Done 2026-08-26: keypad input confirmed in BASIC, boot and
+  ordinary keys unaffected. **Not separately exercised:** ScrollLock as NUM `,`,
+  keypad Enter, keypad `/` (`E0 4A`), and the Pause-does-not-stick check — those
+  are the three judgement calls plus the `hps_io` hazard, so they are the ones to
+  try if anything looks odd.
 * Decide whether ScrollLock is the right home for NUM `,`, and whether keypad
   Enter aliasing RET is wanted. Both are one-byte changes in two places
   (the mif and `kbd_keypad()`), and `check_keypad_consts.py` will catch it if only

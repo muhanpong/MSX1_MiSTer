@@ -1,12 +1,16 @@
 # Expanded cart slots — the OSD "SLOT A/B sub-slot" device
 
-Implemented 2026-08-25. Simulated with a working negative control, full sim suite
-green, **not yet tested on hardware**.
+Implemented 2026-08-25/26. Simulated with a working negative control, full sim
+suite green.
 
-> **First build carrying this:** `MSX1_20260826b_opllpace.rbf` (built by the turbo
-> session from the tree at `3567edf`, timing closed, worst slack +0.321). Defaults
-> are Off, so it is a regression check for the classic path until someone turns
-> the switch on. Hardware results pending.
+**Hardware status is split — read this before trusting it:**
+
+| | |
+|---|---|
+| verified 2026-08-26 | The feature is **inert when off**: `MSX1_20260826b_opllpace` (tree `3567edf`) boots and runs existing games unchanged, and the OSD renders `SLOT A sub-slots`. That is a regression check for the classic path, nothing more. |
+| **NOT verified** | **Nothing has ever run with a slot actually expanded.** No sub-slot device has been placed on hardware — not FM-PAC, not SCC+, not a ROM in sub-slot 2. The whole point of the feature is untested. |
+| **NOT in any build** | `a646083` (ROM Load / Mapper / SRAM moved inside the page) landed *after* that RBF. Needs a fresh build. |
+
 
 Each cart slot can be switched, independently, into an **expanded slot** whose
 four subslots each carry a device the user picks. The classic one-device line for
@@ -293,9 +297,9 @@ for the ROM, so it rides the `ROM` entry rather than being a device of its own.
 * `sim/run_subslot_dev.sh` runs both. Regression: sccdetect, sccplus, yamanooto,
   mfrsd_sccmode/sccsound, keypad, a16x_cfi, flash_seam, yamanooto_flash all green.
 
-Not hardware-tested.
+Hardware: off-path verified only — see the table at the top.
 
-## Hardware test
+## Hardware test — none of this has been done yet
 
 1. FW PACK loaded (FM-PAC / GameMaster2 ROMs come from it).
 2. `SLOT A sub-slots: On`, page: sub-slot 0 = ROM (load a game), sub-slot 1 = FM-PAC.
