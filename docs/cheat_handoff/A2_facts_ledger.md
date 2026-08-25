@@ -1,0 +1,40 @@
+# A2 — Confirmed-Facts Ledger: MSX1_MiSTer Cheat Debugging
+
+Scope: separate PROVEN (with citation) from ASSUMED/UNVERIFIED. No judgement, no decisions — evidence only.
+Date: 2026-06-27. Sources verified live this session unless noted "(memory)".
+
+## Source roots
+- Main_MiSTer: `/run/media/muhanpong/0eb4bebc-0644-4c2f-9a97-ddca5afcd8f3/MiSTer_build/Main_MiSTer/`
+- NES ref: `/run/media/muhanpong/0eb4bebc-0644-4c2f-9a97-ddca5afcd8f3/MiSTer_build/NES_MiSTer/NES.sv`
+- Worktree (standard cheats): `/home/muhanpong/Documents/github/MSX1_MiSTer/.claude/worktrees/cheat-standard/`
+- Main repo (custom engine): `/home/muhanpong/Documents/github/MSX1_MiSTer/`
+
+---
+
+## Ledger
+
+| # | Claim | Status | Evidence (file:line / test) | Notes |
+|---|-------|--------|------------------------------|-------|
+| 1 | Slot A Load (`H3FS3`, store_name=0) triggers `cheats_init` when `use_cheats=1`. | **CONFIRMED** | menu.cpp:2685-2688 `if(!store_name){ game_docs_init(...); if(user_io_use_cheats()) cheats_init(selPath, crc); }`. Parser menu.cpp:2349 sets `store_name=0` at F-option entry; menu.cpp:2362 only sets `store_name=1` on a `C` after F. `H3FS3` = H3(hide cond) + F + S(opensave) + index 3 — no `C` → store_name stays 0. | Path is real and reachable for Slot A Load. `cheats_init` will fire IFF a matching cheats zip exists (menu.cpp:2688 line was cited in task as 2688; actual call at 2688, guard at 2685). |
+| 2 | `FC1` (Load ROM PACK) = store_name=1 → cheats_init blocked; FC1 never a "game". | **CONFIRMED** | menu.cpp:2361-2365 `if(p[idx]=='C'){ store_name=1; idx++; }`. With store_name=1 the menu.cpp:2685 `if(!store_name)` guard skips both `game_docs_init` and `cheats_init`. The worktree CONF_STR previously used `FC1` (memory: "★★진범"). | Mechanism proven from Main source. "FC1 is MACHINE/FW only" is the project's design intent (memory), not a Main-code fact. |
+| 3 | Worktree `MSX1.sv` HAS `"C,Cheats;"` (use_cheats=1); main repo does NOT (uses F6/O[51] custom engine). | **CONFIRMED** | Worktree MSX1.sv:254 `"C,Cheats;"` and :256 `"F1,MSX,Load ROM PACK,30000000;"`, :510 `.cheat_en_master(1'b1)`. Main repo MSX1.sv:294 `"F6,CHT,Load Cheats;"`, :295 `"O[51],Cheats,Off,On;"`, :511 `.cheat_en_master(status[51])`. The `C` token → user_io.cpp:905-908 `if(p[0]=='C') use_cheats=1`. | Two divergent designs confirmed. NOTE: worktree CONF_STR now shows **`F1`** (not `FC1`) at line 256 — i.e. the store_name fix IS present in the current worktree tree. |
+| 4 | Our `.gg` layout (addr@byte0-1, value@byte8) vs NES standard 16B `{addr,compare,replace,flags}`; converter+loader self-consistent; HPS raw-passthrough. | **PARTIAL** | HPS raw-passthrough CONFIRMED: cheats.cpp:358-360 `memcpy(&buff[pos], cheats[i].cheatData, cheatSize)` — no field parsing, byte-exact concat, 16B units (cheats.cpp:69,103 `cheat_unit_size=16`). Loader CONFIRMED to read addr from byte0/1 and freeze value from **byte8** (= standard `.gg` replace32 LSB): worktree msx.sv:338-345. | Loader byte8 IS the standard `.gg` replace field, so loader is consistent with a real 16B `.gg`. Converter (`mcf2mister.py`, memory) NOT present on disk — only `tools/msx1_cheat_editor.html` found. Converter→zip self-consistency UNVERIFIED (no converter file, no produced zip inspected). Claim's "{flags,addr,compare,replace}" ordering wording is imprecise vs the actual `.gg` `{addr32,compare32,replace32,flag32}`. |
+| 5 | ioctl index 255 reaches worktree loader; same clock domain (clk21m), no CDC. | **PARTIAL** | Index match CONFIRMED: HPS sends on 255 (cheats.cpp:380 `user_io_set_index(255)`); loader gate worktree msx.sv:324 `cheat_dl = ioctl_download & (ioctl_index[7:0]==8'd255)`. "no CDC" is a design assertion: loader logic lives in msx.sv clocked region (clk21m) — not independently proven here that ioctl_clk == clk21m for this instance. | Wire path correct. CDC-safety = design claim (memory), not a measured/cited fact. |
+| 6 | Apply path (d_to_cpu mux, 4-way lookup) functionally correct. | **UNVERIFIED (sim-only for standard build)** | Mux present worktree msx.sv:355-357 `cheat_act ? cheat_value :` in d_to_cpu priority chain; 4-way RAMs msx.sv:285-312. Memory: Verilator "7/7" (255/16B variant) and "15/15" (4-way) PASS. | Register engine + 4-way were HW-verified earlier (memory: NeonHorizon, castlemore 222 cheats). The **index-255/16-byte standard loader** variant is only Verilator-confirmed, NOT hardware-confirmed. No sim files re-run this session. |
+| 7 | NES cheats WORK on this board (screenshot); MSX1 cheat menu does NOT appear. | **UNVERIFIED (user-reported)** | NES.sv:77 `"C,Cheats;"`, :72 `"FS,NESFDSNSF;"` (FS = store_name 0 → cheats_init fires) confirms NES is correctly wired for the standard path. The "works on board / MSX menu absent" observations are user screenshot reports (memory), not reproducible by me. | Code asymmetry (NES `FS`=store_name0 vs MSX `FC1`=store_name1) is the documented mechanism and IS confirmed in source. The runtime observations themselves are second-hand. |
+| 8 | The 20260625b build (worktree) was deployed; does it BOOT and was it tested via Slot A Load with cheat menu absent? | **UNVERIFIED — BLOCKING GAP** | Snapshot lists deployed RBF `MSX1_20260625b_cheatStd.rbf` plus later `MSX1_20260626_cheatStd3.rbf`, `..._26a_revtest`, `..._26b_cheatF1s2`. Memory: cheatStd builds used `FC1` (menu greyed); the `F1` fix build `cheatStd3` "부팅fit깨짐" (boot/fit broke — CONF_STR 1-byte shift perturbed SDRAM_DQ IOB placement). | No file-level proof of boot status or of an actual Slot-A-Load + menu-present/absent test for ANY build that simultaneously (a) boots and (b) has the `F1` store_name=0 fix. Current worktree HAS `F1` (line 256) but no confirmed booting RBF of it is cited. |
+| 9 | Main 260611 suppresses console printf during core run (cheats_init log invisible on serial). | **UNVERIFIED** | cheats.cpp does printf (`:132 "MRA cheats: %d"`, `:195 "cheats: %d"`, `:372 "Cheat codes: %d"`) — logs exist in code. Whether Main 260611 redirects/suppresses stdout during core execution is NOT verified in the Main source examined here. | Asserted in memory as diagnostic lesson. Would need to inspect Main's stdout/printf handling (e.g. fpga/console redirect) to confirm. |
+| 10 | zip filename matches ROM; `cheats/MSX1/` dir; CoreName2=MSX1. | **PARTIAL/CONFIRMED-by-derivation** | Dir build CONFIRMED: cheats.cpp:155 `snprintf(core_dir,"%s/cheats/%s", getRootDir(), CoreName2)`. Asset lookup by name OR crc CONFIRMED: cheats.cpp:168 `findGameAsset(..., rom_path, romcrc, ".zip", core_dir, ...)`. CoreName2 = CONF_STR first token = MSX1.sv:253 `"MSX1;"`. | So dir = `cheats/MSX1/`, and a zip matching ROM filename OR 8-hex CRC is found. The actual presence of a correctly-named zip on the SD card is a usage fact NOT verifiable from repo (no SD contents inspected). |
+
+---
+
+## Status summary
+- CONFIRMED (code-cited): #1, #2, #3.
+- PARTIAL (mechanism confirmed, one leg unverified): #4, #5, #10.
+- UNVERIFIED (sim-only / user-reported / not in examined source): #6, #7, #8, #9.
+- DISPROVEN: none.
+
+## Single biggest unverified gap (blocks resolution)
+**Claim #8.** There is no cited proof of a single build that BOTH (a) boots cleanly on hardware AND (b) carries the `F1` (store_name=0) fix, AND was then tested via Slot A Load to observe whether the standard HPS cheat menu appears. The `F1` source fix is present in the worktree (MSX1.sv:256) and the store_name mechanism is proven in Main source (#1/#2), but the memory records the `F1` build (`cheatStd3`) as boot/fit-broken (SDRAM_DQ IOB placement roulette from a 1-byte CONF_STR shift). Until an `F1`-with-store_name=0 build is confirmed to boot and is observed at the OSD after Slot A Load, the end-to-end fix is unproven on hardware.
+
+**Test that would close it:** Build worktree (current `F1` CONF_STR) with a Quartus seed that passes fit/timing AND boots; load a game via Slot A Load that has a matching `cheats/MSX1/<name|crc>.zip`; confirm at OSD that the "Cheats" menu lists entries (not greyed) and a toggled cheat applies (e.g. freeze readback). Capture OSD photo (serial log is unreliable per #9).

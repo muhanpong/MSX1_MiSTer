@@ -63,3 +63,33 @@ build_log.txt
 /moonsound_pcm_fix_implementation_plan.md
 /docs/pcm_openmsx_verification/
 /docs/ASCII16X_save_failure.*
+
+# --- Claude Code local state (worktrees are full checkouts, ~700MB) ---
+/.claude/worktrees/
+/.claude/settings.local.json
+
+# --- YMF278B golden harness: scratch outputs and regenerable wave images ---
+/rtl/peripheral/SOUND/ymf278b_fpga/sim/golden/out/
+/rtl/peripheral/SOUND/ymf278b_fpga/sim/golden/mem2.bin
+/rtl/peripheral/SOUND/ymf278b_fpga/sim/golden/mem2.hex
+/rtl/peripheral/SOUND/ymf278b_fpga/sim/golden/mem4.bin
+/rtl/peripheral/SOUND/ymf278b_fpga/sim/golden/mem4.hex
+/rtl/peripheral/SOUND/ymf278b_fpga/sim/golden/tri16.bin
+/rtl/peripheral/SOUND/ymf278b_fpga/sim/golden/tri16.hex
+/rtl/peripheral/SOUND/ymf278b_fpga/sim/golden/st04_full.bin
+/rtl/peripheral/SOUND/ymf278b_fpga/sim/golden/st04_full.hex
+
+# --- GHDL work library ---
+*.cf
+
+# --- stray upstream clones, not referenced by any .qip (see docs) ---
+/rtl/peripheral/SOUND/ikaopll/
+/rtl/peripheral/SOUND/jt51/
+
+# --- VGM test media: third-party rips and prebuilt binaries ---
+/vgm_test/*.zip
+/vgm_test/moondriver_demo_msx2/
+/vgm_test/strikers_1945_arcade/
+/vgm_test/sdcard/*.VGM
+/vgm_test/sdcard/*.VGZ
+/vgm_test/sdcard/*.COM
