@@ -16,11 +16,19 @@ set_false_path -from [get_clocks {emu|pll|pll_inst|altera_pll_i|*|divclk}] \
 set_false_path -from [get_clocks {pll_audio|pll_audio_inst|altera_pll_i|*|divclk}] \
                -to   [get_clocks {emu|pll|pll_inst|altera_pll_i|*|divclk}]
 
-# T80 (clk21m, ce_3m58_p enable ~3.58 MHz) → SDRAM ch2 multi-cycle path.
-# T80 instruction-bound signals (IR, MCycle, A, etc.) update only on
-# ce_3m58_p ticks — every 6 clk21m cycles = 24 clk_sdram cycles.  The
-# msx_slots mapper combinational chain that ends at sdram|ch2_addr_1[*]|d
-# therefore has 24+ clk_sdram cycles to settle, not 1.  Quartus single-
+# T80 (clk21m, ce_cpu_p enable, 3.58-10.74 MHz) → SDRAM ch2 multi-cycle path.
+# T80 instruction-bound signals (IR, MCycle, A, etc.) update only on CEN
+# ticks.  Re-derived for turbo (20260825): the bound is set by the WINDOW
+# HEAD, which the guard/scoping never shortens — the address goes out on the
+# T1 CEN_p and the strobe falls on the T1 CEN_n, half a T-state later, and
+# ch2_addr_1 captures ~2 clk_sdram after the req edge (ch2_req is decoded
+# from the strobe).  At the fastest CE (/2, 10.74MHz) half a T-state =
+# 1 clk21m = 4 clk_sdram, so launch-to-capture is >= 4+2 = 6 clk_sdram —
+# meets the 6-cycle budget below exactly (and has shipped that way at 10.74
+# since the turbo commit; stock has 4x that margin).  If the budget is ever
+# raised above 6, this head window is the number it must be checked against.
+# The msx_slots mapper combinational chain that ends at sdram|ch2_addr_1[*]|d
+# therefore has the full head window to settle, not 1 cycle.  Quartus single-
 # cycle analysis flags this as -9.1 ns slack even though the data is
 # stable far longer than 1 clk_sdram cycle.
 #

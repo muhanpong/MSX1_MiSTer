@@ -261,10 +261,12 @@ end
 // assumes.  Both are fatal, not cosmetic:
 //
 //   (a) clk_en-gated capture.  IKASCC latches the SCC FREQ/VOL/deform registers
-//       inside `if(!mclkpcen_n)` (= ce_3m58_p), opll latches on .cen, fdc on
-//       .ce.  A write window that contains no ce_3m58_p edge is simply DROPPED
-//       -> SCC/OPLL music dies.  (SCC wave RAM is RAMCTRL_ASYNC=1 and jt49's
-//       register file runs on raw clk21m, so those two are already immune.)
+//       inside `if(!mclkpcen_n)` (= ce_3m58_p) and opll latches on .cen
+//       (= ce_3m58_p).  A write window that contains no ce_3m58_p edge is
+//       simply DROPPED -> SCC/OPLL music dies.  (SCC wave RAM is
+//       RAMCTRL_ASYNC=1, jt49's register file runs on raw clk21m, and the FDC
+//       runs on clk_en_cpu = ce_cpu_p which scales with the CPU, so those
+//       three are already immune — device audit 20260825.)
 //   (b) SDRAM ch2 read latency.  ch2 is OPEN LOOP - sdram.sv states plainly
 //       "ch2 has NO handshake" and ch2_ready is left unconnected in MSX1.sv.
 //       The CPU must not latch DI before the fixed ~24 clk_sdram (~6 clk21m)
@@ -300,6 +302,29 @@ end
 localparam int GUARD_RD_DIV4 = 5;
 localparam int GUARD_RD      = 8;
 localparam int GUARD_WR      = 2;
+// SCOPING (P2, 20260825).  The stock-width window + guaranteed-ce_3m58 pair
+// is only needed where one of the two hard limits actually applies:
+//   * limit (a) — ce_3m58-latched devices.  Memory-mapped: the SCC register
+//     windows and the FM-PAC OPLL pair, decoded as `slow_dev` by msx_slots.
+//     I/O: kept slow WHOLESALE (~iorq_n) — OPLL 0x7C/7D lives there, the VDP
+//     has its own pacer anyway, and memory cycles dominate so the win from
+//     auditing every port is negligible against the risk.
+//   * limit (b) — SDRAM ch2 open-loop read latency.  Worst case measured from
+//     sdram.sv: edge-detect(2) + ongoing burst(6) + emergency refresh(7) +
+//     own ACTIVE->capture(5) ≈ 20 clk_sdram = 5 clk21m.  GUARD_RD_FAST = 5
+//     releases at >=5 counted cycles; the CPU then needs >=1 more T-state
+//     before it latches DI, so consumption lands at >=7 clk21m = 28 clk_sdram
+//     after the strobe fell — 8 clk_sdram of margin over the worst case.
+//     (BRAM reads have 1-clk latency and are trivially covered.)
+// Everything else (plain ROM/RAM fetches — the overwhelming majority of bus
+// cycles) drops the ce_3m58 requirement and runs at the fast floor.  Writes
+// keep GUARD_WR on both paths: SDRAM write req edges are spaced >=3 T-states
+// apart by Z80 M-cycle structure, which exceeds the ch2 queue-turnaround
+// worst case at every speed.
+// NOTE: the SDC multicycle on *sdram*ch2_* is justified by the WINDOW HEAD
+// (addr-valid to strobe-fall is T80-fixed at >=1 T-state); this scoping only
+// shortens the TAIL (WAIT release), so that constraint stays valid.
+localparam int GUARD_RD_FAST = 5;
 
 // ARM on the M-cycle (MREQ/IORQ), MEASURE on the transfer strobe (`req`).
 // The two must be separate: T80pa samples WAIT_n at the SAME CEN_n edge on
@@ -348,10 +373,17 @@ end
 //
 // cpu_turbo == 0 short-circuits the whole guard, so wait_n === wait_m1_n and
 // the stock core is reproduced exactly.
+wire slow_dev;   // from msx_slots: this memory access hits a ce_3m58-latched device
+wire guard_slow  = ~iorq_n | slow_dev;
 wire [3:0] guard_rd   = (cpu_speed_q == 2'd1) ? GUARD_RD_DIV4[3:0] : GUARD_RD[3:0];
-wire [3:0] guard_min  = wr_n ? guard_rd : GUARD_WR[3:0];
-wire bus_guard_n = ~cpu_turbo | ~bus_cycle | (mreq_n & rd_n & wr_n)
-                              | (guard_ce & (guard_cnt >= guard_min));
+wire [3:0] guard_min  = wr_n ? (guard_slow ? guard_rd : GUARD_RD_FAST[3:0])
+                             : GUARD_WR[3:0];
+// The ce_3m58 requirement protects only the slow set; dropping it on the fast
+// path is what recovers the throughput (a fast read no longer waits up to a
+// full 3.58MHz period for an edge it does not need).
+wire guard_open  = guard_slow ? (guard_ce & (guard_cnt >= guard_min))
+                              :             (guard_cnt >= guard_min);
+wire bus_guard_n = ~cpu_turbo | ~bus_cycle | (mreq_n & rd_n & wr_n) | guard_open;
 
 //  -----------------------------------------------------------------------------
 //  -- TURBO VDP PACER
@@ -407,7 +439,8 @@ end
 wire vdp_hold  = cpu_turbo & vdp_bus & ~vdp_grant;
 wire vdp_pace_n = ~(cpu_turbo & vdp_bus & (~vdp_grant | (vdp18 & (vdp_hcnt < 3'd4))));
 
-wire wait_n      = wait_m1_n & bus_guard_n & vdp_pace_n;
+wire opll_pace_n;   // turbo OPLL write pacer, from msx_slots (spec inter-write gaps)
+wire wait_n      = wait_m1_n & bus_guard_n & vdp_pace_n & opll_pace_n;
 
 logic map_valid = 0;
 wire ppi_en = ~ppi_n;
@@ -831,6 +864,9 @@ msx_slots msx_slots
    .cpu_rd(~rd_n),
    .cpu_wr(~wr_n),
    .sound(cart_sound),
+   .slow_dev(slow_dev),
+   .cpu_turbo(cpu_turbo),
+   .opll_pace_n(opll_pace_n),
    .opll_vol(opll_vol),
    .scc_vol(scc_vol),
    .ram_addr(ram_addr),

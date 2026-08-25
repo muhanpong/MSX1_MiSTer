@@ -22,7 +22,12 @@
 `timescale 1ns/1ps
 
 // --- verbatim copy of the guard added to rtl/msx.sv -------------------------
-module guard #(parameter int GUARD_RD = 8, parameter int GUARD_WR = 2) (
+// P2 scoping (20260825): `slow_dev` marks an access to a ce_3m58-latched
+// device; I/O cycles are slow wholesale.  Slow keeps the stock threshold AND
+// the ce_3m58 requirement; fast (plain memory) uses GUARD_RD_FAST and drops
+// the ce requirement.
+module guard #(parameter int GUARD_RD = 8, parameter int GUARD_WR = 2,
+               parameter int GUARD_RD_FAST = 5) (
    input  logic clk21m,
    input  logic reset,
    input  logic ce_3m58_p,
@@ -31,6 +36,7 @@ module guard #(parameter int GUARD_RD = 8, parameter int GUARD_WR = 2) (
    input  logic iorq_n,
    input  logic rd_n,
    input  logic wr_n,
+   input  logic slow_dev,
    output logic bus_guard_n
 );
    // MUST mirror rtl/msx.sv exactly.  Counting on the core's `req` is what
@@ -49,9 +55,12 @@ module guard #(parameter int GUARD_RD = 8, parameter int GUARD_WR = 2) (
          if (ce_3m58_p)         guard_ce  <= 1'b1;
       end
    end
-   wire [3:0] guard_min = wr_n ? GUARD_RD[3:0] : GUARD_WR[3:0];
-   assign bus_guard_n = ~cpu_turbo | ~bus_cycle | (mreq_n & rd_n & wr_n)
-                                   | (guard_ce & (guard_cnt >= guard_min));
+   wire guard_slow = ~iorq_n | slow_dev;
+   wire [3:0] guard_min = wr_n ? (guard_slow ? GUARD_RD[3:0] : GUARD_RD_FAST[3:0])
+                               : GUARD_WR[3:0];
+   wire guard_open = guard_slow ? (guard_ce & (guard_cnt >= guard_min))
+                                :             (guard_cnt >= guard_min);
+   assign bus_guard_n = ~cpu_turbo | ~bus_cycle | (mreq_n & rd_n & wr_n) | guard_open;
 endmodule
 
 // --- hand translation of T80pa.vhd's phase/T-state/strobe machinery ---------
@@ -65,6 +74,7 @@ module cpu_model (
    output logic iorq_n,
    output logic rd_n,
    output logic wr_n,
+   output logic slow_acc,      // this M-cycle targets a ce_3m58-latched device
    output int   mcycles_done
 );
    // M-cycle kinds
@@ -99,6 +109,13 @@ module cpu_model (
    logic       is_write;
 
    assign is_write = (kind == K_WR) || (kind == K_IO && seq_i[0]);
+
+   // Two of the memory cycles are "SCC-window" accesses: seq[5] (a write) and
+   // seq[9] (a read).  Like the real slow_dev this is a level decode of the
+   // M-cycle identity, stable for the whole window.  I/O cycles are slow via
+   // ~iorq_n inside the guard, not via this mark.
+   localparam bit [SEQLEN-1:0] SLOW_MARK = 16'h0220;
+   assign slow_acc = SLOW_MARK[seq_i];
 
    function automatic int last_t(input int k);
       case (k)
@@ -218,6 +235,11 @@ module tb_turbo_guard;
    wire cpu_turbo = guard_on & ((|cpu_speed) | force_turbo);
 
    int  guard_sel = 8;
+   // all_slow forces every access onto the slow path = the pre-scoping guard,
+   // used as the legacy baseline the scoped configuration must beat.
+   logic all_slow = 1'b0;
+   wire  cpu_slow_acc;
+   wire  slow_sig = all_slow | cpu_slow_acc;
    wire [8:0] guard_n_bank;
    generate
       genvar gi;
@@ -225,7 +247,8 @@ module tb_turbo_guard;
          guard #(.GUARD_RD(gi), .GUARD_WR((gi > 6) ? gi - 6 : 0)) u_guard (
             .clk21m(clk21m), .reset(reset), .ce_3m58_p(ce_3m58_p),
             .cpu_turbo(cpu_turbo), .mreq_n(mreq_n), .iorq_n(iorq_n),
-            .rd_n(rd_n), .wr_n(wr_n), .bus_guard_n(guard_n_bank[gi])
+            .rd_n(rd_n), .wr_n(wr_n), .slow_dev(slow_sig),
+            .bus_guard_n(guard_n_bank[gi])
          );
       end
    endgenerate
@@ -236,79 +259,102 @@ module tb_turbo_guard;
       .ce_cpu_p(ce_cpu_p), .ce_cpu_n(ce_cpu_n),
       .wait_n(bus_guard_n),
       .mreq_n(mreq_n), .iorq_n(iorq_n), .rd_n(rd_n), .wr_n(wr_n),
+      .slow_acc(cpu_slow_acc),
       .mcycles_done(mcycles)
    );
 
    always #23.28 clk21m = ~clk21m;
 
    // --- window measurement ---------------------------------------------------
+   // slow/fast are tracked separately: the stock-width + ce_3m58 invariants
+   // apply only to the SLOW set (I/O + slow_dev); the FAST set must merely
+   // keep every READ window at or above the SDRAM ch2 deadline.
    int  win_len, win_ce, win_min, win_max, n_win, n_win_noce, n_win_short, cyc;
-   int  win_min_rd, win_min_wr;
-   logic win_is_wr;
+   int  win_min_rd, win_min_wr;          // slow set
+   int  fast_min_rd, fast_min_wr;        // fast set
+   int  n_noce_slow;
+   logic win_is_wr, win_is_slow;
    int  m0;
    logic req_d;
 
    localparam int SDRAM_DEADLINE = 6;   // ~24 clk_sdram at 85.9MHz = 6 clk21m
 
    task automatic measure(input [1:0] spd, input bit g_on, input string label,
-                          input int thr = 8, input bit ftur = 1'b0);
+                          input int thr = 8, input bit ftur = 1'b0,
+                          input bit aslow = 1'b0);
       begin
          cpu_speed = spd; guard_on = g_on; guard_sel = thr; force_turbo = ftur;
+         all_slow = aslow;
          repeat (12) @(posedge clk21m);
          while (u_clock.clkdiv6 !== 3'd5) @(posedge clk21m);
          while (xfer) @(posedge clk21m);     // never count a partial window
          win_len = 0; win_ce = 0; win_min = 9999; win_max = 0;
          n_win = 0; n_win_noce = 0; n_win_short = 0; req_d = 0;
          win_min_rd = 9999; win_min_wr = 9999;
+         fast_min_rd = 9999; fast_min_wr = 9999; n_noce_slow = 0;
          m0 = mcycles;
          for (cyc = 0; cyc < NCYC; cyc++) begin
             @(posedge clk21m); #1;
             if (xfer) begin
-               if (win_len == 0) win_is_wr = ~wr_n;
+               if (win_len == 0) begin
+                  win_is_wr   = ~wr_n;
+                  win_is_slow = slow_sig | ~iorq_n;   // same classification the guard sees
+               end
                win_len++;
                if (ce_3m58_p) win_ce++;
             end else if (req_d) begin       // window just closed
                n_win++;
                if (win_len < win_min) win_min = win_len;
                if (win_len > win_max) win_max = win_len;
-               if ( win_is_wr && win_len < win_min_wr) win_min_wr = win_len;
-               if (!win_is_wr && win_len < win_min_rd) win_min_rd = win_len;
-               if (win_ce == 0)               n_win_noce++;
-               if (win_len < SDRAM_DEADLINE)  n_win_short++;
+               if (win_is_slow) begin
+                  if ( win_is_wr && win_len < win_min_wr) win_min_wr = win_len;
+                  if (!win_is_wr && win_len < win_min_rd) win_min_rd = win_len;
+                  if (win_ce == 0) n_noce_slow++;
+               end else begin
+                  if ( win_is_wr && win_len < fast_min_wr) fast_min_wr = win_len;
+                  if (!win_is_wr && win_len < fast_min_rd) fast_min_rd = win_len;
+               end
+               if (win_ce == 0)                              n_win_noce++;
+               if (!win_is_wr && win_len < SDRAM_DEADLINE)   n_win_short++;
                win_len = 0; win_ce = 0;
             end
             req_d = xfer;
          end
          last_mcyc = mcycles - m0;
-         $display("  %-26s %5d %5d %5d %6d  %8d %10d %11d",
-                  label, win_min_rd, win_min_wr, win_max, n_win, n_win_noce,
-                  n_win_short, last_mcyc);
+         $display("  %-26s %5d %5d %5d %5d %5d %6d  %8d %8d %11d",
+                  label, win_min_rd, win_min_wr, fast_min_rd, fast_min_wr,
+                  win_max, n_win, n_noce_slow, n_win_short, last_mcyc);
       end
    endtask
 
    int errors = 0;
    int checks = 0;
    int base_mcyc;
+   int legacy_mcyc;
    int last_mcyc;
 
    task automatic chk(input string what, input bit ok);
       begin checks++; if (!ok) begin errors++; $display("  FAIL: %s", what); end end
    endtask
 
-   // Every turbo configuration must satisfy all four, or the feature is unsafe:
-   //   the CPU must actually run; the transfer windows must be no shorter than
-   //   the stock 12 (read) / 6 (write) clk21m; every window must contain a
-   //   ce_3m58_p (or a clk_en-captured device drops the write); and no window
-   //   may close before the open-loop SDRAM ch2 deadline.
+   // Every turbo configuration must satisfy all of these, or it is unsafe:
+   //   the CPU must actually run; SLOW windows (I/O + slow_dev) must be no
+   //   shorter than the stock 12 (read) / 6 (write) clk21m and must every one
+   //   contain a ce_3m58_p (or a clk_en-captured device drops the write); no
+   //   READ window — fast or slow — may close before the open-loop SDRAM ch2
+   //   deadline; and fast writes must stay wide enough for the ch2 req edge
+   //   detector (>=3 clk21m is comfortable against its 1-clk21m floor).
    task automatic assert_safe(input string label);
       begin
          chk($sformatf("%s: CPU is running (not hung)", label), last_mcyc > 0);
-         chk($sformatf("%s: read window >= 12 (got %0d)",  label, win_min_rd), win_min_rd >= 12);
-         chk($sformatf("%s: write window >= 6 (got %0d)",  label, win_min_wr), win_min_wr >= 6);
-         chk($sformatf("%s: every window has a ce_3m58_p (got %0d without)", label, n_win_noce),
-             n_win_noce == 0);
-         chk($sformatf("%s: no window under the SDRAM deadline (got %0d)", label, n_win_short),
+         chk($sformatf("%s: slow read window >= 12 (got %0d)",  label, win_min_rd), win_min_rd >= 12);
+         chk($sformatf("%s: slow write window >= 6 (got %0d)",  label, win_min_wr), win_min_wr >= 6);
+         chk($sformatf("%s: every slow window has a ce_3m58_p (got %0d without)", label, n_noce_slow),
+             n_noce_slow == 0);
+         chk($sformatf("%s: no read window under the SDRAM deadline (got %0d)", label, n_win_short),
              n_win_short == 0);
+         chk($sformatf("%s: fast write window >= 3 (got %0d)", label, fast_min_wr),
+             fast_min_wr >= 3);
       end
    endtask
    initial begin
@@ -318,9 +364,10 @@ module tb_turbo_guard;
 
       $display("=== tb_turbo_guard === (%0d clk21m cycles per run)", NCYC);
       $display("");
-      $display("  configuration              minRD minWR   max windows  no-CE-hit  <%0d cycles  M-cycles/run",
+      $display("  sRD/sWR = slow-set (I/O + slow_dev) window minima, fRD/fWR = fast-set.");
+      $display("  configuration               sRDm  sWRm  fRDm  fWRm   max windows  noCEslow  rd<%0d  M-cycles/run",
                SDRAM_DEADLINE);
-      $display("  ------------------------------------------------------------------------------------");
+      $display("  ------------------------------------------------------------------------------------------");
       measure(2'd0, 1'b1, "3.58MHz (stock)");
       // Diagnostic row: the guard is NOT inert at 3.58MHz.  A stock read
       // window is 12 clk21m and the guard needs cnt>=8 by the T2 CEN_n edge,
@@ -363,11 +410,22 @@ module tb_turbo_guard;
       measure(2'd3, 1'b1, "10.7MHz  guard ON");
       assert_safe("10.7MHz");
       chk($sformatf("10.7MHz is faster than stock"), last_mcyc > base_mcyc);
+
+      // --- P2 scoping: legacy (everything slow) vs scoped, same speed --------
+      measure(2'd3, 1'b1, "10.7MHz  legacy all-slow", 8, 1'b0, 1'b1);
+      assert_safe("10.7MHz legacy");
+      legacy_mcyc = last_mcyc;
+      measure(2'd3, 1'b1, "10.7MHz  scoped (P2)");
+      assert_safe("10.7MHz scoped");
+      chk($sformatf("scoped 10.7MHz beats legacy all-slow (%0d vs %0d)",
+                    last_mcyc, legacy_mcyc), last_mcyc > legacy_mcyc);
+      chk($sformatf("scoped 10.7MHz reaches at least 1.9x stock (%0d vs %0d)",
+                    last_mcyc, base_mcyc), last_mcyc * 10 >= base_mcyc * 19);
       $display("");
       $display("  GUARD_RD sweep at 10.7MHz (x3), GUARD_WR = max(GUARD_RD-6,0):");
-      $display("  configuration              minRD minWR   max windows  no-CE-hit  <%0d cycles  M-cycles/run",
+      $display("  configuration               sRDm  sWRm  fRDm  fWRm   max windows  noCEslow  rd<%0d  M-cycles/run",
                SDRAM_DEADLINE);
-      $display("  ------------------------------------------------------------------------------------");
+      $display("  ------------------------------------------------------------------------------------------");
       for (int t = 0; t <= 8; t++) begin
          measure(2'd3, 1'b1, $sformatf("10.7MHz  GUARD_RD=%0d", t), t);
       end
@@ -375,7 +433,12 @@ module tb_turbo_guard;
       $display("  (GUARD_RD sweep is diagnostic only - not asserted)");
       $display("");
       $display("tb_turbo_guard: %0d checks, %0d errors", checks, errors);
-      $finish(errors ? 1 : 0);
+      // $finish's argument is display VERBOSITY per IEEE 1800, NOT an exit code --
+      // the simulator exits 0 from any $finish, so the old `$finish(errors?1:0)`
+      // could never fail the run_turbo.sh gate.  $fatal is the call that
+      // produces a nonzero process exit status.
+      if (errors) $fatal(1, "TB failed with %0d errors", errors);
+      $finish;
    end
 
 endmodule

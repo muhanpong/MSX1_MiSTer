@@ -377,3 +377,71 @@ Swapping the counter's gate to the level `bus_xfer` gives `guard RELEASED after 
 **T2 — INTA deadlocks even with that fix.** Model `Auto_Wait` (`T80.vhd:1165-1179`, holds `TState = 1`
 for 3 core ticks), the `IntCycleD_n` shift (`T80pa.vhd:178-182`), and T80pa's `CEN_pol` FSM; sample
 `WAIT_n` at the TState-2 `CEN_n` edge. Adding `~inta` to `bus_cycle` is what releases it.
+
+---
+
+## P2 — guard scoping (20260825)
+
+The v1 guard held EVERY bus window to stock width + a guaranteed ce_3m58_p, so
+effective speed saturated well below the CE-rate label (10.74MHz setting ≈
+1.7× stock).  P2 scopes the slow treatment to where the two hard limits apply:
+
+* **Slow set** = all I/O cycles (`~iorq_n`) + `slow_dev` from msx_slots
+  (SCC/SCC+ register windows of konami_scc/mfrsd/yamanooto, FM-PAC
+  memory-mapped OPLL 0x(7/B)FF4-5 — the only remaining ce_3m58-latched
+  destinations; audit 20260825).  Behavior unchanged: stock threshold + guard_ce.
+* **Fast set** = every other memory cycle.  Reads release at GUARD_RD_FAST=5
+  (SDRAM ch2 open-loop worst case ≈ 20 clk_sdram = 5 clk21m; consumption lands
+  ≥ 28 clk_sdram, 8 cycles of margin), writes keep GUARD_WR; the guard_ce
+  requirement is dropped.
+
+Measured (tb_turbo_guard mix): 10.7MHz scoped = **2.07× stock** vs 1.72×
+legacy.  All safety stats hold: slow windows ≥ 12/6 with ce, every read window
+≥ the ch2 deadline.
+
+Two findings worth keeping:
+
+1. **Emergent write invariant.** CEN p/n granularity + the guard_cnt register
+   delay round every guarded write strobe up to ≥ 6 clk21m = one ce_3m58
+   period, at every speed — so even a fast-misclassified SCC write cannot miss
+   the enable edge *at the current constants*.  The slow classification is
+   therefore defense in depth; tb_turbo_slowdev pins the invariant with
+   misclassification probes that fail the suite if GUARD_WR/GUARD_RD_FAST are
+   ever cut below one ce period.
+2. **T3 was never actually fixed.** `$finish(errors ? 1 : 0)` passes a display
+   VERBOSITY, not an exit code — Verilator exits 0 from any $finish, so the
+   run_turbo.sh gate could not fail (observed: "FAIL (2 failures)" → exit 0).
+   All four TBs now use `$fatal(1, ...)` on errors; the failure path is
+   verified to return exit 1.
+
+SDC note: the `*sdram*ch2_*` multicycle stays valid — its budget comes from the
+window HEAD (T80 addr-valid to strobe-fall, ≥ 1 T-state, unchanged), while P2
+only shortens the TAIL (WAIT release).
+
+## OPLL pacer (20260826)
+
+Hardware confirmed the long-suspected turbo OPLL corruption: present in every
+turbo build, P2-independent.  Root cause is SPACING, not window width — the
+one thing a bus guard cannot fix.  IKAOPLL (like the real YM2413) takes a CPU
+write into a single temporary latch (`IKAOPLL_reg.v` `dbus_inlatch`) and
+commits it when the internal 18-slot rotation reaches the register, up to 72
+XIN cycles later; the datasheet demands 12 XIN after an address write and 84
+XIN after a data write, which MSX-MUSIC drivers enforce with software delay
+loops.  Turbo shrinks those loops → the next write clobbers the uncommitted
+latch.
+
+Fix: TURBO OPLL PACER in msx_slots.sv, mirroring the VDP pacer.  While the
+spec gap from the previous OPLL write (addr 72 / data 504 clk21m) has not
+elapsed, the chip's write strobe is masked and `opll_pace_n` holds the CPU in
+msx.sv's wait_n chain; after the grant the hold persists until one clk_en edge
+passes with the strobe visible (the same capture guarantee the guard gives
+slow windows).  Gated on `cpu_turbo` — stock is bit-identical.  Classification
+and arming use the COMBINATIONAL FM-PAC window decode (`fmpac_opll_win`), not
+the 1-clk-late registered `fmpac_opll_wr`.
+
+Verified (tb_turbo_slowdev, temp-latch + rotation commit model, worst-case
+back-to-back addr/data stream): paced turbo loses 0 at 5.37/7.16/10.7 with
+throughput matching the spec arithmetic (~1 write per ~295 clk21m); the
+unpaced turbo control loses 65928/80001 (the defect); an over-spec stream at
+stock loses too (22223) — chip-faithful, and why the pacer stays transparent
+there.

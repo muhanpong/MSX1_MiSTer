@@ -172,7 +172,12 @@ module tb_turbo_clock;
       $display("");
       if (errors == 0) $display("tb_turbo_clock: PASS (0 errors)");
       else             $display("tb_turbo_clock: FAIL (%0d errors)", errors);
-      $finish(errors ? 1 : 0);
+      // $finish's argument is display VERBOSITY per IEEE 1800, NOT an exit code --
+      // the simulator exits 0 from any $finish, so the old `$finish(errors?1:0)`
+      // could never fail the run_turbo.sh gate.  $fatal is the call that
+      // produces a nonzero process exit status.
+      if (errors) $fatal(1, "TB failed with %0d errors", errors);
+      $finish;
    end
 
 endmodule

@@ -284,6 +284,11 @@ module tb_fdc_edge;
          $display("tb_fdc_edge: one-tick pacer lost nothing");
       else
          $display("tb_fdc_edge: one-tick pacer LOSES accesses in %0d of 54 runs", errors);
-      $finish(errors ? 1 : 0);
+      // $finish's argument is display VERBOSITY per IEEE 1800, NOT an exit code --
+      // the simulator exits 0 from any $finish, so the old `$finish(errors?1:0)`
+      // could never fail the run_turbo.sh gate.  $fatal is the call that
+      // produces a nonzero process exit status.
+      if (errors) $fatal(1, "TB failed with %0d errors", errors);
+      $finish;
    end
 endmodule

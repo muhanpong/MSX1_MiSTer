@@ -68,6 +68,14 @@ module msx_slots
    output logic      [15:0] flash16x_size[2],
    // ASCII16X write-time capture (for change-log persistence)
    output                   flash16x_prog_we,
+   // Turbo guard scoping: current memory access targets a ce_3m58-latched
+   // device (SCC/SCC+ register window, FM-PAC memory-mapped OPLL).  See the
+   // assign near the opll instance and the TURBO BUS GUARD block in msx.sv.
+   output                   slow_dev,
+   // Turbo OPLL write pacer (see the block near the opll instance): msx.sv
+   // ANDs opll_pace_n into wait_n exactly like vdp_pace_n.
+   input                    cpu_turbo,
+   output                   opll_pace_n,
    output            [22:0] flash16x_prog_addr,
    output             [7:0] flash16x_prog_data
 );
@@ -534,6 +542,63 @@ cart_fm_pac fm_pac
 );
 
 wire opll_io_wr  = cpu_addr[7:1] == 7'b0111110 & cpu_iorq & ~cpu_m1 & cpu_wr; //7C - 7D
+// FM-PAC memory-mapped OPLL pair 0x(7/B)FF4-5 as a COMBINATIONAL window —
+// fmpac_opll_wr is registered one clk late in fm_pac.sv and misses the T80
+// WAIT_n sample edge, so neither the guard scoping nor the pacer may use it
+// for classification/arming.  (It stays the actual write strobe to the chip.)
+wire fmpac_opll_win = (mapper == MAPPER_FMPAC) & cpu_mreq & cpu_addr[13:1] == 13'h1FFA;
+
+//  -----------------------------------------------------------------------------
+//  -- TURBO OPLL PACER
+//  -----------------------------------------------------------------------------
+// The bus guard fixes the WIDTH of one OPLL write; it cannot fix the GAP to
+// the next one.  IKAOPLL (like the real YM2413) takes a CPU write into a
+// single temporary latch (IKAOPLL_reg.v dbus_inlatch) and only commits it
+// when the internal 18-slot rotation reaches the target register — up to
+// 72 XIN cycles later.  The datasheet therefore demands 12 XIN after an
+// address write and 84 XIN after a data write, and MSX-MUSIC drivers keep
+// that spec with SOFTWARE delay loops — which shrink at turbo, so a second
+// write clobbers the uncommitted latch and the music corrupts.
+// This pacer enforces the spec in hardware, mirroring the VDP pacer: while
+// the gap from the previous OPLL write has not elapsed, the write strobe to
+// the chip is masked and msx.sv holds the CPU via opll_pace_n; once granted,
+// the hold persists until one clk_en edge has passed with the strobe visible
+// (= the capture guarantee the guard gives every slow window).  Gated on
+// cpu_turbo, so stock stays bit-identical.  Music-register writes thus run
+// at stock speed under turbo — exactly what the drivers' delay loops did.
+localparam [9:0] OPLL_GAP_ADDR = 10'd72;    // 12 XIN * 6 clk21m
+localparam [9:0] OPLL_GAP_DATA = 10'd504;   // 84 XIN * 6 clk21m
+
+wire opll_win = opll_io_wr | (fmpac_opll_win & cpu_wr);   // any OPLL-bound write window
+logic [9:0] opll_gap   = '0;
+logic       opll_grant = 1'b0;
+logic       opll_done  = 1'b0;   // chip-visible strobe has spanned a clk_en edge
+logic       opll_a0    = 1'b0;   // A0 of the granted write, for the reload value
+always @(posedge clk) begin
+   if (reset) begin
+      opll_gap <= '0; opll_grant <= 1'b0; opll_done <= 1'b0;
+   end else if (~opll_win) begin
+      // window closed: a granted+captured write starts the spec gap
+      if (opll_grant & opll_done) opll_gap <= opll_a0 ? OPLL_GAP_DATA : OPLL_GAP_ADDR;
+      else if (|opll_gap)         opll_gap <= opll_gap - 1'd1;
+      opll_grant <= 1'b0;
+      opll_done  <= 1'b0;
+   end else begin
+      if (~opll_grant) begin
+         if (~|opll_gap) begin
+            opll_grant <= 1'b1;
+            opll_a0    <= cpu_addr[0];
+         end else opll_gap <= opll_gap - 1'd1;
+      end else if (clk_en & opll_wr_chip) opll_done <= 1'b1;
+   end
+end
+// At stock the gate is forced open and pace_n forced released, so the chip
+// sees exactly the ungated strobes.  The counter itself always runs, so a
+// mid-tune speed switch keeps the pacing history.
+wire opll_wr_gate = ~cpu_turbo | opll_grant;
+wire opll_wr_chip = (opll_io_wr | fmpac_opll_wr[0] | fmpac_opll_wr[1]) & opll_wr_gate;
+assign opll_pace_n = ~(cpu_turbo & opll_win & ~(opll_grant & opll_done));
+
 wire signed [15:0] sound_OPL_int, sound_OPL_EXT[2];
 wire signed [15:0] sound_opll;
 opll opll
@@ -543,10 +608,30 @@ opll opll
    .cen(clk_en),
    .din(cpu_dout),
    .addr(cpu_addr[0]),
-   .wr({opll_io_wr, (opll_io_wr & fmpac_opll_io_enable[1]) | fmpac_opll_wr[1] , (opll_io_wr & fmpac_opll_io_enable[0]) | fmpac_opll_wr[0]}),
+   .wr({3{opll_wr_gate}} & {opll_io_wr, (opll_io_wr & fmpac_opll_io_enable[1]) | fmpac_opll_wr[1] , (opll_io_wr & fmpac_opll_io_enable[0]) | fmpac_opll_wr[0]}),
    .cs({|(msx_device & DEV_OPL3), |(cart_device[1] & DEV_OPL3), |(cart_device[0] & DEV_OPL3)}),
    .sound(sound_opll)
 );
+
+//  -----------------------------------------------------------------------------
+//  -- TURBO GUARD SCOPING
+//  -----------------------------------------------------------------------------
+// Memory-mapped destinations whose registers latch on ce_3m58 rather than the
+// CPU rate — the only two families left in the design (device audit 20260825):
+//   * SCC/SCC+ register windows: IKASCC samples freq/vol/mute/deform at
+//     !mclkpcen_n (= ce_3m58_p).  Wave RAM is async and would be safe fast,
+//     but the whole window stays slow — narrowing by cpu_addr[7] buys little
+//     and interacts with the SCC+ ch5 remap.
+//   * FM-PAC memory-mapped OPLL pair 0x(7/B)FF4-5: IKAOPLL phiM cen = clk_en.
+//     Decoded here combinationally — fmpac_opll_wr is REGISTERED one clk late
+//     in fm_pac.sv and must not be used for guard classification.
+// The sccReq terms are strobe-gated; that is safe for the guard because its
+// counter only advances while a strobe is low, so the classification is valid
+// from the first counted cycle and constant across the window (address and
+// mapper state are stable while the strobe is asserted).
+// I/O cycles never consult this — msx.sv keeps ALL of them on the slow path.
+assign slow_dev = mapper_konami_scc_sccReq | mapper_mfrdsd1_sccReq | mapper_yamanooto_sccReq
+                | fmpac_opll_win;
 
 wire        device_kanji_ram_ce;
 wire [26:0] device_kanji_addr;
