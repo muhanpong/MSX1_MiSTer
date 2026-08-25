@@ -255,12 +255,15 @@ wire      [64:0] rtc;
 //[37:36] CPU SPEED (turbo)
 //[38]    BORDER
 //[48]    DEBUG OVERLAY
-//[50:49] SLOT A SUB-SLOT DEVICE (expanded cart slot; was OPL4 PCM VOLUME)
+//[50:49] free (was OPL4 PCM VOLUME, 2-bit)
 //[51]    CHEATS
-//[53:52] SLOT B SUB-SLOT DEVICE (expanded cart slot; was OPL4 FM VOLUME)
-//[60]    SLOT EXPANSION master toggle (No = the classic non-expanded menu)
+//[53:52] free (was OPL4 FM VOLUME, 2-bit)
 //[56:54] OPL4 PCM VOLUME (5 steps, first entry = default)
 //[59:57] OPL4 FM VOLUME  (5 steps, first entry = default)
+//[71]    SLOT A sub-slots On/Off (expanded cart slot)
+//[72]    SLOT B sub-slots On/Off
+//[84:73] SLOT A sub-slot 0..3 device, 3 bits each (None,ROM,SCC,SCC+,FM-PAC,GameMaster2)
+//[96:85] SLOT B sub-slot 0..3 device, 3 bits each (GameMaster2 never on B)
 `include "build_id.v" 
 localparam CONF_STR = {
    "MSX1;",
@@ -268,12 +271,15 @@ localparam CONF_STR = {
    "FC1,MSX,Load ROM PACK,30000000;",
    "FC2,MSX,Load FW  PACK,32000000;",
    CONF_STR_SLOT_A,
+   CONF_STR_EXPAND_A,
+   CONF_STR_SUBSLOT_A,
    "H3FS3,ROM,Load,30C00000;",
    CONF_STR_MAPPER_A,
    CONF_STR_SRAM_SIZE_A,
-   CONF_STR_SUBSLOT_A,
    "-;",
    CONF_STR_SLOT_B,
+   CONF_STR_EXPAND_B,
+   CONF_STR_SUBSLOT_B,
    // Deliberately F, NOT FS.  The S would set `opensave`, and user_io.cpp:2937
    // mounts the companion <rom>.sav with a HARDCODED drive index 0 -- there is only
    // ever ONE save image and it is on VD0.  Adding S to slot B therefore does not
@@ -285,7 +291,6 @@ localparam CONF_STR = {
    // answer, not a CONF_STR flag.
    "H4F4,ROM,Load,33000000;",
    CONF_STR_MAPPER_B,
-   CONF_STR_SUBSLOT_B,
    "H6-;",
    "H6R[38],SRAM Save;",
    "H6R[39],SRAM Load;",
@@ -328,7 +333,6 @@ localparam CONF_STR = {
    "P2O[70:69],SCC Volume,0dB,+4dB,-4dB,-8dB;",
    "-;",
    "O[64],Reset on ROM change,Yes,No;",
-   CONF_STR_SLOT_EXPANSION,
    "O[48],Debug Overlay,Off,On;",
    "-;",
    "T[0],Reset;",
@@ -337,7 +341,7 @@ localparam CONF_STR = {
    "V,v",`BUILD_DATE 
 };
 
-wire [9:0] status_menumask;   // hps_io takes 16; [8:7] added for the sub-slot menus
+wire [10:0] status_menumask;  // hps_io takes 16; [10:7] = expanded-slot menu masks (CONF_STR H7..HA)
 wire [1:0] sdram_size;
 assign status_menumask[0] = msxConfig.cas_audio_src == CAS_AUDIO_ADC;
 assign status_menumask[1] = fdc_enabled;
@@ -350,9 +354,10 @@ assign status_menumask[5] = sram_A_select_hide;
 // buttons would be hidden, leaving the user no way to trigger a save.  ASCII16X
 // was already excepted for exactly this reason; Yamanooto needs the same, or its
 // newly-wired flash write path is unreachable from the UI.
-assign status_menumask[7] = subslot_A_hide;
-assign status_menumask[8] = subslot_B_hide;
-assign status_menumask[9] = 1'b0;
+assign status_menumask[7]  = slotA_classic_hide;   // slot A expanded -> hide its one-device line
+assign status_menumask[8]  = slotB_classic_hide;
+assign status_menumask[9]  = subA_page_hide;       // slot A not expanded -> hide "SLOT A sub-slots" page
+assign status_menumask[10] = subB_page_hide;       // 'A' in CONF_STR
 assign status_menumask[6] = (lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0)
                           & (cart_conf[0].selected_mapper != MAPPER_ASCII16X)
                           & (cart_conf[0].selected_mapper != MAPPER_YAMANOOTO)
@@ -397,7 +402,7 @@ hps_io #(.CONF_STR(CONF_STR),.VDNUM(VDNUM)) hps_io
 /////////////////   CONFIG   /////////////////
 wire [5:0] mapper_A, mapper_B;
 wire       reload, sram_A_select_hide, fdc_enabled, ROM_A_load_hide, ROM_B_load_hide;
-wire       subslot_A_hide, subslot_B_hide;
+wire       slotA_classic_hide, slotB_classic_hide, subA_page_hide, subB_page_hide;
 
 msx_config msx_config 
 (
@@ -412,8 +417,10 @@ msx_config msx_config
    .rom_loaded(rom_loaded),
    .rom_big(rom_big),
    .sram_A_select_hide(sram_A_select_hide),
-   .subslot_A_hide(subslot_A_hide),
-   .subslot_B_hide(subslot_B_hide),
+   .slotA_classic_hide(slotA_classic_hide),
+   .slotB_classic_hide(slotB_classic_hide),
+   .subA_page_hide(subA_page_hide),
+   .subB_page_hide(subB_page_hide),
    .ROM_A_load_hide(ROM_A_load_hide),
    .ROM_B_load_hide(ROM_B_load_hide),
    .fdc_enabled(fdc_enabled),

@@ -71,7 +71,7 @@ cart_konami_scc u_map (
    .mem_size(25'd128 << 14),              // 2 MB, not exercised here
    .cpu_addr(cpu_addr), .din(din),
    .cpu_mreq(cpu_mreq), .cpu_wr(cpu_wr), .cpu_rd(cpu_rd),
-   .cs(mapper_cs), .cart_num(cart_num),
+   .cs(mapper_cs), .cart_num(cart_num), .subslot(2'd0),
    .sccDevice(sccDevice),
    .mem_unmaped(mem_unmaped), .mem_addr(mem_addr),
    .scc_req(scc_req), .scc_mode(scc_mode)

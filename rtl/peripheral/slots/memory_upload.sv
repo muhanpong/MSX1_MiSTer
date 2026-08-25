@@ -289,7 +289,16 @@ module memory_upload
                                              ? 25'h800000 - ioctl_size[curr_conf == CONFIG_SLOT_A ? 2 : 3][24:0]
                                              : 25'd0;
                                  end else begin
-                                    state     <= STATE_READ_CONF;
+                                    // No file for this ROM row.  Skip just this subslot and
+                                    // keep walking -- an expanded slot may have devices in
+                                    // the subslots after it.  (Was: abort to READ_CONF.)
+                                    if (subslot < 2'd3) begin
+                                       subslot <= subslot + 1'd1;
+                                       state   <= STATE_CHECK_CONFIG;
+                                    end else begin
+                                       subslot <= 0;
+                                       state   <= STATE_READ_CONF;
+                                    end
                                  end
                               end
                               ROM_RAM: begin
@@ -518,7 +527,9 @@ module memory_upload
                         ddr3_addr <= save_addr; //restore
                         save_addr <= 28'd0;
                         if (curr_conf  == CONFIG_SLOT_A | curr_conf  == CONFIG_SLOT_B) begin
-                           if (cart_conf[curr_conf == CONFIG_SLOT_B].typ == CART_TYP_ROM) begin
+                           // "this row loaded the slot's ROM file" -- true for classic
+                           // typ==ROM and for an expanded slot's ROM/SCC subslot alike.
+                           if (cart_rom_id == ROM_ROM) begin
                               mapper <= cart_mapper;
                               if (cart_mapper == MAPPER_NONE) begin
                                  param <= detect_param;
@@ -626,7 +637,7 @@ wire [7:0] detect_mode, detect_param;
 mapper_detect mapper_detect 
 (
    .clk(clk),
-   .rst(state == STATE_READ_CONF),
+   .rst(state == STATE_READ_CONF | state == STATE_CHECK_CONFIG),   // per subslot: an SCC+ RAM fill before the ROM must not pollute the counters
    .data(ddr3_dout),
    .wr(ram_ce),
    .rom_size(ioctl_size[curr_conf == CONFIG_SLOT_A ? 2'd2 : 2'd3]),
@@ -649,7 +660,8 @@ cart_confDecoder cart_decoder
    .detected_mapper(detect_mapper),
    .selected_sram_size(cart_conf[curr_conf == CONFIG_SLOT_B].selected_sram_size),
    .subslot(subslot),
-   .subslot_dev(cart_conf[curr_conf == CONFIG_SLOT_B].selected_subslot_dev),
+   .expanded(cart_conf[curr_conf == CONFIG_SLOT_B].expanded),
+   .sub_dev(cart_conf[curr_conf == CONFIG_SLOT_B].subslot_dev[subslot]),
    .mapper(cart_mapper), 
    .mem_device(cart_mem_device),
    .rom_id(cart_rom_id),
@@ -669,7 +681,8 @@ module cart_confDecoder
    input  mapper_typ_t detected_mapper,
    input  logic  [7:0] selected_sram_size,
    input         [1:0] subslot,
-   input         [1:0] subslot_dev,
+   input               expanded,     // OSD "SLOT x sub-slots: On" -- typ is ignored, sub_dev rules
+   input subslot_dev_t sub_dev,      // = cart_conf.subslot_dev[subslot]
    output mapper_typ_t mapper, 
    output device_typ_t mem_device,
    output data_ID_t    rom_id,
@@ -693,6 +706,19 @@ assign rom_device = rom_mapper == MAPPER_KONAMI_SCC ? DEV_SCC                   
 
 
 assign                                        {mapper             , mem_device    , rom_id             , mode  , param , sram_size          , ram_size,   device               } = 
+   // ---- expanded cart slot: each subslot carries the OSD-chosen device ----------
+   // `typ` is ignored here (its menu is hidden while the slot is expanded).  Values
+   // are copied from the classic rows below.  ROM and SCC consume the slot's one ROM
+   // file, SCC+ is 128KB RAM + SCC-I, FM-PAC / GameMaster2 come from the FW PACK.
+   // msx_config has already enforced "at most one file consumer and at most one
+   // SRAM-bearing device (FM-PAC/GM2 share ref_sram) per slot".
+   expanded & sub_dev == SUB_ROM               ? {rom_mapper         , DEVICE_NONE   , ROM_ROM            , 8'hAA , 8'hE4 , selected_sram_size , 8'd0    ,   rom_device           } :
+   expanded & sub_dev == SUB_SCC               ? {MAPPER_KONAMI_SCC  , DEVICE_NONE   , ROM_ROM            , 8'hAA , 8'h00 , 8'd0               , 8'd0    ,   DEV_SCC              } :
+   expanded & sub_dev == SUB_SCC2              ? {MAPPER_KONAMI_SCC  , DEVICE_NONE   , ROM_RAM            , 8'hAA , 8'h00 , 8'd0               , 8'd8    ,   DEV_SCC2             } :
+   expanded & sub_dev == SUB_FMPAC             ? {MAPPER_FMPAC       , DEVICE_NONE   , ROM_FMPAC          , 8'h08 , 8'h00 , 8'd8               , 8'd0    ,   DEV_OPL3             } : //4000 - 7FFF
+   expanded & sub_dev == SUB_GM2               ? {MAPPER_GM2         , DEVICE_NONE   , ROM_GM2            , 8'hAA , 8'h00 , 8'd8               , 8'd0    ,   DEV_NONE             } :
+   expanded                                    ? {MAPPER_UNUSED      , DEVICE_NONE   , ROM_NONE           , 8'h00 , 8'h00 , 8'd0               , 8'd0    ,   DEV_NONE             } :
+   // ---- classic (non-expanded) cart slot: one device, chosen by typ ---------------
    typ == CART_TYP_ROM    & subslot == 2'd0 ? {rom_mapper         , DEVICE_NONE   , ROM_ROM            , 8'hAA , 8'hE4 , selected_sram_size , 8'd0    ,   rom_device           } :
    typ == CART_TYP_SCC    & subslot == 2'd0 ? {MAPPER_KONAMI_SCC  , DEVICE_NONE   , ROM_ROM            , 8'hAA , 8'h00 , 8'd0               , 8'd0    ,   DEV_SCC              } :
    typ == CART_TYP_SCC2   & subslot == 2'd0 ? {MAPPER_KONAMI_SCC  , DEVICE_NONE   , ROM_RAM            , 8'hAA , 8'h00 , 8'd0               , 8'd8    ,   DEV_SCC2             } :
@@ -701,16 +727,6 @@ assign                                        {mapper             , mem_device  
    typ == CART_TYP_MFRSD  & subslot == 2'd1 ? {MAPPER_MFRSD1      , DEVICE_NONE   , ROM_NONE           , 8'hAA , 8'h00 , 8'd0               , 8'd0    ,   DEV_SCC2 | DEV_FLASH } :
    typ == CART_TYP_MFRSD  & subslot == 2'd2 ? {MAPPER_MFRSD2      , DEVICE_NONE   , ROM_RAM            , 8'hAA , 8'h00 , 8'd0               , 8'd32   ,   DEV_MFRSD2 | DEV_PSG } :
    typ == CART_TYP_MFRSD  & subslot == 2'd3 ? {MAPPER_MFRSD3      , DEVICE_NONE   , ROM_NONE           , 8'hAA , 8'h00 , 8'd0               , 8'd0    ,   DEV_FLASH            } :
-   // ---- user-selected sub-slot device (expanded cart slot) ----------------
-   // Only for a plain ROM cart: subslot 0 stays the ROM, subslot 1 gets this.
-   // memory_upload sets cart_slot_expander_en on its own the moment a config line
-   // with subslot != 0 appears (:306), and cart_device[] is OR-accumulated across
-   // subslots (:537), so nothing else has to change.  Same two rows the MFRSD entries
-   // above use, with the values copied from the CART_TYP_FM_PAC / CART_TYP_GM2 rows.
-   typ == CART_TYP_ROM    & subslot == 2'd1
-                          & subslot_dev == 2'd1 ? {MAPPER_FMPAC       , DEVICE_NONE   , ROM_FMPAC          , 8'h08 , 8'h00 , 8'd8               , 8'd0    ,   DEV_OPL3             } : //4000 - 7FFF
-   typ == CART_TYP_ROM    & subslot == 2'd1
-                          & subslot_dev == 2'd2 ? {MAPPER_GM2         , DEVICE_NONE   , ROM_GM2            , 8'hAA , 8'h00 , 8'd8               , 8'd0    ,   DEV_NONE             } :
    typ == CART_TYP_GM2    & subslot == 2'd0 ? {MAPPER_GM2         , DEVICE_NONE   , ROM_GM2            , 8'hAA , 8'h00 , 8'd8               , 8'd0    ,   DEV_NONE             } :
    typ == CART_TYP_FDC    & subslot == 2'd0 ? {MAPPER_NONE        , DEVICE_FDC    , ROM_FDC            , 8'h08 , 8'h00 , 8'd0               , 8'd0    ,   DEV_NONE             } :
    /*typ == CART_TYP_EMPTY*/                  {MAPPER_UNUSED      , DEVICE_NONE   , ROM_NONE           , 8'h00 , 8'h00 , 8'd0               , 8'd0    ,   DEV_NONE             } ;

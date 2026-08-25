@@ -3,31 +3,46 @@
 Implemented 2026-08-25. Simulated with a working negative control, full sim suite
 green, **not yet tested on hardware**.
 
-Lets a plain ROM cart share its slot with a second device: subslot 0 keeps the
-game, subslot 1 gets FM-PAC or GameMaster2. The point is that you no longer have
-to spend both cart slots to play a ROM *and* have FM music.
+Each cart slot can be switched, independently, into an **expanded slot** whose
+four subslots each carry a device the user picks. The classic one-device line for
+that slot disappears and a sub-menu page takes its place.
 
 ```
-OSD:  ...
-      Reset on ROM change   Yes
-      Slot expansion        No | Yes            <- new master toggle, default No
-      ...
-      SLOT A                ROM
-      ROM                   <game>.rom
-      Mapper type           auto
-      SRAM size             auto
-      SLOT A sub-slot       None | FM-PAC | GameMaster2   <- only when the toggle is Yes
+OSD (slot A shown; slot B is identical minus GameMaster2)
+
+  SLOT A                ROM | SCC | SCC+ | FM-PAC | MFRSD | GameMaster2 | FDC | Empty
+  SLOT A sub-slots      Off | On                         <- per-slot switch, default Off
+  ROM                   Load ...                          (shown while a ROM file is in use)
+  Mapper type           auto ...
+  SRAM size             auto ...
+
+  -- with "SLOT A sub-slots: On" the first line is replaced by a page: --
+
+  SLOT A sub-slots  ▸                                     <- menu page (P3)
+      Sub-slot 0        None | ROM | SCC | SCC+ | FM-PAC | GameMaster2
+      Sub-slot 1        None | ROM | SCC | SCC+ | FM-PAC | GameMaster2
+      Sub-slot 2        None | ROM | SCC | SCC+ | FM-PAC | GameMaster2
+      Sub-slot 3        None | ROM | SCC | SCC+ | FM-PAC | GameMaster2
+  ROM / Mapper type / SRAM size     (shown while some sub-slot is ROM or SCC)
 ```
 
-**`Slot expansion` is a master switch, and its default `No` is the menu the core
-has always had.** With it off the two `sub-slot` entries are hidden *and* forced to
-`None` in RTL, so the cart slots are non-expanded exactly as before — a user who
-never touches it cannot reach any of the new behaviour. Turning it on reveals the
-per-slot sub-slot menus, and each of those additionally appears only when its slot
-is set to `ROM` (it shares that condition with the slot's `ROM,Load` entry).
+Default `Off` reproduces the previous behaviour exactly: a non-expanded primary
+slot, one device, chosen by the classic line. Slot B's list has no GameMaster2
+(see *Mapper-module state* below). Status bits: `[71]`/`[72]` the switches,
+`[84:73]` / `[96:85]` the eight 3-bit device fields.
 
-Hiding and forcing are deliberately separate: hiding alone would leave a stale
-status word from an older build still selecting a device.
+Rules applied by `msx_config` before anything reaches the RTL — first occurrence
+wins, later conflicting entries fall back to `None`:
+
+* **ROM and SCC both load the slot's single ROM file** → at most one of them per
+  slot. (SCC = "the loaded ROM with the KonamiSCC mapper forced".)
+* **FM-PAC and GameMaster2 share `lookup_SRAM` index 1/2 of the slot**
+  (`memory_upload.sv:266`) and FM-PAC has one instance per slot → at most one.
+* **GameMaster2 is slot A only**; codes 6/7 are unused → `None`.
+* **SCC+ may appear in several subslots** — `konami_scc` keeps its state per
+  (slot, subslot) now. They share the slot's one SCC *sound* chip, though.
+* While a slot is `Off`, all four of its fields are forced to `None`, not just
+  hidden — a status word carried over from an older build cannot select anything.
 
 ---
 
@@ -217,85 +232,60 @@ Yamanooto is a flat primary-slot cartridge with no subslot expander of its own
 (`memory_upload.sv:686-687`), so unlike MFRSD it is perfectly legal inside someone
 else's subslot. Every blocker above is ours.
 
-### What the menu offers today, and why those two are safe now
+### Why only these five
 
-`FM-PAC` (slots A and B) and `GameMaster2` (slot A only). Both are safe under the
-*current* per-slot mapper state because `MAPPER_FMPAC` and `MAPPER_GM2` are the
-only cart mappers a ROM cart cannot reach in either direction:
-
-* not in the mapper menu — `CONF_STR_MAPPER_A/B` lists `auto..WIZARDRY, Yamanooto`
-  only; both are marked `/*NEXT INTERNAL*/` in `package.sv:5`;
-* not producible by auto-detect — `mapper_detect.sv:90-95` emits only
-  `MAPPER_UNUSED / NONE / KONAMI_SCC / KONAMI / ASCII8 / ASCII16`.
-
-Their ROMs come from the **FW PACK** (`ROM_FMPAC` / `ROM_GM2` -> `STATE_FIND_ROM`
-at `0x2000000`), so the one-ROM-file-per-slot limit does not apply either. And
-`lookup_SRAM`: a ROM cart's SRAM takes index 0 (slot A only, deliberately —
-`memory_upload.sv:252-259`), a non-`ROM_ROM` config takes 1 (slot A) or 2 (slot B),
-which is the same index "SLOT A = FM-PAC" already uses today. No new allocation.
-
-GameMaster2 is slot A only because of the third row above: it was reachable from
-the SLOT A menu alone, so at most one could exist. The first version of this
-feature offered it on slot B's sub-slot too, which made "SLOT A = GameMaster2" +
-"SLOT B sub-slot = GameMaster2" reachable and the two would have shared
-`bank1/2/3`. Caught before hardware; the option was removed and `msx_config`
-clamps slot B so a status word from an older build cannot resurrect it.
-
-## Known limitation — needs a ROM actually loaded
-
-**If no ROM file is loaded in that slot, the sub-slot device does not appear.**
-
-`memory_upload.sv:288-292`: the `ROM_ROM` branch aborts to `STATE_READ_CONF` when
-`ioctl_size[..] == 0`, and that abort happens *before* the subslot advance at
-`:609-613`. So the FSM never reaches subslot 1.
-
-This was left as-is deliberately. Making the empty-slot case fall through to the
-next subslot means editing a shared abort path that every cart type takes, for a
-configuration ("expanded slot whose only occupant is the sub-slot device") that
-has no use — the same device can just be selected as the main slot type instead.
-Worth knowing when testing: **select the sub-slot device with a game loaded.**
+Everything else is blocked by a limit of ours, not by MSX (see §3): a second
+**ROM** needs a second ROM file per slot; **FDC** needs `fdc_enabled` to look at
+subslots; **MFRSD** is architecturally impossible (§1); **Yamanooto** is a mapper
+for the ROM, so it rides the `ROM` entry rather than being a device of its own.
 
 ## What landed
 
-* `rtl/package.sv` — `config_cart_t.selected_subslot_dev` (2 bits).
-* `rtl/msx_config.sv` — `CONF_STR_SLOT_EXPANSION` (master toggle, status `[60]`),
-  `CONF_STR_SUBSLOT_A/B`, status bits `[50:49]` / `[53:52]`
-  (both were free; the map in `MSX1.sv:255-262` is updated), decode, and the
-  `CART_TYP_ROM` guard. Added to `act_config` so changing it triggers `reload`
-  (`lastConfig` widened 19 -> 23 bits).
-* `rtl/peripheral/slots/memory_upload.sv` — `cart_confDecoder` gains a
-  `subslot_dev` input and two table rows.
-* `MSX1.sv` — the toggle placed directly under "Reset on ROM change", plus the two
-  sub-slot entries. `status_menumask` widened `[7:0]` -> `[9:0]` (hps_io's port is
-  already 16 bits, `hps_io.sv:117`) for the new bits 7/8:
-  `subslot_A_hide = ~slot_expansion_en | ROM_A_load_hide`, and the same for B.
-* `sim/tb_subslot_dev.sv` + `sim/run_subslot_dev.sh` — two DUTs. 21 checks on
-  `cart_confDecoder`: subslot 0 untouched, default stays non-expanded, the device
-  lands in subslot 1 only (not 2/3), **MFRSD's own subslots are not overridden**,
-  and no other cart type expands. `NEGCTL=1` forces `subslot_dev` to 0: exactly
-  the 6 feature checks fail, the rest still pass.
-  Plus 10 checks on `msx_config`, which is where the menu-side guards live:
-  `Slot expansion=No` forces both sub-slots to `None` **and** hides both menus,
-  `Yes` reveals them, a non-ROM slot type suppresses and hides its own, and slot B
-  clamps GameMaster2 away. All four guards are mutation-proven — removing the
-  master-toggle term, the hide term, or the slot B clamp each makes exactly one
-  check fail.
+* `rtl/package.sv` — `subslot_dev_t` (None/ROM/SCC/SCC+/FM-PAC/GM2);
+  `config_cart_t` gains `expanded` and `subslot_dev[4]`.
+* `rtl/msx_config.sv` — `CONF_STR_EXPAND_A/B` (`O[71]`/`O[72]`), the two sub-menu
+  pages `P3`/`P4` with four 3-bit fields each, the conflict rules above, and four
+  hide signals: classic line hidden while expanded (`H7`/`H8`), page hidden while
+  not (`H9`/`HA` — mask bits 9 and 10; the firmware reads `'A'` as index 10,
+  `user_io.cpp user_io_status_bits`). `fdc_enabled` ignores the hidden classic
+  type while slot A is expanded. `act_config` widened to 45 bits so any change
+  triggers `reload`.
+* `rtl/peripheral/slots/memory_upload.sv` — `cart_confDecoder` takes `expanded`
+  and `sub_dev`; six rows at the top of the table, `expanded` takes precedence over
+  the classic `typ` rows (a stale hidden type cannot leak). Three FSM fixes that
+  the four-subslot walk needed:
+  1. a `ROM` row with no file loaded used to abort the whole record — it now skips
+     just that subslot and keeps walking (the earlier "known limitation" is gone);
+  2. the auto-mapper re-latch after the fill was gated on `typ == ROM` — now on
+     `cart_rom_id == ROM_ROM`, so a ROM in subslot 2 gets detected too;
+  3. `mapper_detect` is reset per subslot (`STATE_CHECK_CONFIG`), not per record —
+     an SCC+ RAM fill in an earlier subslot must not pollute the ROM's counters.
+* `rtl/peripheral/slots/konami_scc.sv` — bank/mode/enable state indexed by
+  `{cart_num, subslot}` (8 sets); `scc_mode` per cart slot = any subslot in SCC+
+  mode. `subslot` auto-connects via `.*` from `msx_slots.sv:143`.
+* `MSX1.sv` — menu placement, `status_menumask` widened to `[10:0]`, bit map.
+* `sim/tb_subslot_dev.sv` — decoder (classic rows untouched; every device in every
+  subslot; stale `typ` ignored; Yamanooto via ROM) + `msx_config` (per-slot On/Off,
+  all hides, every conflict rule, GM2 clamp on B, FDC non-leak). `NEGCTL=1` forces
+  the decoder's `expanded` low: exactly the 36 expanded checks fail.
+* `sim/tb_scc_subslot.sv` — two subslots of one slot write bank 1 and each reads
+  back its own; other slot/subslots untouched; SCC+ mode aggregates per slot.
+  `NEGCTL=1` ties `subslot` to 0: the two clobber checks fail.
+* `sim/run_subslot_dev.sh` runs both. Regression: sccdetect, sccplus, yamanooto,
+  mfrsd_sccmode/sccsound, keypad, a16x_cfi, flash_seam, yamanooto_flash all green.
 
-Full `sim/run_*.sh` suite re-run: 19/19 green.
+Not hardware-tested.
 
 ## Hardware test
 
 1. FW PACK loaded (FM-PAC / GameMaster2 ROMs come from it).
-2. SLOT A = ROM, load a game, `SLOT A sub-slot` = FM-PAC.
-3. The machine should now see an **expanded** slot: subslot 0 = the game,
-   subslot 1 = FM-PAC at `0x4000-0x7FFF`. Anything that scans subslots for OPLL
-   (e.g. the `"APRLOPLL"` sweep in `docs/TODO_scmd_silent_exit.md`) should find it.
-4. Confirm the game still runs — that is the real regression risk, since its slot
-   is now expanded and `0xFFFF` becomes a subslot register in it.
-5. Repeat with GameMaster2, and on slot B.
-6. Set the menu back to `None`, and separately set `Slot expansion` to `No`, and
-   confirm the slot is non-expanded again in both cases.
-
-Untested combination worth checking early: a game whose own mapper is
-KonamiSCC (auto-detected) together with a sub-slot device — the mappers differ,
-so it should be fine, but it is the closest thing to a collision case.
+2. `SLOT A sub-slots: On`, page: sub-slot 0 = ROM (load a game), sub-slot 1 = FM-PAC.
+   The game must still run — its slot is now expanded and `0xFFFF` is a subslot
+   register there. Software that sweeps subslots for OPLL should find the FM-PAC.
+3. Move the ROM to sub-slot 2, leave 0/1 empty: still boots (exercises the
+   "skip empty subslot, keep walking" fix and the per-subslot mapper detect).
+4. ROM (KonamiSCC game) in sub-slot 0 + SCC+ in sub-slot 1: both bank sets must
+   stay independent — the game must not lose its banks when SCMD-style software
+   pokes the SCC+ cart. This is the `konami_scc` split on real silicon.
+5. Repeat 2 on slot B; then both slots expanded at once.
+6. `Off` on each slot: classic line returns, slot is non-expanded again.

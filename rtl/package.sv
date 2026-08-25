@@ -4,6 +4,8 @@ typedef enum logic [3:0] {CONFIG_NONE, CONFIG_FDC, CONFIG_SLOT_A, CONFIG_SLOT_B,
 typedef enum logic [2:0] {CART_TYP_ROM, CART_TYP_SCC, CART_TYP_SCC2, CART_TYP_FM_PAC, CART_TYP_MFRSD, CART_TYP_GM2, CART_TYP_FDC, CART_TYP_EMPTY } cart_typ_t;
 typedef enum logic [4:0] {MAPPER_UNUSED, MAPPER_RAM, MAPPER_AUTO, MAPPER_NONE, MAPPER_ASCII8, MAPPER_ASCII16, MAPPER_KONAMI, MAPPER_KONAMI_SCC, MAPPER_KOEI, MAPPER_LINEAR, MAPPER_RTYPE, MAPPER_WIZARDY, /*NEXT INTERNAL*/ MAPPER_FMPAC,MAPPER_OFFSET, MAPPER_MFRSD1,MAPPER_MFRSD2, MAPPER_MFRSD3, MAPPER_GM2, MAPPER_HALNOTE, MAPPER_ASCII16X, MAPPER_YAMANOOTO} mapper_typ_t;
 typedef enum logic [3:0] {DEVICE_NONE, DEVICE_ROM, DEVICE_RAM, DEVICE_FDC,  DEVICE_MFRSD0} device_typ_t;
+// What the user put in one subslot of an EXPANDED cart slot (OSD "Sub-slot n").
+typedef enum logic [2:0] {SUB_NONE, SUB_ROM, SUB_SCC, SUB_SCC2, SUB_FMPAC, SUB_GM2} subslot_dev_t;
 typedef enum logic [3:0] {ROM_NONE, ROM_ROM, ROM_RAM, ROM_FDC, ROM_FMPAC, ROM_MFRSD, ROM_GM2, ROM_EMPTY, ROM_MOONSOUND } data_ID_t;
 typedef enum logic {MSX1,MSX2} MSX_typ_t;
 
@@ -63,12 +65,13 @@ package MSX;
     } lookup_SRAM_t;
 
     typedef struct {
-        cart_typ_t   typ;
-        mapper_typ_t selected_mapper;
-        logic [7:0]  selected_sram_size;
-        // Device the user placed in SUB-SLOT 1 of this cart slot (0 = none).
-        // Only honoured when typ == CART_TYP_ROM; see cart_confDecoder.
-        logic [1:0]  selected_subslot_dev;
+        cart_typ_t    typ;
+        mapper_typ_t  selected_mapper;
+        logic [7:0]   selected_sram_size;
+        // Expanded cart slot.  When set, `typ` is ignored (its menu is hidden) and
+        // each of the four subslots carries subslot_dev[n].  See cart_confDecoder.
+        logic         expanded;
+        subslot_dev_t subslot_dev[4];
     } config_cart_t;
         
 endpackage
