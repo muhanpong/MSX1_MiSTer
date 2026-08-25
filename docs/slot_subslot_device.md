@@ -17,19 +17,30 @@ OSD (slot A shown; slot B is identical minus GameMaster2)
 
   SLOT A                ROM | SCC | SCC+ | FM-PAC | MFRSD | GameMaster2 | FDC | Empty
   SLOT A sub-slots      Off | On                         <- per-slot switch, default Off
-  ROM                   Load ...                          (shown while a ROM file is in use)
+  ROM                   Load ...                          (classic: while SLOT A = ROM)
   Mapper type           auto ...
   SRAM size             auto ...
 
-  -- with "SLOT A sub-slots: On" the first line is replaced by a page: --
+  -- "SLOT A sub-slots: On": the four classic lines above are replaced by a page --
 
   SLOT A sub-slots  ▸                                     <- menu page (P3)
       Sub-slot 0        None | ROM | SCC | SCC+ | FM-PAC | GameMaster2
       Sub-slot 1        None | ROM | SCC | SCC+ | FM-PAC | GameMaster2
       Sub-slot 2        None | ROM | SCC | SCC+ | FM-PAC | GameMaster2
       Sub-slot 3        None | ROM | SCC | SCC+ | FM-PAC | GameMaster2
-  ROM / Mapper type / SRAM size     (shown while some sub-slot is ROM or SCC)
+      ─────
+      ROM               Load ...        (while a sub-slot is ROM or SCC)
+      Mapper type       auto ...        (while a sub-slot is ROM -- SCC forces KonamiSCC)
+      SRAM size         auto ...        (same)
 ```
+
+The ROM's own three entries exist twice on the same status bits — at slot level for
+the classic menu (hidden while expanded, `H7`/`H8`) and inside the page (only
+reachable while expanded). Masks: `H3`/`H4` = "a ROM file is in use" (ROM or SCC),
+`HB`/`HC` = "a ROM sub-slot is chosen" (Mapper / SRAM mean nothing for SCC). The
+firmware parses `F`/`S` entries after a page prefix (`menu.cpp:2024`, `:2405`), so
+`P3FS3` is legal; the load addresses are the same literals as the slot-level copy
+and must keep matching `memory_upload.sv`'s staging (`0xC00000` / `0x3000000`).
 
 Default `Off` reproduces the previous behaviour exactly: a non-expanded primary
 slot, one device, chosen by the classic line. Slot B's list has no GameMaster2
@@ -251,8 +262,10 @@ for the ROM, so it rides the `ROM` entry rather than being a device of its own.
 * `rtl/msx_config.sv` — `CONF_STR_EXPAND_A/B` (`O[71]`/`O[72]`), the two sub-menu
   pages `P3`/`P4` with four 3-bit fields each, the conflict rules above, and four
   hide signals: classic line hidden while expanded (`H7`/`H8`), page hidden while
-  not (`H9`/`HA` — mask bits 9 and 10; the firmware reads `'A'` as index 10,
-  `user_io.cpp user_io_status_bits`). `fdc_enabled` ignores the hidden classic
+  not (`H9`/`HA`), Mapper/SRAM hidden unless a ROM sub-slot is chosen (`HB`/`HC`)
+  — mask bits 9..12; the firmware reads `'A'..'V'` as 10..31
+  (`user_io.cpp user_io_status_bits`). The page carries its own ROM Load /
+  Mapper / SRAM entries on the same status bits as the slot-level ones. `fdc_enabled` ignores the hidden classic
   type while slot A is expanded. `act_config` widened to 45 bits so any change
   triggers `reload`.
 * `rtl/peripheral/slots/memory_upload.sv` — `cart_confDecoder` takes `expanded`
@@ -268,7 +281,8 @@ for the ROM, so it rides the `ROM` entry rather than being a device of its own.
 * `rtl/peripheral/slots/konami_scc.sv` — bank/mode/enable state indexed by
   `{cart_num, subslot}` (8 sets); `scc_mode` per cart slot = any subslot in SCC+
   mode. `subslot` auto-connects via `.*` from `msx_slots.sv:143`.
-* `MSX1.sv` — menu placement, `status_menumask` widened to `[10:0]`, bit map.
+* `MSX1.sv` — menu placement (slot-level ROM entries gain `H7`/`H8`),
+  `status_menumask` widened to `[12:0]`, bit map.
 * `sim/tb_subslot_dev.sv` — decoder (classic rows untouched; every device in every
   subslot; stale `typ` ignored; Yamanooto via ROM) + `msx_config` (per-slot On/Off,
   all hides, every conflict rule, GM2 clamp on B, FDC non-leak). `NEGCTL=1` forces

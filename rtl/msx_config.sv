@@ -20,31 +20,42 @@ parameter CONF_STR_EXPAND_A = {
 parameter CONF_STR_EXPAND_B = {
     "O[72],SLOT B sub-slots,Off,On;"
 };
+// Single "ASCII16X" entry covers both: ROM <= 4MB -> classic ASCII16 (SRAM etc.),
+// ROM > 4MB -> ASCII16X flash mapper (8-bit-bank ASCII16 cannot exceed 4MB; per the
+// ASCII16-X spec the X mapper is "mostly backwards compatible" for plain ROM banking).
+parameter MAPPER_LIST    = "Mapper type,auto,none,ASCII8,ASCII16X,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY,Yamanooto;";
+parameter SRAM_SIZE_LIST = "SRAM size,auto,1kB,2kB,4kB,8kB,16kB,32kB,none;";
+// The ROM's own three entries (Load / Mapper type / SRAM size) exist TWICE, on the
+// same status bits: once at slot level for the classic menu (hidden while the slot
+// is expanded, H7/H8) and once inside the sub-slot page (only reachable while it
+// is).  Masks: H3/H4 = "a ROM file is in use" (ROM or SCC chosen; SCC forces
+// KonamiSCC), HB/HC = "a ROM sub-slot is chosen" (Mapper / SRAM are meaningless
+// for SCC).  The firmware parses F/S entries after a page prefix (menu.cpp:2024,
+// :2405), so "P3FS3" is legal.  Load addresses MUST match memory_upload.sv's
+// staging (0xC00000 / 0x3000000) -- same literals as MSX1.sv's slot-level copy.
+parameter CONF_STR_MAPPER_A    = { "H7HBO[23:20],", MAPPER_LIST };
+parameter CONF_STR_MAPPER_B    = { "H8HCO[35:32],", MAPPER_LIST };
+parameter CONF_STR_SRAM_SIZE_A = { "H7H5O[28:26],", SRAM_SIZE_LIST };
 parameter CONF_STR_SUBSLOT_A = {
     "H9P3,SLOT A sub-slots;",
     "P3O[75:73],Sub-slot 0,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
     "P3O[78:76],Sub-slot 1,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
     "P3O[81:79],Sub-slot 2,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
-    "P3O[84:82],Sub-slot 3,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;"
+    "P3O[84:82],Sub-slot 3,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
+    "P3-;",
+    "H3P3FS3,ROM,Load,30C00000;",
+    "HBP3O[23:20],", MAPPER_LIST,
+    "H5P3O[28:26],", SRAM_SIZE_LIST
 };
 parameter CONF_STR_SUBSLOT_B = {
     "HAP4,SLOT B sub-slots;",
     "P4O[87:85],Sub-slot 0,None,ROM,SCC,SCC+,FM-PAC;",
     "P4O[90:88],Sub-slot 1,None,ROM,SCC,SCC+,FM-PAC;",
     "P4O[93:91],Sub-slot 2,None,ROM,SCC,SCC+,FM-PAC;",
-    "P4O[96:94],Sub-slot 3,None,ROM,SCC,SCC+,FM-PAC;"
-};
-// Single "ASCII16X" entry covers both: ROM <= 4MB -> classic ASCII16 (SRAM etc.),
-// ROM > 4MB -> ASCII16X flash mapper (8-bit-bank ASCII16 cannot exceed 4MB; per the
-// ASCII16-X spec the X mapper is "mostly backwards compatible" for plain ROM banking).
-parameter CONF_STR_MAPPER_A = {
-    "H3O[23:20],Mapper type,auto,none,ASCII8,ASCII16X,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY,Yamanooto;"
-};
-parameter CONF_STR_MAPPER_B = {
-    "H4O[35:32],Mapper type,auto,none,ASCII8,ASCII16X,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY,Yamanooto;"
-};
-parameter CONF_STR_SRAM_SIZE_A = {
-    "H5O[28:26],SRAM size,auto,1kB,2kB,4kB,8kB,16kB,32kB,none;"
+    "P4O[96:94],Sub-slot 3,None,ROM,SCC,SCC+,FM-PAC;",
+    "P4-;",
+    "H4P4F4,ROM,Load,33000000;",       // F not FS -- see the note in MSX1.sv
+    "HCP4O[35:32],", MAPPER_LIST
 };
 
 module msx_config
@@ -63,8 +74,10 @@ module msx_config
     output                    slotB_classic_hide,   //8
     output                    subA_page_hide,       //9  not expanded -> hide the sub-slot page
     output                    subB_page_hide,       //10 ('A' in CONF_STR)
-    output                    ROM_A_load_hide,      //3
+    output                    ROM_A_load_hide,      //3   no ROM file in use (ROM or SCC)
     output                    ROM_B_load_hide,      //4
+    output                    mapper_A_hide,        //11 ('B')  no ROM sub-slot / classic type != ROM
+    output                    mapper_B_hide,        //12 ('C')
     output                    fdc_enabled,
     output MSX::user_config_t msxConfig,
     output                    reload
@@ -106,22 +119,25 @@ assign cart_conf[1].typ                = slot_B_select < CART_TYP_MFRSD ? cart_t
 //   * the whole slot is None while it is not expanded.
 // SCC+ may appear more than once: konami_scc keeps state per (slot, subslot).
 subslot_dev_t subA[4], subB[4];
-logic         fileA_used, fileB_used;
+logic         fileA_used, fileB_used;   // ROM or SCC chosen (consumes the ROM file)
+logic         romA_used,  romB_used;    // ROM chosen (Mapper / SRAM entries apply)
 always_comb begin
    logic          sram_a, sram_b;
    subslot_dev_t  d;
-   fileA_used = 1'b0; sram_a = 1'b0;
-   fileB_used = 1'b0; sram_b = 1'b0;
+   fileA_used = 1'b0; sram_a = 1'b0; romA_used = 1'b0;
+   fileB_used = 1'b0; sram_b = 1'b0; romB_used = 1'b0;
    for (int i = 0; i < 4; i++) begin
       d = (subA_raw[i] > 3'd5) ? SUB_NONE : subslot_dev_t'(subA_raw[i]);
       if (!expanded_A) d = SUB_NONE;
       if (d == SUB_ROM   || d == SUB_SCC) begin if (fileA_used) d = SUB_NONE; else fileA_used = 1'b1; end
+      if (d == SUB_ROM) romA_used = 1'b1;
       if (d == SUB_FMPAC || d == SUB_GM2) begin if (sram_a)     d = SUB_NONE; else sram_a     = 1'b1; end
       subA[i] = d;
 
       d = (subB_raw[i] > 3'd4) ? SUB_NONE : subslot_dev_t'(subB_raw[i]);   // 5 = GM2: never on slot B
       if (!expanded_B) d = SUB_NONE;
       if (d == SUB_ROM   || d == SUB_SCC) begin if (fileB_used) d = SUB_NONE; else fileB_used = 1'b1; end
+      if (d == SUB_ROM) romB_used = 1'b1;
       if (d == SUB_FMPAC)                 begin if (sram_b)     d = SUB_NONE; else sram_b     = 1'b1; end
       subB[i] = d;
    end
@@ -142,6 +158,8 @@ assign cart_conf[1].subslot_dev[3] = subB[3];
 // ROM / SCC subslot.  Drives the Load / Mapper / SRAM entries.
 wire fileA_present = expanded_A ? fileA_used : typ_A == CART_TYP_ROM;
 wire fileB_present = expanded_B ? fileB_used : cart_conf[1].typ == CART_TYP_ROM;
+wire romA_present  = expanded_A ? romA_used  : typ_A == CART_TYP_ROM;
+wire romB_present  = expanded_B ? romB_used  : cart_conf[1].typ == CART_TYP_ROM;
 
 // 10-entry list maps uniformly +2 onto the enum (auto..WIZARDRY). The "ASCII16X"
 // entry (index 3) resolves by ROM size: >4MB -> MAPPER_ASCII16X (flash), else
@@ -152,7 +170,7 @@ assign cart_conf[0].selected_mapper    = rom_loaded[0] ? mapper_typ_t'(mapper_A_
 assign cart_conf[1].selected_mapper    = rom_loaded[1] ? mapper_typ_t'(mapper_B_select == 4'd10                ? 5'(MAPPER_YAMANOOTO) :
                                                                      (mapper_B_select == 4'd3 & rom_big[1]) ? 5'(MAPPER_ASCII16X)  :
                                                                                                (mapper_B_select + 4'd2)) : MAPPER_UNUSED;
-assign cart_conf[0].selected_sram_size = fileA_present & mapper_A_select > 4'd1 & mapper_A_select != 4'd10 & ~(mapper_A_select == 4'd3 & rom_big[0]) & sram_A_select > 3'd0 & sram_A_select < 3'd7 ? (8'd1 << (sram_A_select - 1'd1)) : 8'd0;
+assign cart_conf[0].selected_sram_size = romA_present & mapper_A_select > 4'd1 & mapper_A_select != 4'd10 & ~(mapper_A_select == 4'd3 & rom_big[0]) & sram_A_select > 3'd0 & sram_A_select < 3'd7 ? (8'd1 << (sram_A_select - 1'd1)) : 8'd0;
 // Slot B gets no SRAM.  Not an oversight: the firmware mounts exactly one
 // <rom>.sav and always on VD0 (user_io.cpp:2937), so a second saveable cart has
 // nowhere to go, and giving slot B a nonzero size makes memory_upload write
@@ -169,11 +187,13 @@ assign msxConfig.moonsound_en = HPS_status[45];
 
 assign ROM_A_load_hide    = ~fileA_present;
 assign ROM_B_load_hide    = ~fileB_present;
+assign mapper_A_hide      = ~romA_present;
+assign mapper_B_hide      = ~romB_present;
 assign slotA_classic_hide = expanded_A;
 assign slotB_classic_hide = expanded_B;
 assign subA_page_hide     = ~expanded_A;
 assign subB_page_hide     = ~expanded_B;
-assign sram_A_select_hide = ~fileA_present | mapper_A_select == 4'd0 | mapper_A_select == 4'd10 | (mapper_A_select == 4'd3 & rom_big[0]);
+assign sram_A_select_hide = ~romA_present | mapper_A_select == 4'd0 | mapper_A_select == 4'd10 | (mapper_A_select == 4'd3 & rom_big[0]);
 // While slot A is expanded its (hidden) classic type must not leak: FDC is not a
 // sub-slot device, so it cannot come from an expanded slot.
 assign fdc_enabled = bios_config.use_FDC | (~expanded_A & cart_conf[0].typ == CART_TYP_FDC);

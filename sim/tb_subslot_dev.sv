@@ -56,7 +56,7 @@ module tb_subslot_dev;
    MSX::config_cart_t    cart_conf[2];
    MSX::user_config_t    msxConfig_o;
    wire sram_A_hide_o, romA_hide_o, romB_hide_o, fdc_en_o, reload_o;
-   wire clsA_hide_o, clsB_hide_o, pageA_hide_o, pageB_hide_o;
+   wire clsA_hide_o, clsB_hide_o, pageA_hide_o, pageB_hide_o, mapA_hide_o, mapB_hide_o;
 
    always #5 cfg_clk = ~cfg_clk;
 
@@ -68,6 +68,7 @@ module tb_subslot_dev;
       .slotA_classic_hide(clsA_hide_o), .slotB_classic_hide(clsB_hide_o),
       .subA_page_hide(pageA_hide_o), .subB_page_hide(pageB_hide_o),
       .ROM_A_load_hide(romA_hide_o), .ROM_B_load_hide(romB_hide_o),
+      .mapper_A_hide(mapA_hide_o), .mapper_B_hide(mapB_hide_o),
       .fdc_enabled(fdc_en_o), .msxConfig(msxConfig_o), .reload(reload_o)
    );
 
@@ -170,6 +171,7 @@ module tb_subslot_dev;
       expect_bit ("A Off: classic shown", clsA_hide_o, 1'b0);
       expect_bit ("A Off: page hidden",   pageA_hide_o, 1'b1);
       expect_bit ("A Off: ROM load shown (typ=ROM)", romA_hide_o, 1'b0);
+      expect_bit ("A Off: mapper shown (typ=ROM)",   mapA_hide_o, 1'b0);
       expect_bit ("expanded flag A off", cart_conf[0].expanded, 1'b0);
 
       hps_status[71] = 1'b1;                 // SLOT A sub-slots: On   (B stays Off)
@@ -181,6 +183,7 @@ module tb_subslot_dev;
       expect_bit ("B: classic still shown", clsB_hide_o, 1'b0);
       expect_bit ("B: page still hidden",  pageB_hide_o, 1'b1);
       expect_bit ("A On: ROM load shown (ROM in ss0)", romA_hide_o, 1'b0);
+      expect_bit ("A On: mapper shown (ROM in ss0)",   mapA_hide_o, 1'b0);
       expect_bit ("expanded flag A on", cart_conf[0].expanded, 1'b1);
 
       hps_status[72] = 1'b1;                 // SLOT B sub-slots: On
@@ -199,12 +202,15 @@ module tb_subslot_dev;
       #1;
       expect_devs("A: SCC first wins, two SCC+ allowed",     1'b0, SUB_SCC, SUB_NONE, SUB_SCC2, SUB_SCC2);
       expect_bit ("A: SCC counts as ROM file present", romA_hide_o, 1'b0);
+      expect_bit ("A: SCC only -> Mapper/SRAM hidden",  mapA_hide_o, 1'b1);
+      expect_bit ("A: SCC only -> SRAM size hidden",    sram_A_hide_o, 1'b1);
 
       set_subA(0, SUB_FMPAC); set_subA(1, SUB_GM2); set_subA(2, SUB_NONE); set_subA(3, SUB_FMPAC);
       #1;
       expect_devs("A: one SRAM device (FM-PAC,GM2,-,FM-PAC)", 1'b0, SUB_FMPAC, SUB_NONE, SUB_NONE, SUB_NONE);
       expect_bit ("A: no ROM -> load hidden", romA_hide_o, 1'b1);
       expect_bit ("A: no ROM -> SRAM size hidden", sram_A_hide_o, 1'b1);
+      expect_bit ("A: no ROM -> mapper hidden",    mapA_hide_o, 1'b1);
 
       set_subA(0, SUB_GM2); set_subA(1, SUB_NONE); set_subA(2, SUB_NONE); set_subA(3, SUB_NONE);
       #1;
@@ -214,6 +220,7 @@ module tb_subslot_dev;
       #1;
       expect_devs("B: GM2 clamped, FM-PAC ok, 6/7 -> None", 1'b1, SUB_NONE, SUB_FMPAC, SUB_NONE, SUB_NONE);
       expect_bit ("B: no ROM -> load hidden", romB_hide_o, 1'b1);
+      expect_bit ("B: no ROM -> mapper hidden", mapB_hide_o, 1'b1);
 
       // =================== msx_config: hidden classic type must not leak ========
       hps_status[19:17] = 3'(CART_TYP_FDC);     // stale classic type while A is expanded

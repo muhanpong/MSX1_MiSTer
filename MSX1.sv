@@ -273,7 +273,7 @@ localparam CONF_STR = {
    CONF_STR_SLOT_A,
    CONF_STR_EXPAND_A,
    CONF_STR_SUBSLOT_A,
-   "H3FS3,ROM,Load,30C00000;",
+   "H7H3FS3,ROM,Load,30C00000;",       // slot-level copy; the sub-slot page has its own (msx_config.sv)
    CONF_STR_MAPPER_A,
    CONF_STR_SRAM_SIZE_A,
    "-;",
@@ -289,7 +289,7 @@ localparam CONF_STR = {
    // <romB>.sav.  Both files are destroyed.  Verified against the firmware source
    // and reachable in the DEFAULT configuration.  Slot B saving needs a firmware
    // answer, not a CONF_STR flag.
-   "H4F4,ROM,Load,33000000;",
+   "H8H4F4,ROM,Load,33000000;",        // slot-level copy; the sub-slot page has its own (msx_config.sv)
    CONF_STR_MAPPER_B,
    "H6-;",
    "H6R[38],SRAM Save;",
@@ -341,7 +341,7 @@ localparam CONF_STR = {
    "V,v",`BUILD_DATE 
 };
 
-wire [10:0] status_menumask;  // hps_io takes 16; [10:7] = expanded-slot menu masks (CONF_STR H7..HA)
+wire [12:0] status_menumask;  // hps_io takes 16; [12:7] = expanded-slot menu masks (CONF_STR H7..HC)
 wire [1:0] sdram_size;
 assign status_menumask[0] = msxConfig.cas_audio_src == CAS_AUDIO_ADC;
 assign status_menumask[1] = fdc_enabled;
@@ -358,6 +358,8 @@ assign status_menumask[7]  = slotA_classic_hide;   // slot A expanded -> hide it
 assign status_menumask[8]  = slotB_classic_hide;
 assign status_menumask[9]  = subA_page_hide;       // slot A not expanded -> hide "SLOT A sub-slots" page
 assign status_menumask[10] = subB_page_hide;       // 'A' in CONF_STR
+assign status_menumask[11] = mapper_A_hide;        // 'B': no ROM sub-slot -> Mapper/SRAM entries hidden
+assign status_menumask[12] = mapper_B_hide;        // 'C'
 assign status_menumask[6] = (lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0)
                           & (cart_conf[0].selected_mapper != MAPPER_ASCII16X)
                           & (cart_conf[0].selected_mapper != MAPPER_YAMANOOTO)
@@ -402,7 +404,7 @@ hps_io #(.CONF_STR(CONF_STR),.VDNUM(VDNUM)) hps_io
 /////////////////   CONFIG   /////////////////
 wire [5:0] mapper_A, mapper_B;
 wire       reload, sram_A_select_hide, fdc_enabled, ROM_A_load_hide, ROM_B_load_hide;
-wire       slotA_classic_hide, slotB_classic_hide, subA_page_hide, subB_page_hide;
+wire       slotA_classic_hide, slotB_classic_hide, subA_page_hide, subB_page_hide, mapper_A_hide, mapper_B_hide;
 
 msx_config msx_config 
 (
@@ -421,6 +423,8 @@ msx_config msx_config
    .slotB_classic_hide(slotB_classic_hide),
    .subA_page_hide(subA_page_hide),
    .subB_page_hide(subB_page_hide),
+   .mapper_A_hide(mapper_A_hide),
+   .mapper_B_hide(mapper_B_hide),
    .ROM_A_load_hide(ROM_A_load_hide),
    .ROM_B_load_hide(ROM_B_load_hide),
    .fdc_enabled(fdc_enabled),
