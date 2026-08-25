@@ -60,79 +60,142 @@ Everything downstream already handles it:
 So the entire change is **two rows in a decode table plus a menu entry.** No FSM
 change, no new state, no resource growth beyond the two table rows.
 
-## What can and cannot go in a sub-slot
+## What can go in a sub-slot — three different kinds of limit
 
-Every cart type the OSD knows, and why it is or is not offered as a sub-slot device.
-The deciding questions are (a) can its mapper collide with the ROM's own mapper,
-(b) does it need the slot's one ROM file, (c) is its mapper module per-cart-slot.
+**On real MSX, a subslot can hold anything.** The subslot expander is transparent:
+each 16KB page independently selects its own (primary, subslot), so two devices in
+*different* subslots are never visible in the same page at the same time and their
+memory windows cannot collide. Any list of "what is allowed" is therefore not an
+MSX rule — with one exception below. Keep the three kinds of limit apart:
 
-| device | sub-slot | why |
+### 1. Real MSX architecture — the only true ❌ is MFRSD
+
+| | |
+|---|---|
+| **MegaFlashROM SCC+ SD** | ❌ **never put it in a subslot.** MSX has no nested expansion — there is no sub-sub-slot. MFRSD *is* an expanded cartridge; it already owns subslots 0-3 of whatever primary it sits in (`memory_upload.sv:698-701`). This is the one item on the old list that was genuinely architectural. |
+| `0xFFFF` | Expanding a slot changes that slot's `0xFFFF`: `msx_slots.sv:123` `mapper_en = (cpu_addr == 16'hFFFF & slot_expander_en[active_slot] & ...)`. It only bites when the expanded primary is the one selected for **page 3**, which for a cart slot is unusual — but it is why "does the game still run?" is a real hardware-test item and not a formality. |
+| everything else | no architectural objection at all |
+
+**Guarding MFRSD is structural, not a menu rule.** The sub-slot rows in
+`cart_confDecoder` require `typ == CART_TYP_ROM`, and MFRSD's own rows own
+subslots 1-3, so a sub-slot device can never displace them. `msx_config` also
+forces `selected_subslot_dev` to 0 for any non-ROM slot type, so selecting MFRSD
+switches the feature off rather than layering on top of it. `tb_subslot_dev`
+asserts all three MFRSD subslots survive with a sub-slot device requested.
+
+### 2. I/O ports — the real conflict class, and it is slot-agnostic
+
+I/O decoding is not slot-scoped, on real hardware or here. Two devices answering
+the same port collide no matter which slot or subslot they are in. That is not
+something the sub-slot menu can fix, and we reproduce it faithfully:
+
+* **OPLL `0x7C`/`0x7D`.** `msx_slots.sv:550` drives three IKAOPLL instances whose
+  outputs are summed under `cs` (`opll_ika.sv:15-17`): internal MSX-Music, cart
+  slot A, cart slot B. On a machine with built-in MSX-Music — **HB-F1XV has one** —
+  adding an FM-PAC gives you two OPLLs, and once software enables the cart's ports
+  a single write to `0x7C` reaches both and they sound together, at double level.
+  That is real FM-PAC behaviour, not a bug. It is gated the real way: the cart's
+  OPLL I/O only answers when the FM-PAC's own enable bit at `0x7FF6` is set
+  (`fm_pac.sv:103`, `14'h3FF6` -> `opll_io_enable`), so it is off until a program
+  asks for it.
+* Same class: cart PSG `0x10-0x17` (`msx_slots.sv:603`), memory mapper `0xFC-0xFF`.
+
+### 3. Our implementation — why the menu is short, and how to lengthen it
+
+None of these are MSX rules. They are ours, and each is fixable.
+
+| limit | on real hardware | what it would take |
 |---|---|---|
-| **FM-PAC** | ✅ slot A and B | `MAPPER_FMPAC` is unreachable for a ROM cart (not in the mapper menu, not producible by `mapper_detect`); `cart_fm_pac` instantiates **twice**, `.cs(cs & ~cart_num)` / `.cs(cs & cart_num)` (`fm_pac.sv:44,58`); ROM comes from the FW PACK |
-| **GameMaster2** | ✅ slot A only | `MAPPER_GM2` likewise unreachable; ROM from the FW PACK. **Slot B excluded on purpose** — see the instance table below |
-| ROM (a second game) | ❌ | One ROM file per slot: `ioctl_size[2]/[3]`, two DDR3 staging regions (`0xC00000` / `0x3000000`). Subslot 0 already owns it |
-| SCC | ❌ (two reasons) | `MAPPER_KONAMI_SCC` is both pickable from the mapper menu **and** producible by `mapper_detect` (`mapper_detect.sv:92`) → shares `bank[2][4]` with the ROM in the same slot. It is also `ROM_ROM`, so it would need the slot's ROM file too |
-| SCC+ | ❌ | Same `MAPPER_KONAMI_SCC` collision. (It is `ROM_RAM`, so the ROM-file half does not apply) |
-| MegaFlashROM SCC+ SD | ❌ | It *is* an expanded cart — it already occupies subslots 0-3 of its slot (`memory_upload.sv:698-701`). Nothing can share it |
-| FDC | ⚠️ not offered | Its mapper is safe (`MAPPER_NONE` is stateless — `msx_slots.sv:219` is pure combinational). The blocker is elsewhere: `msx_config.sv:103` `fdc_enabled = bios_config.use_FDC \| cart_conf[0].typ == CART_TYP_FDC` looks at the **slot type only**, so an FDC in a subslot would never raise `fdc_enabled` and the drive-mount menu would not appear. Doable, but needs that wiring first |
-| Empty | — | nothing to place |
+| **Mapper state is per cart *slot*, not per subslot** — `konami_scc.sv:21` `bank[2][4]`, `sccMode[2]`, indexed by `cart_num`. Two subslots of one slot share `cart_num`, so two devices with the same mapper would share bank registers. | a non-issue: every real cartridge carries its own registers | index `[cart_num][subslot]`. **Costed below — essentially free.** |
+| **One ROM file per cart slot** — `ioctl_size[2]/[3]`, two DDR3 staging regions (`0xC00000` / `0x3000000`) | host-side only, nothing to do with MSX | no silicon cost; ioctl indices + staging regions + one `F` entry per subslot in CONF_STR |
+| **`cart_gamemaster2` has one global bank set** — `gamemaster2.sv:15`, no `cart_num` port at all, unlike `konami_scc`/`ascii8`/`ascii16x` (which index `[cart_num]`) or `fm_pac` (which instantiates twice, `:44,58`) | per-cartridge | the whole module is **11 ALUT / 18 reg**; ~10 lines + a bench |
+| **`fdc_enabled` looks at the slot type only** — `msx_config.sv:103` — so an FDC in a subslot would never raise it and the drive-mount menu would not appear | — | a few lines |
 
-### Mapper-module state, which is what actually decides collisions
+### Costed against the real fit
 
-Mapper state lives in the mapper module, not in the slot layout, so two subslots of
-the **same** slot share whatever their mapper module holds (they have the same
-`cart_num`).
+Baseline (`output_files/MSX1.fit.summary`, 2026-08-26): **ALM 29,406 / 41,910 (70%)**,
+**38,073 registers**, **M10K 351 / 553 (63%)**, block memory 41%.
+Per-entity figures from `MSX1.map.rpt`'s *Resource Utilization by Entity*.
+Cyclone V packs 2 ALUTs per ALM, so ALM ≈ ALUT / 2.
 
-| module | per-cart-slot state? | evidence |
+Mapper modules are tiny — they are just bank registers:
+
+| module | ALUT | reg |
 |---|---|---|
-| `konami_scc` | yes | `bank[2][4]`, `sccMode[2]` (`konami_scc.sv:20-21`) |
-| `ascii8` | yes | `bank[2][4]`, `sramBank[2][4]` (`ascii8.sv:20-21`) |
-| `ascii16x` | yes | `bankRegs[2][2]` (`ascii16x.sv:55`) |
-| `fm_pac` | yes | two inner instances muxed by `cart_num` (`fm_pac.sv:29-31,44,58`) |
-| **`gamemaster2`** | **NO** | `bank1, bank2, bank3` single (`gamemaster2.sv:15`); the module has **no `cart_num` port at all** |
+| `cart_konami_scc` | 45 | 76 |
+| `cart_ascii8` | 113 | 144 |
+| `cart_ascii16` | 66 | 36 |
+| `cart_ascii16x` | 51 | 53 |
+| `cart_fm_pac` (both inner instances) | 44 | 44 |
+| `cart_gamemaster2` | 11 | 18 |
 
-`cart_gamemaster2` having one global set of bank registers is pre-existing and
-harmless today, because GM2 is reachable only from the SLOT A menu — at most one
-can exist. The first version of this feature offered GameMaster2 in slot B's
-sub-slot menu too, which made "SLOT A = GameMaster2" + "SLOT B sub-slot =
-GameMaster2" reachable and would have had the two share `bank1/2/3`. That was
-caught before hardware and the slot B option was removed; `msx_config.sv` also
-clamps slot B's selection so a status word carried over from an older build cannot
-resurrect it.
+The sound chips are where the silicon actually is:
 
-**If GameMaster2 in both slots is ever wanted**, the real fix is to give
-`cart_gamemaster2` a `cart_num` port and make `bank1/2/3` arrays, exactly like
-`ascii8`. About ten lines plus a bench. Nobody has asked for it.
+| chip | ALUT | reg | memory bits |
+|---|---|---|---|
+| `IKASCC_player_s` (one SCC) | **519** | 387 | 1,280 |
+| `IKAOPLL` (one OPLL) | **~895** | ~905 | 749 (3 M10K) |
 
-## Why only FM-PAC and GameMaster2
+**A — mapper state per subslot (`[cart_num]` → `[cart_num][subslot]`).**
+Four copies of the table above instead of two: **≈ +1,200 registers (+3.1%)** and,
+allowing for the deeper read mux, **≈ +300-500 ALUT ≈ +150-250 ALM (+0.5-0.9%)**.
+No memory blocks. **This is the one that matters and it is essentially free** — it
+is what unblocks SCC, SCC+, Konami and the ASCII family as sub-slot devices.
 
-Not arbitrary — it is what provably cannot collide.
+**B — a second SCC *sound chip* per cart slot** (only needed if two SCC-family
+devices in the *same* slot must sound at once): +2 `IKASCC_player_s` =
+**+1,038 ALUT (~520 ALM, +1.8%), +774 reg, +2,560 memory bits**. Going fully
+per-subslot (8 total, +6) = **+3,114 ALUT (~1,560 ALM, +5.3%), +2,322 reg**.
+Affordable, but rarely needed — banking and sound are separate problems, and A
+alone already lets a game and an SCC+ cart share a slot as long as only one of
+them is actually making sound.
 
-Mapper state is per-mapper-module, not per-subslot. If the subslot device used a
-mapper the ROM in subslot 0 might also use, both subslots would share one set of
-bank registers and corrupt each other. `MAPPER_FMPAC` and `MAPPER_GM2` are the
-only cart mappers that are **unreachable** for a ROM cart, in both directions:
+**C — a second OPLL per cart slot**: +1 IKAOPLL = **~+450 ALM (+1.5%), +905 reg,
++3 M10K**. Fully per-subslot (+6) = **~+2,685 ALM (+9.1%), +5,430 reg, +18 M10K
+(351 → 369)**. This is the expensive one *and* the least useful: OPLL is addressed
+through I/O ports `0x7C`/`0x7D`, which are not slot-scoped at all (see §2), so
+more than one cart OPLL per slot buys nothing an MSX program can distinguish.
 
-* not in the user's mapper menu — `CONF_STR_MAPPER_A/B` lists only
-  `auto..WIZARDRY, Yamanooto` (`msx_config.sv:11,15`); both are marked
-  `/*NEXT INTERNAL*/` in `package.sv:5`;
-* not producible by auto-detect — `mapper_detect.sv:90-95` can only ever emit
+**The binding constraint is not the ALM count.** 12,504 ALMs are free — even C in
+full fits. What this project has actually been bitten by is *fit congestion*: a
+large combinational cloud in the PCM engine broke `SDRAM_DQ` IOB packing and made
+2MB RAM flaky at ~95% BRAM (see `project_pcm_noise_rootcause` and
+`docs/pcm_engine_optimization_study.md`), and the ASCII16X "ch1 sustained read
+hang" turned out to be fit-dependent too. So the honest ordering is: **do A**
+(free, unblocks the useful cases), **do B only if a concrete title needs it**, and
+**treat C as not worth the placement risk**.
+
+**So SCC and SCC+ are excluded by us, not by MSX.** `MAPPER_KONAMI_SCC` is both
+pickable from the mapper menu and producible by `mapper_detect` (`:92`), so a ROM
+in subslot 0 can already be using it and the two would share `bank[2][4]`. Lift
+the first row of that table and "a game plus a real SCC+ sound cartridge in one
+slot" opens up — which is exactly the configuration the SCMD investigation needed
+(SCC-I and its RAM in the *same* subslot, see
+`docs/mfrsd_scc_sound_cartridge_20260823.md`).
+
+### What the menu offers today, and why those two are safe now
+
+`FM-PAC` (slots A and B) and `GameMaster2` (slot A only). Both are safe under the
+*current* per-slot mapper state because `MAPPER_FMPAC` and `MAPPER_GM2` are the
+only cart mappers a ROM cart cannot reach in either direction:
+
+* not in the mapper menu — `CONF_STR_MAPPER_A/B` lists `auto..WIZARDRY, Yamanooto`
+  only; both are marked `/*NEXT INTERNAL*/` in `package.sv:5`;
+* not producible by auto-detect — `mapper_detect.sv:90-95` emits only
   `MAPPER_UNUSED / NONE / KONAMI_SCC / KONAMI / ASCII8 / ASCII16`.
 
-SCC+ was considered and rejected for exactly this reason: it is `MAPPER_KONAMI_SCC`,
-which the user can pick *and* auto-detect can produce.
+Their ROMs come from the **FW PACK** (`ROM_FMPAC` / `ROM_GM2` -> `STATE_FIND_ROM`
+at `0x2000000`), so the one-ROM-file-per-slot limit does not apply either. And
+`lookup_SRAM`: a ROM cart's SRAM takes index 0 (slot A only, deliberately —
+`memory_upload.sv:252-259`), a non-`ROM_ROM` config takes 1 (slot A) or 2 (slot B),
+which is the same index "SLOT A = FM-PAC" already uses today. No new allocation.
 
-Two further constraints, both respected rather than worked around:
-
-* **One ROM file per slot** (`ioctl_size[2]/[3]`, two DDR3 staging regions at
-  `0xC00000` / `0x3000000`). FM-PAC and GameMaster2 take their ROMs from the
-  **FW PACK** (`ROM_FMPAC` / `ROM_GM2` -> `STATE_FIND_ROM`, `ddr3_addr 0x2000000`),
-  not from a user file, so no second file is needed.
-* **`lookup_SRAM[4]`, 3 in use.** A ROM cart's SRAM takes index 0 (slot A only,
-  deliberately — see the comment at `memory_upload.sv:252-259`); a non-`ROM_ROM`
-  config takes index 1 (slot A) or 2 (slot B). The subslot device is not
-  `ROM_ROM`, so it takes 1 or 2 — the same index "SLOT A = FM-PAC" already uses
-  today. No new allocation, no aliasing.
+GameMaster2 is slot A only because of the third row above: it was reachable from
+the SLOT A menu alone, so at most one could exist. The first version of this
+feature offered it on slot B's sub-slot too, which made "SLOT A = GameMaster2" +
+"SLOT B sub-slot = GameMaster2" reachable and the two would have shared
+`bank1/2/3`. Caught before hardware; the option was removed and `msx_config`
+clamps slot B so a status word from an older build cannot resurrect it.
 
 ## Known limitation — needs a ROM actually loaded
 
