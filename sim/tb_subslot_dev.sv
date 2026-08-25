@@ -40,6 +40,29 @@ module tb_subslot_dev;
       .sram_size(sram_size), .ram_size(ram_size), .mode(mode), .param(param), .device(device)
    );
 
+   // ---- second DUT: msx_config, where the menu-side guards live -----------
+   // The decoder above trusts subslot_dev; msx_config is what decides whether the
+   // user's menu selection is allowed to reach it at all.
+   logic                 cfg_clk = 0;
+   logic         [127:0] hps_status = '0;
+   MSX::bios_config_t    bios_config;
+   MSX::config_cart_t    cart_conf[2];
+   MSX::user_config_t    msxConfig_o;
+   wire sram_A_hide_o, romA_hide_o, romB_hide_o, fdc_en_o, reload_o;
+   wire subslot_A_hide_o, subslot_B_hide_o;
+
+   always #5 cfg_clk = ~cfg_clk;
+
+   msx_config cfg (
+      .clk(cfg_clk), .reset(1'b0), .bios_config(bios_config),
+      .HPS_status(hps_status), .scandoubler(1'b0), .sdram_size(2'd2),
+      .rom_loaded(2'b11), .rom_big(2'b00),
+      .cart_conf(cart_conf), .sram_A_select_hide(sram_A_hide_o),
+      .subslot_A_hide(subslot_A_hide_o), .subslot_B_hide(subslot_B_hide_o),
+      .ROM_A_load_hide(romA_hide_o), .ROM_B_load_hide(romB_hide_o),
+      .fdc_enabled(fdc_en_o), .msxConfig(msxConfig_o), .reload(reload_o)
+   );
+
    int errors = 0;
 
    task automatic drive(input cart_typ_t t, input logic [1:0] ss, input logic [1:0] dev);
@@ -80,6 +103,7 @@ module tb_subslot_dev;
    endtask
 
    initial begin
+      bios_config        = '{default:'0};
       selected_mapper    = MAPPER_ASCII8;   // a plain ROM cart with a fixed mapper
       detected_mapper    = MAPPER_KONAMI;
       selected_sram_size = 8'd0;
@@ -130,6 +154,66 @@ module tb_subslot_dev;
       drive(CART_TYP_FM_PAC, 2'd1, 2'd1);  expect_empty("FM-PAC ss1 dev=FM-PAC");
       drive(CART_TYP_GM2,    2'd1, 2'd2);  expect_empty("GM2 ss1 dev=GameMaster2");
       drive(CART_TYP_EMPTY,  2'd1, 2'd1);  expect_empty("Empty ss1 dev=FM-PAC");
+
+      // ================= menu-side guards (msx_config) =====================
+      // [19:17] SLOT A type, [31:29] SLOT B type,
+      // [50:49] SLOT A sub-slot, [53:52] SLOT B sub-slot
+      // ---- master toggle OFF = the classic menu, nothing expands ---------
+      hps_status = '0;                                   // both slots = ROM, toggle No
+      hps_status[50:49] = 2'd1; hps_status[53:52] = 2'd1;  // both sub-slots FM-PAC
+      #1;
+      if (cart_conf[0].selected_subslot_dev !== 2'd0 || cart_conf[1].selected_subslot_dev !== 2'd0) begin
+         $display("FAIL msx_config: Slot expansion=No must force both sub-slots to None");
+         errors++;
+      end
+      if (!subslot_A_hide_o || !subslot_B_hide_o) begin
+         $display("FAIL msx_config: Slot expansion=No must hide both sub-slot menus");
+         errors++;
+      end
+
+      // ---- master toggle ON ----------------------------------------------
+      hps_status[60] = 1'b1;
+      #1;
+      if (subslot_A_hide_o || subslot_B_hide_o) begin
+         $display("FAIL msx_config: Slot expansion=Yes must reveal both sub-slot menus");
+         errors++;
+      end
+      if (cart_conf[0].selected_subslot_dev !== 2'd1) begin
+         $display("FAIL msx_config: slot A ROM + FM-PAC not passed through"); errors++;
+      end
+      if (cart_conf[1].selected_subslot_dev !== 2'd1) begin
+         $display("FAIL msx_config: slot B ROM + FM-PAC not passed through"); errors++;
+      end
+
+      // a non-ROM slot type must suppress the sub-slot device entirely
+      hps_status[19:17] = 3'(CART_TYP_SCC2);
+      hps_status[31:29] = 3'(CART_TYP_FM_PAC);
+      #1;
+      if (!subslot_A_hide_o || !subslot_B_hide_o) begin
+         $display("FAIL msx_config: a non-ROM slot must hide its sub-slot menu"); errors++;
+      end
+      if (cart_conf[0].selected_subslot_dev !== 2'd0) begin
+         $display("FAIL msx_config: SLOT A = SCC+ must suppress the sub-slot device"); errors++;
+      end
+      if (cart_conf[1].selected_subslot_dev !== 2'd0) begin
+         $display("FAIL msx_config: SLOT B = FM-PAC must suppress the sub-slot device"); errors++;
+      end
+
+      // GameMaster2 is slot A only.  cart_gamemaster2 keeps ONE global bank set
+      // (gamemaster2.sv:15, no cart_num), so slot B must never select it -- not
+      // even from a status word left over by an older build.
+      hps_status[19:17] = 3'(CART_TYP_ROM);
+      hps_status[31:29] = 3'(CART_TYP_ROM);
+      hps_status[50:49] = 2'd2; hps_status[53:52] = 2'd2;
+      #1;
+      if (cart_conf[0].selected_subslot_dev !== 2'd2) begin
+         $display("FAIL msx_config: slot A GameMaster2 not passed through"); errors++;
+      end
+      if (cart_conf[1].selected_subslot_dev !== 2'd0) begin
+         $display("FAIL msx_config: slot B must CLAMP GameMaster2 to None, got %0d",
+                  cart_conf[1].selected_subslot_dev);
+         errors++;
+      end
 
       if (errors == 0) begin
          $display("PASS: sub-slot device lands in subslot 1 of a ROM cart only");

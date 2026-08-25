@@ -13,11 +13,24 @@ parameter CONF_STR_SLOT_B = {
 // mappers (MAPPER_FMPAC / MAPPER_GM2, both "NEXT INTERNAL" in package.sv:4) can be
 // neither picked from the mapper menu nor produced by mapper_detect, so the subslot
 // device can never collide with the ROM's own mapper state.
-parameter CONF_STR_SUBSLOT_A = {
-    "H3O[50:49],SLOT A sub-slot,None,FM-PAC,GameMaster2;"
+// Master switch.  Default No = the menu the core has always had: both cart slots
+// non-expanded, subslot 0 only.  Yes reveals the per-slot sub-slot menus below.
+parameter CONF_STR_SLOT_EXPANSION = {
+    "O[60],Slot expansion,No,Yes;"
 };
+parameter CONF_STR_SUBSLOT_A = {
+    "H7O[50:49],SLOT A sub-slot,None,FM-PAC,GameMaster2;"
+};
+// Slot B deliberately does NOT offer GameMaster2.  cart_gamemaster2 keeps ONE
+// global set of bank registers (gamemaster2.sv:15 -- no cart_num port at all,
+// unlike konami_scc/ascii8/ascii16x which index [cart_num], and unlike fm_pac
+// which instantiates twice at fm_pac.sv:44,58).  Today GM2 is reachable only from
+// the SLOT A menu, so at most one can exist; offering it here as well would make
+// "SLOT A = GameMaster2" + "SLOT B sub-slot = GameMaster2" reachable and the two
+// would share bank1/2/3.  Giving cart_gamemaster2 a cart_num is the real fix; it
+// is not needed for anything anyone has asked for.
 parameter CONF_STR_SUBSLOT_B = {
-    "H4O[53:52],SLOT B sub-slot,None,FM-PAC,GameMaster2;"
+    "H8O[53:52],SLOT B sub-slot,None,FM-PAC;"
 };
 // Single "ASCII16X" entry covers both: ROM <= 4MB -> classic ASCII16 (SRAM etc.),
 // ROM > 4MB -> ASCII16X flash mapper (8-bit-bank ASCII16 cannot exceed 4MB; per the
@@ -45,6 +58,8 @@ module msx_config
     input               [1:0] rom_big,     // ROM > 4MB per slot -> promote ASCII16X entry to the flash mapper
     output MSX::config_cart_t cart_conf[2],
     output                    sram_A_select_hide,
+    output                    subslot_A_hide,  //7
+    output                    subslot_B_hide,  //8
     output                    ROM_A_load_hide, //3 
     output                    ROM_B_load_hide, //4
     output                    fdc_enabled,
@@ -57,6 +72,7 @@ wire [2:0] slot_B_select   = HPS_status[31:29];
 wire [2:0] sram_A_select   = HPS_status[28:26];
 wire [3:0] mapper_A_select = HPS_status[23:20];
 wire [3:0] mapper_B_select = HPS_status[35:32]; 
+wire       slot_expansion_en = HPS_status[60];
 wire [1:0] subslot_A_select = HPS_status[50:49];
 wire [1:0] subslot_B_select = HPS_status[53:52];
 
@@ -86,8 +102,10 @@ assign cart_conf[1].selected_sram_size = 8'd0;
 
 // Honoured only for a plain ROM cart -- every other cart type either already owns
 // its subslots (MFRSD) or would clash with the subslot device's mapper.
-assign cart_conf[0].selected_subslot_dev = cart_conf[0].typ == CART_TYP_ROM ? subslot_A_select : 2'd0;
-assign cart_conf[1].selected_subslot_dev = cart_conf[1].typ == CART_TYP_ROM ? subslot_B_select : 2'd0;
+assign cart_conf[0].selected_subslot_dev = slot_expansion_en & cart_conf[0].typ == CART_TYP_ROM ? subslot_A_select : 2'd0;
+// Clamped to FM-PAC: the menu lists only None/FM-PAC, but a status word carried
+// over from an older build could still hold 2 (GameMaster2) -- see above.
+assign cart_conf[1].selected_subslot_dev = slot_expansion_en & cart_conf[1].typ == CART_TYP_ROM & subslot_B_select == 2'd1 ? 2'd1 : 2'd0;
 
 assign msxConfig.typ = bios_config.MSX_typ;
 assign msxConfig.scandoubler = scandoubler;
@@ -99,6 +117,9 @@ assign msxConfig.moonsound_en = HPS_status[45];
 
 assign ROM_A_load_hide    = cart_conf[0].typ != CART_TYP_ROM;
 assign ROM_B_load_hide    = cart_conf[1].typ != CART_TYP_ROM;
+// Sub-slot menus appear only with the master toggle on AND that slot set to ROM.
+assign subslot_A_hide     = ~slot_expansion_en | ROM_A_load_hide;
+assign subslot_B_hide     = ~slot_expansion_en | ROM_B_load_hide;
 assign sram_A_select_hide = cart_conf[0].typ != CART_TYP_ROM | mapper_A_select == 4'd0 | mapper_A_select == 4'd10 | (mapper_A_select == 4'd3 & rom_big[0]);
 assign fdc_enabled = bios_config.use_FDC | cart_conf[0].typ == CART_TYP_FDC;
 

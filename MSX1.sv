@@ -258,6 +258,7 @@ wire      [64:0] rtc;
 //[50:49] SLOT A SUB-SLOT DEVICE (expanded cart slot; was OPL4 PCM VOLUME)
 //[51]    CHEATS
 //[53:52] SLOT B SUB-SLOT DEVICE (expanded cart slot; was OPL4 FM VOLUME)
+//[60]    SLOT EXPANSION master toggle (No = the classic non-expanded menu)
 //[56:54] OPL4 PCM VOLUME (5 steps, first entry = default)
 //[59:57] OPL4 FM VOLUME  (5 steps, first entry = default)
 `include "build_id.v" 
@@ -327,6 +328,7 @@ localparam CONF_STR = {
    "P2O[70:69],SCC Volume,0dB,+4dB,-4dB,-8dB;",
    "-;",
    "O[64],Reset on ROM change,Yes,No;",
+   CONF_STR_SLOT_EXPANSION,
    "O[48],Debug Overlay,Off,On;",
    "-;",
    "T[0],Reset;",
@@ -335,7 +337,7 @@ localparam CONF_STR = {
    "V,v",`BUILD_DATE 
 };
 
-wire [7:0] status_menumask;
+wire [9:0] status_menumask;   // hps_io takes 16; [8:7] added for the sub-slot menus
 wire [1:0] sdram_size;
 assign status_menumask[0] = msxConfig.cas_audio_src == CAS_AUDIO_ADC;
 assign status_menumask[1] = fdc_enabled;
@@ -348,6 +350,9 @@ assign status_menumask[5] = sram_A_select_hide;
 // buttons would be hidden, leaving the user no way to trigger a save.  ASCII16X
 // was already excepted for exactly this reason; Yamanooto needs the same, or its
 // newly-wired flash write path is unreachable from the UI.
+assign status_menumask[7] = subslot_A_hide;
+assign status_menumask[8] = subslot_B_hide;
+assign status_menumask[9] = 1'b0;
 assign status_menumask[6] = (lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0)
                           & (cart_conf[0].selected_mapper != MAPPER_ASCII16X)
                           & (cart_conf[0].selected_mapper != MAPPER_YAMANOOTO)
@@ -392,6 +397,7 @@ hps_io #(.CONF_STR(CONF_STR),.VDNUM(VDNUM)) hps_io
 /////////////////   CONFIG   /////////////////
 wire [5:0] mapper_A, mapper_B;
 wire       reload, sram_A_select_hide, fdc_enabled, ROM_A_load_hide, ROM_B_load_hide;
+wire       subslot_A_hide, subslot_B_hide;
 
 msx_config msx_config 
 (
@@ -406,6 +412,8 @@ msx_config msx_config
    .rom_loaded(rom_loaded),
    .rom_big(rom_big),
    .sram_A_select_hide(sram_A_select_hide),
+   .subslot_A_hide(subslot_A_hide),
+   .subslot_B_hide(subslot_B_hide),
    .ROM_A_load_hide(ROM_A_load_hide),
    .ROM_B_load_hide(ROM_B_load_hide),
    .fdc_enabled(fdc_enabled),
