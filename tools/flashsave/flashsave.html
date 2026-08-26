@@ -1,0 +1,428 @@
+<title>MSX 플래시 세이브 브리지</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --ground:#EDF1F0; --surface:#FFFFFF; --surface-2:#F6F9F8;
+  --ink:#0C1618; --ink-2:#415352; --muted:#6B7D7C;
+  --line:#D2DCDA; --line-2:#E3EAE9;
+  --pad:#E0E7E5; --rom:#96ADAB; --dirty:#B25E06;
+  --bad:#A33119; --ok:#2F6B4F;
+  --shadow:0 1px 2px rgba(12,22,24,.06), 0 8px 24px -16px rgba(12,22,24,.35);
+  --on-dirty:#FFFFFF;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#0B1214; --surface:#131E20; --surface-2:#0F191B;
+    --ink:#E3ECEB; --ink-2:#B4C5C4; --muted:#879B9A;
+    --line:#22302F; --line-2:#1A2628;
+    --pad:#182325; --rom:#3E5553; --dirty:#E9A144;
+    --bad:#E0705A; --ok:#6DBF95;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+    --on-dirty:#1B1206;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0B1214; --surface:#131E20; --surface-2:#0F191B;
+  --ink:#E3ECEB; --ink-2:#B4C5C4; --muted:#879B9A;
+  --line:#22302F; --line-2:#1A2628;
+  --pad:#182325; --rom:#3E5553; --dirty:#E9A144;
+  --bad:#E0705A; --ok:#6DBF95;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px -16px rgba(0,0,0,.8);
+  --on-dirty:#1B1206;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  font-size:15px; line-height:1.65; -webkit-font-smoothing:antialiased;
+  word-break:keep-all;
+}
+.mono{font-family:"IBM Plex Mono","IBM Plex Sans KR",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+
+.wrap{max-width:940px;margin:0 auto;padding:40px 24px 72px;display:flex;flex-direction:column;gap:28px}
+
+header h1{
+  font-size:clamp(27px,4vw,38px); font-weight:700; letter-spacing:-.02em;
+  margin:0 0 8px; text-wrap:balance; line-height:1.3;
+}
+header p{margin:0;color:var(--muted);max-width:60ch}
+header .eyebrow{
+  font-family:"IBM Plex Mono",monospace; font-size:11px; font-weight:500;
+  letter-spacing:.14em; text-transform:uppercase; color:var(--dirty);
+  margin:0 0 10px;
+}
+
+.modes{display:flex;gap:4px;padding:4px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;width:fit-content}
+.modes button{
+  font:inherit;font-weight:500;font-size:14px;color:var(--ink-2);
+  background:transparent;border:0;border-radius:7px;padding:8px 16px;cursor:pointer;
+}
+.modes button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.modes button:focus-visible{outline:2px solid var(--dirty);outline-offset:2px}
+
+.flow{
+  font-size:13px;color:var(--muted);
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:-14px
+}
+.flow b{color:var(--ink-2);font-weight:500;font-family:"IBM Plex Mono",monospace;font-size:12.5px}
+
+.slots{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:680px){.slots{grid-template-columns:1fr}}
+.slot{
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;
+  padding:16px 18px;display:flex;flex-direction:column;gap:5px;min-height:106px;
+  cursor:pointer;transition:border-color .12s,background .12s;position:relative;
+}
+.slot:hover,.slot.drag{border-color:var(--dirty);background:var(--surface-2)}
+.slot:focus-visible{outline:2px solid var(--dirty);outline-offset:2px}
+.slot .lbl{
+  font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:500;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--muted);
+}
+.slot .name{font-weight:600;font-size:15px;word-break:break-all;line-height:1.4}
+.slot .name.empty{color:var(--muted);font-weight:400;font-size:13.5px}
+.slot .meta{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-2)}
+.slot .meta.err{color:var(--bad)}
+.slot input{position:absolute;inset:0;opacity:0;cursor:pointer}
+
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:20px;box-shadow:var(--shadow)}
+.panel h2{font-size:14px;font-weight:600;margin:0 0 3px}
+.panel .sub{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--muted);margin:0 0 16px}
+
+.map{display:grid;grid-template-columns:repeat(16,1fr);gap:3px}
+.cell{aspect-ratio:1;border-radius:2px;background:var(--pad);transition:transform .1s, box-shadow .1s}
+.cell.rom{background:var(--rom)}
+.cell.dirty{background:var(--dirty)}
+.cell:hover{transform:scale(1.35);box-shadow:0 0 0 1px var(--surface),0 2px 6px rgba(0,0,0,.25);z-index:2;position:relative}
+
+.readout{
+  font-family:"IBM Plex Mono","IBM Plex Sans KR",monospace;font-size:12.5px;color:var(--ink-2);
+  margin-top:14px;padding-top:12px;border-top:1px solid var(--line-2);min-height:20px
+}
+.legend{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;font-size:12.5px;color:var(--muted)}
+.legend span{display:flex;align-items:center;gap:7px}
+.legend i{width:11px;height:11px;border-radius:2px;display:block;flex:none}
+
+.blocks{margin-top:18px;overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-family:"IBM Plex Mono",monospace;font-size:12.5px}
+th{text-align:left;font-weight:500;color:var(--muted);font-size:11px;letter-spacing:.06em;padding:0 14px 8px 0;white-space:nowrap;font-family:"IBM Plex Sans KR",sans-serif}
+td{padding:5px 14px 5px 0;border-top:1px solid var(--line-2);white-space:nowrap;color:var(--ink-2)}
+td.b{color:var(--ink);font-weight:500}
+
+.result{display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:16px 20px}
+.result.hot{border-color:var(--dirty)}
+.result .out{flex:1;min-width:220px;display:flex;flex-direction:column;gap:2px}
+.result .out .fn{font-family:"IBM Plex Mono",monospace;font-weight:500;font-size:14px;word-break:break-all}
+.result .out .sz{font-family:"IBM Plex Mono","IBM Plex Sans KR",monospace;font-size:12.5px;color:var(--muted)}
+button.go{
+  font:inherit;font-weight:600;font-size:14px;color:var(--on-dirty);background:var(--dirty);
+  border:0;border-radius:9px;padding:11px 24px;cursor:pointer;white-space:nowrap
+}
+button.go:hover{filter:brightness(1.08)}
+button.go:disabled{opacity:.4;cursor:not-allowed;filter:none}
+button.go:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+.status{font-family:"IBM Plex Mono","IBM Plex Sans KR",monospace;font-size:12.5px;min-height:18px;color:var(--muted)}
+.status.err{color:var(--bad)}
+.status.ok{color:var(--ok)}
+
+.notes{display:grid;grid-template-columns:1fr 1fr;gap:14px;font-size:13.5px;color:var(--ink-2)}
+@media (max-width:680px){.notes{grid-template-columns:1fr}}
+.notes h3{font-size:12.5px;color:var(--muted);margin:0 0 9px;font-weight:600}
+.notes p{margin:0 0 9px}
+.notes p:last-child{margin:0}
+.notes code{font-family:"IBM Plex Mono",monospace;font-size:12px;background:var(--surface-2);border:1px solid var(--line-2);border-radius:4px;padding:1px 5px}
+.notes .card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">MFX16XDB · 64 KB 블록 · 8 MB 플래시</p>
+    <h1>MSX 플래시 세이브 브리지</h1>
+    <p>플래시 카트리지 세이브를 openMSX와 MiSTer MSX1 코어 사이에서 옮깁니다.
+       MiSTer의 <span class="mono">.sav</span>는 메모리 덤프가 아니라 <b>8 MB 플래시에 대한 희소 패치</b>입니다.
+       헤더 하나에, 게임이 실제로 바꾼 64 KB 블록만 담깁니다. 반면 openMSX는 칩 전체를 그대로 저장합니다.
+       원본 ROM과 비교해 그 차이를 뽑아내고, 되돌리는 도구입니다.</p>
+  </header>
+
+  <div class="modes" role="group" aria-label="변환 방향">
+    <button id="mExtract" aria-pressed="true">openMSX → MiSTer</button>
+    <button id="mApply" aria-pressed="false">MiSTer → openMSX</button>
+  </div>
+  <p class="flow" id="flow"></p>
+
+  <div class="slots">
+    <label class="slot" id="slotRom" tabindex="0">
+      <span class="lbl">원본 ROM</span>
+      <span class="name empty" id="romName">플레이에 쓰는, 수정되지 않은 .ROM</span>
+      <span class="meta" id="romMeta"></span>
+      <input type="file" id="romFile">
+    </label>
+    <label class="slot" id="slotSec" tabindex="0">
+      <span class="lbl" id="secLbl">openMSX 플래시 이미지</span>
+      <span class="name empty" id="secName">…/persistent/roms/&lt;rom&gt;/&lt;rom&gt;.SRAM</span>
+      <span class="meta" id="secMeta"></span>
+      <input type="file" id="secFile">
+    </label>
+  </div>
+
+  <section class="panel">
+    <h2>플래시 맵</h2>
+    <p class="sub">128 블록 × 64 KB — 한 칸이 칩의 블록 하나</p>
+    <div class="map" id="map"></div>
+    <div class="legend">
+      <span><i style="background:var(--rom)"></i>ROM, 변경 없음</span>
+      <span><i style="background:var(--pad)"></i>ROM 뒤 0xFF 패딩</span>
+      <span><i style="background:var(--dirty)"></i>변경됨 — 이것이 세이브</span>
+    </div>
+    <div class="readout" id="readout">두 파일을 넣으면 세이브가 어느 블록에 있는지 보입니다.</div>
+    <div class="blocks" id="blocks"></div>
+  </section>
+
+  <div class="result" id="result">
+    <div class="out">
+      <span class="fn" id="outName">—</span>
+      <span class="sz" id="outSize">아직 결과 없음</span>
+    </div>
+    <button class="go" id="save" disabled>파일 저장</button>
+  </div>
+  <p class="status" id="status"></p>
+
+  <div class="notes">
+    <div class="card">
+      <h3>MiSTer에 넣기</h3>
+      <p><code>/media/fat/saves/MSX1/&lt;롬이름&gt;.sav</code> 에 두세요. 파일명은 코어에서 불러오는
+         ROM 이름에서 확장자만 뗀 것과 <b>정확히 같아야</b> 합니다. 펌웨어가 그 이름의 동반 파일을
+         VD0에 마운트하고, 코어가 부팅 때 읽습니다.</p>
+      <p>브라우저 저장은 허용된 확장자만 되는데 <code>.sav</code>는 목록에 없어서
+         <code>.sav.txt</code>로 내려옵니다. <code>.txt</code>만 지우면 됩니다 — 내용은 이미 정확합니다.</p>
+    </div>
+    <div class="card">
+      <h3>비교가 전제하는 것</h3>
+      <p>코어는 플래시 카트를 8 MB 칩 전체로 올립니다. 오프셋 0에 ROM, 그 뒤는 끝까지
+         <code>0xFF</code>(지워진 상태)입니다. 이것과 다른 64 KB 블록은 전부 세이브로 봅니다.</p>
+      <p>코어 자신보다 아주 조금 더 넓게 잡습니다. 코어는 게임이 바이트를 <b>프로그램</b>한 블록만
+         표시하므로, 지우기만 하고 쓰지 않은 블록은 코어가 놓치고 여기서는 잡힙니다.
+         복원은 그 블록을 그대로 다시 쓰는 것뿐이라 무해합니다.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const BLOCK = 65536, NBLOCKS = 128, FLASH = BLOCK * NBLOCKS, SECTOR = 512;
+// 디스크상 매직은 64비트 상수 MFX16XDB를 리틀엔디언으로 쓴 것이라 바이트로는 "BDX61XFM".
+// 코어가 실제로 쓴 .sav로 확인함.
+const MAGIC = [0x42,0x44,0x58,0x36,0x31,0x58,0x46,0x4D];
+const MODE_DIRTY_BLOCK = 0x02;
+
+let downloads = null;
+let mode = "extract";                 // "extract" | "apply"
+let rom = null, sec = null;           // {name, bytes}
+let out = null;                       // {name, bytes}
+
+const $ = id => document.getElementById(id);
+const kb = n => n.toLocaleString() + " 바이트";
+const hex = (n, w=6) => "0x" + n.toString(16).toUpperCase().padStart(w, "0");
+
+/* ---------- 변환 코어 ---------- */
+function paddedBase(romBytes){
+  const b = new Uint8Array(FLASH).fill(0xFF);
+  b.set(romBytes.subarray(0, Math.min(romBytes.length, FLASH)));
+  return b;
+}
+function blockDiffers(a, b, i){
+  const s = i * BLOCK;
+  for (let k = 0; k < BLOCK; k++) if (a[s+k] !== b[s+k]) return true;
+  return false;
+}
+function diffStats(a, b, i){
+  const s = i * BLOCK; let n = 0, first = -1, last = -1;
+  for (let k = 0; k < BLOCK; k++) if (a[s+k] !== b[s+k]){ n++; if (first < 0) first = k; last = k; }
+  return {n, first, last};
+}
+function buildSav(image, dirty){
+  const outBytes = new Uint8Array(SECTOR + dirty.length * BLOCK);
+  MAGIC.forEach((v,i) => outBytes[i] = v);
+  outBytes[8] = MODE_DIRTY_BLOCK;
+  for (const b of dirty) outBytes[16 + (b >> 3)] |= 1 << (b & 7);
+  dirty.forEach((b, n) => outBytes.set(image.subarray(b*BLOCK, (b+1)*BLOCK), SECTOR + n*BLOCK));
+  return outBytes;
+}
+function parseSav(bytes){
+  if (bytes.length < SECTOR) return {error:"512바이트 섹터 하나보다 짧습니다 — .sav가 아닙니다."};
+  for (let i = 0; i < 8; i++) if (bytes[i] !== MAGIC[i]){
+    const got = Array.from(bytes.subarray(0,8)).map(c => (c>=32&&c<127) ? String.fromCharCode(c) : ".").join("");
+    return {error:`헤더 매직이 "${got}"입니다. "BDX61XFM"이어야 합니다.`};
+  }
+  const dirty = [];
+  for (let b = 0; b < NBLOCKS; b++) if (bytes[16 + (b>>3)] >> (b&7) & 1) dirty.push(b);
+  const want = SECTOR + dirty.length * BLOCK;
+  if (bytes.length !== want)
+    return {error:`비트맵은 ${dirty.length}개 블록 = ${want.toLocaleString()}바이트를 가리키는데 파일은 ${bytes.length.toLocaleString()}바이트입니다.`};
+  return {dirty, mode: bytes[8]};
+}
+
+/* ---------- 화면 ---------- */
+const cells = [];
+(function initMap(){
+  const map = $("map");
+  for (let i = 0; i < NBLOCKS; i++){
+    const c = document.createElement("div");
+    c.className = "cell";
+    c.addEventListener("mouseenter", () => $("readout").textContent = c.dataset.info || `블록 ${i} · ${hex(i*BLOCK)}`);
+    map.appendChild(c); cells.push(c);
+  }
+  map.addEventListener("mouseleave", () => render());
+})();
+
+function setMap(romLen, dirty, stats){
+  const d = new Set(dirty);
+  cells.forEach((c,i) => {
+    const inRom = romLen != null && i*BLOCK < romLen;
+    c.className = "cell" + (d.has(i) ? " dirty" : inRom ? " rom" : "");
+    const s = stats && stats[i];
+    c.dataset.info = `블록 ${String(i).padStart(3)} · ${hex(i*BLOCK)}–${hex((i+1)*BLOCK-1)} · ` +
+      (d.has(i) ? (s ? `${s.n.toLocaleString()}바이트 변경, ${hex(s.first,4)}–${hex(s.last,4)}` : "세이브 데이터")
+                : inRom ? "ROM, 변경 없음" : "0xFF 패딩");
+  });
+}
+
+function blockTable(dirty, stats){
+  if (!dirty || !dirty.length){ $("blocks").innerHTML = ""; return; }
+  const rows = dirty.map(b => {
+    const s = stats && stats[b];
+    return `<tr><td class="b">${b}</td><td>${hex(b*BLOCK)}</td>` +
+           `<td>${s ? s.n.toLocaleString() : "—"}</td>` +
+           `<td>${s ? hex(s.first,4) + "–" + hex(s.last,4) : "블록 전체"}</td></tr>`;
+  }).join("");
+  $("blocks").innerHTML =
+    `<table><thead><tr><th>블록</th><th>플래시 오프셋</th><th>변경 바이트</th><th>블록 내 범위</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function say(msg, cls=""){ const s = $("status"); s.textContent = msg; s.className = "status " + cls; }
+
+function render(){
+  const ex = mode === "extract";
+  $("mExtract").setAttribute("aria-pressed", ex);
+  $("mApply").setAttribute("aria-pressed", !ex);
+  $("secLbl").textContent = ex ? "openMSX 플래시 이미지" : "MiSTer 세이브";
+  $("flow").innerHTML = ex
+    ? '원본 <b>.ROM</b> + openMSX <b>.SRAM</b>(8 MB) → MiSTer <b>.sav</b> &nbsp;·&nbsp; 비교해서 바뀐 블록만 담습니다'
+    : '원본 <b>.ROM</b> + MiSTer <b>.sav</b> → openMSX <b>.SRAM</b>(8 MB) &nbsp;·&nbsp; 칩 전체로 채우고 블록을 덮어씁니다';
+  if (!sec) $("secName").textContent = ex ? "…/persistent/roms/<rom>/<rom>.SRAM" : "<롬이름>.sav";
+
+  out = null; $("save").disabled = true; $("result").classList.remove("hot");
+  $("outName").textContent = "—"; $("outSize").textContent = "아직 결과 없음";
+  $("blocks").innerHTML = "";
+
+  if (!rom || !sec){
+    setMap(rom ? rom.bytes.length : null, [], null);
+    $("readout").textContent = rom || sec ? "나머지 파일을 넣으면 세이브를 계산합니다."
+                                          : "두 파일을 넣으면 세이브가 어느 블록에 있는지 보입니다.";
+    say(""); return;
+  }
+  compute();
+}
+
+/* ---------- 계산 ---------- */
+function compute(){
+  const base = paddedBase(rom.bytes);
+  const stem = rom.name.replace(/\.[^.]*$/, "");
+
+  if (mode === "extract"){
+    if (sec.bytes.length !== FLASH){
+      say(`플래시 이미지는 정확히 ${FLASH.toLocaleString()}바이트(8 MB)여야 하는데 이 파일은 ${sec.bytes.length.toLocaleString()}바이트입니다.`, "err");
+      setMap(rom.bytes.length, [], null); return;
+    }
+    const img = sec.bytes, dirty = [], stats = {};
+    for (let i = 0; i < NBLOCKS; i++) if (blockDiffers(base, img, i)){ dirty.push(i); stats[i] = diffStats(base, img, i); }
+    setMap(rom.bytes.length, dirty, stats); blockTable(dirty, stats);
+    if (!dirty.length){
+      $("readout").textContent = "다른 블록이 없습니다 — 이 이미지에는 아직 세이브가 없습니다.";
+      say("추출할 것이 없습니다. 이미지가 0xFF로 채운 ROM과 완전히 같습니다.", "err"); return;
+    }
+    const bytes = buildSav(img, dirty);
+    out = {name: `${stem}.sav.txt`, bytes};
+    $("readout").textContent = `${dirty.length}개 블록이 변경됨 → 헤더 + 64 KB × ${dirty.length}`;
+    $("outName").textContent = out.name;
+    $("outSize").textContent = kb(bytes.length) + `  ·  ${stem}.sav 로 이름 변경`;
+    $("save").disabled = !downloads; $("result").classList.add("hot");
+    say(downloads ? `${dirty.length}개 블록에서 세이브를 추출했습니다.` : "이 화면에서는 저장을 쓸 수 없습니다.", downloads ? "ok" : "err");
+  } else {
+    const p = parseSav(sec.bytes);
+    if (p.error){ say(p.error, "err"); setMap(rom.bytes.length, [], null); return; }
+    setMap(rom.bytes.length, p.dirty, null); blockTable(p.dirty, null);
+    const img = base.slice();
+    p.dirty.forEach((b, n) => img.set(sec.bytes.subarray(SECTOR + n*BLOCK, SECTOR + (n+1)*BLOCK), b*BLOCK));
+    out = {name: `${rom.name}.SRAM.txt`, bytes: img};
+    $("readout").textContent = `${p.dirty.length}개 블록을 8 MB 칩에 적용했습니다`;
+    $("outName").textContent = out.name;
+    $("outSize").textContent = kb(img.length) + `  ·  ${rom.name}.SRAM 로 이름 변경`;
+    $("save").disabled = !downloads; $("result").classList.add("hot");
+    say(downloads ? `${p.dirty.length}개 블록으로 이미지를 복원했습니다.` : "이 화면에서는 저장을 쓸 수 없습니다.", downloads ? "ok" : "err");
+  }
+}
+
+/* ---------- 파일 ---------- */
+function wire(slotId, inputId, nameId, metaId, assign){
+  const slot = $(slotId), input = $(inputId);
+  const take = async file => {
+    if (!file) return;
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    assign({name: file.name, bytes});
+    $(nameId).textContent = file.name; $(nameId).classList.remove("empty");
+    $(metaId).textContent = kb(bytes.length) +
+      (bytes.length === FLASH ? "  ·  8 MB — 칩 전체" : bytes.length > FLASH ? "  ·  8 MB보다 큼" : "");
+    $(metaId).className = "meta" + (bytes.length > FLASH ? " err" : "");
+    render();
+  };
+  input.addEventListener("change", e => take(e.target.files[0]));
+  slot.addEventListener("dragover", e => { e.preventDefault(); slot.classList.add("drag"); });
+  slot.addEventListener("dragleave", () => slot.classList.remove("drag"));
+  slot.addEventListener("drop", e => { e.preventDefault(); slot.classList.remove("drag"); take(e.dataTransfer.files[0]); });
+  slot.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " "){ e.preventDefault(); input.click(); } });
+}
+wire("slotRom","romFile","romName","romMeta", v => rom = v);
+wire("slotSec","secFile","secName","secMeta", v => sec = v);
+
+function switchMode(m){
+  if (mode === m) return;
+  mode = m; sec = null;
+  $("secName").classList.add("empty"); $("secMeta").textContent = ""; $("secMeta").className = "meta";
+  $("secFile").value = ""; render();
+}
+$("mExtract").addEventListener("click", () => switchMode("extract"));
+$("mApply").addEventListener("click",  () => switchMode("apply"));
+
+$("save").addEventListener("click", async () => {
+  if (!out || !downloads) return;
+  $("save").disabled = true; say("저장 확인을 기다리는 중…");
+  try {
+    await downloads.save({filename: out.name, data: out.bytes.slice()});
+    say(`${out.name} 저장됨 — 이제 .txt를 떼고 이름을 바꾸세요.`, "ok");
+  } catch (e) {
+    const c = e && e.code;
+    say(c === "declined"     ? "저장을 취소했습니다."
+      : c === "too_large"    ? "브라우저 저장 한도(16 MB)를 넘었습니다."
+      : c === "rate_limited" ? "저장 확인 창이 이미 열려 있습니다. 잠시 후 다시 시도하세요."
+      : `저장 실패 (${c || "원인 불명"}).`, "err");
+  } finally { $("save").disabled = !out; }
+});
+
+(async () => {
+  downloads = await claude.use("downloads");
+  if (!downloads){
+    $("save").disabled = true;
+    $("save").textContent = "저장 불가";
+  } else if (out) $("save").disabled = false;
+})();
+
+render();
+</script>
