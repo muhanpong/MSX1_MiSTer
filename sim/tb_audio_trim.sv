@@ -16,12 +16,18 @@
 module tb_audio_trim;
    int errors = 0, checks = 0;
 
-   function automatic signed [9:0] vol_mul(input [1:0] v);
+   function automatic signed [9:0] vol_mul(input [3:0] v);
       case (v)
-         2'd0: vol_mul = 10'sd128;
-         2'd1: vol_mul = 10'sd203;
-         2'd2: vol_mul = 10'sd81;
-         default: vol_mul = 10'sd51;
+         4'd1: vol_mul = 10'sd102;   //  -2dB
+         4'd2: vol_mul = 10'sd81;   //  -4dB
+         4'd3: vol_mul = 10'sd64;   //  -6dB
+         4'd4: vol_mul = 10'sd51;   //  -8dB
+         4'd5: vol_mul = 10'sd128;   //   0dB
+         4'd6: vol_mul = 10'sd161;   //  +2dB
+         4'd7: vol_mul = 10'sd203;   //  +4dB
+         4'd8: vol_mul = 10'sd255;   //  +6dB
+         4'd9: vol_mul = 10'sd322;   //  +8dB
+         default: vol_mul = 10'sd128;   //   0dB  <- entry 0
       endcase
    endfunction
 
@@ -29,7 +35,7 @@ module tb_audio_trim;
    function automatic signed [15:0] mix(input signed [15:0] opll,
                                         input signed [15:0] scc,
                                         input signed [15:0] psg,
-                                        input [1:0] ov, input [1:0] sv);
+                                        input [3:0] ov, input [3:0] sv);
       logic signed [24:0] a, b;
       logic signed [18:0] sum;
       begin
@@ -54,9 +60,9 @@ module tb_audio_trim;
       // ---- unity: entry 0 must be bit-exact over the whole range -------------
       for (i = -32768; i <= 32767; i += 7) begin
          v = 16'(i);
-         chk("unity opll", mix(v, 16'sd0, 16'sd0, 2'd0, 2'd0) === v);
-         chk("unity scc",  mix(16'sd0, v, 16'sd0, 2'd0, 2'd0) === v);
-         chk("unity psg",  mix(16'sd0, 16'sd0, v, 2'd0, 2'd0) === v);
+         chk("unity opll", mix(v, 16'sd0, 16'sd0, 4'd0, 4'd0) === v);
+         chk("unity scc",  mix(16'sd0, v, 16'sd0, 4'd0, 4'd0) === v);
+         chk("unity psg",  mix(16'sd0, 16'sd0, v, 4'd0, 4'd0) === v);
       end
 
       // ---- silence stays silence at every setting ----------------------------
@@ -64,18 +70,18 @@ module tb_audio_trim;
          chk("silence", mix(16'sd0, 16'sd0, 16'sd0, 2'(i), 2'(i)) === 16'sd0);
 
       // ---- saturation, not wrap ---------------------------------------------
-      chk("positive clip", mix(16'sh7FFF, 16'sh7FFF, 16'sh7FFF, 2'd1, 2'd1) === 16'sh7FFF);
-      chk("negative clip", mix(16'sh8000, 16'sh8000, 16'sh8000, 2'd1, 2'd1) === 16'sh8000);
+      chk("positive clip", mix(16'sh7FFF, 16'sh7FFF, 16'sh7FFF, 4'd7, 4'd7) === 16'sh7FFF);
+      chk("negative clip", mix(16'sh8000, 16'sh8000, 16'sh8000, 4'd7, 4'd7) === 16'sh8000);
       chk("three loud sources at unity still clip",
-          mix(16'sh7000, 16'sh7000, 16'sh7000, 2'd0, 2'd0) === 16'sh7FFF);
+          mix(16'sh7000, 16'sh7000, 16'sh7000, 4'd0, 4'd0) === 16'sh7FFF);
 
       // ---- attenuation actually attenuates, boost boosts ---------------------
-      chk("-4dB < 0dB", mix(16'sd10000, 16'sd0, 16'sd0, 2'd2, 2'd0)
-                      <  mix(16'sd10000, 16'sd0, 16'sd0, 2'd0, 2'd0));
-      chk("-8dB < -4dB", mix(16'sd10000, 16'sd0, 16'sd0, 2'd3, 2'd0)
-                       <  mix(16'sd10000, 16'sd0, 16'sd0, 2'd2, 2'd0));
-      chk("+4dB > 0dB", mix(16'sd10000, 16'sd0, 16'sd0, 2'd1, 2'd0)
-                      >  mix(16'sd10000, 16'sd0, 16'sd0, 2'd0, 2'd0));
+      chk("-4dB < 0dB", mix(16'sd10000, 16'sd0, 16'sd0, 4'd2, 4'd0)
+                      <  mix(16'sd10000, 16'sd0, 16'sd0, 4'd0, 4'd0));
+      chk("-8dB < -4dB", mix(16'sd10000, 16'sd0, 16'sd0, 4'd4, 4'd0)
+                       <  mix(16'sd10000, 16'sd0, 16'sd0, 4'd2, 4'd0));
+      chk("+4dB > 0dB", mix(16'sd10000, 16'sd0, 16'sd0, 4'd7, 4'd0)
+                      >  mix(16'sd10000, 16'sd0, 16'sd0, 4'd0, 4'd0));
 
       $display("");
       $display("tb_audio_trim: %0d checks, %0d errors", checks, errors);

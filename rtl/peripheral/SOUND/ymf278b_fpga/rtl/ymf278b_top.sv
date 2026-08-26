@@ -45,8 +45,8 @@ module ymf278b_top #(
     // Audio mute controls (for debugging)
     input  wire        pcm_mute,
     input  wire        fm_mute,
-    input  wire  [2:0] pcm_vol,    // OSD OPL4 PCM trim, 5 steps; see pcm_pre()/pcm_post()
-    input  wire  [2:0] fm_vol,     // OSD OPL4 FM  trim, 5 steps; see fm_gain()
+    input  wire  [3:0] pcm_vol,    // OSD OPL4 PCM trim, 2 dB ladder; see pcm_pre()/pcm_post()
+    input  wire  [3:0] fm_vol,     // OSD OPL4 FM  trim, 2 dB ladder; see fm_gain()
 
     // Debug outputs (clk_sdram domain)
     output wire        dbg_pcm_valid,
@@ -353,43 +353,52 @@ logic signed [15:0] pcm_left_hold, pcm_right_hold;
 
 // Engine pre-saturation shift selector: engine computes sh = 3 - pcm_vol,
 // so 2'd3 -> 0 dB, 2'd2 -> -6.02, 2'd1 -> -12.04, 2'd0 -> -18.06 dB.
-function automatic [1:0] pcm_pre(input [2:0] sel);
+function automatic [1:0] pcm_pre(input [3:0] sel);
+    // PCM's ladder is 2 dB like the others but its RANGE is different, and
+    // deliberately so.  Measured raw peak of both MoonSound music-disk tracks is
+    // +11.0 / +11.4 dBFS, so any net above about -11 dB clips -- and clipping
+    // inside the engine cannot be undone by the post multiplier, it only gets
+    // quieter (crest 16.9 -> 6.6 dB).  So the top of the range is cut at -12 dB,
+    // which is also the 2026-08-21 calibration point, and entry 0 = OSD default.
+    // Every step here is clean for a +11 dB peak at BOTH clamps; tb T6 checks it.
+    // Pre-saturation shift (sh = 3 - this); this is where the attenuation lives.
     case (sel)
-        3'd1: pcm_pre = 2'd0;   // "-16dB" sh 3  -18.06
-        3'd2: pcm_pre = 2'd2;   // "-8dB"  sh 1   -6.02
-        3'd3: pcm_pre = 2'd2;   // "-4dB"  sh 1   -6.02
-        3'd4: pcm_pre = 2'd3;   //  "0dB"  sh 0    0.00
-        default: pcm_pre = 2'd1;// "-12dB" sh 2  -12.04  <- default / out of range
+        4'd1: pcm_pre = 2'd1;   //  -14dB
+        4'd2: pcm_pre = 2'd1;   //  -16dB
+        4'd3: pcm_pre = 2'd0;   //  -18dB
+        4'd4: pcm_pre = 2'd0;   //  -20dB
+        default: pcm_pre = 2'd1;   //  -12dB  <- entry 0 = OSD default / out of range
     endcase
 endfunction
 // Post-saturation remainder, x/128.  net = pre + 20*log10(post/128).
-function automatic [11:0] pcm_post(input [2:0] sel);
+function automatic [11:0] pcm_post(input [3:0] sel);
+    // Post-saturation remainder, x/128.  net = -6.0206*sh + 20log10(post/128).
     case (sel)
-        3'd1: pcm_post = 12'd162;   // "-16dB" +2.06 -> net -16.0
-        3'd2: pcm_post = 12'd102;   // "-8dB"  -1.98 -> net  -8.0
-        3'd3: pcm_post = 12'd162;   // "-4dB"  +2.06 -> net  -4.0
-        3'd4: pcm_post = 12'd128;   //  "0dB"   0.00 -> net   0.0
-        default: pcm_post = 12'd129;// "-12dB" +0.07 -> net -12.0  <- default
+        4'd1: pcm_post = 12'd102;   //  -14dB
+        4'd2: pcm_post = 12'd81;   //  -16dB
+        4'd3: pcm_post = 12'd128;   //  -18dB
+        4'd4: pcm_post = 12'd102;   //  -20dB
+        default: pcm_post = 12'd129;   //  -12dB  <- entry 0 = OSD default / out of range
     endcase
 endfunction
 // FM has no internal saturation stage of its own, so one multiplier suffices.
-function automatic [11:0] fm_gain(input [2:0] sel);
-    // Labels are dB VS UNITY and the multipliers actually deliver them, like the
-    // PSG/OPLL/SCC menus (msx_slots.sv vol_mul, 0dB == mul 128).  Before
-    // 2026-08-26 the labels were offsets from the shipping default, so the entry
-    // called "+8dB" really gave +4.01 dB and "0dB" really gave -3.98: the names
-    // did not match the values.  Fixed by moving the VALUES to the names --
-    // mul 322 is a real +8 dB -- not by renaming the steps.
-    // The -12.04 dB step (mul 32) was dropped to make room; the 2026-08-21
-    // calibration point (mul 81) survives as "-4dB".
-    // Width: opl3_l_eff is signed [16:0], {1'b0,fm_gain} is 13 bits -> 30-bit
-    // product into fm_l_mul signed [29:0]; |322 * 65536| = 21.1M, well inside.
+function automatic [11:0] fm_gain(input [3:0] sel);
+    // Same 2 dB ring as every other volume menu -- 0,-2,-4,-6,-8,0,+2,+4,+6,+8 (0 twice: down to -8, back through 0, up to +8) --
+    // rotated so entry 0 (the OSD power-on default) is +4dB (mul 203): the gain the
+    // user had been listening to, which the old menu mislabelled "+8dB".
+    // Width: opl3_l_eff signed [16:0] x 13-bit gain -> 30-bit product into
+    // fm_l_mul signed [29:0]; |322 * 65536| = 21.1M, well inside 2^29.
     case (sel)
-        3'd1: fm_gain = 12'd128;    //  "0dB"   +0.00 dB  = unity
-        3'd2: fm_gain = 12'd81;     //  "-4dB"  -3.97 dB  <- 2026-08-21 calibration point
-        3'd3: fm_gain = 12'd51;     //  "-8dB"  -7.99 dB
-        3'd4: fm_gain = 12'd203;    //  "+4dB"  +4.01 dB
-        default: fm_gain = 12'd322; //  "+8dB"  +8.01 dB  <- entry 0 = OSD default
+        4'd1: fm_gain = 12'd255;   //  +6dB
+        4'd2: fm_gain = 12'd322;   //  +8dB
+        4'd3: fm_gain = 12'd128;   //   0dB
+        4'd4: fm_gain = 12'd102;   //  -2dB
+        4'd5: fm_gain = 12'd81;   //  -4dB
+        4'd6: fm_gain = 12'd64;   //  -6dB
+        4'd7: fm_gain = 12'd51;   //  -8dB
+        4'd8: fm_gain = 12'd128;   //   0dB
+        4'd9: fm_gain = 12'd161;   //  +2dB
+        default: fm_gain = 12'd203;   //  +4dB  <- entry 0 = OSD default / out of range
     endcase
 endfunction
 localparam int GAIN_SH = 7;

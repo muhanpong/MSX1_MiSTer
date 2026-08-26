@@ -27,44 +27,49 @@ module tb_opl4_gain;
    localparam int GAIN_SH = 7;
 
    // ---- gain tables, kept identical to ymf278b_top.sv --------------------
-   function automatic [1:0] pcm_pre(input [2:0] sel);
+   function automatic [1:0] pcm_pre(input [3:0] sel);
 `ifdef NEGCTL
       pcm_pre = 2'd3;                       // negative control: no pre-shift
 `else
       case (sel)
-         3'd1: pcm_pre = 2'd0;   // "-8dB"  sh 3
-         3'd2: pcm_pre = 2'd2;   // "0dB"   sh 1
-         3'd3: pcm_pre = 2'd2;   // "+4dB"  sh 1
-         3'd4: pcm_pre = 2'd3;   // "+8dB"  sh 0
-         default: pcm_pre = 2'd1;// "-4dB"  sh 2   <- default
+         4'd1: pcm_pre = 2'd1;   // -14dB
+         4'd2: pcm_pre = 2'd1;   // -16dB
+         4'd3: pcm_pre = 2'd0;   // -18dB
+         4'd4: pcm_pre = 2'd0;   // -20dB
+         default: pcm_pre = 2'd1;   // -12dB  <- entry 0
       endcase
 `endif
    endfunction
 
-   function automatic [11:0] pcm_post(input [2:0] sel);
+   function automatic [11:0] pcm_post(input [3:0] sel);
 `ifdef NEGCTL
       pcm_post = 12'd128;
 `else
       case (sel)
-         3'd1: pcm_post = 12'd162;
-         3'd2: pcm_post = 12'd102;
-         3'd3: pcm_post = 12'd162;
-         3'd4: pcm_post = 12'd128;
-         default: pcm_post = 12'd129;
+         4'd1: pcm_post = 12'd102;   // -14dB
+         4'd2: pcm_post = 12'd81;   // -16dB
+         4'd3: pcm_post = 12'd128;   // -18dB
+         4'd4: pcm_post = 12'd102;   // -20dB
+         default: pcm_post = 12'd129;   // -12dB  <- entry 0
       endcase
 `endif
    endfunction
 
-   function automatic [11:0] fm_gain(input [2:0] sel);
+   function automatic [11:0] fm_gain(input [3:0] sel);
 `ifdef NEGCTL
       fm_gain = 12'd128;
 `else
       case (sel)
-         3'd1: fm_gain = 12'd128;
-         3'd2: fm_gain = 12'd81;
-         3'd3: fm_gain = 12'd51;
-         3'd4: fm_gain = 12'd203;
-         default: fm_gain = 12'd322;
+         4'd1: fm_gain = 12'd255;   //  +6dB
+         4'd2: fm_gain = 12'd322;   //  +8dB
+         4'd3: fm_gain = 12'd128;   //   0dB
+         4'd4: fm_gain = 12'd102;   //  -2dB
+         4'd5: fm_gain = 12'd81;   //  -4dB
+         4'd6: fm_gain = 12'd64;   //  -6dB
+         4'd7: fm_gain = 12'd51;   //  -8dB
+         4'd8: fm_gain = 12'd128;   //   0dB
+         4'd9: fm_gain = 12'd161;   //  +2dB
+         default: fm_gain = 12'd203;   //  +4dB  <- entry 0
       endcase
 `endif
    endfunction
@@ -73,7 +78,7 @@ module tb_opl4_gain;
    // pcm_mix_gain() (wave reg 0xF9) is unity at reset and is not part of the
    // OSD scale, so it is left out here.
    function automatic signed [15:0] engine_out(input signed [23:0] accum,
-                                               input [2:0] psel);
+                                               input [3:0] psel);
       logic [1:0] sh;
       logic signed [23:0] shifted;
       begin
@@ -87,7 +92,7 @@ module tb_opl4_gain;
    // ---- ymf278b_top stage 1 + stage 2 ------------------------------------
    function automatic signed [15:0] mix(input signed [16:0] fm,
                                         input signed [23:0] pcm_accum,
-                                        input [2:0] fsel, input [2:0] psel,
+                                        input [3:0] fsel, input [3:0] psel,
                                         input pmute);
       logic signed [15:0] pc;
       logic signed [29:0] fm_mul, pc_mul;
@@ -108,28 +113,39 @@ module tb_opl4_gain;
    endtask
 
    real gmin, gmax, g, db;
-   real fm_want [5];
-   real pc_want [5];
+   real fm_want [10];
+   real pc_want [10];
    logic signed [15:0] y, yprev;
    int lim;
 
    initial begin
-      // menu order: FM  { +8dB, 0dB, -4dB, -8dB, +4dB }  -- labels ARE net vs unity
-      //   entry 0 (+8dB, mul 322) is the OSD default, user decision 2026-08-26
-      fm_want[0] = +8.01; fm_want[1] =  0.00; fm_want[2] = -3.97;
-      fm_want[3] = -7.99; fm_want[4] = +4.01;
-      // menu order: PCM { -12dB, -16dB, -8dB, -4dB, 0dB }  labels = net vs unity
-      pc_want[0] = -12.00; pc_want[1] = -16.00; pc_want[2] = -8.00;
-      pc_want[3] =  -4.00; pc_want[4] =   0.00;
+      // menu order: FM  +4,+6,+8,0,-2,-4,-6,-8,0,+2   (2 dB ring, default first)
+      fm_want[0] = +4.01;
+      fm_want[1] = +5.99;
+      fm_want[2] = +8.01;
+      fm_want[3] = +0.00;
+      fm_want[4] = -1.97;
+      fm_want[5] = -3.97;
+      fm_want[6] = -6.02;
+      fm_want[7] = -7.99;
+      fm_want[8] = +0.00;
+      fm_want[9] = +1.99;
+      // menu order: PCM -12,-14,-16,-18,-20  (2 dB, but the RANGE is cut at -12:
+      //   above that a +11 dB peak clips, unrecoverably.  5 steps, not 10.)
+      pc_want[0] = -11.97;
+      pc_want[1] = -14.01;
+      pc_want[2] = -16.02;
+      pc_want[3] = -18.06;
+      pc_want[4] = -20.03;
 
       // ---- T1a: FM gain accuracy per step, linear region only -------------
-      for (int sel = 0; sel < 5; sel++) begin
-         lim = (32767 * 128) / int'(fm_gain(sel[2:0]));
+      for (int sel = 0; sel < 10; sel++) begin
+         lim = (32767 * 128) / int'(fm_gain(sel[3:0]));
          if (lim > 65535) lim = 65535;
          gmin = 1.0e9; gmax = -1.0e9;
          for (int v = -lim; v <= lim; v += 13) begin
             if (v > -1000 && v < 1000) continue;
-            y = mix(17'(v), 24'sd0, sel[2:0], 3'd0, 1'b0);
+            y = mix(17'(v), 24'sd0, sel[3:0], 4'd0, 1'b0);
             g = real'(int'(y)) / real'(v);
             if (g < gmin) gmin = g;
             if (g > gmax) gmax = g;
@@ -142,8 +158,8 @@ module tb_opl4_gain;
 
       // ---- T1b: PCM net gain per step, accumulator -> output ---------------
       for (int sel = 0; sel < 5; sel++) begin
-         automatic int sh = 3 - int'(pcm_pre(sel[2:0]));
-         automatic int m  = int'(pcm_post(sel[2:0]));
+         automatic int sh = 3 - int'(pcm_pre(sel[3:0]));
+         automatic int m  = int'(pcm_post(sel[3:0]));
          // Two independent ceilings: the engine clamp (accum >> sh must fit in
          // 16 bit) and the final clamp after the post multiply.  The sweep has
          // to stay under BOTH, so take the smaller -- overwriting with the
@@ -155,8 +171,12 @@ module tb_opl4_gain;
          end
          gmin = 1.0e9; gmax = -1.0e9;
          for (int v = -lim; v <= lim; v += (lim/4000 > 0 ? lim/4000 : 1)) begin
-            if (v > -20000 && v < 20000) continue;   // truncation dominates below this
-            y = mix(17'sd0, 24'(v), 3'd0, sel[2:0], 1'b0);
+            // Truncation dominates for small |v|, so only the top of the range is
+            // measured.  This threshold MUST scale with lim: once PCM can exceed
+            // unity the whole usable range falls below a fixed 20000 and the sweep
+            // collects no samples at all (measured -inf).
+            if (v > -((lim*3)/5) && v < ((lim*3)/5)) continue;
+            y = mix(17'sd0, 24'(v), 4'd0, sel[3:0], 1'b0);
             g = real'(int'(y)) / real'(v);
             if (g < gmin) gmin = g;
             if (g > gmax) gmax = g;
@@ -169,37 +189,37 @@ module tb_opl4_gain;
       end
 
       // ---- T2: no sign wrap, both paths, every setting ---------------------
-      for (int sel = 0; sel < 5; sel++) begin
+      for (int sel = 0; sel < 10; sel++) begin
          for (int v = -65536; v <= 65535; v += 97) begin
-            y = mix(17'(v), 24'sd0, sel[2:0], 3'd0, 1'b0);
+            y = mix(17'(v), 24'sd0, sel[3:0], 4'd0, 1'b0);
             chk($sformatf("T2 FM wrap sel=%0d v=%0d", sel, v),
                 (v > 0) ? (y > 0) : (v < 0) ? (y < 0) : (y == 0));
          end
          for (int v = -4000000; v <= 4000000; v += 6113) begin
-            y = mix(17'sd0, 24'(v), 3'd0, sel[2:0], 1'b0);
+            y = mix(17'sd0, 24'(v), 4'd0, sel[3:0], 1'b0);
             chk($sformatf("T2 PCM wrap sel=%0d v=%0d", sel, v),
                 (v > 0) ? (y > 0) : (v < 0) ? (y < 0) : (y == 0));
          end
       end
 
       // ---- T3: monotone + exact extremes (FM path) -------------------------
-      for (int sel = 0; sel < 5; sel++) begin
+      for (int sel = 0; sel < 10; sel++) begin
          yprev = 16'sh8000;
          for (int v = -65536; v <= 65535; v += 113) begin
-            y = mix(17'(v), 24'sd0, sel[2:0], 3'd0, 1'b0);
+            y = mix(17'(v), 24'sd0, sel[3:0], 4'd0, 1'b0);
             chk($sformatf("T3 monotone sel=%0d v=%0d", sel, v), y >= yprev);
             yprev = y;
          end
          begin
-            automatic int m  = int'(fm_gain(sel[2:0]));
+            automatic int m  = int'(fm_gain(sel[3:0]));
             automatic int hi = (65535 * m) >>> 7;
             automatic int lo = (-65536 * m) >>> 7;
             if (hi >  32767) hi =  32767;
             if (lo < -32768) lo = -32768;
             chk($sformatf("T3 top extreme sel=%0d want %0d", sel, hi),
-                int'(mix( 17'sd65535, 24'sd0, sel[2:0], 3'd0, 1'b0)) == hi);
+                int'(mix( 17'sd65535, 24'sd0, sel[3:0], 4'd0, 1'b0)) == hi);
             chk($sformatf("T3 bottom extreme sel=%0d want %0d", sel, lo),
-                int'(mix(-17'sd65536, 24'sd0, sel[2:0], 3'd0, 1'b0)) == lo);
+                int'(mix(-17'sd65536, 24'sd0, sel[3:0], 4'd0, 1'b0)) == lo);
          end
       end
 
@@ -242,14 +262,15 @@ module tb_opl4_gain;
       begin
          automatic int hot = 116112;                  // = +11.0 dBFS, measured
          for (int ps = 0; ps < 5; ps++) begin
-            automatic int sh   = 3 - int'(pcm_pre(ps[2:0]));
+            automatic int sh   = 3 - int'(pcm_pre(ps[3:0]));
             automatic int shd  = hot >>> sh;
-            automatic bit clipped = (shd > 32767);
-            automatic bit want_clean = (ps == 0) || (ps == 1);   // -4dB / -8dB steps
-            $display("T6  PCM step %0d: accum %0d >> %0d = %0d %s",
-                     ps, hot, sh, shd, clipped ? "CLIPS" : "clean");
-            if (want_clean)
-               chk($sformatf("T6 step %0d must not clip a +11 dB peak", ps), !clipped);
+            automatic int outv = (shd * int'(pcm_post(ps[3:0]))) / 128;
+            automatic bit clipped = (shd > 32767) || (outv > 32767);
+            $display("T6  PCM step %0d: accum %0d >> %0d = %0d, x%0d/128 = %0d %s",
+                     ps, hot, sh, shd, pcm_post(ps[3:0]), outv, clipped ? "CLIPS" : "clean");
+            // The range was cut at -12 dB precisely so that EVERY step is clean --
+            // not just the default.  If a louder step is ever added back, this fails.
+            chk($sformatf("T6 step %0d must not clip a +11 dB peak", ps), !clipped);
          end
       end
 

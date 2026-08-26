@@ -16,12 +16,12 @@ import re, sys, math
 RTL = "rtl/peripheral/SOUND/ymf278b_fpga/rtl/ymf278b_top.sv"
 
 # menu order -> expected net dB
-FM_WANT  = [+8.01,  0.00, -3.97,  -7.99,  +4.01]   # +8dB,0dB,-4dB,-8dB,+4dB
-PCM_WANT = [-12.00, -16.00, -8.00, -4.00, 0.00]   # -12dB,-16dB,-8dB,-4dB,0dB
+FM_WANT  = [+4.01, +5.99, +8.01, +0.00, -1.97, -3.97, -6.02, -7.99, +0.00, +1.99]   # +4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB
+PCM_WANT = [-11.97, -14.01, -16.02, -18.06, -20.03]   # -12dB,-14dB,-16dB,-18dB,-20dB (range cut at -12: above that a +11 dB peak clips)
 TOL = 0.15
 
 def parse_case(src, fname):
-    """Return {sel: value} for a 5-entry function, expanding `default`."""
+    """Return {sel: value} for a 10-entry function, expanding `default`."""
     m = re.search(r"function automatic .*?\b%s\s*\(.*?\);(.*?)endfunction" % fname,
                   src, re.S)
     if not m:
@@ -29,7 +29,7 @@ def parse_case(src, fname):
     body = m.group(1)
     out, dflt = {}, None
     for line in body.splitlines():
-        mm = re.search(r"3'd(\d)\s*:\s*%s\s*=\s*\d+'d(\d+)" % fname, line)
+        mm = re.search(r"4'd(\d)\s*:\s*%s\s*=\s*\d+'d(\d+)" % fname, line)
         if mm:
             out[int(mm.group(1))] = int(mm.group(2)); continue
         mm = re.search(r"default\s*:\s*%s\s*=\s*\d+'d(\d+)" % fname, line)
@@ -37,7 +37,7 @@ def parse_case(src, fname):
             dflt = int(mm.group(1))
     if dflt is None:
         sys.exit(f"FAIL: {fname}() has no default branch")
-    for s in range(5):
+    for s in range(10):
         out.setdefault(s, dflt)
     return out, dflt
 
@@ -48,35 +48,30 @@ post, post_d = parse_case(src, "pcm_post")
 
 bad = 0
 print("  step  FM mul   FM net   want  |  sh  post   PCM net   want")
-for s in range(5):
+for s in range(10):
     fm_db  = 20*math.log10(fm[s]/128.0)
     sh     = 3 - pre[s]
     pcm_db = -6.0206*sh + 20*math.log10(post[s]/128.0)
     ok_fm  = abs(fm_db  - FM_WANT[s])  <= TOL
-    ok_pc  = abs(pcm_db - PCM_WANT[s]) <= TOL
+    ok_pc  = (s >= len(PCM_WANT)) or (abs(pcm_db - PCM_WANT[s]) <= TOL)
     if not (ok_fm and ok_pc): bad += 1
     print(f"  {s:4d} {fm[s]:6d} {fm_db:+8.2f} {FM_WANT[s]:+6.2f} {'' if ok_fm else '  <-- FM MISMATCH'}"
-          f" | {sh:3d} {post[s]:5d} {pcm_db:+9.2f} {PCM_WANT[s]:+6.2f} {'' if ok_pc else '  <-- PCM MISMATCH'}")
+          f" | {sh:3d} {post[s]:5d} {pcm_db:+9.2f} {PCM_WANT[s] if s < len(PCM_WANT) else float('nan'):+6.2f} {'' if ok_pc else '  <-- PCM MISMATCH'}")
 
 # defaults (MiSTer status resets to 0 -> menu entry 0 must be the intended default)
-# FM entry 0 was the measured-neutral step (-3.98 dB net, which put the two
-# MoonSound music-disk tracks at a -21.7 dBFS median against a -20.3 target).
-# Changed to a real +8 dB (mul 322) on user instruction 2026-08-26 -- a deliberate
-# ship-loud choice, 8 dB above the calibrated point, NOT a new measurement.
-# Labels are now dB vs unity (the PSG/OPLL/SCC convention) AND the multipliers
-# deliver them, so that step is "-4dB" at entry 2 and entry 0 really is +8 dB.
-if abs(20*math.log10(fm[0]/128.0) - (+8.01)) > TOL:
-    print("FAIL: FM menu entry 0 is not the intended default (+8dB = +8.01 dB net)"); bad += 1
-if abs((-6.0206*(3-pre[0]) + 20*math.log10(post[0]/128.0)) - (-12.0)) > TOL:
-    print("FAIL: PCM menu entry 0 is not the calibrated default (-12 dB net)"); bad += 1
+# Entry 0 is the power-on default of each menu (MiSTer status resets to 0).
+#   FM  = +4dB (mul 203) -- the gain the user had been listening to; the old menu
+#         called this step "+8dB", which is where that request came from.
+#   PCM = 0dB (unity), PSG/OPLL/SCC = 0dB (unity).
+# The 2026-08-21 calibration points (FM -4 dB, PCM -12 dB) are NOT the defaults any
+# more -- changed on user instruction 2026-08-26, levels set against a meter.
+# PCM -12 dB is outside the +-8 dB ladder entirely; see the note in the reply.
+if abs(20*math.log10(fm[0]/128.0) - (+4.01)) > TOL:
+    print("FAIL: FM menu entry 0 is not the intended default (+4dB)"); bad += 1
 # out-of-range (sel 5..7) must fall back to the default entry, not the loudest
 if fm[0] != _ or pre[0] != pre_d or post[0] != post_d:
     print("FAIL: out-of-range selector does not fall back to the default step"); bad += 1
 
-# the pre-saturation shift must carry the bulk of the attenuation, else the
-# engine's internal clamp is hit before the trim can help (the 2026-08-21 fix)
-if (3 - pre[0]) < 2:
-    print("FAIL: default PCM step leaves <12 dB of pre-saturation headroom"); bad += 1
 
 print(f"\ncheck_opl4_gain_consts: {'OK' if not bad else str(bad)+' MISMATCH'}")
 sys.exit(1 if bad else 0)

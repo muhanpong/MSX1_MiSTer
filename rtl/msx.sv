@@ -119,8 +119,8 @@ module msx
    // MoonSound audio mute (debug)
    input                     pcm_mute,
    input                     fm_mute,
-   input               [2:0] pcm_vol,
-   input               [2:0] fm_vol,
+   input               [3:0] pcm_vol,
+   input               [3:0] fm_vol,
 
    // MoonSound debug outputs (clk_sdram domain)
    output wire               dbg_pcm_valid,
@@ -150,9 +150,9 @@ module msx
    output logic       [15:0] dbg_watch_pc,      // PC of last write to IM2 table byte 257
    output logic       [15:0] dbg_watch_dc,      // {written data, write count} for that byte
    output logic              dbg_int_ghost,     // fatal IFF1-fall had NO INTA (DI-death / ghost)
-   input               [1:0] psg_vol,           // 0=0dB 1=+4dB 2=-4dB 3=-8dB
-   input               [1:0] opll_vol,
-   input               [1:0] scc_vol
+   input               [3:0] psg_vol,           // 2 dB ladder, see psg_mul below
+   input               [3:0] opll_vol,
+   input               [3:0] scc_vol
 );
 
 //  -----------------------------------------------------------------------------
@@ -163,9 +163,23 @@ wire  [9:0] audioPSG = ay_ch_mix + {keybeep,5'b00000} + {(cas_audio_in & ~cas_mo
 // UNSIGNED with silence at 0, so scaling it is a plain multiply -- no sign handling.
 // Entry 0 is x128>>>7, exactly the old value, so an untouched menu is bit-identical.
 // Clamped to 10 bits because +4dB can overflow the field `fm` expects.
-wire [8:0]  psg_mul   = psg_vol == 2'd0 ? 9'd128 :
-                        psg_vol == 2'd1 ? 9'd203 :
-                        psg_vol == 2'd2 ? 9'd81  : 9'd51;
+logic [8:0] psg_mul;
+// 2 dB ladder, true dB vs unity (mul 128).  Ring 0,-2,-4,-6,-8,0,+2,+4,+6,+8 (0 twice: down to -8, back through 0, up to +8).
+// Entry 0 = 0 dB = unity is the power-on default, unchanged.
+always_comb begin
+   case (psg_vol)
+       4'd1: psg_mul = 9'd102;   //  -2dB
+       4'd2: psg_mul = 9'd81;   //  -4dB
+       4'd3: psg_mul = 9'd64;   //  -6dB
+       4'd4: psg_mul = 9'd51;   //  -8dB
+       4'd5: psg_mul = 9'd128;   //   0dB
+       4'd6: psg_mul = 9'd161;   //  +2dB
+       4'd7: psg_mul = 9'd203;   //  +4dB
+       4'd8: psg_mul = 9'd255;   //  +6dB
+       4'd9: psg_mul = 9'd322;   //  +8dB
+       default: psg_mul = 9'd128;   //   0dB  <- entry 0 = OSD default / out of range
+   endcase
+end
 wire [18:0] psg_scl   = audioPSG * psg_mul;
 wire [9:0]  psg_trim  = |psg_scl[18:17] ? 10'h3FF : psg_scl[16:7];
 wire [16:0] fm       = {3'b00, psg_trim, 4'b0000};

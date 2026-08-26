@@ -16,8 +16,8 @@ module msx_slots
    input                       cpu_m1,
    input                 [1:0] active_slot,
    output signed        [15:0] sound,
-   input                 [1:0] opll_vol,          // 0=0dB 1=+4dB 2=-4dB 3=-8dB
-   input                 [1:0] scc_vol,
+   input                 [3:0] opll_vol,          // 2 dB ladder, see vol_mul()
+   input                 [3:0] scc_vol,
    //RAM
    output               [26:0] ram_addr,
    output                [7:0] ram_din,
@@ -98,12 +98,21 @@ assign flash16x_prog_data = cpu_dout;
 // that nothing downstream can detect.  msx.sv's psg_mul is UNSIGNED [8:0] (max
 // 511) and would not have that problem, so the two "identical" tables did not
 // actually have identical headroom.  Widen here rather than rely on a comment.
-function automatic signed [9:0] vol_mul(input [1:0] v);
+function automatic signed [9:0] vol_mul(input [3:0] v);
+   // 2 dB ladder; labels are dB VS UNITY and the multipliers deliver them (max
+   // error 0.03 dB).  Ring 0,-2,-4,-6,-8,0,+2,+4,+6,+8 (0 twice: down to -8, back through 0, up to +8).
+   // Entry 0 = OSD power-on default = 0 dB = unity, unchanged for OPLL/SCC.
    case (v)
-      2'd0: vol_mul = 10'sd128;   // 0dB
-      2'd1: vol_mul = 10'sd203;   // +4dB
-      2'd2: vol_mul = 10'sd81;    // -4dB
-      default: vol_mul = 10'sd51; // -8dB
+       4'd1: vol_mul = 10'sd102;   //  -2dB
+       4'd2: vol_mul = 10'sd81;   //  -4dB
+       4'd3: vol_mul = 10'sd64;   //  -6dB
+       4'd4: vol_mul = 10'sd51;   //  -8dB
+       4'd5: vol_mul = 10'sd128;   //   0dB
+       4'd6: vol_mul = 10'sd161;   //  +2dB
+       4'd7: vol_mul = 10'sd203;   //  +4dB
+       4'd8: vol_mul = 10'sd255;   //  +6dB
+       4'd9: vol_mul = 10'sd322;   //  +8dB
+       default: vol_mul = 10'sd128;   //   0dB  <- entry 0 = OSD default / out of range
    endcase
 endfunction
 

@@ -329,12 +329,12 @@ localparam CONF_STR = {
    // They used to be offsets from the shipping default, so "0dB" was really -3.98 dB
    // and "+8dB" was really +4.01.  Fixed by moving the VALUES to the names, not by
    // renaming the steps: FM "+8dB" is mul 322 = a real +8 dB.  Entry 0 = default.
-   "P2O[56:54],OPL4 PCM Volume,-12dB,-16dB,-8dB,-4dB,0dB;",
-   "P2O[59:57],OPL4 FM Volume,+8dB,0dB,-4dB,-8dB,+4dB;",
+   "P2O[112:109],OPL4 PCM Volume,-12dB,-14dB,-16dB,-18dB,-20dB;",
+   "P2O[116:113],OPL4 FM Volume,+4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB;",
    "P2-;",
-   "P2O[66:65],PSG Volume,0dB,+4dB,-4dB,-8dB;",
-   "P2O[68:67],OPLL Volume,0dB,+4dB,-4dB,-8dB;",
-   "P2O[70:69],SCC Volume,0dB,+4dB,-4dB,-8dB;",
+   "P2O[100:97],PSG Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P2O[104:101],OPLL Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P2O[108:105],SCC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
    "-;",
    "O[64],Reset on ROM change,Yes,No;",
    "O[48],Debug Overlay,Off,On;",
@@ -518,9 +518,9 @@ wire        dbg_int_ghost;
 
 // Audio trims for the msx instance, which connects by `.*` -- these are wired by
 // name, not in its port list.  4 steps each; entry 0 is exactly unity.
-wire  [1:0] psg_vol  = status[66:65];
-wire  [1:0] opll_vol = status[68:67];
-wire  [1:0] scc_vol  = status[70:69];
+wire  [3:0] psg_vol  = status[100:97];
+wire  [3:0] opll_vol = status[104:101];
+wire  [3:0] scc_vol  = status[108:105];
 wire [15:0] cpu_addr;
 wire signed [15:0] audio_l, audio_r;
 wire        hsync, vsync, blank_n, hblank, vblank, ce_pix;
@@ -637,8 +637,8 @@ msx MSX
    // MoonSound mute / debug
    .pcm_mute       (status[46]),
    .fm_mute        (status[47]),
-   .pcm_vol        (status[56:54]),
-   .fm_vol         (status[59:57]),
+   .pcm_vol        (status[112:109]),
+   .fm_vol         (status[116:113]),
    .dbg_pcm_valid  (dbg_pcm_valid),
    .dbg_opl3_valid (dbg_opl3_valid),
    .dbg_pcm_level  (dbg_pcm_level),
