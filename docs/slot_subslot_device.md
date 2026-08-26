@@ -9,7 +9,7 @@ suite green.
 |---|---|
 | verified 2026-08-26 | The feature is **inert when off**: `MSX1_20260826b_opllpace` (tree `3567edf`) boots and runs existing games unchanged, and the OSD renders `SLOT A sub-slots`. That is a regression check for the classic path, nothing more. |
 | **NOT verified** | **Nothing has ever run with a slot actually expanded.** No sub-slot device has been placed on hardware — not FM-PAC, not SCC+, not a ROM in sub-slot 2. The whole point of the feature is untested. |
-| **NOT in any build** | `a646083` (ROM Load / Mapper / SRAM moved inside the page) landed *after* that RBF. Needs a fresh build. |
+| **awaiting test** | `MSX1_20260826c_subslotmenu.rbf` — built and deployed 2026-08-26 19:59 from `9108e17` (RTL `a646083`, so it *does* carry the in-page ROM/Mapper/SRAM entries). Fitter OK, ALM 71%, M10K 63%; Setup/Hold/Recovery/Removal/MPW all positive, every TNS 0.000, 0 critical warnings; `clk_sdram` setup +1.144 / hold +0.247. **The expanded-slot path itself is still unexercised.** |
 
 
 Each cart slot can be switched, independently, into an **expanded slot** whose
