@@ -27,17 +27,14 @@ module tb_opl4_gain;
    localparam int GAIN_SH = 7;
 
    // ---- gain tables, kept identical to ymf278b_top.sv --------------------
+   // Fixed engine headroom, mirroring ymf278b_top's PCM_HEADROOM.  It is NOT the
+   // OSD control any more: the engine clamps a 24-slot sum at 16 bit, so ~12 dB
+   // has to sit before that clamp no matter what the user picks.
    function automatic [1:0] pcm_pre(input [3:0] sel);
 `ifdef NEGCTL
-      pcm_pre = 2'd3;                       // negative control: no pre-shift
+      pcm_pre = 2'd3;                       // negative control: no headroom
 `else
-      case (sel)
-         4'd1: pcm_pre = 2'd1;   // -14dB
-         4'd2: pcm_pre = 2'd1;   // -16dB
-         4'd3: pcm_pre = 2'd0;   // -18dB
-         4'd4: pcm_pre = 2'd0;   // -20dB
-         default: pcm_pre = 2'd1;   // -12dB  <- entry 0
-      endcase
+      pcm_pre = 2'd1;                       // sh = 3 - 1 = 2  ->  -12.04 dB
 `endif
    endfunction
 
@@ -46,11 +43,16 @@ module tb_opl4_gain;
       pcm_post = 12'd128;
 `else
       case (sel)
-         4'd1: pcm_post = 12'd102;   // -14dB
-         4'd2: pcm_post = 12'd81;   // -16dB
-         4'd3: pcm_post = 12'd128;   // -18dB
-         4'd4: pcm_post = 12'd102;   // -20dB
-         default: pcm_post = 12'd129;   // -12dB  <- entry 0
+         4'd1: pcm_post = 12'd102;   // -2dB
+         4'd2: pcm_post = 12'd81;   // -4dB
+         4'd3: pcm_post = 12'd64;   // -6dB
+         4'd4: pcm_post = 12'd51;   // -8dB
+         4'd5: pcm_post = 12'd128;   //   0dB
+         4'd6: pcm_post = 12'd161;   // +2dB
+         4'd7: pcm_post = 12'd203;   // +4dB
+         4'd8: pcm_post = 12'd255;   // +6dB
+         4'd9: pcm_post = 12'd322;   // +8dB
+         default: pcm_post = 12'd128;   //   0dB  <- entry 0
       endcase
 `endif
    endfunction
@@ -130,13 +132,19 @@ module tb_opl4_gain;
       fm_want[7] = -7.99;
       fm_want[8] = +0.00;
       fm_want[9] = +1.99;
-      // menu order: PCM -12,-14,-16,-18,-20  (2 dB, but the RANGE is cut at -12:
-      //   above that a +11 dB peak clips, unrecoverably.  5 steps, not 10.)
-      pc_want[0] = -11.97;
+      // menu order: PCM 0,-2,-4,-6,-8,0,+2,+4,+6,+8 -- same ring as everything
+      //   else.  The measured net includes the FIXED -12.04 dB engine headroom,
+      //   which is why pc_want is the trim shifted down by that amount.
+      pc_want[0] = -12.04;
       pc_want[1] = -14.01;
       pc_want[2] = -16.02;
       pc_want[3] = -18.06;
       pc_want[4] = -20.03;
+      pc_want[5] = -12.04;
+      pc_want[6] = -10.05;
+      pc_want[7] = -8.04;
+      pc_want[8] = -6.05;
+      pc_want[9] = -4.03;
 
       // ---- T1a: FM gain accuracy per step, linear region only -------------
       for (int sel = 0; sel < 10; sel++) begin
@@ -157,7 +165,7 @@ module tb_opl4_gain;
       end
 
       // ---- T1b: PCM net gain per step, accumulator -> output ---------------
-      for (int sel = 0; sel < 5; sel++) begin
+      for (int sel = 0; sel < 10; sel++) begin
          automatic int sh = 3 - int'(pcm_pre(sel[3:0]));
          automatic int m  = int'(pcm_post(sel[3:0]));
          // Two independent ceilings: the engine clamp (accum >> sh must fit in
@@ -261,16 +269,20 @@ module tb_opl4_gain;
       //          engine clamp.  A post-saturation-only trim cannot do this.
       begin
          automatic int hot = 116112;                  // = +11.0 dBFS, measured
-         for (int ps = 0; ps < 5; ps++) begin
-            automatic int sh   = 3 - int'(pcm_pre(ps[3:0]));
-            automatic int shd  = hot >>> sh;
-            automatic int outv = (shd * int'(pcm_post(ps[3:0]))) / 128;
-            automatic bit clipped = (shd > 32767) || (outv > 32767);
-            $display("T6  PCM step %0d: accum %0d >> %0d = %0d, x%0d/128 = %0d %s",
-                     ps, hot, sh, shd, pcm_post(ps[3:0]), outv, clipped ? "CLIPS" : "clean");
-            // The range was cut at -12 dB precisely so that EVERY step is clean --
-            // not just the default.  If a louder step is ever added back, this fails.
-            chk($sformatf("T6 step %0d must not clip a +11 dB peak", ps), !clipped);
+         automatic int sh  = 3 - int'(pcm_pre(4'd0));
+         automatic int shd = hot >>> sh;
+         $display("T6  fixed headroom: accum %0d >> %0d = %0d %s",
+                  hot, sh, shd, (shd > 32767) ? "CLIPS" : "clean");
+         // The engine clamp must never be reached, WHATEVER the user picks -- that
+         // is the whole point of moving the headroom out of the OSD.  Clipping here
+         // is unrecoverable; clipping later, from a user boost, is just loud.
+         chk("T6 fixed headroom keeps a +11 dB peak out of the engine clamp", shd <= 32767);
+         // and at the default trim (0 dB) it must still be clean end to end
+         begin
+            automatic int outv = (shd * int'(pcm_post(4'd0))) / 128;
+            $display("T6  at 0dB trim: x%0d/128 = %0d %s", pcm_post(4'd0), outv,
+                     (outv > 32767) ? "CLIPS" : "clean");
+            chk("T6 default trim does not clip a +11 dB peak", outv <= 32767);
          end
       end
 

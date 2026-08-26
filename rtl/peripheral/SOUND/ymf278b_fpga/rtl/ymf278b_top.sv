@@ -218,7 +218,7 @@ ymf278_pcm_engine2 #(
     .mem_busy        (mem_busy),
 
     // Audio Output
-    .pcm_vol         (pcm_pre(pcm_vol)),  // pre-saturation shift (sh = 3 - this); see pcm_pre()
+    .pcm_vol         (PCM_HEADROOM),      // FIXED headroom, not the OSD trim; see above
     .pcm_left        (pcm_left),
     .pcm_right       (pcm_right),
     .pcm_valid       (pcm_valid),
@@ -353,32 +353,37 @@ logic signed [15:0] pcm_left_hold, pcm_right_hold;
 
 // Engine pre-saturation shift selector: engine computes sh = 3 - pcm_vol,
 // so 2'd3 -> 0 dB, 2'd2 -> -6.02, 2'd1 -> -12.04, 2'd0 -> -18.06 dB.
-function automatic [1:0] pcm_pre(input [3:0] sel);
-    // PCM's ladder is 2 dB like the others but its RANGE is different, and
-    // deliberately so.  Measured raw peak of both MoonSound music-disk tracks is
-    // +11.0 / +11.4 dBFS, so any net above about -11 dB clips -- and clipping
-    // inside the engine cannot be undone by the post multiplier, it only gets
-    // quieter (crest 16.9 -> 6.6 dB).  So the top of the range is cut at -12 dB,
-    // which is also the 2026-08-21 calibration point, and entry 0 = OSD default.
-    // Every step here is clean for a +11 dB peak at BOTH clamps; tb T6 checks it.
-    // Pre-saturation shift (sh = 3 - this); this is where the attenuation lives.
-    case (sel)
-        4'd1: pcm_pre = 2'd1;   //  -14dB
-        4'd2: pcm_pre = 2'd1;   //  -16dB
-        4'd3: pcm_pre = 2'd0;   //  -18dB
-        4'd4: pcm_pre = 2'd0;   //  -20dB
-        default: pcm_pre = 2'd1;   //  -12dB  <- entry 0 = OSD default / out of range
-    endcase
-endfunction
+// ---- fixed PCM headroom, NOT a user control -------------------------------
+// The engine accumulates up to 24 slots and then clamps to 16 bit
+// (ymf278_pcm_engine2.sv:455-465).  One full-scale voice is exactly 0 dBFS
+// there, so two voices in phase already overflow -- "unity" is not a ceiling for
+// a polyphonic sum, it is a level normal music passes straight through.
+// Measured raw peak of the MoonSound music-disk tracks is +11.0 / +11.4 dBFS
+// (~3.5 full-scale voices), so the engine needs ~12 dB of room BEFORE its clamp.
+// That is structural and belongs here, not in the OSD: clipping inside the
+// engine is unrecoverable downstream (it only gets quieter, crest 16.9->6.6 dB).
+//
+// The engine computes sh = 3 - pcm_vol, so 2'd1 gives sh = 2 = -12.04 dB.
+// Before 2026-08-27 this shift WAS the OSD control, which is why the PCM menu
+// used to be stuck at -20..-12 dB while every other menu ran -8..+8.
+localparam [1:0] PCM_HEADROOM = 2'd1;   // sh = 2 => -12.04 dB before the clamp
 // Post-saturation remainder, x/128.  net = pre + 20*log10(post/128).
 function automatic [11:0] pcm_post(input [3:0] sel);
-    // Post-saturation remainder, x/128.  net = -6.0206*sh + 20log10(post/128).
+    // The USER trim, same 2 dB ring as every other volume menu.  Applied after
+    // the engine clamp, so 0dB now means "this source's normal level" and the
+    // ladder matches PSG/OPLL/SCC/FM.  Boosting loud material still clips at the
+    // final mix, exactly as it does for the other sources.
     case (sel)
-        4'd1: pcm_post = 12'd102;   //  -14dB
-        4'd2: pcm_post = 12'd81;   //  -16dB
-        4'd3: pcm_post = 12'd128;   //  -18dB
-        4'd4: pcm_post = 12'd102;   //  -20dB
-        default: pcm_post = 12'd129;   //  -12dB  <- entry 0 = OSD default / out of range
+        4'd1: pcm_post = 12'd102;   //  -2dB
+        4'd2: pcm_post = 12'd81;   //  -4dB
+        4'd3: pcm_post = 12'd64;   //  -6dB
+        4'd4: pcm_post = 12'd51;   //  -8dB
+        4'd5: pcm_post = 12'd128;   //   0dB
+        4'd6: pcm_post = 12'd161;   //  +2dB
+        4'd7: pcm_post = 12'd203;   //  +4dB
+        4'd8: pcm_post = 12'd255;   //  +6dB
+        4'd9: pcm_post = 12'd322;   //  +8dB
+        default: pcm_post = 12'd128;   //   0dB  <- entry 0 = OSD default / out of range
     endcase
 endfunction
 // FM has no internal saturation stage of its own, so one multiplier suffices.

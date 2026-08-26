@@ -329,7 +329,7 @@ localparam CONF_STR = {
    // They used to be offsets from the shipping default, so "0dB" was really -3.98 dB
    // and "+8dB" was really +4.01.  Fixed by moving the VALUES to the names, not by
    // renaming the steps: FM "+8dB" is mul 322 = a real +8 dB.  Entry 0 = default.
-   "P2O[112:109],OPL4 PCM Volume,-12dB,-14dB,-16dB,-18dB,-20dB;",
+   "P2O[112:109],OPL4 PCM Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
    "P2O[116:113],OPL4 FM Volume,+4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB;",
    "P2-;",
    "P2O[100:97],PSG Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
