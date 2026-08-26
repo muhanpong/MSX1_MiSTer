@@ -12,6 +12,11 @@ parameter CONF_STR_SLOT_B = {
 // The machinery already existed -- MFRSD fills all four subslots of a cart slot
 // the same way -- only the menu was missing.  Per-slot, independent.
 //
+// Every page ENTRY carries its page's hide mask (H9/HA), not just the page title.
+// The firmware's flat mode (backtick key) bypasses the page rule that would
+// otherwise hide them at root (menu.cpp:1976), so an unmasked item leaks to
+// depth 0 for a slot that is not expanded.
+//
 // Slot B has no GameMaster2: cart_gamemaster2 keeps ONE global bank set
 // (gamemaster2.sv:15, no cart_num port), so a second GM2 anywhere would alias it.
 parameter CONF_STR_EXPAND_A = {
@@ -38,24 +43,24 @@ parameter CONF_STR_MAPPER_B    = { "H8HCO[35:32],", MAPPER_LIST };
 parameter CONF_STR_SRAM_SIZE_A = { "H7H5O[28:26],", SRAM_SIZE_LIST };
 parameter CONF_STR_SUBSLOT_A = {
     "H9P3,SLOT A sub-slots;",
-    "P3O[75:73],Sub-slot 0,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
-    "P3O[78:76],Sub-slot 1,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
-    "P3O[81:79],Sub-slot 2,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
-    "P3O[84:82],Sub-slot 3,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
-    "P3-;",
-    "H3P3FS3,ROM,Load,30C00000;",
-    "HBP3O[23:20],", MAPPER_LIST,
-    "H5P3O[28:26],", SRAM_SIZE_LIST
+    "H9P3O[75:73],Sub-slot 0,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
+    "H9P3O[78:76],Sub-slot 1,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
+    "H9P3O[81:79],Sub-slot 2,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
+    "H9P3O[84:82],Sub-slot 3,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
+    "H9P3-;",
+    "H9H3P3FS3,ROM,Load,30C00000;",
+    "H9HBP3O[23:20],", MAPPER_LIST,
+    "H9H5P3O[28:26],", SRAM_SIZE_LIST
 };
 parameter CONF_STR_SUBSLOT_B = {
     "HAP4,SLOT B sub-slots;",
-    "P4O[87:85],Sub-slot 0,None,ROM,SCC,SCC+,FM-PAC;",
-    "P4O[90:88],Sub-slot 1,None,ROM,SCC,SCC+,FM-PAC;",
-    "P4O[93:91],Sub-slot 2,None,ROM,SCC,SCC+,FM-PAC;",
-    "P4O[96:94],Sub-slot 3,None,ROM,SCC,SCC+,FM-PAC;",
-    "P4-;",
-    "H4P4F4,ROM,Load,33000000;",       // F not FS -- see the note in MSX1.sv
-    "HCP4O[35:32],", MAPPER_LIST
+    "HAP4O[87:85],Sub-slot 0,None,ROM,SCC,SCC+,FM-PAC;",
+    "HAP4O[90:88],Sub-slot 1,None,ROM,SCC,SCC+,FM-PAC;",
+    "HAP4O[93:91],Sub-slot 2,None,ROM,SCC,SCC+,FM-PAC;",
+    "HAP4O[96:94],Sub-slot 3,None,ROM,SCC,SCC+,FM-PAC;",
+    "HAP4-;",
+    "HAH4P4F4,ROM,Load,33000000;",       // F not FS -- see the note in MSX1.sv
+    "HAHCP4O[35:32],", MAPPER_LIST
 };
 
 module msx_config

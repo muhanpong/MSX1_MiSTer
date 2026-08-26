@@ -128,7 +128,15 @@ it is on. Press `` ` `` again to restore the pages.
 Telling them apart: in flat mode the core's **own** pages (`P1` Video settings,
 `P2` Audio settings) are flattened too. If those are still pages and only `P3`/`P4`
 are loose, that *would* be ours. Observed 2026-08-26 during the first hardware
-session with this menu; it was flat mode.
+session with this menu — **the user confirmed Video/Audio settings were flattened
+as well**, so it was flat mode and the CONF_STR was never at fault.
+
+What flat mode *did* expose, and what was fixed: only the page **titles** carried
+`H9`/`HA`. Flat mode bypasses the page rule that hides items at root
+(`menu.cpp:1976`), so the `Sub-slot 0..3` entries appeared at depth 0 even for a
+slot that is not expanded, and the page's ROM / Mapper / SRAM copies showed up
+next to their slot-level twins. Every `P3`/`P4` entry now carries its page mask in
+addition to its own condition (masks OR together in the firmware's parse loop).
 
 Worth knowing because a flattened menu also mixes `OPL4 PCM Volume`,
 `OPL4 FM Volume` and `SCC Volume` into one screen, which is an easy way to think
