@@ -355,31 +355,35 @@ logic signed [15:0] pcm_left_hold, pcm_right_hold;
 // so 2'd3 -> 0 dB, 2'd2 -> -6.02, 2'd1 -> -12.04, 2'd0 -> -18.06 dB.
 function automatic [1:0] pcm_pre(input [2:0] sel);
     case (sel)
-        3'd1: pcm_pre = 2'd0;   // "-8dB"  sh 3  -18.06
-        3'd2: pcm_pre = 2'd2;   // "0dB"   sh 1   -6.02
-        3'd3: pcm_pre = 2'd2;   // "+4dB"  sh 1   -6.02
-        3'd4: pcm_pre = 2'd3;   // "+8dB"  sh 0    0.00
-        default: pcm_pre = 2'd1;// "-4dB"  sh 2  -12.04  <- default / out of range
+        3'd1: pcm_pre = 2'd0;   // "-16dB" sh 3  -18.06
+        3'd2: pcm_pre = 2'd2;   // "-8dB"  sh 1   -6.02
+        3'd3: pcm_pre = 2'd2;   // "-4dB"  sh 1   -6.02
+        3'd4: pcm_pre = 2'd3;   //  "0dB"  sh 0    0.00
+        default: pcm_pre = 2'd1;// "-12dB" sh 2  -12.04  <- default / out of range
     endcase
 endfunction
 // Post-saturation remainder, x/128.  net = pre + 20*log10(post/128).
 function automatic [11:0] pcm_post(input [2:0] sel);
     case (sel)
-        3'd1: pcm_post = 12'd162;   // "-8dB"  +2.06 -> net -16.0
-        3'd2: pcm_post = 12'd102;   // "0dB"   -1.98 -> net  -8.0
-        3'd3: pcm_post = 12'd162;   // "+4dB"  +2.06 -> net  -4.0
-        3'd4: pcm_post = 12'd128;   // "+8dB"   0.00 -> net   0.0
-        default: pcm_post = 12'd129;// "-4dB"  +0.07 -> net -12.0  <- default
+        3'd1: pcm_post = 12'd162;   // "-16dB" +2.06 -> net -16.0
+        3'd2: pcm_post = 12'd102;   // "-8dB"  -1.98 -> net  -8.0
+        3'd3: pcm_post = 12'd162;   // "-4dB"  +2.06 -> net  -4.0
+        3'd4: pcm_post = 12'd128;   //  "0dB"   0.00 -> net   0.0
+        default: pcm_post = 12'd129;// "-12dB" +0.07 -> net -12.0  <- default
     endcase
 endfunction
 // FM has no internal saturation stage of its own, so one multiplier suffices.
 function automatic [11:0] fm_gain(input [2:0] sel);
+    // Labels are dB VS UNITY, like the PSG/OPLL/SCC menus (msx_slots.sv vol_mul,
+    // where 0dB == mul 128).  They used to be offsets from the shipping default,
+    // so the entry called "0dB" was really -3.98 dB and "+4dB" was really unity --
+    // a menu that lied about its own numbers.  Fixed 2026-08-26.
     case (sel)
-        3'd1: fm_gain = 12'd81;     // "0dB"    -3.98 dB  <- the measured-neutral point
-        3'd2: fm_gain = 12'd51;     // "-4dB"   -8.00 dB
-        3'd3: fm_gain = 12'd32;     // "-8dB"  -12.04 dB
-        3'd4: fm_gain = 12'd128;    // "+4dB"    0.00 dB
-        default: fm_gain = 12'd203; // "+8dB"   +4.02 dB  <- menu entry 0 = OSD default
+        3'd1: fm_gain = 12'd128;    //  "0dB"    0.00 dB  = unity
+        3'd2: fm_gain = 12'd81;     //  "-4dB"  -3.98 dB  <- 2026-08-21 calibration point
+        3'd3: fm_gain = 12'd51;     //  "-8dB"  -8.00 dB
+        3'd4: fm_gain = 12'd32;     // "-12dB" -12.04 dB
+        default: fm_gain = 12'd203; //  "+4dB"  +4.02 dB  <- entry 0 = OSD default
     endcase
 endfunction
 localparam int GAIN_SH = 7;

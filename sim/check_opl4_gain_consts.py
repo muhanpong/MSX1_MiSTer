@@ -16,8 +16,8 @@ import re, sys, math
 RTL = "rtl/peripheral/SOUND/ymf278b_fpga/rtl/ymf278b_top.sv"
 
 # menu order -> expected net dB
-FM_WANT  = [+4.02, -3.98, -8.00, -12.04,  0.00]   # +8dB,0dB,-4dB,-8dB,+4dB
-PCM_WANT = [-12.00, -16.00, -8.00, -4.00, 0.00]   # -4dB,-8dB,0dB,+4dB,+8dB
+FM_WANT  = [+4.02,  0.00, -3.98,  -8.00, -12.04]   # +4dB,0dB,-4dB,-8dB,-12dB
+PCM_WANT = [-12.00, -16.00, -8.00, -4.00, 0.00]   # -12dB,-16dB,-8dB,-4dB,0dB
 TOL = 0.15
 
 def parse_case(src, fname):
@@ -61,11 +61,12 @@ for s in range(5):
 # defaults (MiSTer status resets to 0 -> menu entry 0 must be the intended default)
 # FM entry 0 was the measured-neutral step (-3.98 dB net, which put the two
 # MoonSound music-disk tracks at a -21.7 dBFS median against a -20.3 target).
-# Changed to +8dB (+4.02 net) on user instruction 2026-08-26 -- a deliberate
+# Changed to the +4.02 net step on user instruction 2026-08-26 -- a deliberate
 # ship-loud choice, 8 dB above the calibrated point, NOT a new measurement.
-# The -3.98 step is still on the menu as "0dB" at entry 1.
+# Labels are now dB vs unity (the PSG/OPLL/SCC convention), so that step is
+# called "-4dB" and sits at entry 2; entry 0 is honestly labelled "+4dB".
 if abs(20*math.log10(fm[0]/128.0) - (+4.02)) > TOL:
-    print("FAIL: FM menu entry 0 is not the intended default (+8dB, +4.02 dB net)"); bad += 1
+    print("FAIL: FM menu entry 0 is not the intended default (+4dB = +4.02 dB net)"); bad += 1
 if abs((-6.0206*(3-pre[0]) + 20*math.log10(post[0]/128.0)) - (-12.0)) > TOL:
     print("FAIL: PCM menu entry 0 is not the calibrated default (-12 dB net)"); bad += 1
 # out-of-range (sel 5..7) must fall back to the default entry, not the loudest

@@ -325,8 +325,11 @@ localparam CONF_STR = {
    "P2O[45],MoonSound,Off,On;",
    "P2O[46],PCM Mute,Off,On;",
    "P2O[47],FM Mute,Off,On;",
-   "P2O[56:54],OPL4 PCM Volume,-4dB,-8dB,0dB,+4dB,+8dB;",
-   "P2O[59:57],OPL4 FM Volume,+8dB,0dB,-4dB,-8dB,+4dB;",   // entry 0 = OSD default (user, 2026-08-26)
+   // Labels are dB VS UNITY, matching the PSG/OPLL/SCC menus below (0dB = no gain).
+   // They used to be offsets from the shipping default, so "0dB" was really -3.98 dB
+   // and "+4dB" was really unity.  Entry 0 is the power-on default either way.
+   "P2O[56:54],OPL4 PCM Volume,-12dB,-16dB,-8dB,-4dB,0dB;",
+   "P2O[59:57],OPL4 FM Volume,+4dB,0dB,-4dB,-8dB,-12dB;",
    "P2-;",
    "P2O[66:65],PSG Volume,0dB,+4dB,-4dB,-8dB;",
    "P2O[68:67],OPLL Volume,0dB,+4dB,-4dB,-8dB;",
