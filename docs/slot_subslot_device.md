@@ -95,6 +95,26 @@ Everything downstream already handles it:
 So the entire change is **two rows in a decode table plus a menu entry.** No FSM
 change, no new state, no resource growth beyond the two table rows.
 
+## OSD trap: "the page items all showed up at the root"
+
+Not a CONF_STR bug. The firmware has a **flat menu mode** that expands every page
+inline at the root, toggled by the **`` ` `` (backtick / KEY_GRAVE) key** while the
+OSD is open — `menu.cpp:1426` sets `recent`, `:2618` does `flat = !flat`, and
+`:1976` `if (!page && n && !flat) inpage = 0;` is what stops hiding page items once
+it is on. Press `` ` `` again to restore the pages.
+
+Telling them apart: in flat mode the core's **own** pages (`P1` Video settings,
+`P2` Audio settings) are flattened too. If those are still pages and only `P3`/`P4`
+are loose, that *would* be ours. Observed 2026-08-26 during the first hardware
+session with this menu; it was flat mode.
+
+Worth knowing because a flattened menu also mixes `OPL4 PCM Volume`,
+`OPL4 FM Volume` and `SCC Volume` into one screen, which is an easy way to think
+an audio trim is broken when the wrong item was moved.
+
+For the record, mask-before-page (`H9P3,…`) is fine — `P1` already ships that shape
+(`h2P1O[14:13]`, `H2P1O[12]`).
+
 ## What can go in a sub-slot — three different kinds of limit
 
 **On real MSX, a subslot can hold anything.** The subslot expander is transparent:
