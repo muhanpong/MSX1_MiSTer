@@ -60,7 +60,37 @@ wins, later conflicting entries fall back to `None`:
   (`memory_upload.sv:266`) and FM-PAC has one instance per slot → at most one.
 * **GameMaster2 is slot A only**; codes 6/7 are unused → `None`.
 * **SCC+ may appear in several subslots** — `konami_scc` keeps its state per
-  (slot, subslot) now. They share the slot's one SCC *sound* chip, though.
+  (slot, subslot) now. They share the slot's one SCC *sound* chip, though; see
+  the limitation below.
+
+### Limitation: two SCC-family devices in one cart slot
+
+Allowed by the menu, degraded by construction — **one `IKASCC` per cart slot**
+(`scc_sound.sv` instantiates A and B, one per slot, not per subslot). Two SCC
+devices in the same slot therefore share the chip's wave RAM and its FREQ/VOL
+registers: only one subslot is addressable per page at a time, but the chip
+*state* is whatever the last writer left, so they overwrite each other rather
+than coexisting.
+
+`sccDevice` is per cart slot too (`msx_slots.sv:480`
+`|(cart_device[cart_num] & DEV_SCC2)`, and `cart_device[]` is OR-accumulated
+across subslots at `memory_upload.sv:537`). So an SCC+ anywhere in the slot makes
+the whole slot's chip an SCC-I, and a plain SCC sharing that slot is driven as
+SCC-I: software probing it sees SCC-I, and with the mode register set to Plus its
+ch5 plays its own (stale) RAM instead of mirroring ch4 — audibly not a real SCC.
+
+It still *plays*: the plain-SCC window survives because `scc_req`'s second term
+(`~sccMode[5] & bank[2][5:0] == 0x3F` at `0x9800`) does not look at `sccDevice`;
+only the third term does. So this is a fidelity gap in an already-degraded
+configuration, not a failure.
+
+**Not blocked on purpose** (2026-08-26): the real constraint is one chip per slot,
+which no menu rule can fix, and forbidding the combination would only remove a
+configuration a user might still want. **To do later:** either give `sccDevice`
+per-subslot scope (half a fix while the chip stays shared), or refuse SCC next to
+SCC+ in `msx_config`'s conflict rules (cheap, honest). Option B in
+*Costed against the real fit* — a second `IKASCC` per slot, +520 ALM — is what
+would actually make the combination work.
 * While a slot is `Off`, all four of its fields are forced to `None`, not just
   hidden — a status word carried over from an older build cannot select anything.
 
