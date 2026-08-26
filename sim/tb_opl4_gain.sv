@@ -63,8 +63,8 @@ module tb_opl4_gain;
          3'd1: fm_gain = 12'd128;
          3'd2: fm_gain = 12'd81;
          3'd3: fm_gain = 12'd51;
-         3'd4: fm_gain = 12'd32;
-         default: fm_gain = 12'd203;
+         3'd4: fm_gain = 12'd203;
+         default: fm_gain = 12'd322;
       endcase
 `endif
    endfunction
@@ -114,10 +114,10 @@ module tb_opl4_gain;
    int lim;
 
    initial begin
-      // menu order: FM  { +4dB, 0dB, -4dB, -8dB, -12dB }  -- labels ARE net vs unity
-      //   entry 0 (+4dB) is the OSD default, user decision 2026-08-26
-      fm_want[0] = +4.02; fm_want[1] =  0.00; fm_want[2] = -3.98;
-      fm_want[3] = -8.00; fm_want[4] = -12.04;
+      // menu order: FM  { +8dB, 0dB, -4dB, -8dB, +4dB }  -- labels ARE net vs unity
+      //   entry 0 (+8dB, mul 322) is the OSD default, user decision 2026-08-26
+      fm_want[0] = +8.01; fm_want[1] =  0.00; fm_want[2] = -3.97;
+      fm_want[3] = -7.99; fm_want[4] = +4.01;
       // menu order: PCM { -12dB, -16dB, -8dB, -4dB, 0dB }  labels = net vs unity
       pc_want[0] = -12.00; pc_want[1] = -16.00; pc_want[2] = -8.00;
       pc_want[3] =  -4.00; pc_want[4] =   0.00;

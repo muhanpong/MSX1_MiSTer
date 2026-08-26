@@ -327,9 +327,10 @@ localparam CONF_STR = {
    "P2O[47],FM Mute,Off,On;",
    // Labels are dB VS UNITY, matching the PSG/OPLL/SCC menus below (0dB = no gain).
    // They used to be offsets from the shipping default, so "0dB" was really -3.98 dB
-   // and "+4dB" was really unity.  Entry 0 is the power-on default either way.
+   // and "+8dB" was really +4.01.  Fixed by moving the VALUES to the names, not by
+   // renaming the steps: FM "+8dB" is mul 322 = a real +8 dB.  Entry 0 = default.
    "P2O[56:54],OPL4 PCM Volume,-12dB,-16dB,-8dB,-4dB,0dB;",
-   "P2O[59:57],OPL4 FM Volume,+4dB,0dB,-4dB,-8dB,-12dB;",
+   "P2O[59:57],OPL4 FM Volume,+8dB,0dB,-4dB,-8dB,+4dB;",
    "P2-;",
    "P2O[66:65],PSG Volume,0dB,+4dB,-4dB,-8dB;",
    "P2O[68:67],OPLL Volume,0dB,+4dB,-4dB,-8dB;",

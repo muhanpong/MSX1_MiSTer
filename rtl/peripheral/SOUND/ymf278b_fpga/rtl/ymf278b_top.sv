@@ -374,16 +374,22 @@ function automatic [11:0] pcm_post(input [2:0] sel);
 endfunction
 // FM has no internal saturation stage of its own, so one multiplier suffices.
 function automatic [11:0] fm_gain(input [2:0] sel);
-    // Labels are dB VS UNITY, like the PSG/OPLL/SCC menus (msx_slots.sv vol_mul,
-    // where 0dB == mul 128).  They used to be offsets from the shipping default,
-    // so the entry called "0dB" was really -3.98 dB and "+4dB" was really unity --
-    // a menu that lied about its own numbers.  Fixed 2026-08-26.
+    // Labels are dB VS UNITY and the multipliers actually deliver them, like the
+    // PSG/OPLL/SCC menus (msx_slots.sv vol_mul, 0dB == mul 128).  Before
+    // 2026-08-26 the labels were offsets from the shipping default, so the entry
+    // called "+8dB" really gave +4.01 dB and "0dB" really gave -3.98: the names
+    // did not match the values.  Fixed by moving the VALUES to the names --
+    // mul 322 is a real +8 dB -- not by renaming the steps.
+    // The -12.04 dB step (mul 32) was dropped to make room; the 2026-08-21
+    // calibration point (mul 81) survives as "-4dB".
+    // Width: opl3_l_eff is signed [16:0], {1'b0,fm_gain} is 13 bits -> 30-bit
+    // product into fm_l_mul signed [29:0]; |322 * 65536| = 21.1M, well inside.
     case (sel)
-        3'd1: fm_gain = 12'd128;    //  "0dB"    0.00 dB  = unity
-        3'd2: fm_gain = 12'd81;     //  "-4dB"  -3.98 dB  <- 2026-08-21 calibration point
-        3'd3: fm_gain = 12'd51;     //  "-8dB"  -8.00 dB
-        3'd4: fm_gain = 12'd32;     // "-12dB" -12.04 dB
-        default: fm_gain = 12'd203; //  "+4dB"  +4.02 dB  <- entry 0 = OSD default
+        3'd1: fm_gain = 12'd128;    //  "0dB"   +0.00 dB  = unity
+        3'd2: fm_gain = 12'd81;     //  "-4dB"  -3.97 dB  <- 2026-08-21 calibration point
+        3'd3: fm_gain = 12'd51;     //  "-8dB"  -7.99 dB
+        3'd4: fm_gain = 12'd203;    //  "+4dB"  +4.01 dB
+        default: fm_gain = 12'd322; //  "+8dB"  +8.01 dB  <- entry 0 = OSD default
     endcase
 endfunction
 localparam int GAIN_SH = 7;
