@@ -326,7 +326,7 @@ localparam CONF_STR = {
    "P2O[46],PCM Mute,Off,On;",
    "P2O[47],FM Mute,Off,On;",
    "P2O[56:54],OPL4 PCM Volume,-4dB,-8dB,0dB,+4dB,+8dB;",
-   "P2O[59:57],OPL4 FM Volume,0dB,-4dB,-8dB,+4dB,+8dB;",
+   "P2O[59:57],OPL4 FM Volume,+8dB,0dB,-4dB,-8dB,+4dB;",   // entry 0 = OSD default (user, 2026-08-26)
    "P2-;",
    "P2O[66:65],PSG Volume,0dB,+4dB,-4dB,-8dB;",
    "P2O[68:67],OPLL Volume,0dB,+4dB,-4dB,-8dB;",

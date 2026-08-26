@@ -375,11 +375,11 @@ endfunction
 // FM has no internal saturation stage of its own, so one multiplier suffices.
 function automatic [11:0] fm_gain(input [2:0] sel);
     case (sel)
-        3'd1: fm_gain = 12'd51;     // "-4dB"   -8.00 dB
-        3'd2: fm_gain = 12'd32;     // "-8dB"  -12.04 dB
-        3'd3: fm_gain = 12'd128;    // "+4dB"    0.00 dB
-        3'd4: fm_gain = 12'd203;    // "+8dB"   +4.02 dB
-        default: fm_gain = 12'd81;  // "0dB"    -3.98 dB  <- default / out of range
+        3'd1: fm_gain = 12'd81;     // "0dB"    -3.98 dB  <- the measured-neutral point
+        3'd2: fm_gain = 12'd51;     // "-4dB"   -8.00 dB
+        3'd3: fm_gain = 12'd32;     // "-8dB"  -12.04 dB
+        3'd4: fm_gain = 12'd128;    // "+4dB"    0.00 dB
+        default: fm_gain = 12'd203; // "+8dB"   +4.02 dB  <- menu entry 0 = OSD default
     endcase
 endfunction
 localparam int GAIN_SH = 7;
