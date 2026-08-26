@@ -1,0 +1,102 @@
+<?xml version="1.0" ?>
+<!--
+  Panasonic FS-A1WX (1988, Japanese MSX2+) with a 1MB memory mapper.
+  Stock is 64 KB; this variant only changes the 3-0 mapper size
+  (block_count is in 16 KB units: 4=64KB, 64=1MB, 128=2MB, 256=4MB).
+
+  Slot layout follows openMSX share/machines/Panasonic_FS-A1WX.xml, and every ROM
+  SHA1 below matches that file's, so these are the canonical dumps.
+
+  Two things the real machine has that this core cannot represent:
+
+  1. The 2 MB built-in software in slot 3-3.  It needs the PANASONIC mapper, which
+     is in neither createMSXpack's BLOCK_TYPES nor package.sv's mapper_typ_t.
+     Omitted; the machine still boots to BASIC without it.
+
+  2. The Matsushita switched device on I/O 0x40/0x41, i.e. the 5.37 MHz turbo.
+     The core decodes no such port, so IN(0x41) reads 0xFF, which is exactly what
+     a machine WITHOUT the turbo hardware returns.  Software probing it concludes
+     "no turbo" and boot is unaffected.  (bit2==0 would mean the hardware exists,
+     bit0==0 that turbo is on; both read 1 here.)
+
+  MoonSound is this core's extension rather than FS-A1WX hardware; it is declared
+  here for parity with Sony_HB-F1XV.xml.
+-->
+<msxConfig>
+  <type>MSX2</type>
+  <kbd_layout>/yX/cWdlZv//ZP//cHMh////YP9hRgH///9XUCZUAv//MFUxMgQD//+AUzNRRwX//0MnNTRWBv///0I3UgcQ//8iQDZEABH//yMkQRdFEv///yD/FRP//2Ngdxb/FP//////////df///////////////////3L/dv//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////Yv//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////hIH///+Cg4b/h4X///////90//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////8=</kbd_layout>
+  <device typ="KANJI" id="Kanji ROM">
+    <rom>
+      <filename>fs-a1wx_kanjifont.rom</filename>
+      <!-- lowercase <sha1> here: createMSXpack reads block/SHA1 but device/rom/sha1
+           (createMSXpack.py:186 vs :238).  Getting it wrong is fail-quiet: the ROM is
+           silently left out of the pack and the machine boots without kanji. -->
+      <sha1>5aff2d9b6efc723bc395b0f96f0adfa83cc54a49</sha1>
+    </rom>
+  </device>
+  <device typ="RESET_STATUS" id="Reset Status register"></device>
+  <device typ="MOONSOUND" id="MoonSound PCM Wave ROM"></device>
+  <primary slot="0">
+    <secondary slot="0">
+      <block start="0" id="MSX BIOS with BASIC ROM">
+        <type>ROM</type>
+        <block_count>2</block_count>
+        <filename>fs-a1wx_basic-bios2p.rom</filename>
+        <SHA1>e90f80a61d94c617850c415e12ad70ac41e66bb7</SHA1>
+      </block>
+    </secondary>
+    <secondary slot="2">
+      <block start="1" id="MSX Music">
+        <type>MSX-MUSIC</type>
+        <block_count>1</block_count>
+        <filename>fs-a1wx_fmbasic.rom</filename>
+        <SHA1>aad42ba4289b33d8eed225d42cea930b7fc5c228</SHA1>
+      </block>
+    </secondary>
+  </primary>
+  <primary slot="1">
+    <secondary slot="0">
+      <block start="0">
+        <type>SLOT A</type>
+      </block>
+    </secondary>
+  </primary>
+  <primary slot="2">
+    <secondary slot="0">
+      <block start="0">
+        <type>SLOT B</type>
+      </block>
+    </secondary>
+  </primary>
+  <primary slot="3">
+    <secondary slot="0">
+      <block start="0" id="Main RAM">
+        <type>RAM MAPPER</type>
+        <block_count>64</block_count>
+        <pattern>4</pattern>
+      </block>
+    </secondary>
+    <secondary slot="1">
+      <block start="0" id="MSX Sub ROM">
+        <type>ROM</type>
+        <block_count>1</block_count>
+        <filename>fs-a1wx_msx2psub.rom</filename>
+        <SHA1>fe0254cbfc11405b79e7c86c7769bd6322b04995</SHA1>
+      </block>
+      <block start="1" id="MSX Kanji Driver with BASIC">
+        <type>ROM</type>
+        <block_count>2</block_count>
+        <filename>fs-a1wx_kanjibasic.rom</filename>
+        <SHA1>1ef3956f7f918873fb9b031339bba45d1e5e5878</SHA1>
+      </block>
+    </secondary>
+    <secondary slot="2">
+      <block start="1" id="Memory Mapped FDC">
+        <type>FDC</type>
+        <block_count>1</block_count>
+        <filename>fs-a1wx_disk.rom</filename>
+        <SHA1>bb59c849898d46a23fdbd0cc04ab35088e74a18d</SHA1>
+      </block>
+    </secondary>
+  </primary>
+</msxConfig>
