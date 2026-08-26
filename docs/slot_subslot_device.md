@@ -95,6 +95,28 @@ Everything downstream already handles it:
 So the entire change is **two rows in a decode table plus a menu entry.** No FSM
 change, no new state, no resource growth beyond the two table rows.
 
+## "슬롯 1" 과 "슬롯 1-0" 은 다른 주소다
+
+MSX에서 확장 슬롯의 서브슬롯 0은 비확장 primary 와 **같은 곳이 아니다**. 확장이면
+BIOS 가 `EXPTBL` bit7 을 세우고, `0xFFFF` 가 서브슬롯 레지스터가 되며,
+`RDSLT`/`WRSLT`/`CALSLT` 에 넘기는 슬롯 바이트도 달라진다. 서브슬롯을 훑는
+소프트웨어(예: SCMD 의 `APRLOPLL` 순회)가 장치를 찾는 자리도 달라진다.
+
+첫 구현은 `memory_upload.sv` 가 **`subslot != 0` 인 설정 줄이 나올 때만** 확장을
+켰다. 그래서 "sub-slots: On + Sub-slot 0 만 사용" 이면 확장 플래그가 서지 않고
+장치가 **1-0 이 아니라 1** 에 놓였다 — 사용자가 확장을 켠 의사를 무시한 것이다.
+2026-08-26 실기 세션에서 사용자가 지적해 고쳤다: 이제 `cart_conf[].expanded` 를
+같이 본다. 서브슬롯이 전부 None 이어도 확장 슬롯은 확장으로 남는다.
+
+MFRSD 는 `expanded` 를 쓰지 않고 예전처럼 `subslot != 0` 로 켜지므로 영향 없다.
+
+**실기 확인법** (BASIC):
+```
+FOR I=0 TO 3:PRINT I,HEX$(PEEK(&HFCC1+I)):NEXT
+```
+`EXPTBL` 이고 bit7(`&H80`)이 서 있으면 그 primary 는 확장 슬롯이다.
+카트 슬롯을 `sub-slots: On` 으로 두면 해당 항목이 `8x` 로 보여야 한다.
+
 ## OSD trap: "the page items all showed up at the root"
 
 Not a CONF_STR bug. The firmware has a **flat menu mode** that expands every page

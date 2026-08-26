@@ -312,11 +312,23 @@ module memory_upload
                                  state     <= STATE_FIND_ROM;
                               end
                            endcase
-                           if (subslot != 0) begin
+                           // Expand the primary when a subslot != 0 is occupied (how MFRSD
+                           // has always done it) OR when the user asked for it in the OSD.
+                           // The second term matters even with ONLY subslot 0 filled: on MSX
+                           // "slot 1" and "slot 1-0" are different addresses.  Without the
+                           // expander the BIOS leaves EXPTBL bit7 clear, 0xFFFF is not a
+                           // subslot register, and the device answers as plain slot 1 -- not
+                           // what "sub-slots: On" asked for, and the wrong slot byte for
+                           // RDSLT/CALSLT and for anything that sweeps subslots.
+                           if (subslot != 0 | cart_conf[curr_conf == CONFIG_SLOT_B].expanded) begin
                               cart_slot_expander_en <= cart_slot_expander_en | 4'b0001 << conf[3][3:2];
                               $display("    Enabled Expanded slot");
                            end
                         end else begin
+                           // Empty subslot.  An expanded slot stays expanded even if every
+                           // subslot is None -- that is still a different slot layout.
+                           if (cart_conf[curr_conf == CONFIG_SLOT_B].expanded)
+                              cart_slot_expander_en <= cart_slot_expander_en | 4'b0001 << conf[3][3:2];
                            if (subslot < 2'd3) begin
                               subslot <= subslot + 1'd1;
                               state <= STATE_CHECK_CONFIG;
