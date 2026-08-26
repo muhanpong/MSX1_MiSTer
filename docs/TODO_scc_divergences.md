@@ -14,7 +14,30 @@ D1·D5는 내가 openMSX 소스와 대조해 독립 확인했다. D3·D4·D6은 
 
 ---
 
-## D5 — `scc_mode`가 칩 모드와 창 가시성을 섞는다 ★가청, 1순위
+## D5 — ~~`scc_mode`가 칩 모드와 창 가시성을 섞는다~~ **수정 완료 2026-08-26**
+
+**상태: FIXED** (sim 검증 + 뮤테이션 증명, 실기 미검증)
+
+`konami_scc.sv` / `mfrsd.sv` 의 `scc_mode` 에서 `bank[..][3][7]` / `sccBanks[3][7]`
+항을 제거했다. **음원 거동과 매퍼 거동의 분리**가 요점이다:
+
+| | 무엇 | 어디로 |
+|---|---|---|
+| 칩 모드 | 모드 레지스터 **bit5만** | `scc_mode` → IKASCC `i_SCCP_MODE` |
+| 창 가시성 | bit5 **AND** bank3 bit7 | `scc_req` (그대로 둠) |
+
+`yamanooto.sv:128` 은 처음부터 bit5만 봐서 옳았다 — 손대지 않았다.
+
+**검증**: `sim/tb_sccdetect.sv` 에 `D5x` 케이스 추가 — Plus 상태에서 ch5 를 자기
+파형으로 울리는 중에 bit7 없는 뱅크를 `0xB000` 에 써서 창을 닫고, ch5 가 여전히
+자기 파형(+127)인지 **소리로** 확인한다. 벤치 안에 옛 공식 섀도우(`tb_bank3`)를
+두어 자체 네거티브 컨트롤도 넣었다. 기존 `D2.1`/`D2.2`/`D3.1` 은 결함을 기대값으로
+고정하고 있어서 openMSX 기준으로 고쳤다.
+
+**뮤테이션 증명**: 옛 항을 되살리면 `D5x.4`(가청)·`D5x.1`·`D2.1`·`D3.1` 4건이 실패
+(53 passed / 4 failed). 되살리지 않으면 57 전건 통과.
+
+<details><summary>수정 전 기록</summary>
 
 **확인 상태: VERIFIED** (내가 openMSX 소스 직접 대조)
 
@@ -47,6 +70,8 @@ assign scc_mode = { sccDevice & sccMode[1][5] & bank[1][3][7], ... };
 
 **수정 방향:** `scc_mode`에서 `sccBanks[3][7]` / `bank[..][3][7]` 항 제거.
 `scc_req`(창 디코드)는 그대로 둔다 — 거기서는 bank3 bit7이 맞다.
+
+</details>
 
 **TB:** 기존 `sim/tb_mfrsd_sccsound.sv`가 주소 축만 훑어서 못 잡는다.
 필요한 케이스 = *SCC+ 모드로 파형을 쓴 뒤, `0xB000`에 bit7 없는 뱅크를 쓰고,

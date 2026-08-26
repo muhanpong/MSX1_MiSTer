@@ -67,12 +67,26 @@ module cart_konami_scc
       end
    end
 
-   // Chip mode per CART SLOT (the consumer, scc_sound, has one IKASCC per slot):
-   // SCC+ if any subslot of that slot is in SCC+ mode.
-   assign scc_mode = { sccDevice & |{sccMode[4][5] & bank[4][3][7], sccMode[5][5] & bank[5][3][7],
-                                    sccMode[6][5] & bank[6][3][7], sccMode[7][5] & bank[7][3][7]},
-                       sccDevice & |{sccMode[0][5] & bank[0][3][7], sccMode[1][5] & bank[1][3][7],
-                                    sccMode[2][5] & bank[2][3][7], sccMode[3][5] & bank[3][3][7]} };
+   // ---- CHIP MODE (sound), not window visibility (mapper) --------------------
+   // These are two different things and must not be folded together:
+   //
+   //   chip mode        openMSX MegaFlashRomSCCPlusSD.cc:621
+   //                    scc.setMode((value & 0x20) ? Plus : Compatible)   <- bit5 ONLY
+   //   window visible   :503  (sccMode & 0x20) && (sccBanks[3] & 0x80)
+   //                    :505  !(sccMode & 0x20) && ((sccBanks[2] & 0x3F) == 0x3F)
+   //
+   // scc_mode drives IKASCC's i_SCCP_MODE, which the audio path consumes
+   // CONTINUOUSLY (IKASCC_player_s.v:309 latches ch5's waveform from ch4's shared
+   // RAM unless the mode reads Plus).  Folding bank3 bit7 in here meant that
+   // paging a bank without bit7 into 0xA000-0xBFFF during playback flipped the
+   // CHIP to Compatible and ch5 audibly became a ch4 mirror.  The window term
+   // belongs in scc_req below, and stays there.  (docs/TODO_scc_divergences.md D5;
+   // cc183c9 fixed the address half of the same mistake and left this half.)
+   //
+   // Per CART SLOT, because scc_sound has one IKASCC per slot: Plus if any subslot
+   // of that slot is in Plus.
+   assign scc_mode = { sccDevice & |{sccMode[4][5], sccMode[5][5], sccMode[6][5], sccMode[7][5]},
+                       sccDevice & |{sccMode[0][5], sccMode[1][5], sccMode[2][5], sccMode[3][5]} };
    // Writes are suppressed while the segment is RAM (openMSX + real SCC+ agree).
    // Reads are deliberately NOT gated: openMSX cites Sean Young for read-through and
    // issue #1964 is still open on it -- mfrsd.sv makes the same choice.

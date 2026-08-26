@@ -107,7 +107,13 @@ assign scc_req      = cs & cpu_mreq & (cpu_rd | cpu_wr) & ((cpu_wr & ((EN_SCC & 
 // mode reads Plus), so between accesses it read Compatible and ch5 played ch4's
 // waveform.  Same defect be52736 fixed for konami_scc; scc_req below keeps using
 // EN_SCCPLUS because the window decode is exactly what it wants.
-assign scc_mode     = sccMode[5] & sccBanks[3][7];
+// CHIP MODE only -- bit5, exactly openMSX's setMode (MegaFlashRomSCCPlusSD.cc:621).
+// The `& sccBanks[3][7]` that used to be here is WINDOW visibility (:503) and is a
+// mapper concern; it lives in scc_req/EN_SCCPLUS below.  Mixing them made a bank
+// page without bit7 flip the chip to Compatible mid-playback, and ch5 then mirrored
+// ch4 (IKASCC_player_s.v:309).  See docs/TODO_scc_divergences.md D5 -- cc183c9 fixed
+// the address half of this and left the bank half behind.
+assign scc_mode     = sccMode[5];
 
 wire [2:0] page8kB  = cpu_addr[15:13] - 3'd2;
 logic [7:0] bank[4], sccBanks[4];

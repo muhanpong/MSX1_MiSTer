@@ -26,9 +26,11 @@
 //                                       0xBFFE must be inert (no SCC+ on an SCC chip)
 //   D1  SCC+ cart, reset state = Compatible: ch5 is a ch4 mirror (read + playback),
 //                                       writes to 0xA0-0xBF ignored
-//   D2  -> Plus: mode bit5 alone is not enough, bank3 bit7 required;
-//                       window moves 0x9800 -> 0xB800; ch5 becomes independent
-//   D3  mode-register alias 0xBFFF, and EN_NONE when mode=Plus but bank3 bit7 cleared
+//   D2  -> Plus: mode bit5 alone puts the CHIP in Plus (ch5 independent);
+//                       bank3 bit7 is what opens the 0xB800 WINDOW.  Two separate
+//                       things -- openMSX :621 vs :503.  Was conflated; see D5x.
+//   D3  mode-register alias 0xBFFF; EN_NONE when mode=Plus but bank3 bit7 cleared
+//                       -- windows shut, but the CHIP stays Plus
 //   D4  -> back to Compatible and again to Plus: private ch5 RAM survives the round trip
 //
 // usage: sim/run_sccdetect.sh    (or: iverilog -g2012 -o x sim/tb_sccdetect.sv \
@@ -121,7 +123,9 @@ endtask
 reg req_seen;
 reg unmap_seen;
 
+reg [7:0] tb_bank3 = 8'h00;   // bench shadow of the 0xB000 bank register
 task wr(input [15:0] a, input [7:0] d);
+   if (a[15:11] == 5'b10110) tb_bank3 = d;   // 0xB000-0xB7FF
    begin
       align;
       cpu_addr = a; din = d;
@@ -359,12 +363,14 @@ initial begin
    $display("--- D2 Compatible -> Plus (0xBFFE bit5 + bank3 bit7)");
 
    wr(16'hBFFE, 8'h20);                       // mode bit5 only
-   check("D2.1 mode bit5 alone does not enable Plus (bank3 bit7 = 0)", scc_mode == 2'b00);
+   // openMSX MegaFlashRomSCCPlusSD.cc:621 -- setMode looks at bit5 and nothing else.
+   // This assertion used to demand scc_mode == 0 here, which pinned the D5 defect.
+   check("D2.1 mode bit5 alone puts the CHIP in Plus", scc_mode == 2'b01);
    probe(16'h9800, o_scc); probe(16'hB800, o_sccp);
    check("D2.1b EN_NONE: both windows closed", o_scc == 1'b0 && o_sccp == 1'b0);
 
-   wr(16'hB000, 8'h80);                       // bank3 bit7
-   check("D2.2 bank3 bit7 completes Plus (scc_mode == 1)", scc_mode == 2'b01);
+   wr(16'hB000, 8'h80);                       // bank3 bit7 -> opens the window
+   check("D2.2 chip still Plus after bank3 bit7", scc_mode == 2'b01);
    probe(16'hB800, o_sccp);
    check("D2.2b SCC+ window open at 0xB800", o_sccp == 1'b1);
    probe(16'h9800, o_scc);
@@ -385,13 +391,36 @@ initial begin
    check("D2.5 Plus ch4 solo (-128) negative", m_nz == NSAMP && m_max < 0);
    set_en(16'hB8A0, 8'h10); measure(SETTLE, NSAMP);
    check("D2.6 Plus ch5 solo (+127) positive -> independent of ch4", m_nz == NSAMP && m_min > 0);
+
+   // ---- D5x  paging a non-bit7 bank must NOT change the chip mode -------------
+   // The symptom D5 describes: in Plus, with ch5 playing its own waveform, the
+   // program pages a bank without bit7 into 0xA000-0xBFFF.  That closes the SCC+
+   // WINDOW (correct) but must leave the CHIP in Plus.  With the old formula the
+   // chip fell back to Compatible and ch5 latched ch4's waveform
+   // (IKASCC_player_s.v:309) -- audible as ch5 suddenly sounding like ch4.
+   // Enable ch5 BEFORE closing the window: once it is shut the registers at
+   // 0xB8A0 are unreachable, which is exactly the situation being modelled.
+   set_en(16'hB8A0, 8'h10);                   // ch5 solo (+127, its private RAM)
+   wr(16'hB000, 8'h00);                       // bank3 bit7 cleared -> window closed
+   check("D5x.1 chip stays Plus with the window closed", scc_mode == 2'b01);
+   // negative control, in the bench: the OLD formula (mode AND bank3 bit7) would
+   // read Compatible right here, so this case genuinely discriminates.
+   check("D5x.2 the old mode formula would have read Compatible (control)",
+         (scc_mode & {2{tb_bank3[7]}}) == 2'b00);
+   probe(16'hB800, o_sccp); probe(16'h9800, o_scc);
+   check("D5x.3 both windows shut (mapper side unchanged)", o_sccp == 1'b0 && o_scc == 1'b0);
+   measure(SETTLE, NSAMP);
+   check("D5x.4 ch5 still plays its OWN waveform (+127), not a ch4 mirror",
+         m_nz == NSAMP && m_min > 0);
+   wr(16'hB000, 8'h80);                       // restore the window for D3
    set_en(16'hB8A0, 8'h00);
 
    // ==================================================== D3  alias + EN_NONE
    $display("--- D3 mode register alias 0xBFFF, EN_NONE when bank3 bit7 cleared");
 
    wr(16'hB000, 8'h00);                       // clear bank3 bit7, mode still Plus
-   check("D3.1 bank3 bit7 cleared -> scc_mode back to 0", scc_mode == 2'b00);
+   // The mapper closes its window; the SOUND CHIP is untouched (openMSX :503 vs :621).
+   check("D3.1 bank3 bit7 cleared -> CHIP stays Plus", scc_mode == 2'b01);
    probe(16'h9800, o_scc); probe(16'hB800, o_sccp);
    check("D3.1b EN_NONE (mode=Plus, bank3 bit7=0): both windows closed",
          o_scc == 1'b0 && o_sccp == 1'b0);
