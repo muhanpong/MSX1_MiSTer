@@ -65,9 +65,8 @@ BF66  탈출 후크: 0F378H 에 시그니처를 쓰고 JP 0000H (리셋)
 
 ### 실기 (2026-08-28)
 
-**CPC-300 no_tutor 실기 정상 확인** — 보드에서 바로 BASIC으로 부팅.
-CPC-300E no_tutor 는 아직 미검증(한글 ROM은 CPC-300과 같은 패치본을 쓰므로
-튜터 차단 자체는 동일하고, E 고유분인 sub ROM·RAM 64 KB 만 남은 변수다).
+**CPC-300 / CPC-300E no_tutor 둘 다 실기 정상 확인** — 보드에서 바로 BASIC으로 부팅.
+E 고유분(sub ROM `cpc-300e_msx2sub.rom`, RAM 64 KB)도 문제 없음.
 
 `CALL HANON` 이 syntax error인 건 **스톡도 똑같다** — 패치와 무관한 기존 거동이다
 (A/B로 확인). 관측한 모든 항목에서 `패치본 == 스톡의 자체 탈출 경로`.
