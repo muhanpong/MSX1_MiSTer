@@ -17,6 +17,18 @@
      "no turbo" and boot is unaffected.  (bit2==0 would mean the hardware exists,
      bit0==0 that turbo is on; both read 1 here.)
 
+  3. The floppy controller.  The real FS-A1WX has a TC8566AF (uPD765 family); so
+     does every Panasonic FS-A1* machine.  This core implements only a WD2793
+     (rtl/peripheral/wd1793.sv, decoded in rtl/peripheral/slots/fdc.sv: 7FF8-7FFB
+     WD registers, 7FFC side, 7FFD drive, 7FFF status).  The original
+     fs-a1wx_disk.rom drives uPD765 registers that do not exist here, so it hangs
+     and never reaches DOS1.
+     Slot 3-2 therefore carries a WD2793 disk ROM instead, sha1 12f2cc79... = the
+     exact bytes the working Sony HB-F1XV pack loads (its skip=49152 window), so
+     it is proven on hardware.  DOS1 boots and .dsk images mount.  The tradeoff:
+     this is no longer an authentic FS-A1WX disk subsystem.  The real fix is a
+     TC8566AF model in RTL, which would revive FS-A1F/FX/WSX/WX/ST/GT at once.
+
   MoonSound is this core's extension rather than FS-A1WX hardware; it is declared
   here for parity with Sony_HB-F1XV.xml.
 -->
@@ -89,11 +101,11 @@
       </block>
     </secondary>
     <secondary slot="2">
-      <block start="1" id="Memory Mapped FDC">
+      <block start="1" id="Memory Mapped FDC (WD2793 substitute)">
         <type>FDC</type>
         <block_count>1</block_count>
-        <filename>fs-a1wx_disk.rom</filename>
-        <SHA1>bb59c849898d46a23fdbd0cc04ab35088e74a18d</SHA1>
+        <filename>hb-f1xd_disk.rom</filename>
+        <SHA1>12f2cc79b3d09723840bae774be48c0d721ec1c6</SHA1>
       </block>
     </secondary>
   </primary>
