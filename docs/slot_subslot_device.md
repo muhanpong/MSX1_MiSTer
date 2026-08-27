@@ -3,15 +3,20 @@
 Implemented 2026-08-25/26. Simulated with a working negative control, full sim
 suite green.
 
-**Hardware status is split — read this before trusting it:**
+**Hardware status: verified 2026-08-28** on `MSX1_20260827a_volladder`.
+
+A slot actually expanded, with a device in a non-zero subslot, runs on real
+hardware — the checklist in `docs/hwtest_20260827a.md` section C passed in full.
+That was the feature's one real unknown: expanding a slot turns its `0xFFFF`
+into the subslot register, so *anything* running at all is the core test.
+
+Earlier, narrower results, kept because they bound what each build proved:
 
 | | |
 |---|---|
-| verified 2026-08-26 | The feature is **inert when off**: `MSX1_20260826b_opllpace` (tree `3567edf`) boots and runs existing games unchanged, and the OSD renders `SLOT A sub-slots`. That is a regression check for the classic path, nothing more. |
-| **NOT verified** | **Nothing has ever run with a slot actually expanded.** No sub-slot device has been placed on hardware — not FM-PAC, not SCC+, not a ROM in sub-slot 2. The whole point of the feature is untested. |
-| partly exercised | `MSX1_20260826c_subslotmenu.rbf` (2026-08-26 20:01, tree `9108e17`/RTL `a646083`). SCC+ in **Sub-slot 0 of both slots**: detected and sounding. That validates the new decode table and the menu — but with only subslot 0 filled the old code never set `cart_slot_expander_en`, so the slot was **not actually expanded**. |
-| **awaiting test** | `MSX1_20260826d_ch2loop.rbf` (2026-08-26 21:56, md5 `d10424f5…`, built by the turbo session from tree `21d24df` + its P3 work; timing clean, worst +0.578, `clk_sdram` setup +1.013). First build carrying `a10a874` (**"On" now expands the primary even with only Sub-slot 0** — so the same OSD settings behave differently from 26c), `565ac47` (**D5**, chip mode split from the window — SCC/SCC+ may *sound* different, deliberately) and `21d24df`. **A device in a NON-ZERO subslot has still never run.** |
-
+| 2026-08-26 | `MSX1_20260826b_opllpace` (`3567edf`): feature **inert when off** — boots, existing games unchanged, OSD renders `SLOT A sub-slots`. Regression check for the classic path only. |
+| 2026-08-26 | `MSX1_20260826c_subslotmenu` (`9108e17`/RTL `a646083`): SCC+ in **Sub-slot 0 of both slots**, detected and sounding. Validated the decode table and the menu — but with only subslot 0 filled the old code never set `cart_slot_expander_en`, so the slot was **not actually expanded**. |
+| 2026-08-28 | `MSX1_20260827a_volladder`: **the real thing.** Carries `a10a874` ("On" expands the primary even with only Sub-slot 0), `565ac47` (D5 chip-mode split) and the turbo P3. |
 
 Each cart slot can be switched, independently, into an **expanded slot** whose
 four subslots each carry a device the user picks. The classic one-device line for
