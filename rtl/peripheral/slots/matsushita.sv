@@ -49,8 +49,18 @@
 //     flat.  Keeping the two paths separate means the OSD turbo stays invisible
 //     to software, exactly as it is today.
 //
-//  2. bit7 reads 1 (firmware switch OFF).  The FS-A1WX pack carries no 3-3
-//     firmware ROM -- there is no built-in software to switch to.
+//  2. bit7 reads 1 (firmware switch OFF).  This is the FRONT PANEL FIRMWARE
+//     SWITCH, and it is what decides whether the machine's built-in software
+//     takes over at boot.  Verified on the reference model: openMSX
+//     Panasonic_FS-A1FX with firmwareswitch=false boots to BASIC, with
+//     firmwareswitch=true boots straight into the A1 Cockpit menu.
+//     So reporting 1 is what lets the FS-A1FX pack ship its Cockpit ROM
+//     "present but not active on boot" with no ROM patching at all; and the
+//     FS-A1WX pack carries no 3-3 firmware, so for it there is nothing to
+//     switch to either way.
+//     If an OSD toggle for this switch is ever wanted, THIS is the bit it
+//     drives -- one input on this module.  Noted as a relationship only; no
+//     work is scheduled for it.
 //
 module dev_matsushita
 (
