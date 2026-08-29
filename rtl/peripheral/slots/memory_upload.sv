@@ -171,13 +171,19 @@ module memory_upload
          subslot               <= 2'd0; 
          cart_slot_expander_en <= 4'd0;
          cart_device           <= '{0, 0};
-         // msx_device is OR-accumulated as the config records are read, so it MUST
-         // be cleared here or its bits survive into the NEXT machine pack.  This was
-         // invisible while every device (KANJI / OPL3 / RESET_STATUS / MOONSOUND) was
-         // present in almost every pack; DEV_MATSUSHITA, which only 8 packs declare,
-         // exposed it: loading FS-A1FX and then Sony HB-F1XV left the Panasonic turbo
-         // port answering on the Sony (INP(&H40) = 247 instead of 255).
-         msx_device            <= '0;
+         // NOTE: msx_device is OR-accumulated as the config records are read and is
+         // deliberately NOT cleared here.  Clearing it looks obviously right -- the
+         // bits otherwise survive into the next machine pack, which is a real and
+         // measured bug (loading FS-A1FX then Sony HB-F1XV left the Panasonic turbo
+         // port answering on the Sony: INP(&H40) = 247 instead of 255).  But `load`
+         // also fires for a plain SLOT A/B ROM load (ioctl_index 3/4, see the load
+         // detector above), and clearing on that path broke Konami-mapper games on
+         // hardware: MSX1_20260830b_devclear regressed against 20260830a, VRAM
+         // garbage and a reset loop, reproduced only on the board.  The config walk
+         // that should rebuild the bits evidently does not always do so on the ROM
+         // path.  Reverted until that is understood; do NOT re-add this line without
+         // a bench that covers "machine pack, then ROM load".
+         // See docs/TODO_msx_device_leak.md.
          bios_config.ram_size  <= 8'h00;
          bios_config.use_FDC   <= 1'b0;
          lookup_SRAM[0].size   <= 16'd0;

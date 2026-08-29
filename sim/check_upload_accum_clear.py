@@ -30,9 +30,21 @@ if not m:
     sys.exit("check_upload_accum_clear: could not find the `if (load) begin` block")
 cleared = set(re.findall(r'^\s*([A-Za-z_]\w*)\s*<=', m.group(1), re.M))
 
+# msx_device is a KNOWN, DELIBERATE exception: clearing it here regressed
+# Konami-mapper games on hardware (MSX1_20260830b vs 30a) because `load` also
+# fires for a plain SLOT A/B ROM load.  See docs/TODO_msx_device_leak.md.
+KNOWN = {"msx_device"}
+
 missing = sorted(accum - cleared)
 for s in sorted(accum):
-    print(f"  {s:24s} {'cleared on load' if s in cleared else '*** NOT CLEARED ***'}")
+    if s in cleared:      state = "cleared on load"
+    elif s in KNOWN:      state = "NOT cleared -- known exception, see docs/TODO_msx_device_leak.md"
+    else:                 state = "*** NOT CLEARED ***"
+    print(f"  {s:24s} {state}")
+unexpected = [m for m in missing if m not in KNOWN]
+if unexpected:
+    sys.exit(f"\nFAIL: {', '.join(unexpected)} accumulate(s) across machine packs")
 if missing:
-    sys.exit(f"\nFAIL: {', '.join(missing)} accumulate(s) across machine packs")
-print(f"\nOK: all {len(accum)} accumulated signal(s) cleared on load")
+    print(f"\nOK (with {len(missing)} known exception): no NEW accumulate-without-clear")
+else:
+    print(f"\nOK: all {len(accum)} accumulated signal(s) cleared on load")
