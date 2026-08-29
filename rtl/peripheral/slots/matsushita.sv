@@ -17,6 +17,20 @@
 //
 //  Unused bits read 1; the base is &HFF and bits are only ever cleared.
 //
+//  Measured on the reference model (openMSX Panasonic_FS-A1WX, real ROMs, from
+//  BASIC).  Every value below is asserted by sim/tb_matsushita.sv:
+//
+//      OUT &H40,8    : PRINT INP(&H40);INP(&H41)  ->  247 251   (F7 FB)
+//      OUT &H40,&HF7 : PRINT INP(&H40);INP(&H41)  ->  255 255   (FF FF)
+//      OUT &H40,8 : OUT &H41,0 : PRINT INP(&H41)  ->  250       (FA)
+//      OUT &H41,1                                 ->  251       (FB)
+//
+//  Note the second line: writing the COMPLEMENT does not select -- the ID goes
+//  in directly.  (fs-a1wx_kanjibasic.rom has a routine at 429FH that writes F7H
+//  and compares the readback against 08H; on the reference model that compare
+//  fails and it takes its not-found branch, so this core matches it exactly.
+//  The machine's own boot path, traced at PC=8167H, writes 08H.)
+//
 //  Answering ID 8 does NOT imply a turbo: Sanyo PHC-70FD, National FS-4500 /
 //  FS-4700F / CF-2000 and SVI-728 all return &HF7 and have no turbo at all.
 //  Software must decide on bit2 of port &H41, which is why bit2 is wired to a
