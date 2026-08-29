@@ -75,6 +75,7 @@ module msx_slots
    // Turbo OPLL write pacer (see the block near the opll instance): msx.sv
    // ANDs opll_pace_n into wait_n exactly like vdp_pace_n.
    input                    cpu_turbo,
+   output                   msx_turbo_req,       // Panasonic 40H/41H asked for 5.37MHz
    output                   opll_pace_n,
    output            [22:0] flash16x_prog_addr,
    output             [7:0] flash16x_prog_data
@@ -206,6 +207,7 @@ assign cpu_din          = mapper_ram_dout                        //IO
                         & psg_dout                               //IO (cart PSG read, port 12H)
                         & flash_dout
                         & d_to_cpu_reset_status                  //IO
+                        & d_to_cpu_matsushita                    //IO 40H/41H
                         & (mem_unmaped  ? 8'hFF : ram_dout);
 
 assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
@@ -662,6 +664,16 @@ dev_reset_status dev_reset_status
    .cpu_addr(cpu_addr[7:0]),
    .cs(|(msx_device & DEV_RESET_STATUS)),
    .dout(d_to_cpu_reset_status),
+   .*
+);
+
+wire [7:0] d_to_cpu_matsushita;
+dev_matsushita dev_matsushita
+(
+   .cpu_addr(cpu_addr[7:0]),
+   .cs(|(msx_device & DEV_MATSUSHITA)),
+   .dout(d_to_cpu_matsushita),
+   .turbo(msx_turbo_req),
    .*
 );
 

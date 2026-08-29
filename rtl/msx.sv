@@ -16,6 +16,7 @@ module msx
    input                    cpu_turbo,           // 1 while ce_cpu_* runs faster than ce_3m58_*
    input              [1:0] cpu_speed_q,         // LATCHED speed, selects the guard limit
    output                   cpu_bus_idle,        // -> clock.sv: safe point to change speed
+   output                   msx_turbo_req,       // Panasonic 40H/41H: software asked for 5.37MHz
    input                    ce_5m39_n,
    input                    ce_10hz,
    input                    probe_freeze,        // diagnostic: freeze vdp_regprobe ring (msx_pause)
@@ -924,7 +925,8 @@ msx_slots msx_slots
    .flash16x_size(flash16x_size),
    .flash16x_prog_we(flash16x_prog_we),
    .flash16x_prog_addr(flash16x_prog_addr),
-   .flash16x_prog_data(flash16x_prog_data)
+   .flash16x_prog_data(flash16x_prog_data),
+   .msx_turbo_req(msx_turbo_req)
 );
 
 

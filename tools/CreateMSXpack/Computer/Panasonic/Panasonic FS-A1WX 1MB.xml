@@ -47,6 +47,7 @@
     </rom>
   </device>
   <device typ="RESET_STATUS" id="Reset Status register"></device>
+  <device typ="MATSUSHITA" id="Matsushita switched I/O (5.37MHz turbo)"></device>
   <device typ="MOONSOUND" id="MoonSound PCM Wave ROM"></device>
   <primary slot="0">
     <secondary slot="0">

@@ -440,7 +440,12 @@ wire clk21m, clk_sdram, locked_sdram;
 wire ce_10m7_p, ce_10m7_n, ce_5m39_p, ce_5m39_n, ce_3m58_p, ce_3m58_n, ce_10hz;
 // CPU turbo.  status[37:36]: 0 = 3.58MHz (stock), 1 = 7.16MHz, 2 = 10.74MHz.
 // Bound by name into `clock clock (.*)` below.
-wire  [1:0] cpu_speed = status[37:36];
+// Panasonic FS-A1FX/WX/WSX expose the turbo on I/O 40H/41H (dev_matsushita).
+// The port can only RAISE the speed: if the OSD already asks for something
+// faster than 5.37MHz, software turning "turbo on" must not slow the machine
+// down.  Speeds are encoded in ascending frequency order, so this is a max().
+wire        msx_turbo_req;          // from msx.sv <- msx_slots <- dev_matsushita
+wire  [1:0] cpu_speed = (msx_turbo_req & status[37:36] == 2'd0) ? 2'd1 : status[37:36];
 wire        cpu_turbo;              // driven by clock.sv from the latched speed
 wire  [1:0] cpu_speed_q;            // latched speed, back out of clock.sv
 wire        cpu_bus_idle;           // from msx.sv, gates the speed latch
@@ -577,6 +582,7 @@ msx MSX
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),
    .cpu_bus_idle(cpu_bus_idle),
+   .msx_turbo_req(msx_turbo_req),
    .ce_5m39_n(ce_5m39_n),
    .ce_10hz  (ce_10hz   & ~msx_pause),
    .probe_freeze(msx_pause),
