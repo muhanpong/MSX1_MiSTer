@@ -171,6 +171,13 @@ module memory_upload
          subslot               <= 2'd0; 
          cart_slot_expander_en <= 4'd0;
          cart_device           <= '{0, 0};
+         // msx_device is OR-accumulated as the config records are read, so it MUST
+         // be cleared here or its bits survive into the NEXT machine pack.  This was
+         // invisible while every device (KANJI / OPL3 / RESET_STATUS / MOONSOUND) was
+         // present in almost every pack; DEV_MATSUSHITA, which only 8 packs declare,
+         // exposed it: loading FS-A1FX and then Sony HB-F1XV left the Panasonic turbo
+         // port answering on the Sony (INP(&H40) = 247 instead of 255).
+         msx_device            <= '0;
          bios_config.ram_size  <= 8'h00;
          bios_config.use_FDC   <= 1'b0;
          lookup_SRAM[0].size   <= 16'd0;
