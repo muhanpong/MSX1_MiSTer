@@ -171,19 +171,20 @@ module memory_upload
          subslot               <= 2'd0; 
          cart_slot_expander_en <= 4'd0;
          cart_device           <= '{0, 0};
-         // NOTE: msx_device is OR-accumulated as the config records are read and is
-         // deliberately NOT cleared here.  Clearing it looks obviously right -- the
-         // bits otherwise survive into the next machine pack, which is a real and
-         // measured bug (loading FS-A1FX then Sony HB-F1XV left the Panasonic turbo
-         // port answering on the Sony: INP(&H40) = 247 instead of 255).  But `load`
-         // also fires for a plain SLOT A/B ROM load (ioctl_index 3/4, see the load
-         // detector above), and clearing on that path broke Konami-mapper games on
-         // hardware: MSX1_20260830b_devclear regressed against 20260830a, VRAM
-         // garbage and a reset loop, reproduced only on the board.  The config walk
-         // that should rebuild the bits evidently does not always do so on the ROM
-         // path.  Reverted until that is understood; do NOT re-add this line without
-         // a bench that covers "machine pack, then ROM load".
-         // See docs/TODO_msx_device_leak.md.
+         // msx_device is OR-accumulated as the config records are walked, so it MUST
+         // be cleared here or its bits survive into the NEXT machine pack.
+         //
+         // PROVEN on hardware 2026-08-30: without this, a Sony HB-F1XV pack reported
+         // itself to software as "MSX2+ (Panasonic)" and ran at 5.36 MHz -- Z80BENCH
+         // v1.4.2 screenshot, machine selector showing SONY_HB-F1XV1MB_NOLOGO.  The
+         // leaked DEV_MATSUSHITA answers I/O 41H bit2, so anything that probes the
+         // Panasonic turbo (Z80BENCH, MGSDRV, Tales of Popolon, Hi no Tori's 60Hz
+         // patch) switches itself to 5.37 MHz on a machine that has no turbo.
+         //
+         // An earlier revert of this line (1b57fd4) was a mistake: the crashes blamed
+         // on it were software that had been riding that false turbo and genuinely
+         // cannot run at 3.58.  See docs/TODO_msx_device_leak.md.
+         msx_device            <= '0;
          bios_config.ram_size  <= 8'h00;
          bios_config.use_FDC   <= 1'b0;
          lookup_SRAM[0].size   <= 16'd0;
