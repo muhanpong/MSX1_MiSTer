@@ -516,6 +516,7 @@ wire        dbg_int_refused;
 wire [15:0] dbg_pc_snap;
 wire [15:0] dbg_pc_vec;
 wire [15:0] dbg_pc_now;
+wire [15:0] dbg_trap_from, dbg_trap_prev, dbg_trap_sp, dbg_trap_b10, dbg_trap_b32, dbg_trap_cnt;
 wire [15:0] dbg_im_i;
 wire [15:0] dbg_watch_pc;
 wire [15:0] dbg_watch_dc;
@@ -814,6 +815,12 @@ debug_overlay u_overlay (
    .dbg_pc_snap(dbg_pc_snap),
    .dbg_pc_vec(dbg_pc_vec),
    .dbg_pc_now(dbg_pc_now),
+   .dbg_trap_from(dbg_trap_from),
+   .dbg_trap_prev(dbg_trap_prev),
+   .dbg_trap_sp(dbg_trap_sp),
+   .dbg_trap_b10(dbg_trap_b10),
+   .dbg_trap_b32(dbg_trap_b32),
+   .dbg_trap_cnt(dbg_trap_cnt),
    .dbg_im_i(dbg_im_i),
    .dbg_watch_pc(dbg_watch_pc),
    .dbg_watch_dc(dbg_watch_dc),

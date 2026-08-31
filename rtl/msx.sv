@@ -147,6 +147,13 @@ module msx
    output logic       [15:0] dbg_pc_snap,       // PC at the last IFF1-fall before green latched
    output logic       [15:0] dbg_pc_vec,        // PC of handler entry after the last INTA
    output logic       [15:0] dbg_pc_now,        // live PC (dark-freeze spin locator)
+   // ── PC-trap forensics (MOONSOUND_DIAG): where execution died ─────────────
+   output logic       [15:0] dbg_trap_from,     // last opcode fetch before landing at 0000
+   output logic       [15:0] dbg_trap_prev,     // the one before that
+   output logic       [15:0] dbg_trap_sp,       // SP at the moment of the trap
+   output logic       [15:0] dbg_trap_b10,      // Konami bank {b1,b0} snapshot at the trap
+   output logic       [15:0] dbg_trap_b32,      // Konami bank {b3,b2} snapshot at the trap
+   output logic       [15:0] dbg_trap_cnt,      // {escapes, live bank0} -- how often it died
    output logic       [15:0] dbg_im_i,          // {IM[1:0], 6'b0, I[7:0]} at last INTA
    output logic       [15:0] dbg_watch_pc,      // PC of last write to IM2 table byte 257
    output logic       [15:0] dbg_watch_dc,      // {written data, write count} for that byte
@@ -1320,6 +1327,9 @@ wire ms_int_n = ~ms_int_hold;
 // IFF/IM/I/PC forensics, IM2-table write watchpoint).  Compiled out by default;
 // re-enable by defining MOONSOUND_DIAG (see MSX1.qsf).
 `ifdef MOONSOUND_DIAG
+logic        m1_dly, trap_hit;
+logic [15:0] pc_f1, pc_f2;
+logic  [7:0] bank_mir[4];
 // ── Freeze detectors (clk21m) — latch (sticky) when a signal is stuck
 // abnormally long, to diagnose the vgmplay OPL-timer freeze.  Exported to the
 // debug overlay (video domain), readable WHILE the CPU is frozen, to tell:
@@ -1408,6 +1418,44 @@ always_ff @(posedge clk21m) begin
         end
         dbg_pc_now <= t80_reg[79:64];
 
+        // ── PC TRAP ──────────────────────────────────────────────────────────
+        // A Konami-mapper game executes in 4000-BFFF and calls BIOS in page 0
+        // constantly, so "PC left the cart window" is NOT a fault.  The fault
+        // signature we want is the crash-reboot: an opcode fetch AT 0000.
+        // When that happens, freeze the two preceding opcode-fetch PCs, the SP,
+        // and the mapper banks.  Sticky (first death wins) so the reboot loop
+        // that follows cannot overwrite the evidence.
+        //
+        // Banks are mirrored off the bus rather than read out of konami_scc, so
+        // this costs nothing outside this diag block and cannot perturb the
+        // mapper: 5000/7000/9000/B000 are its four bank registers.
+        m1_dly <= m1_n;
+        if (m1_dly & ~m1_n & iorq_n) begin        // start of an opcode fetch
+            pc_f2 <= pc_f1;
+            pc_f1 <= t80_reg[79:64];
+            if (t80_reg[79:64] == 16'h0000) begin
+                if (~&dbg_trap_cnt[15:8]) dbg_trap_cnt[15:8] <= dbg_trap_cnt[15:8] + 8'd1;
+                if (!trap_hit) begin
+                    trap_hit      <= 1'b1;
+                    dbg_trap_from <= pc_f1;
+                    dbg_trap_prev <= pc_f2;
+                    dbg_trap_sp   <= t80_reg[63:48];   // T80.vhd:259 REG layout
+                    dbg_trap_b10  <= {bank_mir[1], bank_mir[0]};
+                    dbg_trap_b32  <= {bank_mir[3], bank_mir[2]};
+                end
+            end
+        end
+        if (~mreq_n & ~wr_n) begin
+            case (a[15:11])
+                5'b01010: bank_mir[0] <= d_from_cpu;   // 5000-57FF
+                5'b01110: bank_mir[1] <= d_from_cpu;   // 7000-77FF
+                5'b10010: bank_mir[2] <= d_from_cpu;   // 9000-97FF
+                5'b10110: bank_mir[3] <= d_from_cpu;   // B000-B7FF
+                default: ;
+            endcase
+        end
+        dbg_trap_cnt[7:0] <= bank_mir[0];              // live bank0, for comparison
+
         // WRITE WATCHPOINT on the IM2 table's 257th byte ({I+1, 0x00}) — the
         // byte found corrupted (0x10-0x13) in the freeze forensics.  Captures
         // WHO writes it: PC + data + count.  The legitimate init value is the
@@ -1444,6 +1492,12 @@ assign dbg_pc_now        = '0;
 assign dbg_im_i          = '0;
 assign dbg_watch_pc      = '0;
 assign dbg_watch_dc      = '0;
+assign dbg_trap_from     = '0;
+assign dbg_trap_prev     = '0;
+assign dbg_trap_sp       = '0;
+assign dbg_trap_b10      = '0;
+assign dbg_trap_b32      = '0;
+assign dbg_trap_cnt      = '0;
 `endif
 
 ymf278b_top #(
