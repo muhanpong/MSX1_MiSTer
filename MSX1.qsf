@@ -305,7 +305,8 @@ set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_
 # Fitter seed.  Placement only -- it changes no behaviour, but this design sits
 # close enough to the edge that an unrelated ascal (framework video scaler) path
 # can miss by tens of picoseconds on one seed and pass on the next.  SEED 3 gave
-# -0.041 ns there on 2026-08-27; moved to 4.  There used to be a stale `SEED 1`
+# -0.041 ns there on 2026-08-27; moved to 4.  SEED 4 then gave -0.077 ns on
+# 2026-09-01 (again all ten worst paths in ascal, none of ours); moved to 5.  There used to be a stale `SEED 1`
 # above this line as well -- Quartus takes the last, so it was inert, now removed.
-set_global_assignment -name SEED 4
+set_global_assignment -name SEED 5
 
