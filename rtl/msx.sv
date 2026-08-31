@@ -14,6 +14,7 @@ module msx
    input                    ce_cpu_p,            // turbo: CPU clock enable (>= ce_3m58_p)
    input                    ce_cpu_n,
    input                    cpu_turbo,           // 1 while ce_cpu_* runs faster than ce_3m58_*
+   input                    sdram_rdtog,         // flips once per completed SDRAM ch2 READ (P3 closed loop)
    input              [1:0] cpu_speed_q,         // LATCHED speed, selects the guard limit
    output                   cpu_bus_idle,        // -> clock.sv: safe point to change speed
    output                   msx_turbo_req,       // Panasonic 40H/41H: software asked for 5.37MHz
@@ -153,7 +154,12 @@ module msx
    output logic       [15:0] dbg_trap_sp,       // SP at the moment of the trap
    output logic       [15:0] dbg_trap_b10,      // Konami bank {b1,b0} snapshot at the trap
    output logic       [15:0] dbg_trap_b32,      // Konami bank {b3,b2} snapshot at the trap
-   output logic       [15:0] dbg_trap_cnt,      // {escapes, live bank0} -- how often it died
+   output logic       [15:0] dbg_trap_cnt,      // {escapes, bus strobes at freeze}
+   output logic       [15:0] dbg_trap_bus,      // CPU address bus frozen at the trap
+   output logic       [15:0] dbg_spin,          // consecutive opcode fetches AT 0038 = RST 38 spin
+   output logic       [15:0] dbg_a8_pc,         // PC of the last OUT (A8) -- who moved page 0
+   output logic       [15:0] dbg_a8_vc,         // {value written to A8, write count}
+   output logic       [15:0] dbg_ppi_a8,        // {PPI port A at the trap, PPI port A live}
    output logic       [15:0] dbg_im_i,          // {IM[1:0], 6'b0, I[7:0]} at last INTA
    output logic       [15:0] dbg_watch_pc,      // PC of last write to IM2 table byte 257
    output logic       [15:0] dbg_watch_dc,      // {written data, write count} for that byte
@@ -400,11 +406,38 @@ wire guard_slow  = ~iorq_n | slow_dev;
 wire [3:0] guard_rd   = (cpu_speed_q == 2'd1) ? GUARD_RD_DIV4[3:0] : GUARD_RD[3:0];
 wire [3:0] guard_min  = wr_n ? (guard_slow ? guard_rd : GUARD_RD_FAST[3:0])
                              : GUARD_WR[3:0];
+
+// P3 (20260826): CLOSED-LOOP release for fast SDRAM reads.  The fixed
+// GUARD_RD_FAST floor existed only to cover ch2's open-loop consumption
+// deadline; sdram.sv now flips ch2_rdtog at every ch2 read-data capture, so
+// the guard can release exactly when THIS read's data is home.  Protocol:
+// latch the toggle on the first counted cycle of the window (the completion
+// is >= 2 clk21m away, so the latch always wins the race), then a toggle
+// change = data captured.  clk_sdram and clk21m are integer-related outputs
+// of the same PLL, so the single-bit crossing is a timed synchronous path,
+// and a TOGGLE (unlike ch2_ready's level) cannot be missed by the slower
+// sampler.  guard_cnt saturation (15 clk21m = 64 clk_sdram, far beyond any
+// legitimate latency) is a hang-proof watchdog only; if it ever fires the
+// behavior degrades to the old open-loop timing, never to a stall.
+wire hs_win = bus_xfer & sdram_ce & ram_rnw & ~guard_slow & cpu_turbo;
+logic hs_armed = 1'b0, hs_done = 1'b0, hs_tog0 = 1'b0;
+always @(posedge clk21m) begin
+   if (reset | ~hs_win) begin
+      hs_armed <= 1'b0;
+      hs_done  <= 1'b0;
+   end else if (~hs_armed) begin
+      hs_armed <= 1'b1;
+      hs_tog0  <= sdram_rdtog;
+   end else if (sdram_rdtog != hs_tog0) hs_done <= 1'b1;
+end
+
 // The ce_3m58 requirement protects only the slow set; dropping it on the fast
 // path is what recovers the throughput (a fast read no longer waits up to a
 // full 3.58MHz period for an edge it does not need).
-wire guard_open  = guard_slow ? (guard_ce & (guard_cnt >= guard_min))
-                              :             (guard_cnt >= guard_min);
+wire guard_open  = guard_slow           ? (guard_ce & (guard_cnt >= guard_min)) :
+                   ~wr_n                ? (guard_cnt >= guard_min)              :  // fast write
+                   (sdram_ce & ram_rnw) ? (hs_done | (&guard_cnt))              :  // fast SDRAM read: closed loop
+                                          (guard_cnt >= guard_min);                // fast BRAM/unmapped read
 wire bus_guard_n = ~cpu_turbo | ~bus_cycle | (mreq_n & rd_n & wr_n) | guard_open;
 
 //  -----------------------------------------------------------------------------
@@ -1328,6 +1361,9 @@ wire ms_int_n = ~ms_int_hold;
 // re-enable by defining MOONSOUND_DIAG (see MSX1.qsf).
 `ifdef MOONSOUND_DIAG
 logic        m1_dly, trap_hit, arm_trap, nom1_d;
+logic        booted = 1'b0;   // see PC TRAP: the Z80 reset vector IS PC=0000
+logic        iow_a8_d;       // OUT (A8) edge detect -- the slot-select snoop
+logic  [7:0] a8_cnt = 8'd0;
 logic [15:0] pc_f1, pc_f2;
 logic  [7:0] bank_mir[4];
 // ── Freeze detectors (clk21m) — latch (sticky) when a signal is stuck
@@ -1360,7 +1396,16 @@ always_ff @(posedge clk21m) begin
         iff1_d <= 0; ghost_arm <= 0; intack_seen <= 0;
         dbg_wait_stuck <= 0; dbg_irq_stuck <= 0; dbg_cpu_nom1 <= 0; dbg_intack_stop <= 0;
         dbg_iff_stuck_off <= 0; dbg_int_refused <= 0; dbg_int_ghost <= 0;
-    end else begin
+        dbg_spin <= 0; dbg_a8_pc <= 0; dbg_a8_vc <= 0; a8_cnt <= 0;
+    // *** PAUSE GATE (2026-09-01) -- this was the bug that made the first two
+    // captures unreadable.  MSX1.sv:565 folds OSD-open and ROM-load into
+    // msx_pause, and MSX1.sv:581 gates ce_cpu_p with it, so the CPU stops for
+    // far longer than 760us EVERY time the user opens the OSD or loads a ROM.
+    // Ungated, dbg_cpu_nom1 (sticky) latched on the very act of starting the
+    // game and read as "the CPU halted" in every capture.  probe_freeze is
+    // msx_pause; while it is high the CPU is not running, so nothing here may
+    // count.
+    end else if (!probe_freeze) begin
         if (wait_n)            wait_cnt <= 0;
         else if (~&wait_cnt)   wait_cnt <= wait_cnt + 1'b1;
         if (&wait_cnt)         dbg_wait_stuck <= 1'b1;
@@ -1426,6 +1471,15 @@ always_ff @(posedge clk21m) begin
         // and the mapper banks.  Sticky (first death wins) so the reboot loop
         // that follows cannot overwrite the evidence.
         //
+        // *** `booted` is not optional. ***  The Z80's own reset vector is
+        // PC=0000, so WITHOUT this gate the very first opcode fetch after
+        // power-on arms the trap and the latch freezes on boot values -- which
+        // is exactly what the 2026-09-01 capture showed: noM1 asserted (a real
+        // halt) but trap_from/prev/SP/banks all 0000, the evidence spent at
+        // power-on.  `booted` goes high once the PC leaves page-0 low memory,
+        // so only a POST-boot return to 0000 counts, and the death counter
+        // becomes a true death count instead of boot+deaths.
+        //
         // Banks are mirrored off the bus rather than read out of konami_scc, so
         // this costs nothing outside this diag block and cannot perturb the
         // mapper: 5000/7000/9000/B000 are its four bank registers.
@@ -1433,7 +1487,17 @@ always_ff @(posedge clk21m) begin
         if (m1_dly & ~m1_n & iorq_n) begin        // start of an opcode fetch
             pc_f2 <= pc_f1;
             pc_f1 <= t80_reg[79:64];
-            if (t80_reg[79:64] == 16'h0000) begin
+            if (t80_reg[79:64] >= 16'h0100) booted <= 1'b1;
+            // RST 38 SPIN.  An unmapped read returns FFH (msx_slots.sv:211) and
+            // FFH is RST 38, so a page-0 that stops pointing at the BIOS turns
+            // every fetch into "RST 38" and the CPU spins at 0038 pushing 0039
+            // forever, walking SP through all of RAM.  In normal IM1 operation
+            // 0038 is fetched once per interrupt and the JP there leaves
+            // immediately, so requiring the PREVIOUS fetch to have been 0038 too
+            // makes this read exactly 0 on a healthy machine.
+            if (t80_reg[79:64] == 16'h0038 && pc_f1 == 16'h0038 && ~&dbg_spin)
+                dbg_spin <= dbg_spin + 16'd1;
+            if (booted && t80_reg[79:64] == 16'h0000) begin
                 if (~&dbg_trap_cnt[15:8]) dbg_trap_cnt[15:8] <= dbg_trap_cnt[15:8] + 8'd1;
                 arm_trap <= 1'b1;
             end
@@ -1444,7 +1508,7 @@ always_ff @(posedge clk21m) begin
         // which is exactly "the CPU stopped" -- and freeze the same forensics.
         // Either condition wins; trap_hit keeps the first one.
         nom1_d <= dbg_cpu_nom1;
-        if (dbg_cpu_nom1 & ~nom1_d) arm_trap <= 1'b1;
+        if (booted & dbg_cpu_nom1 & ~nom1_d) arm_trap <= 1'b1;
         if (arm_trap && !trap_hit) begin
             trap_hit      <= 1'b1;
             dbg_trap_from <= pc_f1;
@@ -1452,17 +1516,44 @@ always_ff @(posedge clk21m) begin
             dbg_trap_sp   <= t80_reg[63:48];   // T80.vhd:259 REG layout
             dbg_trap_b10  <= {bank_mir[1], bank_mir[0]};
             dbg_trap_b32  <= {bank_mir[3], bank_mir[2]};
+            // Bus state AT the freeze.  This is the measurement that separates
+            // "parked mid-M-cycle" from "parked between cycles": if MREQ_n and
+            // RD_n are low with dbg_trap_bus = the stuck PC, the CPU is held
+            // inside a T-state; if every strobe is idle, it is not.
+            dbg_trap_bus  <= a;
+            dbg_ppi_a8[15:8] <= ppi_out_a;   // slot select frozen at the trap
+            dbg_trap_cnt[7:0] <= {m1_n, mreq_n, iorq_n, rd_n, wr_n,
+                                  wait_n, exwait_n, cpu_turbo};
         end
+        // Bank snoop.  Konami5/SCC puts its registers at 5000/7000/9000/B000,
+        // Konami4 at 6000/8000/A000 with 4000-5FFF fixed.  Only one mapper is
+        // ever active, so snooping BOTH sets into the same four mirrors cannot
+        // collide -- and snooping only the Konami5 set (as this did) made the
+        // bank rows meaningless for a Konami4 cart.
         if (~mreq_n & ~wr_n) begin
             case (a[15:11])
-                5'b01010: bank_mir[0] <= d_from_cpu;   // 5000-57FF
-                5'b01110: bank_mir[1] <= d_from_cpu;   // 7000-77FF
-                5'b10010: bank_mir[2] <= d_from_cpu;   // 9000-97FF
-                5'b10110: bank_mir[3] <= d_from_cpu;   // B000-B7FF
+                5'b01010, 5'b01100: bank_mir[0] <= d_from_cpu;  // 5000 / 6000
+                5'b01110, 5'b10000: bank_mir[1] <= d_from_cpu;  // 7000 / 8000
+                5'b10010, 5'b10100: bank_mir[2] <= d_from_cpu;  // 9000 / A000
+                5'b10110:           bank_mir[3] <= d_from_cpu;  // B000
                 default: ;
             endcase
         end
-        dbg_trap_cnt[7:0] <= bank_mir[0];              // live bank0, for comparison
+
+        // OUT (A8) SNOOP -- the decisive one.  Page 0 can only stop pointing at
+        // the BIOS if something writes the PPI slot-select port, so latch WHO
+        // did it.  The peer's ROM contains no `D3 A8` at all, so:
+        //   PC in the BIOS  -> garbage flow re-entered BIOS (e.g. mid-ENASLT)
+        //   PC in RAM       -> data bytes executed as code
+        //   count == 0 yet dbg_ppi_a8 changed -> NOBODY wrote it: core bug.
+        iow_a8_d <= ~iorq_n & ~wr_n & m1_n & (a[7:0] == 8'hA8);
+        if ((~iorq_n & ~wr_n & m1_n & (a[7:0] == 8'hA8)) & ~iow_a8_d) begin
+            dbg_a8_pc <= t80_reg[79:64];
+            dbg_a8_vc[15:8] <= d_from_cpu;
+            if (~&a8_cnt) a8_cnt <= a8_cnt + 8'd1;
+        end
+        dbg_a8_vc[7:0]  <= a8_cnt;
+        dbg_ppi_a8[7:0] <= ppi_out_a;        // live, for comparison
 
         // WRITE WATCHPOINT on the IM2 table's 257th byte ({I+1, 0x00}) — the
         // byte found corrupted (0x10-0x13) in the freeze forensics.  Captures
@@ -1506,6 +1597,11 @@ assign dbg_trap_sp       = '0;
 assign dbg_trap_b10      = '0;
 assign dbg_trap_b32      = '0;
 assign dbg_trap_cnt      = '0;
+assign dbg_trap_bus      = '0;
+assign dbg_spin          = '0;
+assign dbg_a8_pc         = '0;
+assign dbg_a8_vc         = '0;
+assign dbg_ppi_a8        = '0;
 `endif
 
 ymf278b_top #(

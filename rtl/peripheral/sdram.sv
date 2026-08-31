@@ -50,6 +50,13 @@ module sdram
     input             ch2_req,
 	input             ch2_rnw,     // 1 - read, 0 - write
     output reg        ch2_ready,
+    // Flips once per completed ch2 READ (at data capture).  A toggle is the
+    // safe way to consume completion from the related clk21m domain: unlike
+    // ch2_ready's level (whose busy-low phase can be shorter than one clk21m
+    // period on writes), a toggle transition can never be missed by a slower
+    // sampler.  Consumer: the turbo bus guard's closed-loop read release
+    // (msx.sv P3, 20260826).
+    output reg        ch2_rdtog,
 
     input      [26:0] ch3_addr,
     output reg  [7:0] ch3_dout,
@@ -197,6 +204,7 @@ always @(posedge clk) begin
 
     if(data_ready_delay2[CAS_LATENCY+BURST_LENGTH-1]) ch2_saved_data <= SDRAM_DQ;
 	if(data_ready_delay2[CAS_LATENCY+BURST_LENGTH-1]) ch2_ready <= 1;
+	if(data_ready_delay2[CAS_LATENCY+BURST_LENGTH-1]) ch2_rdtog <= ~ch2_rdtog;
 	
 	if(data_ready_delay3[CAS_LATENCY+BURST_LENGTH-1]) ch3_saved_data <= SDRAM_DQ;
 	if(data_ready_delay3[CAS_LATENCY+BURST_LENGTH-1]) ch3_ready <= 1;

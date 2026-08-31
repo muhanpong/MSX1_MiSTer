@@ -516,7 +516,8 @@ wire        dbg_int_refused;
 wire [15:0] dbg_pc_snap;
 wire [15:0] dbg_pc_vec;
 wire [15:0] dbg_pc_now;
-wire [15:0] dbg_trap_from, dbg_trap_prev, dbg_trap_sp, dbg_trap_b10, dbg_trap_b32, dbg_trap_cnt;
+wire [15:0] dbg_trap_from, dbg_trap_prev, dbg_trap_sp, dbg_trap_b10, dbg_trap_b32, dbg_trap_cnt, dbg_trap_bus;
+wire [15:0] dbg_spin, dbg_a8_pc, dbg_a8_vc, dbg_ppi_a8;
 wire [15:0] dbg_im_i;
 wire [15:0] dbg_watch_pc;
 wire [15:0] dbg_watch_dc;
@@ -584,6 +585,7 @@ msx MSX
    .cpu_speed_q(cpu_speed_q),
    .cpu_bus_idle(cpu_bus_idle),
    .msx_turbo_req(msx_turbo_req),
+   .sdram_rdtog(sdram_rdtog),
    .ce_5m39_n(ce_5m39_n),
    .ce_10hz  (ce_10hz   & ~msx_pause),
    .probe_freeze(msx_pause),
@@ -821,6 +823,11 @@ debug_overlay u_overlay (
    .dbg_trap_b10(dbg_trap_b10),
    .dbg_trap_b32(dbg_trap_b32),
    .dbg_trap_cnt(dbg_trap_cnt),
+   .dbg_trap_bus(dbg_trap_bus),
+   .dbg_spin(dbg_spin),
+   .dbg_a8_pc(dbg_a8_pc),
+   .dbg_a8_vc(dbg_a8_vc),
+   .dbg_ppi_a8(dbg_ppi_a8),
    .dbg_im_i(dbg_im_i),
    .dbg_watch_pc(dbg_watch_pc),
    .dbg_watch_dc(dbg_watch_dc),
@@ -946,7 +953,7 @@ assign ram_dout = sdram_ce ? sdram_dout :
                   bram_ce  ? bram_dout  :
                              8'hFF;
 
-wire         sdram_ready, sdram_rnw, dw_sdram_we, dw_sdram_ready, flash_ready, flash_req, flash_done;
+wire         sdram_ready, sdram_rdtog, sdram_rnw, dw_sdram_we, dw_sdram_ready, flash_ready, flash_req, flash_done;
 wire  [26:0] sdram_addr;
 wire  [24:0] dw_sdram_addr;
 wire  [26:0] flash_addr;
@@ -994,6 +1001,7 @@ sdram sdram
    .ch2_req(sdram_ce),
    .ch2_rnw(ram_rnw),
    .ch2_ready(sdram_ready),
+   .ch2_rdtog(sdram_rdtog),
 
    .ch3_addr(flash_addr),
    .ch3_dout(),

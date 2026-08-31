@@ -37,7 +37,12 @@ module debug_overlay (
     input  wire [15:0] dbg_trap_sp,           // SP at the trap
     input  wire [15:0] dbg_trap_b10,          // Konami banks {b1,b0} at the trap
     input  wire [15:0] dbg_trap_b32,          // Konami banks {b3,b2} at the trap
-    input  wire [15:0] dbg_trap_cnt,          // {times PC hit 0000, live bank0}
+    input  wire [15:0] dbg_trap_cnt,          // {times PC hit 0000, bus strobes at freeze}
+    input  wire [15:0] dbg_trap_bus,          // CPU address bus frozen at the trap
+    input  wire [15:0] dbg_spin,              // RST 38 spin iterations (0 on a healthy machine)
+    input  wire [15:0] dbg_a8_pc,             // PC of the last OUT (A8)
+    input  wire [15:0] dbg_a8_vc,             // {A8 value written, A8 write count}
+    input  wire [15:0] dbg_ppi_a8,            // {PPI port A at trap, PPI port A live}
     input  wire [15:0] dbg_im_i,              // {IM, 6'b0, I} at last INTA
     input  wire [15:0] dbg_watch_pc,          // PC of last write to table byte 257
     input  wire [15:0] dbg_watch_dc,          // {data, count} of that write
@@ -76,6 +81,8 @@ logic [1:0]  wstk_s, istk_s, nom1_s, astp_s, iack_s;   // freeze-detector latche
 logic [1:0]  ioff_s, irfs_s;                            // IFF1-split detectors
 logic [15:0] pcs_s1, pcs_s2, pcl_s1, pcl_s2;            // PC snapshot / vec
 logic [15:0] tfr_s1,tfr_s2, tpv_s1,tpv_s2, tsp_s1,tsp_s2, tb1_s1,tb1_s2, tb3_s1,tb3_s2, tct_s1,tct_s2;
+logic [15:0] tbu_s1,tbu_s2;
+logic [15:0] spn_s1,spn_s2, apc_s1,apc_s2, avc_s1,avc_s2, ppa_s1,ppa_s2;
 logic [15:0] pcn_s1, pcn_s2, imi_s1, imi_s2;            // live PC / IM+I
 logic [15:0] wpc_s1, wpc_s2, wdc_s1, wdc_s2;            // watchpoint PC / data+count
 logic [1:0]  gho_s;                                      // ghost acceptance
@@ -102,6 +109,11 @@ always_ff @(posedge CLK_VIDEO) begin
     tb1_s1 <= dbg_trap_b10;  tb1_s2 <= tb1_s1;
     tb3_s1 <= dbg_trap_b32;  tb3_s2 <= tb3_s1;
     tct_s1 <= dbg_trap_cnt;  tct_s2 <= tct_s1;
+    tbu_s1 <= dbg_trap_bus;  tbu_s2 <= tbu_s1;
+    spn_s1 <= dbg_spin;      spn_s2 <= spn_s1;
+    apc_s1 <= dbg_a8_pc;     apc_s2 <= apc_s1;
+    avc_s1 <= dbg_a8_vc;     avc_s2 <= avc_s1;
+    ppa_s1 <= dbg_ppi_a8;    ppa_s2 <= ppa_s1;
     imi_s1     <= dbg_im_i;      imi_s2 <= imi_s1;
     wpc_s1     <= dbg_watch_pc;  wpc_s2 <= wpc_s1;
     wdc_s1     <= dbg_watch_dc;  wdc_s2 <= wdc_s1;
@@ -238,7 +250,7 @@ logic        pb;      // current bit
 // ─── Render ──────────────────────────────────────────────────────────────────
 localparam PW = 11'd66;
 `ifdef MOONSOUND_DIAG
-localparam PH = 8'd154; // 13 rows + 6 PC-trap rows (docs/pc_trap_overlay.md)
+localparam PH = 8'd194; // 13 rows + 11 PC-trap/spin rows (docs/pc_trap_overlay.md)
 `else
 localparam PH = 8'd58;  // 7 rows: PCM diagnosis + ch4 latency probe
 `endif
@@ -387,10 +399,35 @@ always_comb begin
                     if (tb3_s2[4'd15 - px[7:2]]) begin R_out=8'h40; G_out=8'hC0; B_out=8'hC0; end
                     else                          begin R_out=8'h00; G_out=8'h18; B_out=8'h18; end
                 end
-            end else begin                 // {death count, live bank0} — white
+            end else if (py < 8'd152) begin // {death count, bus strobes} — white
                 if (px < 8'd64) begin
                     if (tct_s2[4'd15 - px[7:2]]) begin R_out=8'hFF; G_out=8'hFF; B_out=8'hFF; end
                     else                          begin R_out=8'h18; G_out=8'h18; B_out=8'h18; end
+                end
+            end else if (py < 8'd160) begin // TRAP: address bus at the freeze — magenta
+                if (px < 8'd64) begin
+                    if (tbu_s2[4'd15 - px[7:2]]) begin R_out=8'hFF; G_out=8'h40; B_out=8'hFF; end
+                    else                          begin R_out=8'h20; G_out=8'h08; B_out=8'h20; end
+                end
+            end else if (py < 8'd168) begin // RST 38 SPIN COUNT — bright yellow
+                if (px < 8'd64) begin          // ANY non-zero value here = the spin
+                    if (spn_s2[4'd15 - px[7:2]]) begin R_out=8'hFF; G_out=8'hFF; B_out=8'h00; end
+                    else                          begin R_out=8'h20; G_out=8'h20; B_out=8'h00; end
+                end
+            end else if (py < 8'd176) begin // PPI port A {at trap, live} — light green
+                if (px < 8'd64) begin          // which primary slot each page sees
+                    if (ppa_s2[4'd15 - px[7:2]]) begin R_out=8'h80; G_out=8'hFF; B_out=8'h80; end
+                    else                          begin R_out=8'h10; G_out=8'h20; B_out=8'h10; end
+                end
+            end else if (py < 8'd184) begin // PC of the last OUT (A8) — orange-red
+                if (px < 8'd64) begin
+                    if (apc_s2[4'd15 - px[7:2]]) begin R_out=8'hFF; G_out=8'h60; B_out=8'h00; end
+                    else                          begin R_out=8'h20; G_out=8'h0C; B_out=8'h00; end
+                end
+            end else begin                 // {A8 value, A8 write count} — blue
+                if (px < 8'd64) begin          // count==0 + changed PPI = CORE BUG
+                    if (avc_s2[4'd15 - px[7:2]]) begin R_out=8'h60; G_out=8'h80; B_out=8'hFF; end
+                    else                          begin R_out=8'h0C; G_out=8'h10; B_out=8'h20; end
                 end
             end
 `else
