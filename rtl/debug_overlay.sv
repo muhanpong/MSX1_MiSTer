@@ -246,6 +246,9 @@ wire in_panel = en && !hblank && !vblank && (h_cnt < PW) && (v_cnt < PH) && !dre
 wire border   = (h_cnt == 11'd0) || (h_cnt == PW-1) || (v_cnt == 8'd0) || (v_cnt == PH-1);
 wire [7:0] px = h_cnt[7:0] - 8'd1;
 wire [7:0] py = v_cnt       - 8'd1;
+localparam [10:0] PROBE_X0 = 11'd80;   // clear of the main panel (h_cnt < 66)
+wire [10:0] probe_x   = h_cnt - PROBE_X0;
+wire  [4:0] probe_bit = probe_x[5:1];
 wire [4:0] slot_idx = px[5:1];   // 2px per slot → slot 0..23
 wire       slot_ok  = (px < 8'd48);
 // Dead voices = a genuine failure: keyed-on AND the envelope still expects to
@@ -408,19 +411,20 @@ always_comb begin
     // rows y 120..151 (8px each), 24 bits x 2px (MSB left), colors:
     //   row0 probe_r2 (red), row1 probe_r23 (green), row2 probe_r0 (amber),
     //   row3 {8'h00, probe_frame} (cyan).  bit=1 -> bright, 0 -> dim.
-`ifndef MOONSOUND_DIAG
-    // NOTE: this probe panel occupies v_cnt 120..151, which is exactly where the
-    // PC-trap rows live in a MOONSOUND_DIAG build -- and it is drawn AFTER them,
-    // so it silently overwrote SP and both bank rows in the first capture.
-    // Compiled out when the trap rows are present.
-    if (en && !hblank && !vblank && v_cnt >= 8'd120 && v_cnt < 8'd152 && h_cnt < 11'd48) begin
+    // MOVED RIGHT (2026-09-01).  This panel used to sit at h_cnt < 48, i.e. on
+    // top of the main panel's own columns, and it draws AFTER it -- so once the
+    // PC-trap rows were added at v_cnt 120..151 it silently overwrote SP and
+    // both bank rows.  Shifted clear of the main panel (which ends at h_cnt 66)
+    // instead of being compiled out, so both diagnostics stay readable.
+    if (en && !hblank && !vblank && v_cnt >= 8'd120 && v_cnt < 8'd152
+        && h_cnt >= PROBE_X0 && h_cnt < PROBE_X0 + 11'd48) begin
         case (v_cnt[4:3])
             2'd0: pv = probe_r2;
             2'd1: pv = probe_r23;
             2'd2: pv = probe_r0;
             default: pv = {8'h00, probe_frame};
         endcase
-        pb = pv[5'd23 - h_cnt[5:1]];
+        pb = pv[5'd23 - probe_bit];
         case (v_cnt[4:3])
             2'd0: begin R_out = pb ? 8'hFF : 8'h30; G_out = 8'h00; B_out = 8'h00; end
             2'd1: begin R_out = 8'h00; G_out = pb ? 8'hFF : 8'h30; B_out = 8'h00; end
@@ -428,7 +432,6 @@ always_comb begin
             default: begin R_out = 8'h00; G_out = pb ? 8'hFF : 8'h30; B_out = pb ? 8'hFF : 8'h30; end
         endcase
     end
-`endif
 
     // Pause symbol — independent of the in_panel/`en` gate above (spec S4);
     // regions never overlap (panel h_cnt<66, symbol sym_px>=226).
