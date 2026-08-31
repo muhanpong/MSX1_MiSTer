@@ -1327,7 +1327,7 @@ wire ms_int_n = ~ms_int_hold;
 // IFF/IM/I/PC forensics, IM2-table write watchpoint).  Compiled out by default;
 // re-enable by defining MOONSOUND_DIAG (see MSX1.qsf).
 `ifdef MOONSOUND_DIAG
-logic        m1_dly, trap_hit;
+logic        m1_dly, trap_hit, arm_trap, nom1_d;
 logic [15:0] pc_f1, pc_f2;
 logic  [7:0] bank_mir[4];
 // ── Freeze detectors (clk21m) — latch (sticky) when a signal is stuck
@@ -1435,15 +1435,23 @@ always_ff @(posedge clk21m) begin
             pc_f1 <= t80_reg[79:64];
             if (t80_reg[79:64] == 16'h0000) begin
                 if (~&dbg_trap_cnt[15:8]) dbg_trap_cnt[15:8] <= dbg_trap_cnt[15:8] + 8'd1;
-                if (!trap_hit) begin
-                    trap_hit      <= 1'b1;
-                    dbg_trap_from <= pc_f1;
-                    dbg_trap_prev <= pc_f2;
-                    dbg_trap_sp   <= t80_reg[63:48];   // T80.vhd:259 REG layout
-                    dbg_trap_b10  <= {bank_mir[1], bank_mir[0]};
-                    dbg_trap_b32  <= {bank_mir[3], bank_mir[2]};
-                end
+                arm_trap <= 1'b1;
             end
+        end
+        // The first hardware capture showed PC never reaches 0000: this game
+        // STOPS rather than reboots.  So arm on the halt detector too --
+        // dbg_cpu_nom1 is sticky and fires after ~760us with no opcode fetch,
+        // which is exactly "the CPU stopped" -- and freeze the same forensics.
+        // Either condition wins; trap_hit keeps the first one.
+        nom1_d <= dbg_cpu_nom1;
+        if (dbg_cpu_nom1 & ~nom1_d) arm_trap <= 1'b1;
+        if (arm_trap && !trap_hit) begin
+            trap_hit      <= 1'b1;
+            dbg_trap_from <= pc_f1;
+            dbg_trap_prev <= pc_f2;
+            dbg_trap_sp   <= t80_reg[63:48];   // T80.vhd:259 REG layout
+            dbg_trap_b10  <= {bank_mir[1], bank_mir[0]};
+            dbg_trap_b32  <= {bank_mir[3], bank_mir[2]};
         end
         if (~mreq_n & ~wr_n) begin
             case (a[15:11])

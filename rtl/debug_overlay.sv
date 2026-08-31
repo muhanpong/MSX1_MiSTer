@@ -408,6 +408,11 @@ always_comb begin
     // rows y 120..151 (8px each), 24 bits x 2px (MSB left), colors:
     //   row0 probe_r2 (red), row1 probe_r23 (green), row2 probe_r0 (amber),
     //   row3 {8'h00, probe_frame} (cyan).  bit=1 -> bright, 0 -> dim.
+`ifndef MOONSOUND_DIAG
+    // NOTE: this probe panel occupies v_cnt 120..151, which is exactly where the
+    // PC-trap rows live in a MOONSOUND_DIAG build -- and it is drawn AFTER them,
+    // so it silently overwrote SP and both bank rows in the first capture.
+    // Compiled out when the trap rows are present.
     if (en && !hblank && !vblank && v_cnt >= 8'd120 && v_cnt < 8'd152 && h_cnt < 11'd48) begin
         case (v_cnt[4:3])
             2'd0: pv = probe_r2;
@@ -423,6 +428,7 @@ always_comb begin
             default: begin R_out = 8'h00; G_out = pb ? 8'hFF : 8'h30; B_out = pb ? 8'hFF : 8'h30; end
         endcase
     end
+`endif
 
     // Pause symbol — independent of the in_panel/`en` gate above (spec S4);
     // regions never overlap (panel h_cnt<66, symbol sym_px>=226).
