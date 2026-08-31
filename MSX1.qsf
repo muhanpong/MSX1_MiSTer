@@ -18,7 +18,7 @@ set_global_assignment -name LAST_QUARTUS_VERSION "17.1.0 Lite Edition"
 # MoonSound freeze-diagnosis infrastructure (detectors + T80 forensics + overlay
 # rows + IM2-table watchpoint).  Uncomment to re-enable; see rtl/msx.sv and
 # rtl/debug_overlay.sv `ifdef MOONSOUND_DIAG sections.
-# set_global_assignment -name VERILOG_MACRO "MOONSOUND_DIAG=1"
+set_global_assignment -name VERILOG_MACRO "MOONSOUND_DIAG=1"
 
 set_global_assignment -name GENERATE_RBF_FILE ON
 set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files

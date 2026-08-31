@@ -32,6 +32,12 @@ module debug_overlay (
     input  wire [15:0] dbg_pc_snap,           // PC at last IFF1-fall before green latch
     input  wire [15:0] dbg_pc_vec,            // handler-entry PC after last INTA
     input  wire [15:0] dbg_pc_now,            // live PC
+    input  wire [15:0] dbg_trap_from,         // PC of the last opcode fetch before PC=0000
+    input  wire [15:0] dbg_trap_prev,         // the one before that
+    input  wire [15:0] dbg_trap_sp,           // SP at the trap
+    input  wire [15:0] dbg_trap_b10,          // Konami banks {b1,b0} at the trap
+    input  wire [15:0] dbg_trap_b32,          // Konami banks {b3,b2} at the trap
+    input  wire [15:0] dbg_trap_cnt,          // {times PC hit 0000, live bank0}
     input  wire [15:0] dbg_im_i,              // {IM, 6'b0, I} at last INTA
     input  wire [15:0] dbg_watch_pc,          // PC of last write to table byte 257
     input  wire [15:0] dbg_watch_dc,          // {data, count} of that write
@@ -69,6 +75,7 @@ logic [9:0]  env_s1, env_s2;                            // ch4 latency probe (me
 logic [1:0]  wstk_s, istk_s, nom1_s, astp_s, iack_s;   // freeze-detector latches, CDC into video clk
 logic [1:0]  ioff_s, irfs_s;                            // IFF1-split detectors
 logic [15:0] pcs_s1, pcs_s2, pcl_s1, pcl_s2;            // PC snapshot / vec
+logic [15:0] tfr_s1,tfr_s2, tpv_s1,tpv_s2, tsp_s1,tsp_s2, tb1_s1,tb1_s2, tb3_s1,tb3_s2, tct_s1,tct_s2;
 logic [15:0] pcn_s1, pcn_s2, imi_s1, imi_s2;            // live PC / IM+I
 logic [15:0] wpc_s1, wpc_s2, wdc_s1, wdc_s2;            // watchpoint PC / data+count
 logic [1:0]  gho_s;                                      // ghost acceptance
@@ -89,6 +96,12 @@ always_ff @(posedge CLK_VIDEO) begin
     pcs_s1     <= dbg_pc_snap;   pcs_s2 <= pcs_s1;
     pcl_s1     <= dbg_pc_vec;    pcl_s2 <= pcl_s1;
     pcn_s1     <= dbg_pc_now;    pcn_s2 <= pcn_s1;
+    tfr_s1 <= dbg_trap_from; tfr_s2 <= tfr_s1;
+    tpv_s1 <= dbg_trap_prev; tpv_s2 <= tpv_s1;
+    tsp_s1 <= dbg_trap_sp;   tsp_s2 <= tsp_s1;
+    tb1_s1 <= dbg_trap_b10;  tb1_s2 <= tb1_s1;
+    tb3_s1 <= dbg_trap_b32;  tb3_s2 <= tb3_s1;
+    tct_s1 <= dbg_trap_cnt;  tct_s2 <= tct_s1;
     imi_s1     <= dbg_im_i;      imi_s2 <= imi_s1;
     wpc_s1     <= dbg_watch_pc;  wpc_s2 <= wpc_s1;
     wdc_s1     <= dbg_watch_dc;  wdc_s2 <= wdc_s1;
@@ -225,7 +238,7 @@ logic        pb;      // current bit
 // ─── Render ──────────────────────────────────────────────────────────────────
 localparam PW = 11'd66;
 `ifdef MOONSOUND_DIAG
-localparam PH = 8'd106; // 13 rows: PCM rows + freeze detectors + forensic PC/IM/watch rows
+localparam PH = 8'd154; // 13 rows + 6 PC-trap rows (docs/pc_trap_overlay.md)
 `else
 localparam PH = 8'd58;  // 7 rows: PCM diagnosis + ch4 latency probe
 `endif
@@ -340,10 +353,41 @@ always_comb begin
                     if (wpc_s2[4'd15 - px[7:2]]) begin R_out=8'hFF; G_out=8'h60; B_out=8'hA0; end
                     else                          begin R_out=8'h20; G_out=8'h0C; B_out=8'h14; end
                 end
-            end else begin                 // WATCH {data,count} — violet bits
+            end else if (py < 8'd104) begin // WATCH {data,count} — violet bits
                 if (px < 8'd64) begin
                     if (wdc_s2[4'd15 - px[7:2]]) begin R_out=8'hC0; G_out=8'h80; B_out=8'hFF; end
                     else                          begin R_out=8'h18; G_out=8'h10; B_out=8'h20; end
+                end
+            // ── PC-TRAP rows (docs/pc_trap_overlay.md) ───────────────────────
+            end else if (py < 8'd112) begin // TRAP: PC that jumped to 0000 — bright red
+                if (px < 8'd64) begin
+                    if (tfr_s2[4'd15 - px[7:2]]) begin R_out=8'hFF; G_out=8'h30; B_out=8'h30; end
+                    else                          begin R_out=8'h28; G_out=8'h08; B_out=8'h08; end
+                end
+            end else if (py < 8'd120) begin // TRAP: the fetch before that — dim red
+                if (px < 8'd64) begin
+                    if (tpv_s2[4'd15 - px[7:2]]) begin R_out=8'hC0; G_out=8'h50; B_out=8'h50; end
+                    else                          begin R_out=8'h20; G_out=8'h08; B_out=8'h08; end
+                end
+            end else if (py < 8'd128) begin // TRAP: SP — orange
+                if (px < 8'd64) begin
+                    if (tsp_s2[4'd15 - px[7:2]]) begin R_out=8'hFF; G_out=8'hA0; B_out=8'h20; end
+                    else                          begin R_out=8'h20; G_out=8'h14; B_out=8'h04; end
+                end
+            end else if (py < 8'd136) begin // TRAP: banks {b1,b0} — cyan
+                if (px < 8'd64) begin
+                    if (tb1_s2[4'd15 - px[7:2]]) begin R_out=8'h00; G_out=8'hFF; B_out=8'hFF; end
+                    else                          begin R_out=8'h00; G_out=8'h20; B_out=8'h20; end
+                end
+            end else if (py < 8'd144) begin // TRAP: banks {b3,b2} — dim cyan
+                if (px < 8'd64) begin
+                    if (tb3_s2[4'd15 - px[7:2]]) begin R_out=8'h40; G_out=8'hC0; B_out=8'hC0; end
+                    else                          begin R_out=8'h00; G_out=8'h18; B_out=8'h18; end
+                end
+            end else begin                 // {death count, live bank0} — white
+                if (px < 8'd64) begin
+                    if (tct_s2[4'd15 - px[7:2]]) begin R_out=8'hFF; G_out=8'hFF; B_out=8'hFF; end
+                    else                          begin R_out=8'h18; G_out=8'h18; B_out=8'h18; end
                 end
             end
 `else
