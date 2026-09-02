@@ -518,6 +518,28 @@ wire [15:0] dbg_pc_vec;
 wire [15:0] dbg_pc_now;
 wire [15:0] dbg_trap_from, dbg_trap_prev, dbg_trap_sp, dbg_trap_b10, dbg_trap_b32, dbg_trap_cnt, dbg_trap_bus;
 wire [15:0] dbg_spin, dbg_a8_pc, dbg_a8_vc, dbg_ppi_a8;
+wire [15:0] dbg_a8r_vc, dbg_a8r_pc;
+wire  [6:0] dbg_ppi_ctrl;   // from msx (.* auto-bind): jt8255 live ctrl word
+wire        dbg_ppi_ms;     // from msx (.* auto-bind): a mode-set write was executed
+wire        dbg_ppi_rv;     // from msx (.* auto-bind): ctrl reverted to 1b after a mode-set
+wire [15:0] dbg_ab_vc, dbg_ab_pc;  // from msx (.* auto-bind): AB mode-set bus snoop
+wire [15:0] dbg_jmp0;              // from msx (.* auto-bind): who jumped to 0000
+// PPI reset-pulse counter.  jt8255 has an ASYNCHRONOUS reset while T80pa's is
+// SYNCHRONOUS, so a `reset` pulse shorter than one clk21m resets the PPI and is
+// invisible to the CPU -- port A reverts to an INPUT (ctrl=7'h1b) and every
+// IN A,(A8) then reads porta_din = 00.  This counter is CLOCKED, so it can only
+// see pulses at least a cycle wide; the ctrl word itself is the reliable witness.
+// Held out of `reset` on purpose -- it must survive the event it is counting.
+reg  [6:0] ppi_rstcnt = 7'd0;   // 7 bits: the white row gives its low bits away to ms/rv flags
+reg        ppi_rst_d  = 1'b0;
+always @(posedge clk21m) begin
+   if (RESET) begin ppi_rstcnt <= 7'd0; ppi_rst_d <= 1'b0; end
+   else begin
+      ppi_rst_d <= reset;
+      if (reset & ~ppi_rst_d & ~&ppi_rstcnt) ppi_rstcnt <= ppi_rstcnt + 7'd1;
+   end
+end
+wire [15:0] dbg_ppi_ctl = {dbg_ppi_ms, dbg_ppi_rv, dbg_ppi_ctrl, ppi_rstcnt};
 wire [15:0] dbg_im_i;
 wire [15:0] dbg_watch_pc;
 wire [15:0] dbg_watch_dc;
@@ -828,6 +850,12 @@ debug_overlay u_overlay (
    .dbg_a8_pc(dbg_a8_pc),
    .dbg_a8_vc(dbg_a8_vc),
    .dbg_ppi_a8(dbg_ppi_a8),
+   .dbg_a8r_vc(dbg_a8r_vc),
+   .dbg_a8r_pc(dbg_a8r_pc),
+   .dbg_ppi_ctl(dbg_ppi_ctl),
+   .dbg_ab_vc(dbg_ab_vc),
+   .dbg_ab_pc(dbg_ab_pc),
+   .dbg_jmp0(dbg_jmp0),
    .dbg_im_i(dbg_im_i),
    .dbg_watch_pc(dbg_watch_pc),
    .dbg_watch_dc(dbg_watch_dc),

@@ -160,6 +160,14 @@ module msx
    output logic       [15:0] dbg_a8_pc,         // PC of the last OUT (A8) -- who moved page 0
    output logic       [15:0] dbg_a8_vc,         // {value written to A8, write count}
    output logic       [15:0] dbg_ppi_a8,        // {PPI port A at the trap, PPI port A live}
+   output logic       [15:0] dbg_a8r_vc,        // {last value read from port A8, #reads that returned 00}
+   output logic       [15:0] dbg_a8r_pc,        // RAMPAGE ORIGIN: bus fetch addr right before the first fetch from unexecuted RAM
+   output wire         [6:0] dbg_ppi_ctrl,      // jt8255 live ctrl word; bit4 = ISINA (1 = port A is an INPUT)
+   output logic              dbg_ppi_ms,        // sticky: a PPI MODE-SET (AB write, bit7=1) was executed
+   output logic              dbg_ppi_rv,        // sticky: ctrl was seen back at its RESET value (7'h1b) AFTER a mode-set
+   output logic       [15:0] dbg_ab_vc,         // {last AB mode-set value written, mode-set count}
+   output logic       [15:0] dbg_ab_pc,         // PC of that mode-set write
+   output logic       [15:0] dbg_jmp0,          // BUS fetch addr right before the first post-boot fetch at 0000
    output logic       [15:0] dbg_im_i,          // {IM[1:0], 6'b0, I[7:0]} at last INTA
    output logic       [15:0] dbg_watch_pc,      // PC of last write to IM2 table byte 257
    output logic       [15:0] dbg_watch_dc,      // {written data, write count} for that byte
@@ -550,7 +558,8 @@ jt8255 PPI
    .portc_din(8'h0),
    .porta_dout(ppi_out_a),
    .portb_dout(),
-   .portc_dout(ppi_out_c)
+   .portc_dout(ppi_out_c),
+   .dbg_ctrl(dbg_ppi_ctrl)
  );
 
 //  -----------------------------------------------------------------------------
@@ -1357,15 +1366,50 @@ wire ms_int_n = ~ms_int_hold;
 
 // ═══ MoonSound freeze-diagnosis infrastructure ═══════════════════════════════
 // Battle-tested during the 2026-06 vgmplay-OPL4 freeze hunt (detectors, T80
+`ifdef MOONSOUND_DIAG
+// ── SignalTap embedded logic analyzer (JTAG) ────────────────────────────────
+// Manual sld_signaltap instantiation so the whole thing is scriptable -- no
+// .stp authoring.  The SignalTap GUI / quartus_stp discovers it over JTAG as
+// an auto_signaltap instance; TRIGGER CONDITIONS ARE SET AT RUNTIME there, so
+// nothing about the trigger is baked in here.  Canonical use for the Hi no
+// Tori hunt: trigger on {a[7:0]==A8, ~iorq_n, ~wr_n, m1_n, d_from_cpu<=03},
+// pre-trigger 90%, and read the full bus history of the fatal OUT.
+// 48 bits x 16384 samples = 786Kb =~ 79 M10K (plenty free at 41% BRAM).
+// Registered + (* preserve *): a combinational (* keep *) wire was silently
+// optimised away (map.rpt: "assigned a value but never read"), so the .stp
+// had no nodes to tap and Quartus inserted no analyzer at all.  A preserved
+// REGISTER cannot be swept, and one cycle of capture latency is irrelevant.
+// preserve stops merging/constant-folding; NOPRUNE is the one that stops a
+// register with NO FANOUT being swept -- which is exactly this case, and why
+// two builds produced no analyzer at all.
+(* preserve, noprune *) logic [47:0] stp_data;
+always_ff @(posedge clk21m) stp_data <= {
+    2'b00,                                        // [47:46] spare
+    ppi_out_a,                                    // [45:38] live slot map
+    wait_n, m1_n, mreq_n, iorq_n, rd_n, wr_n,     // [37:32] strobes
+    d_to_cpu,                                     // [31:24] what the CPU receives
+    d_from_cpu,                                   // [23:16] what the CPU drives
+    a                                             // [15:0]  address bus
+};
+// (analyzer instance now comes from MSX1.stp via the standard SignalTap flow)
+`endif
+
 // IFF/IM/I/PC forensics, IM2-table write watchpoint).  Compiled out by default;
 // re-enable by defining MOONSOUND_DIAG (see MSX1.qsf).
 `ifdef MOONSOUND_DIAG
-logic        m1_dly, trap_hit, arm_trap, nom1_d;
+logic        m1_dly;
 logic        booted = 1'b0;   // see PC TRAP: the Z80 reset vector IS PC=0000
 logic        iow_a8_d;       // OUT (A8) edge detect -- the slot-select snoop
 logic  [7:0] a8_cnt = 8'd0;
+logic        a8rd_d;                 // IN A,(A8) edge detect -- the readback snoop
+logic  [7:0] a8r_zcnt = 8'd0;        // how many A8 reads came back 00
+logic        a8r_zhit = 1'b0;        // sticky: rampage-origin trap armed once (see below)
+logic  [7:0] a8r_val;                // d_to_cpu captured while the A8 read is ACTIVE (mux included)
+logic [15:0] fadr_p1;                // BUS-based fetch address pipeline (not t80_reg --
+logic        boot0_hit = 1'b0;       //  the reg PC lags at M1 start; the bus does not)
+logic        iow_ab_d;               // AB mode-set write edge detect
+logic  [7:0] ab_cnt = 8'd0;
 logic [15:0] pc_f1, pc_f2;
-logic  [7:0] bank_mir[4];
 // ── Freeze detectors (clk21m) — latch (sticky) when a signal is stuck
 // abnormally long, to diagnose the vgmplay OPL-timer freeze.  Exported to the
 // debug overlay (video domain), readable WHILE the CPU is frozen, to tell:
@@ -1397,6 +1441,9 @@ always_ff @(posedge clk21m) begin
         dbg_wait_stuck <= 0; dbg_irq_stuck <= 0; dbg_cpu_nom1 <= 0; dbg_intack_stop <= 0;
         dbg_iff_stuck_off <= 0; dbg_int_refused <= 0; dbg_int_ghost <= 0;
         dbg_spin <= 0; dbg_a8_pc <= 0; dbg_a8_vc <= 0; a8_cnt <= 0;
+        dbg_a8r_vc <= 0; dbg_a8r_pc <= 0; a8r_zcnt <= 0; a8r_zhit <= 0;
+        dbg_ppi_ms <= 0; dbg_ppi_rv <= 0; dbg_ab_vc <= 0; dbg_ab_pc <= 0; ab_cnt <= 0;
+        dbg_jmp0 <= 0; fadr_p1 <= 0; boot0_hit <= 0;
     // *** PAUSE GATE (2026-09-01) -- this was the bug that made the first two
     // captures unreadable.  MSX1.sv:565 folds OSD-open and ROM-load into
     // msx_pause, and MSX1.sv:581 gates ce_cpu_p with it, so the CPU stops for
@@ -1488,6 +1535,34 @@ always_ff @(posedge clk21m) begin
             pc_f2 <= pc_f1;
             pc_f1 <= t80_reg[79:64];
             if (t80_reg[79:64] >= 16'h0100) booted <= 1'b1;
+            // Mode-1 (soft-reboot) origin capture, BUS-based.  Both hardware
+            // trials returned trap_prev = 0000, which t80_reg's PC timing at M1
+            // start can explain; the address BUS at M1 is the fetch address
+            // itself, no pipeline ambiguity.  First post-boot fetch of 0000
+            // latches the PREVIOUS fetch address = who jumped to zero.
+            if (booted && a == 16'h0000 && !boot0_hit) begin
+                boot0_hit <= 1'b1;
+                dbg_jmp0  <= fadr_p1;
+            end
+            // RAMPAGE-ORIGIN TRAP (peer design), same bus-based scheme with a
+            // range compare.  Legitimate execution in this game never fetches
+            // from C000-E67F or E800-F37F (460k PC samples x 2 machines, zero
+            // hits -- sampling evidence, not proof).  The first post-boot M1
+            // fetch inside those holes latches the PREVIOUS fetch address:
+            // where execution came FROM when it first stepped onto data RAM.
+            // Variant-independent (works for wedge, zombie, CHGET landing and
+            // soft-reboot alike, mapped or unmapped page 0).  Reading protocol:
+            //   latched addr in cart 4000-BFFF -> the ROM jumped/fell through
+            //   latched addr in BIOS          -> rampage came via BIOS
+            //   latched addr in RAM           -> already rampaging earlier
+            // Lives in dbg_a8r_pc (the retired first-00-read latch), lime row.
+            if (booted && !a8r_zhit &&
+                ((a >= 16'hC000 && a < 16'hE680) ||
+                 (a >= 16'hE800 && a < 16'hF380))) begin
+                a8r_zhit   <= 1'b1;
+                dbg_a8r_pc <= fadr_p1;
+            end
+            fadr_p1 <= a;
             // RST 38 SPIN.  An unmapped read returns FFH (msx_slots.sv:211) and
             // FFH is RST 38, so a page-0 that stops pointing at the BIOS turns
             // every fetch into "RST 38" and the CPU spins at 0038 pushing 0039
@@ -1495,50 +1570,28 @@ always_ff @(posedge clk21m) begin
             // 0038 is fetched once per interrupt and the JP there leaves
             // immediately, so requiring the PREVIOUS fetch to have been 0038 too
             // makes this read exactly 0 on a healthy machine.
-            if (t80_reg[79:64] == 16'h0038 && pc_f1 == 16'h0038 && ~&dbg_spin)
+            if (t80_reg[79:64] == 16'h0038 && pc_f1 == 16'h0038 && ~&dbg_spin) begin
                 dbg_spin <= dbg_spin + 16'd1;
-            if (booted && t80_reg[79:64] == 16'h0000) begin
-                if (~&dbg_trap_cnt[15:8]) dbg_trap_cnt[15:8] <= dbg_trap_cnt[15:8] + 8'd1;
-                arm_trap <= 1'b1;
+                if (dbg_spin == 16'd0)           // FIRST increment = death instant
+                    dbg_trap_bus <= t80_reg[63:48];   // SP (T80.vhd:259 layout)
             end
         end
-        // The first hardware capture showed PC never reaches 0000: this game
-        // STOPS rather than reboots.  So arm on the halt detector too --
-        // dbg_cpu_nom1 is sticky and fires after ~760us with no opcode fetch,
-        // which is exactly "the CPU stopped" -- and freeze the same forensics.
-        // Either condition wins; trap_hit keeps the first one.
-        nom1_d <= dbg_cpu_nom1;
-        if (booted & dbg_cpu_nom1 & ~nom1_d) arm_trap <= 1'b1;
-        if (arm_trap && !trap_hit) begin
-            trap_hit      <= 1'b1;
-            dbg_trap_from <= pc_f1;
-            dbg_trap_prev <= pc_f2;
-            dbg_trap_sp   <= t80_reg[63:48];   // T80.vhd:259 REG layout
-            dbg_trap_b10  <= {bank_mir[1], bank_mir[0]};
-            dbg_trap_b32  <= {bank_mir[3], bank_mir[2]};
-            // Bus state AT the freeze.  This is the measurement that separates
-            // "parked mid-M-cycle" from "parked between cycles": if MREQ_n and
-            // RD_n are low with dbg_trap_bus = the stuck PC, the CPU is held
-            // inside a T-state; if every strobe is idle, it is not.
-            dbg_trap_bus  <= a;
-            dbg_ppi_a8[15:8] <= ppi_out_a;   // slot select frozen at the trap
-            dbg_trap_cnt[7:0] <= {m1_n, mreq_n, iorq_n, rd_n, wr_n,
-                                  wait_n, exwait_n, cpu_turbo};
-        end
-        // Bank snoop.  Konami5/SCC puts its registers at 5000/7000/9000/B000,
-        // Konami4 at 6000/8000/A000 with 4000-5FFF fixed.  Only one mapper is
-        // ever active, so snooping BOTH sets into the same four mirrors cannot
-        // collide -- and snooping only the Konami5 set (as this did) made the
-        // bank rows meaningless for a Konami4 cart.
-        if (~mreq_n & ~wr_n) begin
-            case (a[15:11])
-                5'b01010, 5'b01100: bank_mir[0] <= d_from_cpu;  // 5000 / 6000
-                5'b01110, 5'b10000: bank_mir[1] <= d_from_cpu;  // 7000 / 8000
-                5'b10010, 5'b10100: bank_mir[2] <= d_from_cpu;  // 9000 / A000
-                5'b10110:           bank_mir[3] <= d_from_cpu;  // B000
-                default: ;
-            endcase
-        end
+        // ── 20260901e: the PC==0000 / noM1 arming captured only zeros in every
+        // trial (armed at power-on, then at pause).  The six trap rows are
+        // REPURPOSED as an A8 TRANSACTION RING (last 3 transactions, newest
+        // first), and the bus row becomes SP-at-spin-start.  Row map:
+        //   trap_from  = tx0 PC        trap_prev = tx0 {value, 7'b0, is_write}
+        //   trap_SP    = tx1 PC        trap_b10  = tx1 {value, 7'b0, is_write}
+        //   trap_b32   = tx2 PC        trap_cnt  = tx2 {value, 7'b0, is_write}
+        //   trap_bus   = SP latched at the FIRST spin increment
+        // The wedge stops all A8 traffic, so the ring freezes at death by
+        // itself and reconstructs the fatal sequence: a legitimate page-0
+        // RDSLT reads A8 (R@01FD, value=live map) before RDPRIM writes it, so
+        //   [R(D4) -> W@F382(01)] = A clobbered between read and OUT
+        //   [no preceding R]      = flow entered F380 without the prologue
+        // SP at spin start names the neighbourhood the rampage stack lived in:
+        // F0xx = still the legitimate RDSLT context, anything else = rampage.
+        if (dbg_spin == 16'd0 && ~mreq_n) begin end  // (keep synthesis quiet: no-op)
 
         // OUT (A8) SNOOP -- the decisive one.  Page 0 can only stop pointing at
         // the BIOS if something writes the PPI slot-select port, so latch WHO
@@ -1548,12 +1601,82 @@ always_ff @(posedge clk21m) begin
         //   count == 0 yet dbg_ppi_a8 changed -> NOBODY wrote it: core bug.
         iow_a8_d <= ~iorq_n & ~wr_n & m1_n & (a[7:0] == 8'hA8);
         if ((~iorq_n & ~wr_n & m1_n & (a[7:0] == 8'hA8)) & ~iow_a8_d) begin
+            // ring push: WRITE started
+            dbg_trap_b32 <= dbg_trap_sp;   dbg_trap_cnt  <= dbg_trap_b10;
+            dbg_trap_sp  <= dbg_trap_from; dbg_trap_b10  <= dbg_trap_prev;
+            dbg_trap_from <= t80_reg[79:64];
+            dbg_trap_prev <= {d_from_cpu, 7'b0, 1'b1};
             dbg_a8_pc <= t80_reg[79:64];
             dbg_a8_vc[15:8] <= d_from_cpu;
             if (~&a8_cnt) a8_cnt <= a8_cnt + 8'd1;
         end
         dbg_a8_vc[7:0]  <= a8_cnt;
         dbg_ppi_a8[7:0] <= ppi_out_a;        // live, for comparison
+        dbg_ppi_a8[15:8] <= 8'h00;           // trap snapshot retired (ring build)
+
+        // IN A,(A8) READBACK SNOOP.  The BIOS builds the new slot map with
+        //     A = (IN A,(A8) & C) | B
+        // so a readback of 00 makes correct BIOS arithmetic synthesise 01..03 --
+        // and 01 is the self-erasing map that unmaps page-3 RAM under RDPRIM.
+        // Our PPI can produce exactly that 00: msx.sv wires porta_din to 8'h0 and
+        // jt8255.v:219 returns `isin_a ? porta_din : latch_a`, so ANY read taken
+        // while port A is programmed as an INPUT reads 00 (and ctrl resets to
+        // 7'h1b, i.e. port A = input).  jt8255 also clears latch_a on a mode-set
+        // write.  This snoop decides whether that path is actually taken.
+        // Sampled on the FALLING edge: jt8255's dout is REGISTERED, so it is only
+        // settled after `read` has been high for a cycle.
+        // Capture d_to_cpu, not d_from_8255: d_to_cpu is what the CPU actually
+        // receives, so a fault ANYWHERE on the read path (PPI, mux, override)
+        // is caught, not just one inside the PPI.  It must be sampled WHILE the
+        // read is active -- the mux moves off the PPI the moment rd_n rises --
+        // so a8r_val shadows it every active cycle and the falling edge then
+        // evaluates the final driven value.
+        a8rd_d <= ~iorq_n & ~rd_n & m1_n & (a[7:0] == 8'hA8);
+        if (~iorq_n & ~rd_n & m1_n & (a[7:0] == 8'hA8)) a8r_val <= d_to_cpu;
+        if (a8rd_d & ~(~iorq_n & ~rd_n & m1_n & (a[7:0] == 8'hA8))) begin
+            // ring push: READ completed
+            dbg_trap_b32 <= dbg_trap_sp;   dbg_trap_cnt  <= dbg_trap_b10;
+            dbg_trap_sp  <= dbg_trap_from; dbg_trap_b10  <= dbg_trap_prev;
+            dbg_trap_from <= t80_reg[79:64];
+            dbg_trap_prev <= {a8r_val, 7'b0, 1'b0};
+            dbg_a8r_vc[15:8] <= a8r_val;
+            if (a8r_val == 8'h00) begin
+                if (~&a8r_zcnt) a8r_zcnt <= a8r_zcnt + 8'd1;
+                // (the first-00-read PC latch is retired: it read 0474 -- the
+                //  boot signature -- in every trial, healthy and fatal alike.
+                //  dbg_a8r_pc is REPURPOSED as the rampage-origin trap below.)
+            end
+        end
+        dbg_a8r_vc[7:0] <= a8r_zcnt;
+
+        // PPI MODE-SET WITNESS.  jt8255's ctrl word alone cannot tell
+        //   "the BIOS wrote 82h and something later reverted it"   (reset glitch)
+        // from
+        //   "the 82h write never landed"                            (eaten at boot)
+        // and those are different bugs with different fixes.  This sticky bit says
+        // whether a mode-set ever executed.  It lives in the SYNCHRONOUS diag block,
+        // so -- unlike jt8255's asynchronous reset -- a sub-cycle glitch on `reset`
+        // cannot clear it.  That asymmetry is exactly what makes it a witness:
+        //   ISINA=1 & ms=1 -> 82h ran, then the PPI lost it   = reset glitch
+        //   ISINA=1 & ms=0 -> 82h never took effect           = eaten at boot
+        iow_ab_d <= ~iorq_n & ~wr_n & m1_n & (a[7:0] == 8'hAB);
+        if ((~iorq_n & ~wr_n & m1_n & (a[7:0] == 8'hAB)) & ~iow_ab_d & d_from_cpu[7]) begin
+            dbg_ppi_ms       <= 1'b1;
+            dbg_ab_vc[15:8]  <= d_from_cpu;
+            dbg_ab_pc        <= t80_reg[79:64];
+            if (~&ab_cnt) ab_cnt <= ab_cnt + 8'd1;
+        end
+        dbg_ab_vc[7:0] <= ab_cnt;
+
+        // THE FINISH BIT.  A sub-cycle glitch on `reset` is invisible to every
+        // clocked counter here, and its ISINA evidence can even be laundered if
+        // rampage code happens to rewrite AB afterwards.  But its PERSISTENT
+        // effect -- ctrl back at the reset value 7'h1b -- is sampled by the very
+        // next clock.  Armed only after a mode-set has run, so the legitimate
+        // reset-to-0428 window can never trip it.  (A rampage WRITE of 9BH also
+        // lands ctrl on 1b and trips this -- the AB snoop's count/PC tells the
+        // two apart.)
+        if (dbg_ppi_ms && dbg_ppi_ctrl == 7'h1b) dbg_ppi_rv <= 1'b1;
 
         // WRITE WATCHPOINT on the IM2 table's 257th byte ({I+1, 0x00}) — the
         // byte found corrupted (0x10-0x13) in the freeze forensics.  Captures
@@ -1602,6 +1725,13 @@ assign dbg_spin          = '0;
 assign dbg_a8_pc         = '0;
 assign dbg_a8_vc         = '0;
 assign dbg_ppi_a8        = '0;
+assign dbg_a8r_vc        = '0;
+assign dbg_a8r_pc        = '0;
+assign dbg_ppi_ms        = 1'b0;
+assign dbg_ppi_rv        = 1'b0;
+assign dbg_ab_vc         = '0;
+assign dbg_ab_pc         = '0;
+assign dbg_jmp0          = '0;
 `endif
 
 ymf278b_top #(

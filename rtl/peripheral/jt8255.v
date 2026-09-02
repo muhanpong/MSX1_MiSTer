@@ -33,7 +33,8 @@ module jt8255(
 
     output reg  [7:0]   porta_dout,
     output reg  [7:0]   portb_dout,
-    output      [7:0]   portc_dout
+    output      [7:0]   portc_dout,
+    output      [6:0]   dbg_ctrl        // diagnostic: live mode/direction word
 );
 
 localparam ISINA=4, ISINB=1, ISINCL=0, ISINCH=3; // Control word bits
@@ -43,6 +44,7 @@ localparam INTRA=3, OBFA=7, ACKA=6, STBA=4, IBFA=5, // PC bits, mode 2
 localparam INTEA_OBF=6, INTEA_IBF=4, INTEB=2;
 
 reg  [6:0] ctrl;
+assign dbg_ctrl = ctrl;
 reg  [7:0] latch_a, latch_b, latch_c;
 
 wire       mode_b,
