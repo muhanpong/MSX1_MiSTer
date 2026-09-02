@@ -54,6 +54,11 @@
   192.168.1.86 확인). RAM 351→**447/553**, block memory +786,432 bits(=16384×48),
   ALM 73%, worst setup **+0.624 ns**(전 슬랙 양수).
 
+### `.stp`는 저장소에 없다
+`.gitignore`의 `*.stp`로 제외했다(사용자 결정). **재작성 절차·설정값·트리거 라이브러리는
+`docs/signaltap_msx1_stp.md`에 전부 기록**했다. qsf의 SLD 배선 96줄도 커밋되어 있어
+무엇을 탭했는지는 남아 있다.
+
 ### 다음 단계
 1. Quartus GUI에서 `MSX1.stp` 열고 JTAG 연결 → 게임 진입 **후** 수동 arm
 2. 크래시 → CSV export → 피어에게 경로 전달
