@@ -13,6 +13,7 @@
   only a WD2793, so fs-a1f_disk.rom would hang before DOS1.  Slot 3-2
   carries the WD2793 disk ROM instead, SHA1 12f2cc79, the same
   substitution the FS-A1FX and FS-A1WX packs use.
+  VERIFIED ON HARDWARE 2026-09-04: this pack reaches MSX-DOS.
 
   <pattern>5</pattern> = 128 bytes 00 then 128 bytes FF, which is exactly
   the power-on RAM content openMSX records for this machine.
