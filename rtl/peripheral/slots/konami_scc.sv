@@ -11,7 +11,11 @@ module cart_konami_scc
    input            cs,
    input            cart_num,
    input      [1:0] subslot,       // of the addressed page: bank/mode state is per (cart slot, subslot)
-   input            sccDevice,     // 0-SCC 1-SCC+
+   input            sccDevice,     // 0-SCC 1-SCC+, of the cart being ADDRESSED.
+                                   // Correct for the register-write conditions below,
+                                   // which only fire during an access to that cart.
+   input      [1:0] scc2_slot,     // SCC+ present in slot {B,A}.  Static per slot, so it
+                                   // is the one safe to gate scc_mode with (see below).
    output           mem_unmaped,
    output    [20:0] mem_addr,
    output           scc_req,
@@ -85,8 +89,15 @@ module cart_konami_scc
    //
    // Per CART SLOT, because scc_sound has one IKASCC per slot: Plus if any subslot
    // of that slot is in Plus.
-   assign scc_mode = { sccDevice & |{sccMode[4][5], sccMode[5][5], sccMode[6][5], sccMode[7][5]},
-                       sccDevice & |{sccMode[0][5], sccMode[1][5], sccMode[2][5], sccMode[3][5]} };
+   // Gated with scc2_slot, NOT sccDevice.  sccDevice is |(cart_device[cart_num] & DEV_SCC2)
+   // and cart_num is the ADDRESSED page's cart, so it collapses to 0 the moment the CPU
+   // touches anything that is not an SCC+ cart -- an FM-PAC in a neighbouring subslot, or
+   // simply the other cart slot.  Both slots' mode bits then dropped to Compatible mid-
+   // playback and ch5 became a ch4 mirror: the same D5 defect this comment block warns
+   // about, reached through a third route after cc183c9 fixed the address half and the
+   // bank-bit half was kept out.  Hardware: SCC+ crackled whenever FM-PAC shared the slot.
+   assign scc_mode = { scc2_slot[1] & |{sccMode[4][5], sccMode[5][5], sccMode[6][5], sccMode[7][5]},
+                       scc2_slot[0] & |{sccMode[0][5], sccMode[1][5], sccMode[2][5], sccMode[3][5]} };
    // Writes are suppressed while the segment is RAM (openMSX + real SCC+ agree).
    // Reads are deliberately NOT gated: openMSX cites Sean Young for read-through and
    // issue #1964 is still open on it -- mfrsd.sv makes the same choice.

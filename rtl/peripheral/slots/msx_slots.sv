@@ -491,7 +491,8 @@ cart_konami_scc konami_scc
    .cs(mapper == MAPPER_KONAMI_SCC),
    .mem_unmaped(mapper_konami_scc_unmaped),
    .mem_addr(mapper_konami_scc_addr), 
-   .sccDevice(|(cart_device[cart_num] & DEV_SCC2)) ,
+   .sccDevice(|(cart_device[cart_num] & DEV_SCC2)) ,          // addressed cart
+   .scc2_slot({|(cart_device[1] & DEV_SCC2), |(cart_device[0] & DEV_SCC2)}),  // per slot, like sccPlusChip
    .scc_req(mapper_konami_scc_sccReq),
    .scc_mode(mapper_konami_scc_sccMode),
    .*
