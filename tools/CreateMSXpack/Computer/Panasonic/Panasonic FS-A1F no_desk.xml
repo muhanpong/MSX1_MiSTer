@@ -1,0 +1,90 @@
+<?xml version="1.0" ?>
+<!--
+  Panasonic FS-A1F (1987, Japanese MSX2).  One drive, kanji ROM.
+
+  Slot layout follows openMSX share/machines/Panasonic_FS-A1F.xml.
+  RAM: 64KB (stock).
+
+  no_desk build: the A1 Cockpit ROM(s) are left out entirely, so the machine
+  always comes up in MSX-BASIC.  Everything else is identical to the
+  'basic' pack.  This is the same idea as Daewoo CPC-300_no_tutor.
+
+  The real FS-A1F has a TC8566AF floppy controller and this core models
+  only a WD2793, so fs-a1f_disk.rom would hang before DOS1.  Slot 3-2
+  carries the WD2793 disk ROM instead, SHA1 12f2cc79, the same
+  substitution the FS-A1FX and FS-A1WX packs use.
+
+  <pattern>5</pattern> = 128 bytes 00 then 128 bytes FF, which is exactly
+  the power-on RAM content openMSX records for this machine.
+
+  BIOS and SUB ROM are byte identical across FS-A1, FS-A1mk2 and FS-A1F
+  (SHA1 0081ea0d / 0fbd45ef); the packs differ only in firmware, kanji
+  and disk.
+-->
+<msxConfig>
+  <type>MSX2</type>
+  <kbd_layout>/yX/cWdlZv//ZP//cHMh////YP9hRgH///9XUCZUAv//MFUxMgQD//+AUzNRRwX//0MnNTRWBv///0I3UgcQ//8iQDZEABH//yMkQRdFEv///yD/FRP//2Ngdxb/FP//////////df///////////////////3L/dv//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////Yv//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////hIH///+Cg4b/h4X///////90//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////8=</kbd_layout>
+  <device typ="KANJI" id="Kanji ROM">
+    <rom>
+      <!-- lowercase <sha1> here; <block> uses uppercase <SHA1>.
+           Mixing them up is fail-quiet: the ROM is silently dropped. -->
+      <filename>fs-a1f_kanjifont.rom</filename>
+      <sha1>5e872d5853698731a0ed22fb72dbcdfd59cd19c3</sha1>
+    </rom>
+  </device>
+  <primary slot="0">
+    <secondary slot="0">
+      <block start="0" id="MSX BIOS with BASIC ROM">
+        <type>ROM</type>
+        <block_count>2</block_count>
+        <filename>fs-a1f_basic-bios2.rom</filename>
+        <SHA1>0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd</SHA1>
+      </block>
+    </secondary>
+  </primary>
+  <primary slot="1">
+    <secondary slot="0">
+      <block start="0">
+        <type>SLOT A</type>
+      </block>
+    </secondary>
+  </primary>
+  <primary slot="2">
+    <secondary slot="0">
+      <block start="0">
+        <type>SLOT B</type>
+      </block>
+    </secondary>
+  </primary>
+  <primary slot="3">
+    <secondary slot="0">
+      <block start="0" id="Main RAM">
+        <type>RAM MAPPER</type>
+        <block_count>4</block_count>
+        <pattern>5</pattern>
+      </block>
+    </secondary>
+    <secondary slot="1">
+      <block start="0" id="MSX Sub ROM">
+        <type>ROM</type>
+        <block_count>1</block_count>
+        <filename>fs-a1f_msx2sub.rom</filename>
+        <SHA1>0fbd45ef3dd7bb82d4c31f1947884f411f1ca344</SHA1>
+      </block>
+      <block start="1" id="MSX Kanji Driver with BASIC">
+        <type>ROM</type>
+        <block_count>2</block_count>
+        <filename>fs-a1f_kanjibasic.rom</filename>
+        <SHA1>ea35cc2cad9cfdf56cae224d8ee41579de37f000</SHA1>
+      </block>
+    </secondary>
+    <secondary slot="2">
+      <block start="1" id="Memory Mapped FDC (WD2793 substitute)">
+        <type>FDC</type>
+        <block_count>1</block_count>
+        <filename>hb-f1xd_disk.rom</filename>
+        <SHA1>12f2cc79b3d09723840bae774be48c0d721ec1c6</SHA1>
+      </block>
+    </secondary>
+  </primary>
+</msxConfig>
