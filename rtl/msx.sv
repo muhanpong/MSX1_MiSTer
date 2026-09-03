@@ -175,18 +175,18 @@ module msx
    input               [3:0] psg_vol,           // 2 dB ladder, see psg_mul below
    input               [3:0] opll_vol,
    input               [3:0] scc_vol,
-   input               [1:0] scc_en             // per-cartridge SCC mute (1 = audible)
+   input               [1:0] scc_en,            // per-cartridge SCC mute (1 = audible)
+   input                     psg_mute,
+   input                     opll_mute
 );
 
 //  -----------------------------------------------------------------------------
 //  -- Audio MIX  (stereo; MoonSound is mixed in after instantiation below)
 //  -----------------------------------------------------------------------------
-// PSG Volume entry 10 = "Off".  Only ay_ch_mix is the PSG: keybeep is PPI port C
-// bit 7 and cas_audio_in is the tape, and both merely ride this same mix bus (as
-// they do on real hardware).  Zeroing psg_mul would silence all three, so the Off
-// entry gates the PSG channels here and leaves psg_mul at unity for the rest.
-wire        psg_off  = (psg_vol == 4'd10);
-wire  [9:0] audioPSG = (psg_off ? 10'd0 : ay_ch_mix) + {keybeep,5'b00000} + {(cas_audio_in & ~cas_motor),4'b0000};
+// PSG Mute gates ay_ch_mix ALONE.  Only that is the PSG: keybeep is PPI port C bit 7
+// and cas_audio_in is the tape, and both merely ride this same mix bus (as they do on
+// real hardware).  Muting via psg_mul would have silenced all three.
+wire  [9:0] audioPSG = (psg_mute ? 10'd0 : ay_ch_mix) + {keybeep,5'b00000} + {(cas_audio_in & ~cas_motor),4'b0000};
 // Internal PSG trim (x/128: 128=0dB, 203=+4dB, 81=-4dB, 51=-8dB).  audioPSG is
 // UNSIGNED with silence at 0, so scaling it is a plain multiply -- no sign handling.
 // Entry 0 is x128>>>7, exactly the old value, so an untouched menu is bit-identical.
@@ -940,6 +940,7 @@ msx_slots msx_slots
    .opll_vol(opll_vol),
    .scc_vol(scc_vol),
    .scc_en(scc_en),
+   .opll_mute(opll_mute),
    .ram_addr(ram_addr),
    .ram_din(ram_din),
    .ram_rnw(ram_rnw),

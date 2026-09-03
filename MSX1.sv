@@ -255,11 +255,14 @@ wire      [64:0] rtc;
 //[37:36] CPU SPEED (turbo)
 //[38]    BORDER
 //[48]    DEBUG OVERLAY
-//[50:49] free (was OPL4 PCM VOLUME, 2-bit)
+//[50:49] free (was OPL4 PCM VOLUME, 2-bit -- DO NOT REUSE: saved .CFG files
+//        still carry values here, so a new meaning boots with stale state)
 //[51]    CHEATS
 //[53:52] free (was OPL4 FM VOLUME, 2-bit)
 //[56:54] OPL4 PCM VOLUME (5 steps, first entry = default)
-//[59:57] OPL4 FM VOLUME  (5 steps, first entry = default)
+//[59:57] free (was OPL4 FM VOLUME, 3-bit -- same stale-.CFG hazard as [50:49])
+//[61:60] SCC Slot A/B mute   (never used before, so saved .CFG read 0 = On)
+//[63:62] PSG / MSX-MUSIC mute (same: 0 = not muted)
 //[71]    SLOT A sub-slots On/Off (expanded cart slot)
 //[72]    SLOT B sub-slots On/Off
 //[84:73] SLOT A sub-slot 0..3 device, 3 bits each (None,ROM,SCC,SCC+,FM-PAC,GameMaster2)
@@ -325,24 +328,33 @@ localparam CONF_STR = {
    "P2O[45],MoonSound,Off,On;",
    // The OPL4 rows are indented and carry the OPL4 prefix because "FM" alone was
    // ambiguous: OPLL is what everyone calls FM sound, but fm_mute gates the
-   // MoonSound OPL3 side and never touches the OPLL.  HD hides all four when
-   // MoonSound is off (menumask[13]); they control nothing in that state.
-   "P2HDO[46], OPL4 PCM Mute,Off,On;",
-   "P2HDO[47], OPL4 FM Mute,Off,On;",
+   // MoonSound OPL3 side and never touches the OPLL.
+   // They are NOT hidden when MoonSound is off.  An "HD" (menumask[13]) hide was
+   // tried and made all four vanish in BOTH states on hardware -- mask index 13 is
+   // one past anything this core had used, and nothing here can verify how the
+   // firmware parses it.  Showing them always costs four rows; guessing cost a build.
+   "P2O[46], OPL4 PCM Mute,Off,On;",
+   "P2O[47], OPL4 FM Mute,Off,On;",
    // Labels are dB VS UNITY, matching the PSG/OPLL/SCC menus below (0dB = no gain).
    // They used to be offsets from the shipping default, so "0dB" was really -3.98 dB
    // and "+8dB" was really +4.01.  Fixed by moving the VALUES to the names, not by
    // renaming the steps: FM "+8dB" is mul 322 = a real +8 dB.  Entry 0 = default.
-   "P2HDO[112:109], OPL4 PCM Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
-   "P2HDO[116:113], OPL4 FM Volume,+4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB;",
+   "P2O[112:109], OPL4 PCM Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P2O[116:113], OPL4 FM Volume,+4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB;",
    "P2-;",
-   "P2O[100:97],PSG Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB,Off;",
-   "P2O[104:101],MSX-MUSIC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB,Off;",
-   "P2O[108:105],SCC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB,Off;",
+   // Mutes are their own rows, not an 11th rung on the gain ladder.  The MoonSound
+   // block above already works that way, mute is the most-used control on this page
+   // (10 presses away at the end of a ladder), and a separate toggle keeps the trim
+   // while muted.  SCC needs no Mute row of its own: both slots off IS SCC muted.
+   "P2O[62],PSG Mute,Off,On;",
+   "P2O[63],MSX-MUSIC Mute,Off,On;",
    // Per-cartridge SCC mute.  Applied to scc_sound's oe, which feeds only the
    // wave mix -- register access and chip state are untouched.
-   "P2O[117],SCC Slot A,On,Off;",
-   "P2O[118],SCC Slot B,On,Off;",
+   "P2O[60],SCC Slot A,On,Off;",
+   "P2O[61],SCC Slot B,On,Off;",
+   "P2O[100:97],PSG Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P2O[104:101],MSX-MUSIC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P2O[108:105],SCC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
    "-;",
    "O[64],Reset on ROM change,Yes,No;",
    "O[48],Debug Overlay,Off,On;",
@@ -353,9 +365,8 @@ localparam CONF_STR = {
    "V,v",`BUILD_DATE 
 };
 
-wire [13:0] status_menumask;  // hps_io takes 16; [12:7] = expanded-slot menu masks (CONF_STR H7..HC)
+wire [12:0] status_menumask;  // hps_io takes 16; [12:7] = expanded-slot menu masks (CONF_STR H7..HC)
 wire [1:0] sdram_size;
-assign status_menumask[13] = ~status[45];   // MoonSound off -> hide the OPL4 rows
 assign status_menumask[0] = msxConfig.cas_audio_src == CAS_AUDIO_ADC;
 assign status_menumask[1] = fdc_enabled;
 assign status_menumask[2] = bios_config.use_FDC;
@@ -559,7 +570,9 @@ wire        dbg_int_ghost;
 wire  [3:0] psg_vol  = status[100:97];
 wire  [3:0] opll_vol = status[104:101];
 wire  [3:0] scc_vol  = status[108:105];
-wire  [1:0] scc_en   = ~status[118:117];   // menu is On,Off so 0 = enabled
+wire  [1:0] scc_en   = ~status[61:60];   // menu is On,Off so 0 = enabled
+wire        psg_mute = status[62];
+wire        opll_mute= status[63];
 wire [15:0] cpu_addr;
 wire signed [15:0] audio_l, audio_r;
 wire        hsync, vsync, blank_n, hblank, vblank, ce_pix;

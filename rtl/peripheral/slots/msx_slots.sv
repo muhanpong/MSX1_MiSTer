@@ -19,6 +19,7 @@ module msx_slots
    input                 [3:0] opll_vol,          // 2 dB ladder, see vol_mul()
    input                 [3:0] scc_vol,
    input                 [1:0] scc_en,           // per-cartridge SCC mute (1 = audible)
+   input                      opll_mute,
    //RAM
    output               [26:0] ram_addr,
    output                [7:0] ram_din,
@@ -114,12 +115,12 @@ function automatic signed [9:0] vol_mul(input [3:0] v);
        4'd7: vol_mul = 10'sd203;   //  +4dB
        4'd8: vol_mul = 10'sd255;   //  +6dB
        4'd9: vol_mul = 10'sd322;   //  +8dB
-       4'd10: vol_mul = 10'sd0;   //  Off  <- menu entry 10
        default: vol_mul = 10'sd128;   //   0dB  <- entry 0 = OSD default / out of range
    endcase
 endfunction
 
-wire signed [24:0] opll_scaled = $signed(sound_opll) * vol_mul(opll_vol);
+// Mute is a separate control, not a ladder rung -- see the CONF_STR note in MSX1.sv.
+wire signed [24:0] opll_scaled = opll_mute ? 25'sd0 : $signed(sound_opll) * vol_mul(opll_vol);
 wire signed [24:0] scc_scaled  = $signed(scc_wave)   * vol_mul(scc_vol);
 // 19 bits, not 18: worst case is 51966 + 51966 + 32767 = 136699, which overflows
 // an 18-bit signed sum and would wrap BEFORE the clamp could see it.
