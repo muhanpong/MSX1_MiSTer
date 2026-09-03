@@ -445,3 +445,26 @@ throughput matching the spec arithmetic (~1 write per ~295 clk21m); the
 unpaced turbo control loses 65928/80001 (the defect); an over-spec stream at
 stock loses too (22223) — chip-faithful, and why the pacer stays transparent
 there.
+
+## P3 — closed-loop ch2 read release (20260826)
+
+The GUARD_RD_FAST floor existed only to cover ch2's open-loop consumption
+deadline.  sdram.sv now exports `ch2_rdtog`, a bit that flips at every ch2
+read-data capture; the guard latches it on the first counted cycle of a fast
+SDRAM read window and releases when it changes — i.e. exactly when THIS read's
+data is home.  A toggle (not ch2_ready's level) because the busy-low phase can
+be shorter than one clk21m sample period; a transition cannot be missed.
+clk_sdram/clk21m are integer-related same-PLL outputs, so the crossing is a
+timed synchronous path.  guard_cnt saturation (15 clk21m = 64 clk_sdram) is a
+hang-proof watchdog: a stuck controller degrades to open-loop timing, never to
+a stall.  Slow reads, writes, and BRAM reads are unchanged from P2.
+
+This retires the open-loop hazard class (the vgmplay-freeze family) for turbo
+reads and lets the release track real SDRAM latency instead of a worst-case
+constant — the release is now correct BY CONSTRUCTION at any future latency.
+
+Verified (tb_turbo_guard + ch2_model_s, randomized 2-6 clk21m latency): 8,467
+handshake windows, ZERO closed before data; stuck-controller run: CPU never
+hangs, all windows release at saturation.  Sim throughput ≈ P2 (the model's
+minimum service time is pessimistic); the real-hardware gain comes from idle
+SDRAM latency (~2-3 clk21m) beating the old fixed floor of 5.
