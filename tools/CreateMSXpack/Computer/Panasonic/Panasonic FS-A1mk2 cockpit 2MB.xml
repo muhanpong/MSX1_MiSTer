@@ -1,16 +1,18 @@
 <?xml version="1.0" ?>
 <!--
-  Panasonic FS-A1 (1986, Japanese MSX2).  No disk drive, no kanji.
+  Panasonic FS-A1mk2 (1987, Japanese MSX2).  No disk drive, no kanji.
 
-  Slot layout follows openMSX share/machines/Panasonic_FS-A1.xml.
-  RAM: 64KB (stock).
+  Slot layout follows openMSX share/machines/Panasonic_FS-A1MK2.xml.
+  RAM: 2MB.
 
-  no_desk build: the Desk Pack ROM(s) are left out entirely, so the machine
-  always comes up in MSX-BASIC.  Everything else is identical to the
-  'basic' pack.  This is the same idea as Daewoo CPC-300_no_tutor.
+  cockpit build: the A1 Cockpit firmware is present, as on the real machine.
+  NOTE: unlike the FS-A1FX/WX, this is an MSX2 with no Matsushita
+  switched I/O, so there is no port 41H bit7 firmware switch to gate
+  the firmware, and it DOES take over the boot (verified on hardware).
+  Use the 'basic' pack to come up in MSX-BASIC.
 
-  No <pattern>: openMSX carries a full 64K dump with irregular 16/32-byte
-  runs, which the core's fill patterns cannot express.  Default 3 is used.
+  <pattern>4</pattern> is the closest the core can get to the 00/FF byte
+  alternation openMSX records; the core also inverts every 256 bytes.
 
   BIOS and SUB ROM are byte identical across FS-A1, FS-A1mk2 and FS-A1F
   (SHA1 0081ea0d / 0fbd45ef); the packs differ only in firmware, kanji
@@ -24,7 +26,7 @@
       <block start="0" id="MSX BIOS with BASIC ROM">
         <type>ROM</type>
         <block_count>2</block_count>
-        <filename>fs-a1_basic-bios2.rom</filename>
+        <filename>fs-a1mk2_basic-bios2.rom</filename>
         <SHA1>0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd</SHA1>
       </block>
     </secondary>
@@ -47,15 +49,38 @@
     <secondary slot="0">
       <block start="0" id="Main RAM">
         <type>RAM MAPPER</type>
-        <block_count>4</block_count>
+        <block_count>128</block_count>
+        <pattern>4</pattern>
       </block>
     </secondary>
     <secondary slot="1">
       <block start="0" id="MSX Sub ROM">
         <type>ROM</type>
         <block_count>1</block_count>
-        <filename>fs-a1_msx2sub.rom</filename>
+        <filename>fs-a1mk2_msx2sub.rom</filename>
         <SHA1>0fbd45ef3dd7bb82d4c31f1947884f411f1ca344</SHA1>
+      </block>
+      <block start="1" id="A1 Cockpit 1">
+        <type>ROM</type>
+        <block_count>2</block_count>
+        <filename>fs-a1mk2_cockpit1.rom</filename>
+        <SHA1>2752cd89754c05abdf7c23cba132d38e3ef0f27d</SHA1>
+      </block>
+    </secondary>
+    <secondary slot="2">
+      <block start="1" id="A1 Cockpit 2">
+        <type>ROM</type>
+        <block_count>1</block_count>
+        <filename>fs-a1mk2_cockpit2.rom</filename>
+        <SHA1>e194d290ebfa4595ce0349ea2fc15442508485b0</SHA1>
+      </block>
+    </secondary>
+    <secondary slot="3">
+      <block start="1" id="A1 Cockpit 3">
+        <type>ROM</type>
+        <block_count>2</block_count>
+        <filename>fs-a1mk2_cockpit3.rom</filename>
+        <SHA1>a3f4e2e4934074925d775afe30ac72f150ede543</SHA1>
       </block>
     </secondary>
   </primary>

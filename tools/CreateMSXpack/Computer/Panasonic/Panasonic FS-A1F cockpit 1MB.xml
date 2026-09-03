@@ -5,9 +5,11 @@
   Slot layout follows openMSX share/machines/Panasonic_FS-A1F.xml.
   RAM: 1MB.
 
-  no_desk build: the A1 Cockpit ROM(s) are left out entirely, so the machine
-  always comes up in MSX-BASIC.  Everything else is identical to the
-  'basic' pack.  This is the same idea as Daewoo CPC-300_no_tutor.
+  cockpit build: the A1 Cockpit firmware is present, as on the real machine.
+  NOTE: unlike the FS-A1FX/WX, this is an MSX2 with no Matsushita
+  switched I/O, so there is no port 41H bit7 firmware switch to gate
+  the firmware, and it DOES take over the boot (verified on hardware).
+  Use the 'basic' pack to come up in MSX-BASIC.
 
   The real FS-A1F has a TC8566AF floppy controller and this core models
   only a WD2793, so fs-a1f_disk.rom would hang before DOS1.  Slot 3-2
@@ -84,6 +86,14 @@
         <block_count>1</block_count>
         <filename>hb-f1xd_disk.rom</filename>
         <SHA1>12f2cc79b3d09723840bae774be48c0d721ec1c6</SHA1>
+      </block>
+    </secondary>
+    <secondary slot="3">
+      <block start="1" id="A1 Cockpit">
+        <type>ROM</type>
+        <block_count>2</block_count>
+        <filename>fs-a1f_cockpit.rom</filename>
+        <SHA1>4a99f2444f29c2b642efd6f084081d6fd96bfa9b</SHA1>
       </block>
     </secondary>
   </primary>
