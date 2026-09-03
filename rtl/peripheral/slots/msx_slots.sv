@@ -18,6 +18,7 @@ module msx_slots
    output signed        [15:0] sound,
    input                 [3:0] opll_vol,          // 2 dB ladder, see vol_mul()
    input                 [3:0] scc_vol,
+   input                 [1:0] scc_en,           // per-cartridge SCC mute (1 = audible)
    //RAM
    output               [26:0] ram_addr,
    output                [7:0] ram_din,
@@ -113,6 +114,7 @@ function automatic signed [9:0] vol_mul(input [3:0] v);
        4'd7: vol_mul = 10'sd203;   //  +4dB
        4'd8: vol_mul = 10'sd255;   //  +6dB
        4'd9: vol_mul = 10'sd322;   //  +8dB
+       4'd10: vol_mul = 10'sd0;   //  Off  <- menu entry 10
        default: vol_mul = 10'sd128;   //   0dB  <- entry 0 = OSD default / out of range
    endcase
 endfunction
@@ -505,7 +507,10 @@ scc_sound scc_sound
    .cpu_addr(cpu_addr),
    .din(cpu_dout),
    .scc_dout(scc_sound_dout),
-   .oe({|(cart_device[1] & (DEV_SCC | DEV_SCC2)), |(cart_device[0] & (DEV_SCC | DEV_SCC2))}),
+   // scc_en only reaches scc_sound's oe, and oe feeds nothing but the wave mix
+   // (scc_sound.sv:23) -- muting here leaves register access and chip state alone.
+   .oe({|(cart_device[1] & (DEV_SCC | DEV_SCC2)) & scc_en[1],
+        |(cart_device[0] & (DEV_SCC | DEV_SCC2)) & scc_en[0]}),
    .wave(scc_wave),
    .sccPlusChip({|(cart_device[1] & DEV_SCC2), |(cart_device[0] & DEV_SCC2)}),
    // NOT gated on the *_sccReq strobes.  Those are only true during a bus cycle,

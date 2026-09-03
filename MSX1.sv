@@ -323,18 +323,26 @@ localparam CONF_STR = {
    "-;",
    "P2,Audio settings;",
    "P2O[45],MoonSound,Off,On;",
-   "P2O[46],PCM Mute,Off,On;",
-   "P2O[47],FM Mute,Off,On;",
+   // The OPL4 rows are indented and carry the OPL4 prefix because "FM" alone was
+   // ambiguous: OPLL is what everyone calls FM sound, but fm_mute gates the
+   // MoonSound OPL3 side and never touches the OPLL.  HD hides all four when
+   // MoonSound is off (menumask[13]); they control nothing in that state.
+   "P2HDO[46], OPL4 PCM Mute,Off,On;",
+   "P2HDO[47], OPL4 FM Mute,Off,On;",
    // Labels are dB VS UNITY, matching the PSG/OPLL/SCC menus below (0dB = no gain).
    // They used to be offsets from the shipping default, so "0dB" was really -3.98 dB
    // and "+8dB" was really +4.01.  Fixed by moving the VALUES to the names, not by
    // renaming the steps: FM "+8dB" is mul 322 = a real +8 dB.  Entry 0 = default.
-   "P2O[112:109],OPL4 PCM Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
-   "P2O[116:113],OPL4 FM Volume,+4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB;",
+   "P2HDO[112:109], OPL4 PCM Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P2HDO[116:113], OPL4 FM Volume,+4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB;",
    "P2-;",
-   "P2O[100:97],PSG Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
-   "P2O[104:101],OPLL Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
-   "P2O[108:105],SCC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P2O[100:97],PSG Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB,Off;",
+   "P2O[104:101],MSX-MUSIC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB,Off;",
+   "P2O[108:105],SCC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB,Off;",
+   // Per-cartridge SCC mute.  Applied to scc_sound's oe, which feeds only the
+   // wave mix -- register access and chip state are untouched.
+   "P2O[117],SCC Slot A,On,Off;",
+   "P2O[118],SCC Slot B,On,Off;",
    "-;",
    "O[64],Reset on ROM change,Yes,No;",
    "O[48],Debug Overlay,Off,On;",
@@ -345,8 +353,9 @@ localparam CONF_STR = {
    "V,v",`BUILD_DATE 
 };
 
-wire [12:0] status_menumask;  // hps_io takes 16; [12:7] = expanded-slot menu masks (CONF_STR H7..HC)
+wire [13:0] status_menumask;  // hps_io takes 16; [12:7] = expanded-slot menu masks (CONF_STR H7..HC)
 wire [1:0] sdram_size;
+assign status_menumask[13] = ~status[45];   // MoonSound off -> hide the OPL4 rows
 assign status_menumask[0] = msxConfig.cas_audio_src == CAS_AUDIO_ADC;
 assign status_menumask[1] = fdc_enabled;
 assign status_menumask[2] = bios_config.use_FDC;
@@ -550,6 +559,7 @@ wire        dbg_int_ghost;
 wire  [3:0] psg_vol  = status[100:97];
 wire  [3:0] opll_vol = status[104:101];
 wire  [3:0] scc_vol  = status[108:105];
+wire  [1:0] scc_en   = ~status[118:117];   // menu is On,Off so 0 = enabled
 wire [15:0] cpu_addr;
 wire signed [15:0] audio_l, audio_r;
 wire        hsync, vsync, blank_n, hblank, vblank, ce_pix;
