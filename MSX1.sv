@@ -350,8 +350,11 @@ localparam CONF_STR = {
    "P2O[63],MSX-MUSIC Mute,Off,On;",
    // Per-cartridge SCC mute.  Applied to scc_sound's oe, which feeds only the
    // wave mix -- register access and chip state are untouched.
-   "P2O[60],SCC Slot A,On,Off;",
-   "P2O[61],SCC Slot B,On,Off;",
+   // Worded as Mute/Off,On like every other row in this block.  As "SCC Slot A:
+   // On,Off" it sat between two Mute rows with the polarity flipped, so a column
+   // of Off,Off,On,On all meant "audible".  The bit is unchanged: 0 = audible.
+   "P2O[60],SCC Slot A Mute,Off,On;",
+   "P2O[61],SCC Slot B Mute,Off,On;",
    "P2O[100:97],PSG Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
    "P2O[104:101],MSX-MUSIC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
    "P2O[108:105],SCC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
