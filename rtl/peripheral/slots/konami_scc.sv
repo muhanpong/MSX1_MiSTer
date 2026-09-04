@@ -126,7 +126,20 @@ module cart_konami_scc
 
    wire modereg_wr = cpu_wr & cpu_mreq & sccDevice & ({cpu_addr[15:1],1'b0} == 16'hBFFE);
    assign mem_unmaped = cs & (scc_req  | ~maped | modereg_wr | (cpu_wr & cpu_mreq & ~en_ram));
-   assign mem_addr = {bank_base, cpu_addr[12:0]};
+   // Bank registers are 8-bit but the cartridge is not.  A 128K SCC+ has 16 banks
+   // of 8K, and the top bits of these registers are FLAGS, not address: bank[3]
+   // bit7 is the SCC+ enable (read directly at scc_req above) and 0x3F in bank[2]
+   // is the SCC enable.  Measured live in openMSX on this exact setup: bank[3] =
+   // 0x81 and bank[2] takes 0x3F, so unmasked they addressed 1.03 MB and 504 KB
+   // past a 128 KB cart -- straight into whatever SDRAM was allocated next.  Slot
+   // A is allocated first, so its overshoot landed inside the machine's RAM
+   // mapper (live data, read back as waveform = audible hash); slot B is last, so
+   // its overshoot hit unused SDRAM and stayed quiet.  That is the slot asymmetry
+   // the board reported.  Real hardware simply has no address lines up there and
+   // openMSX masks explicitly; mem_size was already wired in here and unused.
+   // yamanooto.sv:178 masks its own banks for the same reason.
+   wire [7:0] bank_mask = 8'((mem_size >> 13) - 25'd1);   // 8K banks
+   assign mem_addr = {bank_base & bank_mask, cpu_addr[12:0]};
 
 endmodule
        
