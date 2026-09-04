@@ -11,6 +11,13 @@
       whenever mode != Plus), so the private RAM stays disabled and the wrapper points the 0xA0-0xBF
       read window at the shared ch4 RAM (0x60-0x7F) instead.
     - Plus mode only: ch5 wave latch samples the ch5 private RAM; 0xA0-0xBF reads return ch5 RAM data.
+    - Wave RAMs gained a dedicated sound-side read port (i_RAM_ADDR_SND/o_RAM_Q_SND, 2026-09-04).
+      The real chip's single-port RAM hands the whole array to the CPU for the duration of /CS, so
+      every wave rewrite injects the CPU address/data into the playing channel (access noise; the
+      commented-out ~(i_CS_n|i_RD_n) ram_rdrq is NOT the fix -- with cs already gated to rd/wr
+      cycles it is bit-identical, proven in sim/tb_sccstorm.sv).  Songs that stream waveforms
+      (SCMD percussion parts) audibly crackle.  openMSX does not model the noise; we now match it:
+      the channel address counter reads through its own port and CPU access can no longer hijack it.
 */
 module IKASCC_player_s #(
     parameter RAM_TYPE = 1,
@@ -93,17 +100,18 @@ end
 
 wire            ch1_ram_rdrq, ch1_ram_wrrq;
 wire    [4:0]   ch1_ram_addr_cntr, ch1_ram_addr_cpu;
-wire    [4:0]   ch1_ram_addr = ch1_ram_rdrq ? ch1_ram_addr_cpu : ch1_ram_addr_cntr;
-wire    [7:0]   ch1_ram_d, ch1_ram_q;
+wire    [7:0]   ch1_ram_d, ch1_ram_q, ch1_ram_q_snd;
 
 IKASCC_player_memory_s #(.RAM_TYPE(RAM_TYPE), .INITFILE()) u_mem_ch1 (
     .i_EMUCLK                   (emuclk                     ),
     .i_MCLK_PCEN_n              (mclkpcen_n                 ),
 
     .i_RAM_WRRQ                 (ch1_ram_wrrq & ~test[6]    ),
-    .i_RAM_ADDR                 (ch1_ram_addr               ),
+    .i_RAM_ADDR                 (ch1_ram_addr_cpu           ),
     .i_RAM_D                    (ch1_ram_d                  ),
-    .o_RAM_Q                    (ch1_ram_q                  )
+    .o_RAM_Q                    (ch1_ram_q                  ),
+    .i_RAM_ADDR_SND             (ch1_ram_addr_cntr          ),
+    .o_RAM_Q_SND                (ch1_ram_q_snd              )
 );
 
 IKASCC_player_control_s #(
@@ -130,7 +138,7 @@ IKASCC_player_control_s #(
     .o_RAM_ADDR_CNTR            (ch1_ram_addr_cntr          ),
     .o_RAM_ADDR_CPU             (ch1_ram_addr_cpu           ),
     .o_RAM_D                    (ch1_ram_d                  ),
-    .i_RAM_Q                    (ch1_ram_q                  ),
+    .i_RAM_Q                    (ch1_ram_q_snd              ),
 
     .o_FRACCNTR_LD_n            (fraccntr_ld_n[0]           ),
 
@@ -145,17 +153,18 @@ IKASCC_player_control_s #(
 
 wire            ch2_ram_rdrq, ch2_ram_wrrq;
 wire    [4:0]   ch2_ram_addr_cntr, ch2_ram_addr_cpu;
-wire    [4:0]   ch2_ram_addr = ch2_ram_rdrq ? ch2_ram_addr_cpu : ch2_ram_addr_cntr;
-wire    [7:0]   ch2_ram_d, ch2_ram_q;
+wire    [7:0]   ch2_ram_d, ch2_ram_q, ch2_ram_q_snd;
 
 IKASCC_player_memory_s #(.RAM_TYPE(RAM_TYPE), .INITFILE()) u_mem_ch2 (
     .i_EMUCLK                   (emuclk                     ),
     .i_MCLK_PCEN_n              (mclkpcen_n                 ),
 
     .i_RAM_WRRQ                 (ch2_ram_wrrq & ~test[6]    ),
-    .i_RAM_ADDR                 (ch2_ram_addr               ),
+    .i_RAM_ADDR                 (ch2_ram_addr_cpu           ),
     .i_RAM_D                    (ch2_ram_d                  ),
-    .o_RAM_Q                    (ch2_ram_q                  )
+    .o_RAM_Q                    (ch2_ram_q                  ),
+    .i_RAM_ADDR_SND             (ch2_ram_addr_cntr          ),
+    .o_RAM_Q_SND                (ch2_ram_q_snd              )
 );
 
 IKASCC_player_control_s #(
@@ -182,7 +191,7 @@ IKASCC_player_control_s #(
     .o_RAM_ADDR_CNTR            (ch2_ram_addr_cntr          ),
     .o_RAM_ADDR_CPU             (ch2_ram_addr_cpu           ),
     .o_RAM_D                    (ch2_ram_d                  ),
-    .i_RAM_Q                    (ch2_ram_q                  ),
+    .i_RAM_Q                    (ch2_ram_q_snd              ),
 
     .o_FRACCNTR_LD_n            (fraccntr_ld_n[1]           ),
 
@@ -197,17 +206,18 @@ IKASCC_player_control_s #(
 
 wire            ch3_ram_rdrq, ch3_ram_wrrq;
 wire    [4:0]   ch3_ram_addr_cntr, ch3_ram_addr_cpu;
-wire    [4:0]   ch3_ram_addr = ch3_ram_rdrq ? ch3_ram_addr_cpu : ch3_ram_addr_cntr;
-wire    [7:0]   ch3_ram_d, ch3_ram_q;
+wire    [7:0]   ch3_ram_d, ch3_ram_q, ch3_ram_q_snd;
 
 IKASCC_player_memory_s #(.RAM_TYPE(RAM_TYPE), .INITFILE()) u_mem_ch3 (
     .i_EMUCLK                   (emuclk                     ),
     .i_MCLK_PCEN_n              (mclkpcen_n                 ),
 
     .i_RAM_WRRQ                 (ch3_ram_wrrq & ~test[6]    ),
-    .i_RAM_ADDR                 (ch3_ram_addr               ),
+    .i_RAM_ADDR                 (ch3_ram_addr_cpu           ),
     .i_RAM_D                    (ch3_ram_d                  ),
-    .o_RAM_Q                    (ch3_ram_q                  )
+    .o_RAM_Q                    (ch3_ram_q                  ),
+    .i_RAM_ADDR_SND             (ch3_ram_addr_cntr          ),
+    .o_RAM_Q_SND                (ch3_ram_q_snd              )
 );
 
 IKASCC_player_control_s #(
@@ -234,7 +244,7 @@ IKASCC_player_control_s #(
     .o_RAM_ADDR_CNTR            (ch3_ram_addr_cntr          ),
     .o_RAM_ADDR_CPU             (ch3_ram_addr_cpu           ),
     .o_RAM_D                    (ch3_ram_d                  ),
-    .i_RAM_Q                    (ch3_ram_q                  ),
+    .i_RAM_Q                    (ch3_ram_q_snd              ),
 
     .o_FRACCNTR_LD_n            (fraccntr_ld_n[2]           ),
 
@@ -272,16 +282,9 @@ wire            ch45_ram_rdrq, ch45_ram_wrrq;
 assign  ch45_ram_addrsel[1] = ((~ch45_sr[1] & ~ch45_ram_rdrq) | test[7]) & ~test[7];
 assign  ch45_ram_addrsel[0] = (( ch45_sr[1] & ~ch45_ram_rdrq) | test[6]) & ~test[6];
 wire    [4:0]   ch4_ram_addr_cntr, ch5_ram_addr_cntr, ch45_ram_addr_cpu;
-reg     [4:0]   ch45_ram_addr;
-always @(*) begin
-    case(ch45_ram_addrsel)
-        2'd0: ch45_ram_addr = ch45_ram_addr_cpu;
-        2'd1: ch45_ram_addr = ch5_ram_addr_cntr;
-        2'd2: ch45_ram_addr = ch4_ram_addr_cntr;
-        2'd3: ch45_ram_addr = 5'd31;
-    endcase
-end
-wire    [7:0]   ch45_ram_d, ch45_ram_q;
+//sound-side address keeps the ch4/ch5 time division only; CPU access no longer steals it
+wire    [4:0]   ch45_ram_addr_snd = ch45_sr[1] ? ch5_ram_addr_cntr : ch4_ram_addr_cntr;
+wire    [7:0]   ch45_ram_d, ch45_ram_q, ch45_ram_q_snd;
 
 //SCC+ ch5 independent wave RAM (window 0xA0-0xBF), active only in Compatible/Plus mode
 wire            sccp_ch5_indep = (i_SCCP_MODE == 2'd2); //Plus only; Real/Compat keep ch5 = ch4 mirror
@@ -289,24 +292,25 @@ wire            ch5_ram_rdrq_raw, ch5_ram_wrrq_raw;
 wire            ch5_ram_rdrq = ch5_ram_rdrq_raw & sccp_ch5_indep;
 wire            ch5_ram_wrrq = ch5_ram_wrrq_raw & sccp_ch5_indep;
 wire    [4:0]   ch5_ram_addr_cpu;
-wire    [4:0]   ch5_ram_addr = ch5_ram_rdrq ? ch5_ram_addr_cpu : ch5_ram_addr_cntr;
-wire    [7:0]   ch5_ram_d, ch5_ram_q;
+wire    [7:0]   ch5_ram_d, ch5_ram_q, ch5_ram_q_snd;
 
 IKASCC_player_memory_s #(.RAM_TYPE(RAM_TYPE), .INITFILE()) u_mem_ch5 (
     .i_EMUCLK                   (emuclk                     ),
     .i_MCLK_PCEN_n              (mclkpcen_n                 ),
 
     .i_RAM_WRRQ                 (ch5_ram_wrrq & ~test[6]    ),
-    .i_RAM_ADDR                 (ch5_ram_addr               ),
+    .i_RAM_ADDR                 (ch5_ram_addr_cpu           ),
     .i_RAM_D                    (ch5_ram_d                  ),
-    .o_RAM_Q                    (ch5_ram_q                  )
+    .o_RAM_Q                    (ch5_ram_q                  ),
+    .i_RAM_ADDR_SND             (ch5_ram_addr_cntr          ),
+    .o_RAM_Q_SND                (ch5_ram_q_snd              )
 );
 
 //wave data latch
 reg     [7:0]   ch4_wavelatch, ch5_wavelatch;
 always @(posedge emuclk) if(!mclkpcen_n) begin
-    if(ch4_wavelatch_tick_pcen) ch4_wavelatch <= ch45_ram_q;
-    if(ch5_wavelatch_tick_pcen) ch5_wavelatch <= sccp_ch5_indep ? ch5_ram_q : ch45_ram_q; //Real: ch4 mirror
+    if(ch4_wavelatch_tick_pcen) ch4_wavelatch <= ch45_ram_q_snd;
+    if(ch5_wavelatch_tick_pcen) ch5_wavelatch <= sccp_ch5_indep ? ch5_ram_q_snd : ch45_ram_q_snd; //Real: ch4 mirror
 end
 
 IKASCC_player_memory_s #(.RAM_TYPE(RAM_TYPE), .INITFILE()) u_mem_ch45 (
@@ -314,9 +318,11 @@ IKASCC_player_memory_s #(.RAM_TYPE(RAM_TYPE), .INITFILE()) u_mem_ch45 (
     .i_MCLK_PCEN_n              (mclkpcen_n                 ),
 
     .i_RAM_WRRQ                 (ch45_ram_wrrq & ~test[6] & ~test[7]),
-    .i_RAM_ADDR                 (ch45_ram_addr               ),
+    .i_RAM_ADDR                 (ch45_ram_addr_cpu           ),
     .i_RAM_D                    (ch45_ram_d                  ),
-    .o_RAM_Q                    (ch45_ram_q                  )
+    .o_RAM_Q                    (ch45_ram_q                  ),
+    .i_RAM_ADDR_SND             (ch45_ram_addr_snd           ),
+    .o_RAM_Q_SND                (ch45_ram_q_snd              )
 );
 
 IKASCC_player_control_s #(
@@ -705,7 +711,9 @@ module IKASCC_player_memory_s #(parameter RAM_TYPE = 1, parameter FAST_CLOCK = 0
     input   wire            i_RAM_WRRQ,
     input   wire    [4:0]   i_RAM_ADDR,
     input   wire    [7:0]   i_RAM_D,
-    output  wire    [7:0]   o_RAM_Q
+    output  wire    [7:0]   o_RAM_Q,
+    input   wire    [4:0]   i_RAM_ADDR_SND, //sound-side read port: never hijacked by CPU access
+    output  wire    [7:0]   o_RAM_Q_SND
 );
 
 
@@ -729,6 +737,7 @@ initial if(INITFILE != "") $readmemh(INITFILE, wavetable_ram);
 generate
 if(RAM_TYPE == 0) begin : ramstyle_distributed
 assign  o_RAM_Q = i_RAM_WRRQ ? i_RAM_D : wavetable_ram[i_RAM_ADDR];
+assign  o_RAM_Q_SND = wavetable_ram[i_RAM_ADDR_SND];
 
 always @(posedge emuclk) begin
     if(i_RAM_WRRQ) wavetable_ram[i_RAM_ADDR] <= i_RAM_D;
@@ -738,7 +747,9 @@ end
 else if(RAM_TYPE == 1) begin : ramstyle_block
 reg     [7:0]   wavedata_ram;
 reg     [7:0]   wavedata_cpu; //for noise emulation
+reg     [7:0]   wavedata_snd; //sound-side port, immune to CPU access
 assign  o_RAM_Q = i_RAM_WRRQ ? wavedata_cpu : wavedata_ram;
+assign  o_RAM_Q_SND = wavedata_snd;
 
     if(FAST_CLOCK == 1) begin : block_fast
     always @(posedge emuclk) begin
@@ -746,6 +757,7 @@ assign  o_RAM_Q = i_RAM_WRRQ ? wavedata_cpu : wavedata_ram;
         else wavedata_ram <= wavetable_ram[i_RAM_ADDR];
 
         if(i_RAM_WRRQ) wavedata_cpu <= i_RAM_D;
+        wavedata_snd <= wavetable_ram[i_RAM_ADDR_SND];
     end
     end
     else begin : block_slow
@@ -754,6 +766,7 @@ assign  o_RAM_Q = i_RAM_WRRQ ? wavedata_cpu : wavedata_ram;
         else wavedata_ram <= wavetable_ram[i_RAM_ADDR];
 
         if(i_RAM_WRRQ) wavedata_cpu <= i_RAM_D;
+        wavedata_snd <= wavetable_ram[i_RAM_ADDR_SND];
     end
     end
 
