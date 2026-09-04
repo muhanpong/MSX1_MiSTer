@@ -118,3 +118,37 @@ openMSX 소켓 헬퍼: `$CLAUDE_JOB_DIR/tmp/omsx.py` (세션별 경로라 재생
 관련: docs/scc_pack_divergence_20260904.md,
 [[project_scc_plus_crackle]], [[feedback_ikascc_player_s_integration]],
 [[feedback_verify_synthesized_module]], [[reference_openmsx_measurement_harness]]
+
+---
+
+## 2026-09-04 후속 세션 — 수정 완료 (ef9288f)
+
+**① 제안됐던 "읽기/쓰기 주소 분리"는 no-op으로 판명.** 정량 TB
+`sim/tb_sccstorm.sv`(쌍둥이 DUT, 동일내용 32바이트 재기록 폭풍, OTIR 페이싱)로
+실측: 분리 패치 전후 지표가 자릿수까지 동일. 이유 = d255c71 이후 `cs`가 이미
+`mreq & (rd|wr)`로 게이트되어 `~CS` 하이재크 창 = 읽기∪쓰기 액세스 창.
+참고로 실칩 모델 player_a도 `~CS`만으로 하이재크(`o_RAM_CS`, :42) — CS 구간
+하이재크 자체가 칩 거동이고, 쓰기에 CPU 주소가 필요한 이유는 파형 RAM이
+단일 주소 포트라서다.
+
+**② 실제 수정 = 사운드 경로 격리** (`IKASCC_player_memory_s`에
+`i_RAM_ADDR_SND`/`o_RAM_Q_SND` 사운드 전용 읽기 포트 추가, 채널 위상 카운터는
+자기 포트로만 읽음. CPU 포트는 쓰기+리드백 전용으로 고정, ch45 공유 RAM은
+시분할 주소만 유지). openMSX 동등 = 실칩의 액세스 노이즈를 의도적으로 제거.
+
+**정량 결과** (nz/access = 액세스당 오염 clk_en 틱):
+
+| 국면 | 기존 | 분리 패치 | 격리(채택) |
+|---|---|---|---|
+| ch1 쓰기폭풍 | 3.81, max 1920, rms 308 | 동일 | **0** |
+| ch1 읽기폭풍 | 3.76, max 1920 | 동일 | **0** |
+| ch4 쓰기폭풍(공유RAM) | 1.21, max 2880 | 동일 | **0** |
+
+**회귀**: run_sccplus 45/0 + T1 골든 덤프 51,737샘플 **비트일치**(CPU 액세스
+없는 구간 완전 동일), run_sccdetect 47/10(기존 D-격차 그대로), mfrsd_sccsound
+6/6. 실기 미검증 — RBF 배포 후 Passing Breeze A성부 재청취가 판정.
+
+슬롯 교체 예측(더러움이 성부를 따라감)은 이 수정이 실기서 통하면 검증 불요.
+
+**빌드/배포**: MSX1_20260904g_sccIso (map.rpt에 wavedata_snd 10인스턴스 확인,
+슬랙 +0.583ns, RAM 457/553) — 보드 .86 /media/fat/_Computer/ 배포 완료.
