@@ -101,7 +101,17 @@ module cart_konami_scc
    // Writes are suppressed while the segment is RAM (openMSX + real SCC+ agree).
    // Reads are deliberately NOT gated: openMSX cites Sean Young for read-through and
    // issue #1964 is still open on it -- mfrsd.sv makes the same choice.
-   assign scc_req  = cpu_mreq & (cpu_rd | (cpu_wr & ~en_ram)) &
+   // cs (= mapper == MAPPER_KONAMI_SCC) qualifies this.  Without it scc_req was
+   // decoded from the ADDRESS and the register state alone, so any access to
+   // 0xB800-0xB8FF or 0x9800-0x9FFF -- ordinary RAM addresses a program touches
+   // constantly -- raised it.  msx_slots feeds the result straight into
+   // scc_sound's cs, where scc_cs_A = ~cart_num & cs: every non-cartridge page
+   // has cart_num == 0, so the stray CS landed on SLOT A's IKASCC and never on
+   // slot B's.  That is why slot A crackled while slot B stayed clean, why it
+   // only showed with SCC+ (the 0xB8 window opens in Plus mode), and why it
+   // varied by machine pack (different RAM layouts hit those addresses at
+   // different rates).  yamanooto.sv:130 and mfrsd.sv:102 already gate theirs.
+   assign scc_req  = cs & cpu_mreq & (cpu_rd | (cpu_wr & ~en_ram)) &
                      ((sccMode[idx][5] & bank[idx][3][7] & cpu_addr[15:8] == 8'hB8)                    ||   //SCC+
                      (~sccMode[idx][5] & bank[idx][2][5:0] == 6'b111111 & cpu_addr[15:11] == 5'b10011) ||   //SCC+ mode SCC
                      (~sccDevice && sccEnable[idx] & cpu_addr[15:11] == 5'b10011));                              //SCC

@@ -305,9 +305,12 @@ set_global_assignment -name SYSTEMVERILOG_FILE MSX1.sv
 # close enough to the edge that an unrelated ascal (framework video scaler) path
 # can miss by tens of picoseconds on one seed and pass on the next.  SEED 3 gave
 # -0.041 ns there on 2026-08-27; moved to 4.  SEED 4 then gave -0.077 ns on
-# 2026-09-01 (again all ten worst paths in ascal, none of ours); moved to 5.  There used to be a stale `SEED 1`
+# 2026-09-01 (again all ten worst paths in ascal, none of ours); moved to 5.
+# SEED 5 held for three builds on 2026-09-04 (+0.505 / +0.420 / +0.274) and then
+# gave -0.207 on the fourth, all ten worst paths in ascal again; moved to 6.
+# There used to be a stale `SEED 1`
 # above this line as well -- Quartus takes the last, so it was inert, now removed.
-set_global_assignment -name SEED 5
+set_global_assignment -name SEED 6
 
 
 
