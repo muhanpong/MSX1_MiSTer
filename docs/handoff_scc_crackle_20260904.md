@@ -152,3 +152,38 @@ openMSX 소켓 헬퍼: `$CLAUDE_JOB_DIR/tmp/omsx.py` (세션별 경로라 재생
 
 **빌드/배포**: MSX1_20260904g_sccIso (map.rpt에 wavedata_snd 10인스턴스 확인,
 슬랙 +0.583ns, RAM 457/553) — 보드 .86 /media/fat/_Computer/ 배포 완료.
+
+---
+
+## 2026-09-04 후속 2 — 잔여 격차의 진범 = 죽은 deform 레지스터 (dd387cd)
+
+20260904g(사운드포트 격리)로 "조금 좋아졌지만 아직 거리가 있다"(사용자).
+남은 파형상관 0.345의 원인 추적 → **deform 레지스터가 22cf9ad부터 강제 0**
+(`test <= 8'h00; // FORCE TEST MODE OFF permanently`)이었음.
+
+**openMSX 계측으로 확정**: Passing Breeze 재생 중 SCC debuggable 0xC0 폴링
+(Sony_HB-F1XV2MB + scc+ ×2 + SCMD110A.DSK, `SC PASSINGB.SDT`):
+**A칩 deform=0x20 상시, B칩 deform=0** — A성부(타악기)만 벗어나는 관측과
+정확히 일치. openMSX `setFreqVol`: deform bit5가 서면 **매 FREQ 쓰기마다
+pos=0**(파형 처음부터 재생). 타악기 드라이버는 드럼 히트마다 FREQ를 다시 써
+위상 0 재시작을 기대하는데, 우리는 test가 죽어 있어 히트마다 랜덤 위상에서
+시작 = 타격음 더러움 + 파형상관 붕괴.
+
+**수정**: `test <= i_DB & 8'h23` — bit5(=IKASCC `test[5]→intcntr_set`, 위치
+리셋), bit0/1(4/8-bit 주파수 모드, die-modeled). bit6/7(rotation/read-only)은
+계속 마스크: 사운드포트 격리로 회전 주소 탈취 모델이 사라졌기 때문(주석·문서화).
+원본 코드의 `db_z` 지연은 우리 동기 통합에선 틀려서 i_DB 직결(i_WRRQ가 CS
+게이트+데이터 유효 시점이라 정합).
+
+**검증**: tb_sccstorm S5/S6 추가(deform 0x20→FREQ 쓰기 시 pos 리셋 확인 /
+0x00→pos 유지 확인) 7/7. run_sccplus 45/0+T1 골든 비트일치, sccdetect
+47/10(기존), mfrsd_sccsound 6/6.
+
+openMSX 재현 레시피(다음 세션용): OPENMSX_HOME 격리 사본(share에 machines/
+extensions/unicodemaps/scripts/icons/init.tcl/settings.xml 복사+systemroms
+심링크), `openmsx -machine Sony_HB-F1XV2MB -exta scc+ -extb scc+ -diska
+SCMD110A.DSK -script <tcl>`; 128KB 머신은 SC가 "Out of memory". SC 인자는
+**확장자 포함**(`SC PASSINGB.SDT`). deform 폴링 = `debug read {Konami SCC+
+Cartridge with expanded RAM SCC} 0xC0`(B칩은 이름 뒤 "(1)").
+
+**빌드/배포**: MSX1_20260904h_deform (map.rpt에 test[1] 레지스터 합성 확인, 슬랙 +0.583ns) — 보드 .86 배포 완료.
