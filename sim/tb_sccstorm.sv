@@ -227,6 +227,30 @@ initial begin
    meter_report("S4_post", 0);
    check("S4 twins re-converge after storm", m_nz == 0);
 
+   // ---- S5 deform 0x20: FREQ write resets waveform position (SCMD percussion)
+   tgt = 2'b10;
+   wr(8'hC0, 8'h20);                          // deform (Plus: 0xC0-0xDF -> internal 0xE0)
+   // park position away from 0: wait, then check it moved
+   repeat (1000) begin @(posedge clk); while (!clk_en) @(posedge clk); end
+   check("S5 position advanced before test", dut_sut.scc_wave_A.u_ctrl_ch1.o_RAM_ADDR_CNTR > 5'd2);
+   wr(8'hA0, 8'h40);                          // rewrite same FREQ lo
+   repeat (3) begin @(posedge clk); while (!clk_en) @(posedge clk); end
+   check("S5 deform 0x20: freq write resets position", dut_sut.scc_wave_A.u_ctrl_ch1.o_RAM_ADDR_CNTR <= 5'd1);
+
+   // ---- S6 deform 0x00: FREQ write does NOT reset position
+   wr(8'hC0, 8'h00);
+   repeat (1000) begin @(posedge clk); while (!clk_en) @(posedge clk); end
+   if (dut_sut.scc_wave_A.u_ctrl_ch1.o_RAM_ADDR_CNTR <= 5'd4)
+      repeat (400) begin @(posedge clk); while (!clk_en) @(posedge clk); end
+   begin : s6
+      reg [4:0] pos_before;
+      pos_before = dut_sut.scc_wave_A.u_ctrl_ch1.o_RAM_ADDR_CNTR;
+      wr(8'hA0, 8'h40);
+      repeat (3) begin @(posedge clk); while (!clk_en) @(posedge clk); end
+      check("S6 deform 0x00: freq write keeps position",
+            (dut_sut.scc_wave_A.u_ctrl_ch1.o_RAM_ADDR_CNTR - pos_before) <= 5'd1);
+   end
+
    $display("RESULT: %0d passed, %0d failed", n_pass, n_fail);
    $finish;
 end

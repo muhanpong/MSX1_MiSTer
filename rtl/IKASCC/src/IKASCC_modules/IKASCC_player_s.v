@@ -57,11 +57,20 @@ wire            rst_n = i_RST_n;
 //////  Test register
 ////
 
-reg     [7:0]   db_z;
 wire            test_wr = i_WRRQ & i_SCCREG_EN & (i_ABLO[7:5] == 3'b111);
 reg     [7:0]   test;
 always @(posedge emuclk) begin
-    test <= 8'h00; // FORCE TEST MODE OFF permanently
+    // Deform/test register, partially revived (was forced 8'h00 since 22cf9ad).
+    // SCMD's percussion driver keeps deform=0x20: every FREQ write must restart the
+    // waveform at position 0 (openMSX SCC.cc setFreqVol, deformValue&0x20 -> pos=0),
+    // which is test[5] -> intcntr_set here.  Bits 0-1 (4/8-bit frequency modes) are
+    // die-modeled too and safe.  Bits 6-7 (rotation/read-only) stay masked: the
+    // sound-side RAM port no longer models the rotation address takeover.
+    // i_DB (not a delayed copy): i_WRRQ is CS-qualified and fires while data is live.
+    if(!rst_n) test <= 8'h00;
+    else begin if(!mclkpcen_n) begin
+        if(test_wr) test <= i_DB & 8'h23;
+    end end
 end
 
 wire    [4:0]   fraccntr_ld_n;
