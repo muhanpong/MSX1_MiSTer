@@ -85,20 +85,42 @@ step**, so whenever the refresh lands after that window the sample is computed
 from the previous position's byte. ch5 was one sample behind for ~85% of steps
 (settled value matched the reference in only 15.5% of segments).
 
-For ch4 that is the chip: openMSX does not model the time division at all, so
-ch4's 12% divergence is ours being *more* accurate, and it stays. But the SCC+'s
-fifth channel has **its own RAM** and shares with nobody, so in Plus mode ch5 now
-reads that RAM directly instead of through the latch:
+The SCC+'s fifth channel has **its own RAM** and shares with nobody, so in Plus
+mode ch5 now reads that RAM directly instead of through the latch.
 
-| ch5, Plus mode | before | after |
-|---|---|---|
-| samples differing from reference | 59.4% | **0.0%** |
-| residual (codes) | 7.19 | **0.21** |
+ch4 was first left alone, on the reading that its divergence was the real chip's
+time division that openMSX omits. **The board said otherwise**: "Passing Breeze
+ch4 (drums, snare) has noise, the tone is contaminated." Re-reading the code with
+that in hand: once ch5 leaves for its own RAM, ch4 is time-dividing the shared
+port **with a partner that is no longer there** — it owns the port outright and
+was still only refreshing once per 32-tick grid. Same fix, same result:
 
-Real/Compat still use the latch — there ch5 *is* the ch4 mirror and must follow
-ch4's shared-RAM timing exactly.
+| Plus mode | ch5 before | ch5 after | ch4 before | ch4 after |
+|---|---|---|---|---|
+| samples differing from reference | 59.4% | **0.0%** | 11.9% | **0.0%** |
+| residual (codes) | 7.19 | **0.21** | 3.68 | **0.09** |
+| lag behind ch1-3 (ticks) | +46 | **0** | +46 | **0** |
 
-## What is still not matched
+Real/Compat still use the latch — there ch4 and ch5 genuinely share one RAM.
 
-ch4 alone: 12% of samples differ (residual 3.68 codes), which is the shared-RAM
-time division openMSX omits. Nothing else deviates.
+## Result
+
+All five channels are now bit-exact against the reference (residual 0.09-0.39
+codes, mismatch 0.000), and the click detector cannot tell the render from the
+reference:
+
+| | clicks/s | strong (z>12) | z max |
+|---|---|---|---|
+| RTL as found | 10.2 | 10 | 14.4 |
+| + multiplier restart | 7.6 | 3 | 14.8 |
+| + ch5 direct read | 4.2 | 0 | 11.6 |
+| + ch4 direct read | **2.9** | **0** | **9.3** |
+| openMSX-algorithm reference | 2.9 | 0 | 9.3 |
+
+## Listening beat measuring, twice
+
+Both RAM defects were found because the board reported a voice by name, not
+because a number looked wrong. ch4's 12% was measured, written up as
+chip-accurate and left in place; it took "the snare is noisy" to send me back to
+the code. The residual tables are what confirmed each fix, but they are not what
+found it.

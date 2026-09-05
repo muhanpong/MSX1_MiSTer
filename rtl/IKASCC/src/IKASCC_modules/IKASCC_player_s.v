@@ -296,16 +296,18 @@ always @(posedge emuclk) begin
 end
 
 //ram r/w control and address/data
+wire            sccp_ch5_indep = (i_SCCP_MODE == 2'd2); //Plus only; Real/Compat keep ch5 = ch4 mirror
 wire            ch45_ram_rdrq, ch45_ram_wrrq;
 assign  ch45_ram_addrsel[1] = ((~ch45_sr[1] & ~ch45_ram_rdrq) | test[7]) & ~test[7];
 assign  ch45_ram_addrsel[0] = (( ch45_sr[1] & ~ch45_ram_rdrq) | test[6]) & ~test[6];
 wire    [4:0]   ch4_ram_addr_cntr, ch5_ram_addr_cntr, ch45_ram_addr_cpu;
 //sound-side address keeps the ch4/ch5 time division only; CPU access no longer steals it
-wire    [4:0]   ch45_ram_addr_snd = ch45_sr[1] ? ch5_ram_addr_cntr : ch4_ram_addr_cntr;
+//In Plus mode ch5 has left for its own RAM, so ch4 owns this read port outright
+//and does not have to wait for a partner that is no longer there.
+wire    [4:0]   ch45_ram_addr_snd = (sccp_ch5_indep | ~ch45_sr[1]) ? ch4_ram_addr_cntr : ch5_ram_addr_cntr;
 wire    [7:0]   ch45_ram_d, ch45_ram_q, ch45_ram_q_snd;
 
 //SCC+ ch5 independent wave RAM (window 0xA0-0xBF), active only in Compatible/Plus mode
-wire            sccp_ch5_indep = (i_SCCP_MODE == 2'd2); //Plus only; Real/Compat keep ch5 = ch4 mirror
 wire            ch5_ram_rdrq_raw, ch5_ram_wrrq_raw;
 wire            ch5_ram_rdrq = ch5_ram_rdrq_raw & sccp_ch5_indep;
 wire            ch5_ram_wrrq = ch5_ram_wrrq_raw & sccp_ch5_indep;
@@ -367,7 +369,15 @@ IKASCC_player_control_s #(
     .o_RAM_ADDR_CNTR            (ch4_ram_addr_cntr          ),
     .o_RAM_ADDR_CPU             (ch45_ram_addr_cpu          ),
     .o_RAM_D                    (ch45_ram_d                 ),
-    .i_RAM_Q                    (ch4_wavelatch              ),
+    //Same story as ch5 below: the wavelatch is the 32-tick time-division grid,
+    //and in Plus mode there is nothing to divide time WITH.  Sharing an absent
+    //partner's schedule left ch4 one sample behind for 12% of its position
+    //steps -- audible on Passing Breeze as noise on the drum/snare voice, which
+    //is what the board reported.  Reading the RAM straight makes ch4 bit-exact
+    //against the reference (mismatch 0.119 -> 0.000, residual 3.68 -> 0.09) and
+    //puts it back in step with ch1-3 and ch5 (lag 58 -> 12 ticks).
+    //Real/Compat keep the latch: there ch4 really does share the RAM with ch5.
+    .i_RAM_Q                    (sccp_ch5_indep ? ch45_ram_q_snd : ch4_wavelatch),
 
     .o_FRACCNTR_LD_n            (fraccntr_ld_n[3]           ),
 
