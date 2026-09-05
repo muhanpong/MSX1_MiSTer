@@ -127,6 +127,48 @@ IKASCC_player_s #(.RAM_TYPE(1), .FAST_CLOCK(1), .RAMCTRL_ASYNC(1)) scc_wave_A
    .o_SOUND(wave_A)
 );
 
+// ---- SignalTap probe for the slot-A chip (2026-09-05, SCC+ crackle hunt) ---
+// Registered + (* preserve, noprune *) for the same reason as stp_data in
+// rtl/msx.sv: a wire with no fanout is swept before Node Finder sees it.
+// Meant to be sampled with a STORAGE QUALIFIER (wr_pulse), so 32K depth holds
+// ~250 ms of the register stream instead of 1.5 ms of clk21m; tick[15:0]
+// restores the timing (wraps every 18 ms, accesses come every ~15 us, so it is
+// unambiguous).  That stream feeds tools/scc_replay via stp_to_events.py.
+// MSX1.stp taps these nodes by name -- keep the layout in sync with that file.
+// Compiled only with SCC_STP defined (MSX1.qsf VERILOG_MACRO).
+`ifdef SCC_STP
+reg signed [10:0] scc_stp_wave_d;
+reg        [15:0] scc_stp_tick;
+reg               scc_stp_wr_d, scc_stp_rd_d;
+wire signed [11:0] scc_stp_diff = wave_A - scc_stp_wave_d;
+wire scc_stp_jump = (scc_stp_diff > 12'sd191) | (scc_stp_diff < -12'sd192);
+(* preserve, noprune *) reg [55:0] scc_stp;
+always @(posedge clk) begin
+   scc_stp_wave_d <= wave_A;
+   scc_stp_wr_d   <= scc_wr_A;
+   scc_stp_rd_d   <= scc_rdrq_A;
+   if (clk_en) scc_stp_tick <= scc_stp_tick + 1'b1;
+   scc_stp <= {
+      cart_num,                        // [55]    addressed cart slot
+      cs,                              // [54]    raw scc_req OR of all mappers
+      scc_stp_jump,                    // [53]    |d wave_A| >= 192 in one clk (weak)
+      wave_A != scc_stp_wave_d,        // [52]    wave_A moved this clk
+      scc_rdrq_A & ~scc_stp_rd_d,      // [51]    rd_pulse: one clk per read
+      scc_wr_A & ~scc_stp_wr_d,        // [50]    wr_pulse: one clk per write
+      scc_rdrq_A,                      // [49]
+      scc_wr_A,                        // [48]    IKASCC i_WRRQ
+      scc_cs_A,                        // [47]    ~IKASCC i_CS_n
+      mode_A,                          // [46:45] 0 Real / 1 Compat / 2 Plus
+      cpu_addr[15:11] == 5'b10011,     // [44]    0x98xx-0x9Fxx window (SCC)
+      cpu_addr[15:8]  == 8'hB8,        // [43]    0xB8xx window (SCC+)
+      scc_stp_tick,                    // [42:27] 3.58 MHz tick counter
+      cpu_addr[7:0],                   // [26:19] register offset
+      din,                             // [18:11] data bus
+      wave_A                           // [10:0]  chip output
+   };
+end
+`endif
+
 // --- Channel B Logic ---
 wire scc_cs_B   = cart_num & cs;
 wire scc_rdrq_B = scc_cs_B & cpu_rd & cpu_mreq;

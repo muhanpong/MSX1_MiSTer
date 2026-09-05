@@ -679,12 +679,30 @@ end
 //calculation enable
 reg             accshft_en, accshft_en_z;
 always @(posedge emuclk) if(!mclkpcen_n) begin
-    if(mul_rst) accshft_en <= 1'b1;
+    if(mul_rst) begin
+        accshft_en <= 1'b1;
+        //Restarting a multiplier that is ALREADY RUNNING must look exactly like
+        //restarting an idle one.  From idle, accshft_en_z is 0 on the tick after
+        //mul_rst, so the accumulator sits still for one "priming" tick while
+        //wavedata_serial fills with waveform bit 0; the shift-accumulate then
+        //walks bits 0..7 and the sign step lands on the tick cyccntr reaches 7,
+        //where final_sound is latched.  Restarted mid-walk, accshft_en_z was
+        //already 1, that priming tick is skipped, every shift moves up one place
+        //and the sign step falls on bit 6: the sample comes out one code high,
+        //or -- when the walk is cut short of the sign bit -- as the ONE'S
+        //COMPLEMENT of its correct value, a full-scale spike.
+        //SCMD rewrites each channel's frequency as a lo/hi PAIR four ticks
+        //apart, ~360 times a second per channel, so the second write always
+        //restarts the first one's walk: on the captured Passing Breeze stream
+        //waveform 0x7F at volume 15 read -120 instead of +119, ~106 such
+        //transients a second.  That is the SCC+ crackle.
+        //docs/scc_crackle_rootcause_20260905.md
+        accshft_en_z <= 1'b0;
+    end
     else begin
         if(~cyccntr == 4'd7) accshft_en <= 1'b0;
+        accshft_en_z <= accshft_en;
     end
-
-    accshft_en_z <= accshft_en;
 end
 
 //accumulation and shift
