@@ -61,7 +61,7 @@ module tb_mfrsd_sccsound;
       .cpu_addr(cpu_addr), .din(din),
       .scc_dout(scc_dout), .wave(wave),
       .sccPlusChip(2'b01),                // this subslot IS an SCC+ chip
-      .sccPlusMode({1'b0, scc_mode}),
+      .scc_ch_en(5'b11111), .sccPlusMode({1'b0, scc_mode}),
       .debug_scc_wr(debug_scc_wr));
 
    always #5 clk = ~clk;

@@ -19,6 +19,7 @@ module msx_slots
    input                 [3:0] opll_vol,          // 2 dB ladder, see vol_mul()
    input                 [3:0] scc_vol,
    input                 [1:0] scc_en,           // per-cartridge SCC mute (1 = audible)
+   input                 [4:0] scc_ch_en,        // per-channel SCC mute (1 = audible), both carts
    input                      opll_mute,
    //RAM
    output               [26:0] ram_addr,

@@ -37,6 +37,13 @@ module IKASCC_player_s #(
 
     input   wire    [1:0]   i_SCCP_MODE, //SCC+ mode: 0=Real(SCC), 1=Compatible, 2=Plus (unconnected -> 0)
 
+    //Per-channel audible mask, 1 = audible (MSX1_MiSTer diagnostics, 2026-09-05).
+    //Applied at the summer only, so register access, RAM contents, the position
+    //counters and the multiplier all keep running exactly as before -- muting a
+    //channel cannot change what the other four do, which is the whole point of
+    //having it.  Tie to 5'b11111 for the stock chip.
+    input   wire    [4:0]   i_CH_MUTE,
+
     output  reg             o_TEST,
 
     output  reg signed      [10:0]  o_SOUND
@@ -97,7 +104,9 @@ wire signed     [7:0]   ch1_sound, ch2_sound, ch3_sound, ch4_sound, ch5_sound;
 always @(posedge emuclk) begin
     if(!rst_n) o_SOUND <= 11'h000;
     else begin if(!mclkpcen_n) begin
-        o_SOUND <= ch1_sound + ch2_sound + ch3_sound + ch4_sound + ch5_sound;
+        o_SOUND <= (i_CH_MUTE[0] ? ch1_sound : 8'sd0) + (i_CH_MUTE[1] ? ch2_sound : 8'sd0) +
+                   (i_CH_MUTE[2] ? ch3_sound : 8'sd0) + (i_CH_MUTE[3] ? ch4_sound : 8'sd0) +
+                   (i_CH_MUTE[4] ? ch5_sound : 8'sd0);
     end end
 end
 

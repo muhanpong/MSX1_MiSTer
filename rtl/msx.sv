@@ -176,6 +176,7 @@ module msx
    input               [3:0] opll_vol,
    input               [3:0] scc_vol,
    input               [1:0] scc_en,            // per-cartridge SCC mute (1 = audible)
+   input               [4:0] scc_ch_en,         // per-channel SCC mute (1 = audible)
    input                     psg_mute,
    input                     opll_mute
 );
@@ -940,6 +941,7 @@ msx_slots msx_slots
    .opll_vol(opll_vol),
    .scc_vol(scc_vol),
    .scc_en(scc_en),
+   .scc_ch_en(scc_ch_en),
    .opll_mute(opll_mute),
    .ram_addr(ram_addr),
    .ram_din(ram_din),

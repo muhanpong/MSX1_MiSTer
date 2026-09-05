@@ -159,6 +159,7 @@ IKASCC_vrc_s #(.RAMCTRL_ASYNC(RAMCTRL_ASYNC)) u_vrc_s_main (
 ////
 
 IKASCC_player_s #(.RAM_TYPE(RAM_TYPE), .FAST_CLOCK(FAST_CLOCK), .RAMCTRL_ASYNC(RAMCTRL_ASYNC)) u_player_main (
+    .i_CH_MUTE                  (5'b11111                   ), //MSX1_MiSTer: stock chip = all channels audible
     .i_EMUCLK                   (emuclk                     ),
     .i_MCLK_PCEN_n              (mclkpcen_n                 ),
     .i_RST_n                    (rst_n                      ),

@@ -15,6 +15,10 @@ module scc_sound
    output signed [15:0] wave,
    input          [1:0] sccPlusChip,
    input          [1:0] sccPlusMode,
+   // Per-channel audible mask shared by both cartridge chips, 1 = audible.
+   // The per-SLOT mute is `oe` above; this is the per-CHANNEL one, applied
+   // inside IKASCC at its summer so chip state is untouched either way.
+   input          [4:0] scc_ch_en,
    output               debug_scc_wr
 );
 
@@ -120,6 +124,7 @@ IKASCC_player_s #(.RAM_TYPE(1), .FAST_CLOCK(1), .RAMCTRL_ASYNC(1)) scc_wave_A
    .i_RDRQ(scc_rdrq_A),
    .i_WRRQ(scc_wr_A),
    .i_SCCP_MODE(mode_A),
+   .i_CH_MUTE(scc_ch_en),
    .i_ABLO(ablo_A),
    .i_DB(din),
    .o_DB(scc_dout_A_int),
@@ -186,6 +191,7 @@ IKASCC_player_s #(.RAM_TYPE(1), .FAST_CLOCK(1), .RAMCTRL_ASYNC(1)) scc_wave_B
    .i_RDRQ(scc_rdrq_B),
    .i_WRRQ(scc_wr_B),
    .i_SCCP_MODE(mode_B),
+   .i_CH_MUTE(scc_ch_en),
    .i_ABLO(ablo_B),
    .i_DB(din),
    .o_DB(scc_dout_B_int),

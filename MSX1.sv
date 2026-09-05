@@ -355,6 +355,26 @@ localparam CONF_STR = {
    // of Off,Off,On,On all meant "audible".  The bit is unchanged: 0 = audible.
    "P2O[60],SCC Slot A Mute,Off,On;",
    "P2O[61],SCC Slot B Mute,Off,On;",
+   // ---- diagnostics (SCC_DIAG) --------------------------------------------
+   // Per-CHANNEL mute, both cartridges at once; combine with the two slot rows
+   // above to isolate any one voice ("slot A, ch3 only" = mute slot B and the
+   // other four channels).  Applied inside IKASCC at its summer, so the muted
+   // channel's registers, wave RAM, position counter and multiplier keep
+   // running -- muting one voice cannot alter the other four, which is what
+   // makes this usable as a measurement tool.
+   // Bits [69:65] were picked by reading the board's own /media/fat/config/
+   // MSX1.CFG: they are the free bits that are also ZERO there, so they come up
+   // audible on a machine that has never seen this build.  49/50/55/59 are free
+   // in CONF_STR but carry stale 1s in that file and must not be reused.
+   // No menumask: index 13 is the next free one and it failed on hardware
+   // (see the OPL4 note above), so these rows are never hidden.
+   `ifdef SCC_DIAG
+   "P2O[65],SCC Ch1 Mute,Off,On;",
+   "P2O[66],SCC Ch2 Mute,Off,On;",
+   "P2O[67],SCC Ch3 Mute,Off,On;",
+   "P2O[68],SCC Ch4 Mute,Off,On;",
+   "P2O[69],SCC Ch5 Mute,Off,On;",
+   `endif
    "P2O[100:97],PSG Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
    "P2O[104:101],MSX-MUSIC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
    "P2O[108:105],SCC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
@@ -574,6 +594,13 @@ wire  [3:0] psg_vol  = status[100:97];
 wire  [3:0] opll_vol = status[104:101];
 wire  [3:0] scc_vol  = status[108:105];
 wire  [1:0] scc_en   = ~status[61:60];   // menu is On,Off so 0 = enabled
+// Per-channel SCC mute, 1 = audible.  Diagnostics only: without SCC_DIAG the
+// CONF_STR rows are gone and this folds to a constant, costing nothing.
+`ifdef SCC_DIAG
+wire  [4:0] scc_ch_en = ~status[69:65];
+`else
+wire  [4:0] scc_ch_en = 5'b11111;
+`endif
 wire        psg_mute = status[62];
 wire        opll_mute= status[63];
 wire [15:0] cpu_addr;

@@ -45,7 +45,7 @@ scc_sound dut_ref (
    .cart_num(cart_num), .cs(cs & tgt[0]), .oe(2'b01),
    .cpu_rd(cpu_rd), .cpu_wr(cpu_wr), .cpu_mreq(cpu_mreq),
    .cpu_addr(cpu_addr), .din(din), .scc_dout(dout_ref), .wave(wave_ref),
-   .sccPlusChip(2'b01), .sccPlusMode(2'b01), .debug_scc_wr()
+   .sccPlusChip(2'b01), .scc_ch_en(5'b11111), .sccPlusMode(2'b01), .debug_scc_wr()
 );
 scc_sound dut_sut (
    .clk(clk), .clk_en(clk_en), .reset(reset),

@@ -94,7 +94,7 @@ scc_sound u_snd (
    .cpu_rd(cpu_rd), .cpu_wr(cpu_wr), .cpu_mreq(cpu_mreq),
    .cpu_addr(cpu_addr), .din(din),
    .scc_dout(scc_dout), .wave(wave),
-   .sccPlusChip(sccPlusChip), .sccPlusMode(scc_mode),
+   .sccPlusChip(sccPlusChip), .scc_ch_en(5'b11111), .sccPlusMode(scc_mode),
    .debug_scc_wr(debug_scc_wr)
 );
 

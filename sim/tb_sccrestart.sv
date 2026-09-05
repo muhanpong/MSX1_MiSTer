@@ -9,7 +9,7 @@ wire clk_en = (div==0);
 reg reset=1, cs=0, cpu_wr=0, cpu_mreq=0; reg [15:0] cpu_addr=0; reg [7:0] din=0;
 wire [7:0] dout; wire signed [15:0] wave;
 scc_sound dut(.clk(clk),.clk_en(clk_en),.reset(reset),.cart_num(1'b0),.cs(cs),.oe(2'b11),.cpu_rd(1'b0),.cpu_wr(cpu_wr),.cpu_mreq(cpu_mreq),
-  .cpu_addr(cpu_addr),.din(din),.scc_dout(dout),.wave(wave),.sccPlusChip(2'b01),.sccPlusMode(2'b01),.debug_scc_wr());
+  .cpu_addr(cpu_addr),.din(din),.scc_dout(dout),.wave(wave),.sccPlusChip(2'b01),.scc_ch_en(5'b11111), .sccPlusMode(2'b01),.debug_scc_wr());
 `define C dut.scc_wave_A.u_ctrl_ch1
 wire signed [7:0] c1 = dut.scc_wave_A.ch1_sound;
 integer nF=0, nrst=0, bad=0, tot=0; reg armed=0;

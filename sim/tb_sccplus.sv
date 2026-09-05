@@ -56,7 +56,7 @@ scc_sound dut (
    .cart_num(cart_num), .cs(cs), .oe(oe),
    .cpu_rd(cpu_rd), .cpu_wr(cpu_wr), .cpu_mreq(cpu_mreq),
    .cpu_addr(cpu_addr), .din(din), .scc_dout(scc_dout), .wave(wave),
-   .sccPlusChip(sccPlusChip), .sccPlusMode(sccPlusMode),
+   .sccPlusChip(sccPlusChip), .scc_ch_en(5'b11111), .sccPlusMode(sccPlusMode),
    .debug_scc_wr(debug_scc_wr)
 );
 

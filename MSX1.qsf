@@ -19,9 +19,23 @@ set_global_assignment -name LAST_QUARTUS_VERSION "17.1.0 Lite Edition"
 # rows + IM2-table watchpoint).  Uncomment to re-enable; see rtl/msx.sv and
 # rtl/debug_overlay.sv `ifdef MOONSOUND_DIAG sections.
 set_global_assignment -name VERILOG_MACRO "MOONSOUND_DIAG=1"
-# scc_sound.sv scc_stp[55:0] probe register for the SCC+ crackle SignalTap (2026-09-05).
-# Costs ~60 regs; drop it once the .stp is done.
-# set_global_assignment -name VERILOG_MACRO "SCC_STP=1"   # probe off for release builds
+# ---- SCC diagnostics -------------------------------------------------------
+# Two switches, cheap and expensive.
+#
+# SCC_DIAG  Per-channel SCC mute rows on the audio page (status[69:65]), plus the
+#           mask that carries them into IKASCC's summer.  Combined with the two
+#           per-slot Mute rows this isolates any single voice, which is how the
+#           2026-09-05 crackle work localised its defects.  Costs 5 status bits,
+#           5 menu rows and a handful of LUTs; nothing is hidden, so no menumask
+#           index is needed (13 is the next free one and it fails on hardware).
+#           Safe to ship: without it the mask folds to a constant.
+#
+# SCC_STP   SignalTap probe register scc_stp[55:0] in scc_sound.sv.  NOT free --
+#           the analyzer it feeds takes BRAM from 41% to 74% -- and it needs the
+#           SLD wiring turned on separately (see the SignalTap block below), so
+#           it stays off unless a capture is actually being made.
+set_global_assignment -name VERILOG_MACRO "SCC_DIAG=1"
+# set_global_assignment -name VERILOG_MACRO "SCC_STP=1"
 
 set_global_assignment -name GENERATE_RBF_FILE ON
 set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
@@ -337,10 +351,7 @@ set_global_assignment -name SEED 6
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
 # 2026-09-05: the Hi no Tori stp_data wiring that used to sit here was removed;
 # MSX1.stp now taps scc_sound:scc_sound|scc_stp[55:0] (SCC+ crackle) and the
-# SLD wiring comes from `quartus_stp MSX1 --stp_file MSX1.stp --enable` and is
-# stripped again with `--disable` (which is what leaves the three OFF lines
-# below).  Commenting ENABLE_SIGNALTAP out by hand is NOT enough: the SLD
-# assignments alone still build the analyzer (2026-09-05: BRAM 41% -> 74%).
+# SLD wiring below comes from `quartus_stp MSX1 --stp_file MSX1.stp --enable`.
 # `quartus_sh --flow compile` does NOT run that conversion (only the GUI does):
 # the first 2026-09-05 build had ENABLE_SIGNALTAP ON and no analyzer at all
 # (fit.rpt: 0 x sld_signaltap).  Run quartus_stp after every .stp save, and
