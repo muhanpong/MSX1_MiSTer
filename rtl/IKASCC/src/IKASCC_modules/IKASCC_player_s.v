@@ -389,7 +389,21 @@ IKASCC_player_control_s #(
     .o_RAM_ADDR_CNTR            (ch5_ram_addr_cntr          ),
     .o_RAM_ADDR_CPU             (ch5_ram_addr_cpu           ),
     .o_RAM_D                    (ch5_ram_d                  ),
-    .i_RAM_Q                    (ch5_wavelatch              ),
+    //Plus mode reads the private ch5 RAM DIRECTLY, not through ch5_wavelatch.
+    //The latch exists because ch4 and ch5 share one RAM on the K051649 and take
+    //turns on a 32-tick time-division grid (ch45_cntr x ch45_sr), so each of
+    //them can only refresh its waveform byte once per grid period.  The
+    //multiplier, though, runs for nine ticks once per POSITION step, so
+    //whenever the refresh falls after that window the sample is computed from
+    //the previous position's byte -- ch5 played one sample behind for about
+    //85% of its steps.  That is correct for ch4 (openMSX does not model the
+    //time division at all) but wrong for the SCC+'s fifth channel, which has a
+    //RAM of its own and no one to share it with.  Reading it straight makes ch5
+    //bit-exact against the openMSX-algorithm reference, like ch1-3:
+    //  mismatch 0.594 -> 0.000, residual 7.19 -> 0.21 codes (5 s SCMD stream).
+    //Real/Compat keep the latch: there ch5 IS the ch4 mirror and must follow
+    //ch4's shared-RAM timing exactly.  docs/scc_crackle_rootcause_20260905.md
+    .i_RAM_Q                    (sccp_ch5_indep ? ch5_ram_q_snd : ch5_wavelatch),
 
     .o_FRACCNTR_LD_n            (fraccntr_ld_n[4]           ),
 

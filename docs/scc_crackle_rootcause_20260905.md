@@ -72,9 +72,33 @@ Gates kept: `sim/run_sccplus.sh` 45/0, static transfer function 768/768.
   `cyccntr`'s SET): still 39/40 wrong. The pulse width was never the problem —
   the stale `accshft_en_z` was. Reverted.
 
+## Second defect found the same way: ch5 played one sample behind
+
+With the multiplier fixed, per-channel alignment showed ch1-3 **bit-exact**
+against the reference (mismatch 0.000, residual 0.2 codes) and all of the
+remaining error sitting on ch4/ch5 — the pair that shares one wave RAM.
+
+`ch4_wavelatch` / `ch5_wavelatch` exist because the K051649 gives ch4 and ch5
+turns on a **32-tick time-division grid**, so each refreshes its waveform byte
+once per grid period. The multiplier runs for nine ticks once per **position
+step**, so whenever the refresh lands after that window the sample is computed
+from the previous position's byte. ch5 was one sample behind for ~85% of steps
+(settled value matched the reference in only 15.5% of segments).
+
+For ch4 that is the chip: openMSX does not model the time division at all, so
+ch4's 12% divergence is ours being *more* accurate, and it stays. But the SCC+'s
+fifth channel has **its own RAM** and shares with nobody, so in Plus mode ch5 now
+reads that RAM directly instead of through the latch:
+
+| ch5, Plus mode | before | after |
+|---|---|---|
+| samples differing from reference | 59.4% | **0.0%** |
+| residual (codes) | 7.19 | **0.21** |
+
+Real/Compat still use the latch — there ch5 *is* the ch4 mirror and must follow
+ch4's shared-RAM timing exactly.
+
 ## What is still not matched
 
-After the fix the render is close but not identical to the reference: 635 freq
-writes still settle >4 codes off, and ch4/ch5 (the time-division shared RAM pair)
-carry most of the remaining residual. Whether any of that is audible is the
-board's call; the full-scale spikes, which certainly were, are gone.
+ch4 alone: 12% of samples differ (residual 3.68 codes), which is the shared-RAM
+time division openMSX omits. Nothing else deviates.
