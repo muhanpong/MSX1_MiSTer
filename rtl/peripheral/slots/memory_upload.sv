@@ -7,6 +7,10 @@ module memory_upload
    input                [26:0] ioctl_addr,
    input                       rom_eject,
    input                       reload,
+   // Hold the staging FSM off while a .sav DMA owns SDRAM ch1 (MSX1.sv `saving`).
+   // The pulse is latched, not dropped: the file is already in DDR3, so the load
+   // simply starts when the save finishes.
+   input                       hold_load,
    output logic         [27:0] ddr3_addr,
    output logic                ddr3_rd,
    output logic                ddr3_wr,
@@ -63,7 +67,15 @@ module memory_upload
       end
       if (reload) load <= 1;
       ioctl_download_last <= ioctl_download;
-   end 
+   end
+
+   logic load_defer;
+   always @(posedge clk) begin
+      if (load & hold_load)  load_defer <= 1'b1;
+      else if (~hold_load)   load_defer <= 1'b0;
+   end
+   wire load_go = (load | load_defer) & ~hold_load;
+   
 
    assign rom_loaded = {|ioctl_size[3],|ioctl_size[2]};
    assign rom_big    = {ioctl_size[3] > 27'h400000, ioctl_size[2] > 27'h400000};
@@ -156,7 +168,7 @@ module memory_upload
          else                             ram_addr <= ram_addr + 1'd1;
       end
       if (ddr3_ready & ddr3_rd) begin ddr3_rd <= 1'b0; ddr3_addr <= ddr3_addr + 1'd1; end
-      if (load) begin
+      if (load_go) begin
          state <= STATE_CLEAN;
          ddr3_addr             <= 0;
          ram_addr              <= 27'd0;

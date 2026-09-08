@@ -533,7 +533,32 @@ wire upload_hold = reset_rq & status[64] & ~|flash16x_active;
 // transfer regardless of the toggle.  It loses its state, which is the right
 // trade against corrupting the transfer.
 wire reset_ms = reset | upload_hold;
-wire reset = RESET | status[0] | status[10] | (reset_rq & ~status[64]);
+
+// ---- a save in progress outranks the reset buttons (2026-09-08) ----------------
+// nvram_backup and flash_dirtysave both take `reset`, so a reset landing mid-DMA
+// truncates the .sav being written -- the one moment where a stray button press
+// destroys data rather than just interrupting play.  Hold the USER buttons until
+// the DMA finishes and then let the reset through, so the press is honoured
+// rather than swallowed.  RESET (power-on / framework) is never deferred.
+// The wait is bounded: if a save engine ever wedged, an unresettable core would
+// be worse than a lost .sav, so after ~1.5 s the button wins anyway.
+wire saving = nvbak_dma_active | dump_active;      // declared further down, as msx_pause does
+wire reset_btn = status[0] | status[10];
+reg        reset_held = 1'b0;
+reg [24:0] save_guard = 25'd0;                     // 2^25 / 21.48 MHz ~ 1.56 s
+wire       guard_expired = save_guard[24];
+always @(posedge clk21m) begin
+   if (!saving) begin
+      save_guard <= 25'd0;
+      reset_held <= 1'b0;
+   end else begin
+      if (!guard_expired) save_guard <= save_guard + 25'd1;
+      if (reset_btn)      reset_held <= 1'b1;      // remember the press, apply on release
+   end
+end
+wire reset_now = (reset_btn | reset_held) & (~saving | guard_expired);
+
+wire reset = RESET | reset_now | (reset_rq & ~status[64]);
 
 ///////////////// Computer /////////////////
 wire  [7:0] R, G, B, cpu_din, cpu_dout;
@@ -861,6 +886,7 @@ debug_overlay u_overlay (
    .en             (status[48]),
    // pause symbol overlay (docs/pause_overlay_design.md §5) — independent of en/status[48]
    .pause_in       (msx_pause),
+   .saving_in      (saving),
    .osd_in         (OSD_STATUS),
    .key_tgl_in     (ps2_key[10]),
    .mouse_tgl_in   (ps2_mouse[24]),
@@ -972,6 +998,10 @@ wire  [1:0] rom_big;
 memory_upload memory_upload(
     .clk(clk21m),
     .reset_rq(reset_rq),
+    // ch1 gives an upload priority over the save DMA (see the ch1_din mux below),
+    // so starting one mid-save would starve the engine that is writing the .sav.
+    // The file is already staged in DDR3 at this point; deferring costs nothing.
+    .hold_load(saving),
     .ioctl_download(ioctl_download),
     .ioctl_index(ioctl_index),
     .ioctl_addr(ioctl_addr),

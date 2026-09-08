@@ -55,6 +55,11 @@ module debug_overlay (
     input  wire        dbg_int_ghost,         // fatal IFF1-fall had no INTA
     // ── Pause-symbol inputs (docs/pause_overlay_design.md §5 wiring table) ──
     input  wire        pause_in,              // msx_pause (level)
+    // Save/load DMA in progress (nvbak_dma_active | dump_active).  Shares the
+    // pause symbol's box and outranks it: while a .sav is being written the
+    // machine IS paused, so without this the user only sees the pause symbol
+    // and cannot tell a deliberate freeze from a save.
+    input  wire        saving_in,
     input  wire        osd_in,                // OSD_STATUS (level)
     input  wire        key_tgl_in,            // ps2_key[10] — flips per keyboard event
     input  wire        mouse_tgl_in,          // ps2_mouse[24] — flips per mouse packet
@@ -197,7 +202,9 @@ logic       mouse_q1, mouse_q2, mouse_q3;
 logic [5:0] joy0_q1,  joy0_q2,  joy0_q3;
 logic [5:0] joy1_q1,  joy1_q2,  joy1_q3;
 
+logic       saving_q1, saving_q2;
 always_ff @(posedge CLK_VIDEO) begin
+    saving_q1 <= saving_in;   saving_q2 <= saving_q1;
     pause_q1 <= pause_in;     pause_q2 <= pause_q1;
     osd_q1   <= osd_in;       osd_q2   <= osd_q1;
     key_q1   <= key_tgl_in;   key_q2   <= key_q1;    key_q3   <= key_q2;
@@ -223,13 +230,26 @@ always_ff @(posedge CLK_VIDEO) begin
                             sym_hold <= sym_hold - 6'd1;
 end
 
+// A save blinks at ~2 Hz off the same vblank tick the hold counter uses: a frozen
+// icon on a frozen screen cannot say "still working", and the blink is what
+// separates "saving" from "paused" at a glance.
+logic [5:0] blink;
+always_ff @(posedge CLK_VIDEO) begin
+    if (!saving_q2)                    blink <= 6'd0;
+    else if (!vblank_prev && vblank)   blink <= blink + 6'd1;
+end
+
 // pause_q2 gate makes unpause hide the symbol combinationally, same clock.
-wire symbol_on = pause_q2 && (osd_q2 || sym_hold != 6'd0);
+// Saving wins: it is the more urgent of the two and it always coincides with a
+// pause (msx_pause folds in both DMA-active signals).
+wire symbol_on = (saving_q2 && blink[4]) || (pause_q2 && (osd_q2 || sym_hold != 6'd0));
 
 // Fade-out: 4 discrete alpha steps over the last 8 frames of the hold
 // (remaining >=8 or OSD open → opaque; 7..6 → 3/4; 5..4 → 2/4; 3..0 → 1/4).
 // Blend is shift-add only (x1/4, x2/4, x3/4, x4/4) — no multipliers.
-wire [1:0] sym_alpha = (osd_q2 || sym_hold >= 6'd8) ? 2'd3 :
+// A save must stay legible until it finishes, so it never fades.
+wire [1:0] sym_alpha = saving_q2                       ? 2'd3 :
+                       (osd_q2 || sym_hold >= 6'd8)    ? 2'd3 :
                        (sym_hold >= 6'd6)           ? 2'd2 :
                        (sym_hold >= 6'd4)           ? 2'd1 : 2'd0;
 
@@ -266,9 +286,20 @@ wire [10:0] sym_px   = sym_wide ? {1'b0, h_cnt[10:1]} : h_cnt;
 wire in_sym  = symbol_on && !hblank && !vblank
             && (v_cnt >= 8'd26)    && (v_cnt <= 8'd45)
             && (sym_px >= 11'd226) && (sym_px < 11'd242);
-wire sym_bar = (v_cnt >= 8'd28) && (v_cnt <= 8'd43)
-            && ((sym_px >= 11'd228 && sym_px < 11'd232)
-             || (sym_px >= 11'd236 && sym_px < 11'd240));
+wire pause_bars = (v_cnt >= 8'd28) && (v_cnt <= 8'd43)
+               && ((sym_px >= 11'd228 && sym_px < 11'd232)
+                || (sym_px >= 11'd236 && sym_px < 11'd240));
+// Save icon in the same box: an arrow pointing down into a tray.  The head is a
+// 4-row triangle built from two compares per row -- no multipliers, no ROM.
+wire [7:0] head_r    = v_cnt - 8'd36;                       // 0..3 inside the head
+wire       save_shaft = (v_cnt >= 8'd28) && (v_cnt <  8'd36)
+                     && (sym_px >= 11'd232) && (sym_px < 11'd236);
+wire       save_head  = (v_cnt >= 8'd36) && (v_cnt <  8'd40)
+                     && (sym_px >= (11'd230 + 11'(head_r)))
+                     && (sym_px <  (11'd238 - 11'(head_r)));
+wire       save_tray  = (v_cnt >= 8'd41) && (v_cnt <= 8'd42)
+                     && (sym_px >= 11'd228) && (sym_px < 11'd240);
+wire sym_bar = saving_q2 ? (save_shaft | save_head | save_tray) : pause_bars;
 
 logic        pb;      // reg-probe current bit (comb temp)
 
