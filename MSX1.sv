@@ -535,28 +535,17 @@ wire upload_hold = reset_rq & status[64] & ~|flash16x_active;
 wire reset_ms = reset | upload_hold;
 
 // ---- a save in progress outranks the reset buttons (2026-09-08) ----------------
-// nvram_backup and flash_dirtysave both take `reset`, so a reset landing mid-DMA
-// truncates the .sav being written -- the one moment where a stray button press
-// destroys data rather than just interrupting play.  Hold the USER buttons until
-// the DMA finishes and then let the reset through, so the press is honoured
-// rather than swallowed.  RESET (power-on / framework) is never deferred.
-// The wait is bounded: if a save engine ever wedged, an unresettable core would
-// be worse than a lost .sav, so after ~1.5 s the button wins anyway.
-wire saving = nvbak_dma_active | dump_active;      // declared further down, as msx_pause does
-wire reset_btn = status[0] | status[10];
-reg        reset_held = 1'b0;
-reg [24:0] save_guard = 25'd0;                     // 2^25 / 21.48 MHz ~ 1.56 s
-wire       guard_expired = save_guard[24];
-always @(posedge clk21m) begin
-   if (!saving) begin
-      save_guard <= 25'd0;
-      reset_held <= 1'b0;
-   end else begin
-      if (!guard_expired) save_guard <= save_guard + 25'd1;
-      if (reset_btn)      reset_held <= 1'b1;      // remember the press, apply on release
-   end
-end
-wire reset_now = (reset_btn | reset_held) & (~saving | guard_expired);
+// See rtl/save_guard.sv for why, and sim/tb_save_guard.sv for the cases it holds.
+wire saving = nvbak_dma_active | dump_active;   // declared further down, as msx_pause does
+wire reset_now, hold_load;
+save_guard u_save_guard
+(
+   .clk       (clk21m),
+   .saving    (saving),
+   .reset_btn (status[0] | status[10]),   // RESET (power-on) deliberately excluded
+   .reset_now (reset_now),
+   .hold_load (hold_load)
+);
 
 wire reset = RESET | reset_now | (reset_rq & ~status[64]);
 
@@ -1001,7 +990,7 @@ memory_upload memory_upload(
     // ch1 gives an upload priority over the save DMA (see the ch1_din mux below),
     // so starting one mid-save would starve the engine that is writing the .sav.
     // The file is already staged in DDR3 at this point; deferring costs nothing.
-    .hold_load(saving),
+    .hold_load(hold_load),
     .ioctl_download(ioctl_download),
     .ioctl_index(ioctl_index),
     .ioctl_addr(ioctl_addr),
