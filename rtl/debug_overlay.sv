@@ -240,9 +240,15 @@ always_ff @(posedge CLK_VIDEO) begin
 end
 
 // pause_q2 gate makes unpause hide the symbol combinationally, same clock.
-// Saving wins: it is the more urgent of the two and it always coincides with a
-// pause (msx_pause folds in both DMA-active signals).
-wire symbol_on = (saving_q2 && blink[4]) || (pause_q2 && (osd_q2 || sym_hold != 6'd0));
+// Saving takes the box over outright rather than OR-ing into it.  OR-ing let the
+// pause term hold the icon solid whenever sym_hold was still loaded -- which is
+// every save started from the OSD, since closing it leaves 36 frames on the
+// counter -- so the blink only began 0.6 s in.  Worse, `blink` starts at 0, so a
+// save shorter than the first half-period would have drawn NOTHING and only the
+// pause term made it visible at all.  ON first, then blink.
+wire save_visible = ~blink[4];      // 16 frames on / 16 off, starting ON
+wire symbol_on = saving_q2 ? save_visible
+                           : (pause_q2 && (osd_q2 || sym_hold != 6'd0));
 
 // Fade-out: 4 discrete alpha steps over the last 8 frames of the hold
 // (remaining >=8 or OSD open → opaque; 7..6 → 3/4; 5..4 → 2/4; 3..0 → 1/4).

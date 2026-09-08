@@ -44,7 +44,13 @@ module flash_dirtysave #(
     input               prog_we,        // validated ascii16x byte-program strobe
     input        [22:0] prog_addr,      // flash byte address of that program
 
-    input               save_req,       // status[38]
+    input               save_req,       // status[38] -- manual: always saves
+    // Autosave pulse (OSD opened with the option on).  Only acts when something
+    // was PROGRAMMED since the last completed save: `dirty` deliberately keeps
+    // previously-saved blocks (the UNION that keeps a partial-dirty SAVE from
+    // losing them), so gating on any_dirty would rewrite the whole .sav on every
+    // OSD open -- the write amplification the storage plan says to bound.
+    input               save_req_auto,
     input               load_req,       // status[39] | load_sram
     input               upload_active,  // ROM staging in progress
     input               log_clear,      // new ROM loaded -> clear dirty
@@ -78,6 +84,7 @@ logic [7:0] sector_buf [512];
 assign sd_buff_din = sector_buf[sd_buff_addr[8:0]];
 
 logic [127:0] dirty = '0;     // 1 bit per 64KB block, indexed by addr[22:16]
+logic [127:0] dirty_new = '0; // programmed since the last COMPLETED save (autosave gate only)
 logic [127:0] ld_bm;
 logic [63:0]  hdr_magic;
 
@@ -112,6 +119,8 @@ logic load_pending = 1'b0;   // latched LOAD request; executes once all gates ar
 wire pw_rise    = prog_we & ~pw_q;
 wire in_bounds  = ({9'd0, prog_addr} < ({16'd0, flash16x_size} << 14));
 wire save_start = save_req & ~save_q & flash16x_active & mounted_rw;
+logic auto_q = 1'b0;
+wire auto_start = save_req_auto & ~auto_q & flash16x_active & mounted_rw & |dirty_new;
 // LOAD trigger is latched (load_sram is a 1-cycle pulse at staging-end; gates such as
 // ~upload_active / image_size>0 may not all be ready that exact cycle) -> wait for them.
 wire load_ready = load_pending & flash16x_active & ~upload_active & (image_size > 0);
@@ -120,17 +129,20 @@ wire any_dirty  = |dirty;
 always @(posedge clk) begin
     pw_q     <= prog_we;
     save_q   <= save_req;
+    auto_q   <= save_req_auto;
     load_q   <= load_req;
     last_ack <= sd_ack;
     if (img_mounted) begin mounted_rw <= ~img_readonly; image_size <= img_size; end
 
     if (reset) begin
-        st<=IDLE; sdram_req<=0; sd_rd<=0; sd_wr<=0; dirty<='0; pw_q<=0; load_pending<=0; merge_save<=0;
+        st<=IDLE; sdram_req<=0; sd_rd<=0; sd_wr<=0; dirty<='0; dirty_new<='0; pw_q<=0; load_pending<=0; merge_save<=0;
     end else begin
         // ---- dirty capture (passive snoop, live in IDLE only) ----
-        if (log_clear) dirty <= '0;
-        else if (st==IDLE & flash16x_active & pw_rise & in_bounds)
-            dirty[prog_addr[22:16]] <= 1'b1;
+        if (log_clear) begin dirty <= '0; dirty_new <= '0; end
+        else if (st==IDLE & flash16x_active & pw_rise & in_bounds) begin
+            dirty    [prog_addr[22:16]] <= 1'b1;
+            dirty_new[prog_addr[22:16]] <= 1'b1;
+        end
 
         // ---- latch a LOAD request (load_req pulse); cleared when it starts ----
         if (log_clear)                load_pending <= 1'b0;   // new game: drop stale request
@@ -139,7 +151,7 @@ always @(posedge clk) begin
         case (st)
         IDLE: begin
             sdram_req<=0; sd_rd<=0; sd_wr<=0;
-            if (save_start & any_dirty) begin
+            if ((save_start | auto_start) & any_dirty) begin
                 // SAVE-MERGE phase 1: read the existing .sav header and restore the
                 // previously-saved blocks we did NOT change this session into SDRAM,
                 // then fall through to the normal SAVE dump (UNION) -- reuses LD_*.
@@ -254,7 +266,10 @@ always @(posedge clk) begin
             end
         end
 
-        DONE: begin sdram_req<=0; sd_rd<=0; sd_wr<=0; st<=IDLE; end
+        DONE: begin
+            sdram_req<=0; sd_rd<=0; sd_wr<=0; st<=IDLE;
+            if (merge_save) dirty_new <= '0;   // save landed on SD: nothing new pending
+        end
         default: st<=IDLE;
         endcase
     end

@@ -297,6 +297,12 @@ localparam CONF_STR = {
    "H6-;",
    "H6R[38],SRAM Save;",
    "H6R[39],SRAM Load;",
+   // Opening the OSD is the last moment before the destructive choices inside it
+   // (Load ROM, Reset, machine swap), so that is when the autosave fires.  The
+   // flash engine only acts when something was programmed since the last save
+   // (dirty_new), so browsing the menu does not rewrite the .sav every time.
+   // Default Off; bit 52 measured zero in the shipped MSX1.CFG (2026-09-05 audit).
+   "H6O[52],SRAM Autosave on OSD,Off,On;",
    "-;",
    "C,Cheats;",
    "FC7,GG,Load Cheat;",
@@ -538,6 +544,11 @@ wire reset_ms = reset | upload_hold;
 // See rtl/save_guard.sv for why, and sim/tb_save_guard.sv for the cases it holds.
 wire saving = nvbak_dma_active | dump_active;   // declared further down, as msx_pause does
 wire reset_now, hold_load;
+// One pulse when the OSD opens (option O[52]).  nvram_backup saves its small
+// SRAM images every time; flash_dirtysave gates itself on dirty_new.
+reg autosave_osd_q;
+always @(posedge clk21m) autosave_osd_q <= OSD_STATUS;
+wire autosave = status[52] & OSD_STATUS & ~autosave_osd_q;
 save_guard u_save_guard
 (
    .clk       (clk21m),
@@ -1184,7 +1195,7 @@ nvram_backup nvram_backup
    .reset(reset),
    .lookup_SRAM(lookup_SRAM),
    .load_req(status[39] | load_sram),
-   .save_req(status[38]),
+   .save_req(status[38] | autosave),
    .img_mounted(img_mounted[3:0]),
    .img_readonly(img_readonly),
    .img_size(img_size),
@@ -1224,6 +1235,7 @@ flash_dirtysave flash_dirtysave
    .prog_we(flash16x_prog_we),
    .prog_addr(flash16x_prog_addr),
    .save_req(status[38]),
+   .save_req_auto(autosave),
    .load_req(status[39] | load_sram),
    .upload_active(upload_active),
    .log_clear(log_clear),
