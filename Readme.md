@@ -1,8 +1,39 @@
 # MSX1/MSX2 for [MiSTer Board](https://github.com/MiSTer-devel/Main_MiSTer/wiki)
 
 A fork of [MiSTer-devel/MSX1_MiSTer](https://github.com/MiSTer-devel/MSX1_MiSTer) that adds
-MoonSound (YMF278B/OPL4), the ASCII16-X flash mapper, standard OSD cheats, a pause facility,
-and a number of VDP accuracy fixes.
+MoonSound (YMF278B/OPL4), a Z80 turbo, IKASCC-based SCC+, the ASCII16-X and NEO-8/16
+mappers, expanded slots, standard OSD cheats, extended saves, and a number of VDP
+accuracy fixes.
+
+---
+
+## 이 포크가 더한 것 / What this fork adds (summary)
+
+**새로 생긴 것 / New**
+
+- **Z80 터보 / Z80 turbo** — 5.37 / 7.16 / 10.7 MHz 세 단계. 파나소닉 MSX2+ 방식 포트 토글도 지원
+  *Three steps (5.37 / 7.16 / 10.7 MHz), plus the Panasonic MSX2+ port toggle.*
+- **SCC+ 정상화 / SCC+ done right** — IKASCC 기반, ch4/ch5 별도 파형. 듀얼 SCC+ 연주 가능
+  *IKASCC-based, separate ch4/ch5 waveforms; two SCC+ can play at once.*
+- **NEO-8 / NEO-16 매퍼 / mappers** — 최대 64MB, 시그니처 자동 인식 + OSD 수동 선택
+  *Up to 64MB, auto-detected by signature or picked by hand in the OSD.*
+- **확장 슬롯 / Expanded slots** — 주 슬롯에 서브 슬롯 on/off, 넣을 기능 선택
+  *Sub-slots on/off per primary slot, each sub-slot's device chosen in the menu.*
+- **치트 / Cheats** — .gg 형식, 자동/수동 로딩
+  *.gg format, automatic and manual loading.*
+- **세이브 확장 / Extended saves** — ASCII16X와 Yamanooto 매퍼 세이브 지원. ASCII16은 ASCII16X로 통합
+  *Save support for the ASCII16X and Yamanooto mappers; ASCII16 folded into ASCII16X.*
+- **AUDIO SETTINGS** — 음원별 게인 ±8dB, 뮤트, SCC 채널별 뮤트
+  *Per-source gain (±8dB), mute, and per-channel SCC mute.*
+
+**곁들여 고친 것 / Also fixed**
+
+- VDP 버그 두 건 — Zanac EX 타이틀 깨짐, 뿌띠 까미용 공중부양
+  *Two VDP bugs: Zanac EX title corruption, Putty Camiyon floating sprites.*
+- OPL4·ASCII16X 쪽 수정으로 *Go Figure* 플레이 가능
+  *OPL4 and ASCII16X fixes make Go Figure playable.*
+
+아래는 항목별 상세 / Details below.
 
 ---
 
@@ -26,6 +57,11 @@ One `ASCII16X` menu entry covers both variants and dispatches on ROM size:
 - ROM > 4MB → ASCII16-X flash mapper with an 8MB chip, JEDEC/CFI command set
 
 This is what MSXdev entries such as *GoFigure* need.
+
+### NEO-8 / NEO-16 mappers
+openMSX's concept mappers with 12-bit bank registers (up to 64MB). Recognised by the
+`ROM_NEO8` / `ROM_NE16` signature at file offset 16, or selected by hand from the mapper
+dropdown -- a damaged signature cannot be told apart 8-from-16 by banking alone.
 
 ### Cheats
 Standard MiSTer OSD cheat support using the common Kitrinx `.gg` format.
