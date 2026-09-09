@@ -11,19 +11,13 @@
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);
-    font:14px/1.65 -apple-system,"Malgun Gothic","Apple SD Gothic Neo",Segoe UI,Roboto,sans-serif;
+    font:14px/1.55 -apple-system,"Malgun Gothic","Apple SD Gothic Neo",Segoe UI,Roboto,sans-serif;
     word-break:keep-all}
   .wrap{max-width:980px;margin:0 auto;padding:24px}
-  h1{font-size:22px;margin:0 0 4px}
+  h1{font-size:20px;margin:0 0 4px}
   .sub{color:var(--muted);margin:0 0 20px}
-  h2.step{font-size:15px;margin:26px 0 8px;color:var(--accent)}
-  h2.step .n{display:inline-block;background:var(--accent);color:#06231a;border-radius:50%;
-    width:22px;height:22px;line-height:22px;text-align:center;font-size:13px;margin-right:8px}
   .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;
     padding:16px;margin-bottom:16px}
-  .intro{border-left:3px solid var(--accent2)}
-  .intro p{margin:0 0 8px}
-  .intro p:last-child{margin:0}
   table{width:100%;border-collapse:collapse}
   th,td{padding:8px 6px;text-align:left;border-bottom:1px solid var(--line)}
   th{color:var(--muted);font-weight:600;font-size:12px;letter-spacing:.02em}
@@ -55,63 +49,25 @@
     max-height:240px;overflow-y:auto}
   .muted{color:var(--muted)}
   code{background:#0e1116;border:1px solid var(--line);border-radius:4px;padding:1px 5px;
-    font-family:ui-monospace,monospace;word-break:break-all}
+    font-family:ui-monospace,monospace}
   .warn{color:var(--accent2)}
   .err{color:var(--bad)}
   .ok{color:var(--accent)}
   ol,ul{margin:6px 0 0;padding-left:20px}
-  li{margin:0 0 6px}
   a.filelbl{display:inline-block;cursor:pointer;color:var(--accent);text-decoration:underline}
   input[type=file]{display:none}
   .summary{display:flex;gap:20px;flex-wrap:wrap;align-items:center}
   .summary b{color:var(--fg)}
   details summary{cursor:pointer;color:var(--muted)}
-  .paths{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-  @media (max-width:720px){.paths{grid-template-columns:1fr}}
-  .path{border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#161b23}
-  .path h3{margin:0 0 6px;font-size:14px}
-  .path .tag{font-size:11px;border-radius:999px;padding:2px 8px;vertical-align:2px;margin-left:6px}
-  .tag.rec{background:var(--accent);color:#06231a;font-weight:700}
-  .tag.adv{background:transparent;color:var(--muted);border:1px solid var(--line)}
-  .path p{margin:0 0 6px;font-size:13px;color:var(--muted)}
-  .path p b{color:var(--fg)}
-  .kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;
-    font-family:ui-monospace,monospace;font-size:12px;background:#0e1116}
+  table.out td:first-child{white-space:nowrap;color:var(--fg);font-weight:600}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>MSX1 치트 에디터</h1>
-  <p class="sub">MiSTer MSX1 코어용 치트 파일을 만들고 고치는 도구입니다. 이 페이지 하나로 전부 동작하며, 인터넷 연결이 필요 없습니다.</p>
+  <p class="sub">메모리 주소에 값을 고정하는 치트를 만들어 MiSTer용 파일로 내보냄.
+    예: 주소 <code>DC78</code>에 값 <code>80</code> = 연료 고정. 게임별 치트는 blueMSX <code>.mcf</code>에서 불러오는 게 빠름.</p>
 
-  <div class="panel intro">
-    <p><b>치트가 뭐냐면</b> — 게임 메모리의 특정 주소에 원하는 값을 계속 써 넣어 고정하는 것입니다.
-      예를 들어 어떤 게임의 연료가 주소 <code>DC78</code>에 있다면, 거기에 <code>80</code>을 계속 써서
-      연료가 줄지 않게 만드는 식입니다. 주소와 값은 게임마다 다르며, 보통 blueMSX용
-      <code>.mcf</code> 치트 모음 파일에서 가져옵니다.</p>
-    <p><b>만든 치트를 내보내는 길은 두 가지</b>입니다. 뭘 골라야 할지 모르겠다면 <b>표준 .zip</b>을 쓰세요.</p>
-    <div class="paths" style="margin-top:10px">
-      <div class="path">
-        <h3>표준 .zip<span class="tag rec">추천</span></h3>
-        <p>MiSTer 공통 치트 메뉴용. OSD의 <b>Cheats</b> 메뉴에 치트가 <b>이름별로</b> 나열되고,
-           거기서 하나씩 켜고 끌 수 있습니다.</p>
-        <p>복사 위치: <code>/media/fat/cheats/MSX1/&lt;롬파일이름&gt;.zip</code><br>
-           — zip 이름이 <b>롬 파일 이름과 같아야</b> 자동으로 인식됩니다.</p>
-        <p>아래 표의 <b>켜기</b> 체크와 무관하게, 유효한 행이 전부 들어갑니다
-           (켜고 끄는 건 OSD에서 하니까요).</p>
-      </div>
-      <div class="path">
-        <h3>.cht<span class="tag adv">이 코어 전용</span></h3>
-        <p>이 코어의 자체 로더용. OSD의 <b>Load Cheat</b>으로 파일을 고르고
-           <b>Cheats → On</b>으로 한꺼번에 켭니다.</p>
-        <p>복사 위치: <code>/media/fat/games/MSX1/</code> (파일 이름은 자유)</p>
-        <p>아래 표의 <b>켜기</b> 체크가 그대로 저장되어, 체크된 치트만 하드웨어에서
-           동작합니다. 치트가 아주 많으면 아래 충돌 경고를 확인하세요.</p>
-      </div>
-    </div>
-  </div>
-
-  <h2 class="step"><span class="n">1</span>치트 입력하기</h2>
   <div class="panel controls">
     <button id="add">＋ 치트 추가</button>
     <a class="filelbl" id="mcflbl">⬆ .mcf 불러오기 (blueMSX)</a>
@@ -131,23 +87,19 @@
         <thead><tr>
           <th class="idx">#</th>
           <th class="col-on">켜기</th>
-          <th class="col-name">이름 (OSD에 표시될 설명)</th>
-          <th class="col-addr">주소 (16진수)</th>
-          <th class="col-val">값 (16진수)</th>
+          <th class="col-name">이름</th>
+          <th class="col-addr">주소 (hex)</th>
+          <th class="col-val">값 (hex)</th>
           <th class="col-del"></th>
         </tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
     <div class="muted" id="emptyhint" style="margin-top:10px;display:none">
-      아직 치트가 없습니다. <b>치트 추가</b>를 누르거나, 위에서 <code>.mcf</code> ·
-      <code>.cht</code> · <code>.zip</code> 파일을 불러오세요.
+      <b>치트 추가</b>를 누르거나 <code>.mcf</code> / <code>.cht</code> / <code>.zip</code>을 불러올 것.
     </div>
     <div class="muted" style="margin-top:8px;font-size:12px">
-      주소는 <code>0000</code>~<code>FFFF</code>, 값은 <code>00</code>~<code>FF</code>
-      범위의 16진수입니다. 잘못 입력한 칸은 <span class="err">빨간 테두리</span>로 표시됩니다.
-      <br>이름은 파일에 온전히 저장되지만, <b>MiSTer 기기 화면(OSD)의 글꼴에는 한글이 없어서</b>
-      한글 이름은 기기에서 깨져 보입니다. OSD에서 알아보려면 이름은 영문/숫자를 권합니다.
+      주소 0000–FFFF · 값 00–FF. 이름을 한글로 쓰면 파일엔 저장되지만 MiSTer OSD 글꼴에 한글이 없어 기기 화면에선 깨져 보임.
     </div>
   </div>
 
@@ -156,35 +108,29 @@
     <div id="conflict" style="margin-top:10px"></div>
   </div>
 
-  <h2 class="step"><span class="n">2</span>파일로 내려받기</h2>
   <div class="panel controls">
     <label class="fn">파일 이름 <input type="text" id="fname" value="my_cheat" style="width:200px"></label>
-    <button id="dlzip">⬇ 표준 .zip 내려받기 (추천)</button>
-    <button class="ghost" id="dl">⬇ .cht 내려받기 (이 코어 전용)</button>
+    <button id="dlzip">⬇ 표준 .zip</button>
+    <button class="ghost" id="dl">⬇ .cht (이 코어 전용)</button>
+  </div>
+
+  <div class="panel">
+    <table class="out">
+      <tr><th></th><th>넣는 곳</th><th>켜는 법</th></tr>
+      <tr><td>표준 .zip (추천)</td>
+        <td><code>/media/fat/cheats/MSX1/&lt;롬파일명&gt;.zip</code> — 이름을 롬 파일과 맞춰야 인식</td>
+        <td>OSD → Cheats에서 개별 on/off. 켜기 체크 무관, 유효한 행 전부 포함</td></tr>
+      <tr><td>.cht</td>
+        <td><code>/media/fat/games/MSX1/</code> — 이름 자유</td>
+        <td>OSD → Load Cheat → Cheats On. 켜기 체크된 행만 동작, 아래 충돌 경고는 이 경로 전용</td></tr>
+    </table>
   </div>
 
   <div class="panel">
     <details>
-      <summary>.cht 파일 내용 미리보기 <span id="size"></span></summary>
+      <summary>.cht 미리보기 <span id="size"></span></summary>
       <div class="hex" id="hex" style="margin-top:10px">(비어 있음)</div>
     </details>
-  </div>
-
-  <h2 class="step"><span class="n">3</span>MiSTer에 넣고 켜기</h2>
-  <div class="panel">
-    <ol>
-      <li><b>표준 .zip을 받았다면</b> — SD 카드의 <code>/media/fat/cheats/MSX1/</code> 폴더에 넣되,
-        파일 이름을 <b>게임 롬 파일 이름과 똑같이</b> 바꿔 주세요
-        (예: 롬이 <code>Nemesis2.rom</code>이면 → <code>Nemesis2.zip</code>).
-        게임을 켠 뒤 OSD(<span class="kbd">F12</span>)의 <b>Cheats</b> 메뉴에서
-        원하는 치트를 하나씩 켭니다.</li>
-      <li><b>.cht를 받았다면</b> — <code>/media/fat/games/MSX1/</code>에 넣고,
-        OSD의 <b>Load Cheat</b>에서 파일을 고른 뒤 <b>Cheats</b>를 <b>On</b>으로 두면
-        (위 표에서 체크했던 치트만) 바로 동작합니다.</li>
-      <li>치트를 바꾸고 싶으면 이 페이지에서 파일을 다시 불러와 고친 뒤 같은 자리에
-        덮어쓰면 됩니다. <code>.cht</code>에는 이름이 저장되지 않으니, 이름을 지키려면
-        <code>.zip</code>이나 <code>.mcf</code>를 보관하세요.</li>
-    </ol>
   </div>
 </div>
 
