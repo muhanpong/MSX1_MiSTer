@@ -28,7 +28,7 @@ parameter CONF_STR_EXPAND_B = {
 // Single "ASCII16X" entry covers both: ROM <= 4MB -> classic ASCII16 (SRAM etc.),
 // ROM > 4MB -> ASCII16X flash mapper (8-bit-bank ASCII16 cannot exceed 4MB; per the
 // ASCII16-X spec the X mapper is "mostly backwards compatible" for plain ROM banking).
-parameter MAPPER_LIST    = "Mapper type,auto,none,ASCII8,ASCII16X,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY,Yamanooto;";
+parameter MAPPER_LIST    = "Mapper type,auto,none,ASCII8,ASCII16X,Konami,KonamiSCC,KOEI,linear64,R-TYPE,WIZARDRY,Yamanooto,NEO-8,NEO-16;";
 parameter SRAM_SIZE_LIST = "SRAM size,auto,1kB,2kB,4kB,8kB,16kB,32kB,none;";
 // The ROM's own three entries (Load / Mapper type / SRAM size) exist TWICE, on the
 // same status bits: once at slot level for the classic menu (hidden while the slot
@@ -170,12 +170,16 @@ wire romB_present  = expanded_B ? romB_used  : cart_conf[1].typ == CART_TYP_ROM;
 // entry (index 3) resolves by ROM size: >4MB -> MAPPER_ASCII16X (flash), else
 // classic MAPPER_ASCII16 (SRAM/banking as before).
 assign cart_conf[0].selected_mapper    = rom_loaded[0] ? mapper_typ_t'(mapper_A_select == 4'd10                ? 5'(MAPPER_YAMANOOTO) :
+                                                                      mapper_A_select == 4'd11                ? 5'(MAPPER_NEO8)      :
+                                                                      mapper_A_select == 4'd12                ? 5'(MAPPER_NEO16)     :
                                                                      (mapper_A_select == 4'd3 & rom_big[0]) ? 5'(MAPPER_ASCII16X)  :
                                                                                                (mapper_A_select + 4'd2)) : MAPPER_UNUSED;
 assign cart_conf[1].selected_mapper    = rom_loaded[1] ? mapper_typ_t'(mapper_B_select == 4'd10                ? 5'(MAPPER_YAMANOOTO) :
+                                                                      mapper_B_select == 4'd11                ? 5'(MAPPER_NEO8)      :
+                                                                      mapper_B_select == 4'd12                ? 5'(MAPPER_NEO16)     :
                                                                      (mapper_B_select == 4'd3 & rom_big[1]) ? 5'(MAPPER_ASCII16X)  :
                                                                                                (mapper_B_select + 4'd2)) : MAPPER_UNUSED;
-assign cart_conf[0].selected_sram_size = romA_present & mapper_A_select > 4'd1 & mapper_A_select != 4'd10 & ~(mapper_A_select == 4'd3 & rom_big[0]) & sram_A_select > 3'd0 & sram_A_select < 3'd7 ? (8'd1 << (sram_A_select - 1'd1)) : 8'd0;
+assign cart_conf[0].selected_sram_size = romA_present & mapper_A_select > 4'd1 & mapper_A_select != 4'd10 & mapper_A_select != 4'd11 & mapper_A_select != 4'd12 & ~(mapper_A_select == 4'd3 & rom_big[0]) & sram_A_select > 3'd0 & sram_A_select < 3'd7 ? (8'd1 << (sram_A_select - 1'd1)) : 8'd0;
 // Slot B gets no SRAM.  Not an oversight: the firmware mounts exactly one
 // <rom>.sav and always on VD0 (user_io.cpp:2937), so a second saveable cart has
 // nowhere to go, and giving slot B a nonzero size makes memory_upload write
@@ -198,7 +202,7 @@ assign slotA_classic_hide = expanded_A;
 assign slotB_classic_hide = expanded_B;
 assign subA_page_hide     = ~expanded_A;
 assign subB_page_hide     = ~expanded_B;
-assign sram_A_select_hide = ~romA_present | mapper_A_select == 4'd0 | mapper_A_select == 4'd10 | (mapper_A_select == 4'd3 & rom_big[0]);
+assign sram_A_select_hide = ~romA_present | mapper_A_select == 4'd0 | mapper_A_select == 4'd10 | mapper_A_select == 4'd11 | mapper_A_select == 4'd12 | (mapper_A_select == 4'd3 & rom_big[0]);
 // While slot A is expanded its (hidden) classic type must not leak: FDC is not a
 // sub-slot device, so it cannot come from an expanded slot.
 assign fdc_enabled = bios_config.use_FDC | (~expanded_A & cart_conf[0].typ == CART_TYP_FDC);
