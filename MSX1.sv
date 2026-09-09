@@ -653,7 +653,7 @@ always @(posedge clk21m) begin
 end
 // flash_changelog (A: ASCII16X change-log engine) ch1 master + CPU pause
 // reuses the dump_* mux wires (ch1 + VD0)
-wire        dump_active;
+wire        dump_active, dump_save, nvbak_dma_save;
 wire [26:0] dump_sdram_addr;
 wire        dump_sdram_req, dump_sdram_rnw;
 wire  [7:0] dump_sdram_din;
@@ -886,7 +886,9 @@ debug_overlay u_overlay (
    .en             (status[48]),
    // pause symbol overlay (docs/pause_overlay_design.md §5) — independent of en/status[48]
    .pause_in       (msx_pause),
-   .saving_in      (saving),
+   // saves only -- the boot-time .sav auto-LOAD also raises the dma-active pair,
+   // and a save icon flashing on every ROM load reads as a malfunction.
+   .saving_in      (nvbak_dma_save | dump_save),
    .osd_in         (OSD_STATUS),
    .key_tgl_in     (ps2_key[10]),
    .mouse_tgl_in   (ps2_mouse[24]),
@@ -1218,7 +1220,8 @@ nvram_backup nvram_backup
    .sdram_din (nvbak_sdram_din),
    .sdram_dout(nvbak_sdram_dout),
    .sdram_ready(upload_ram_ready),
-   .dma_active(nvbak_dma_active)
+   .dma_active(nvbak_dma_active),
+   .dma_save(nvbak_dma_save)
 );
 
 // ---- ASCII16X DIRTY-BLOCK engine (64KB dirty bitmap -> dump dirty blocks -> VD0 .sav) ----
@@ -1248,6 +1251,7 @@ flash_dirtysave flash_dirtysave
    .sdram_din(dump_sdram_din),
    .sdram_dout(nvbak_sdram_dout),
    .cl_active(dump_active),
+   .cl_save(dump_save),
    .sd_lba(dump_sd_lba),
    .sd_rd(dump_sd_rd),
    .sd_wr(dump_sd_wr),

@@ -33,7 +33,8 @@ module nvram_backup
    input                [7:0] sdram_dout,
    input                      sdram_ready,
    // Hold CPU via WAIT_n while flash DMA uses SDRAM ch1
-   output                     dma_active
+   output                     dma_active,
+   output                     dma_save     // dma_active AND the operation is a save (icon only)
 );
 
 logic [63:0] image_size[4], new_size;
@@ -124,6 +125,9 @@ logic last_ack = 1'b0;
 state_t state = STATE_SLEEP;
 
 // Hold CPU for the ENTIRE flash save/load operation (avoid rapid WAIT_n toggling)
+// wr/rd is which way the CURRENT slot is moving; the overlay shows a save icon
+// only for saves, so a boot-time .sav auto-LOAD does not flash it (2026-09-09).
+assign dma_save   = dma_active & wr;
 assign dma_active = (state == STATE_FLASH_PREFETCH)
                   | (state == STATE_FLASH_RD_WAIT)
                   | (state == STATE_FLASH_SD_WR)

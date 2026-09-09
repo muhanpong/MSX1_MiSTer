@@ -65,7 +65,8 @@ module flash_dirtysave #(
     output reg          sdram_rnw,      // 1=read, 0=write
     output reg   [7:0]  sdram_din,
     input        [7:0]  sdram_dout,
-    output              cl_active,       // owns ch1 + pauses CPU (== dump_active)
+    output              cl_active,
+    output              cl_save,        // cl_active AND it is a save (merge_save path; icon only)       // owns ch1 + pauses CPU (== dump_active)
 
     // SD VD0 block interface
     output reg  [31:0]  sd_lba,
@@ -114,6 +115,7 @@ logic        merge_save = 1'b0;  // this LOAD pass is the restore phase of a SAV
 logic [127:0] dsave = '0;        // snapshot of `dirty` at SAVE start (this session's blocks)
 
 assign cl_active = (st != IDLE);
+assign cl_save   = cl_active & merge_save;  // load path clears merge_save at entry
 
 logic load_pending = 1'b0;   // latched LOAD request; executes once all gates are ready
 wire pw_rise    = prog_we & ~pw_q;
