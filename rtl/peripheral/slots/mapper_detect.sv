@@ -14,6 +14,7 @@ module mapper_detect
 
 logic [7:0]  head  [0:7];
 logic [7:0]  head2 [0:7];
+logic [7:0]  head3 [0:7];   // file offset 16..23 (signature)
 logic signed [15:0] asc16, asc8, kon4, kon5;
 logic [26:0] addr;
 
@@ -43,10 +44,16 @@ logic [7:0] a0,a1,a2;
                     if (addr[6] == 0) begin
                             head  [addr[2:0]] <= data;
                             head2 [addr[2:0]] <= 0;
+                            head3 [addr[2:0]] <= 0;
                     end else begin
                             head2[addr[2:0]] <= data;
                     end
                 end
+                // bytes 16..23: the openMSX signature slot (RomFactory.cc:91).
+                // "ROM_NEO8" / "ROM_NE16" / "ASCII16X" here override the
+                // bank-write histogram -- these mappers are exactly the ones the
+                // histogram can never find.
+                if (addr[6] == 0 && addr[5:3] == 3'b010) head3[addr[2:0]] <= data;
             end
             a0 <= a1;
             a1 <= a2;
@@ -87,7 +94,11 @@ end
 
 assign kon    = kon4 > kon5  ? kon4 : kon5;
 assign ascii  = asc8 > asc16 ? asc8 : asc16;
-assign mapper = rom_size < 27'h1000                        ? MAPPER_UNUSED                 :
+wire [63:0] sig = {head3[0],head3[1],head3[2],head3[3],head3[4],head3[5],head3[6],head3[7]};
+assign mapper = sig == "ROM_NE16"                          ? MAPPER_NEO16                  :
+                sig == "ROM_NEO8"                          ? MAPPER_NEO8                   :
+                sig == "ASCII16X"                          ? MAPPER_ASCII16X               :
+                rom_size < 27'h1000                        ? MAPPER_UNUSED                 :
                 rom_size < 27'h10000                       ? MAPPER_NONE                   :
                 kon >= ascii                               ? (kon5 > kon4  ? MAPPER_KONAMI_SCC : 
                                                                              MAPPER_KONAMI)    :

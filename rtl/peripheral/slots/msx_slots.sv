@@ -180,6 +180,8 @@ assign ram_addr   = device_kanji_ram_ce ? device_kanji_addr                     
 
 wire cart_ascii8  = mapper == MAPPER_ASCII8  | mapper == MAPPER_KOEI | mapper == MAPPER_WIZARDY;
 wire cart_ascii16 = mapper == MAPPER_ASCII16 | mapper == MAPPER_RTYPE;
+wire cart_neo8    = mapper == MAPPER_NEO8;
+wire cart_neo16   = mapper == MAPPER_NEO16;
 
 wire [26:0] mapper_addr = mem_unmaped                 ? 27'hDEAD                    :
                           mapper == MAPPER_NONE       ? 27'(mapper_none_addr)       :
@@ -196,6 +198,8 @@ wire [26:0] mapper_addr = mem_unmaped                 ? 27'hDEAD                
                           cart_ascii8                 ? 27'(mapper_ascii8_addr)     :
                           cart_ascii16                ? 27'(mapper_ascii16_addr)    :
                           mapper == MAPPER_ASCII16X   ? 27'(mapper_ascii16x_addr)   :
+                          cart_neo8                   ? mapper_neo8_addr            :
+                          cart_neo16                  ? mapper_neo16_addr           :
                           mapper == MAPPER_YAMANOOTO  ? 27'(mapper_yamanooto_addr)  :
                           mapper == MAPPER_GM2        ? 27'(mapper_gm2_addr)        :
                                                         27'hDEAD                    ;
@@ -228,6 +232,8 @@ wire mem_unmaped = mapper_konami_unmaped     |
                    mapper_ascii8_unmaped     | 
                    mapper_ascii16_unmaped    |
                    mapper_ascii16x_unmaped   |
+                   mapper_neo8_unmaped       |
+                   mapper_neo16_unmaped      |
                    mapper_yamanooto_unmaped  |
                    mapper_halnote_unmaped    | 
                    mapper_rd                 | 
@@ -428,6 +434,27 @@ cart_ascii16 ascii16
    .mem_addr(mapper_ascii16_addr),
    .sram_cs(ascii16_sram_cs),
    .sram_we(ascii16_sram_wr),
+   .*
+);
+
+wire [26:0] mapper_neo8_addr, mapper_neo16_addr;
+wire        mapper_neo8_unmaped, mapper_neo16_unmaped;
+cart_neo #(.BANK16(0)) neo8
+(
+   .rom_size(27'(size) << 14),
+   .din(cpu_dout),
+   .cs(cart_neo8),
+   .mem_unmaped(mapper_neo8_unmaped),
+   .mem_addr(mapper_neo8_addr),
+   .*
+);
+cart_neo #(.BANK16(1)) neo16
+(
+   .rom_size(27'(size) << 14),
+   .din(cpu_dout),
+   .cs(cart_neo16),
+   .mem_unmaped(mapper_neo16_unmaped),
+   .mem_addr(mapper_neo16_addr),
    .*
 );
 
