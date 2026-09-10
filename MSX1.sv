@@ -213,7 +213,12 @@ wire       [1:0] buttons;
 wire     [127:0] status;
 wire      [10:0] ps2_key;
 wire      [24:0] ps2_mouse;
-wire       [5:0] joy0, joy1;
+// hps_io delivers up to 32 buttons.  The MSX joystick port has exactly two
+// triggers, so bits 4/5 drive them, 6..10 are routed into the keyboard matrix
+// (msx.sv) and 11 is a core function (Pause) that never reaches the machine.
+wire      [31:0] joy0_all, joy1_all;
+wire      [11:0] joy0 = joy0_all[11:0];
+wire      [11:0] joy1 = joy1_all[11:0];
 wire             ioctl_download;
 wire      [15:0] ioctl_index;
 wire             ioctl_wr;
@@ -391,6 +396,19 @@ localparam CONF_STR = {
    "T[0],Reset;",
    "R[10],Reset & Detach ROM Cartridge;",					
    "R[0],Reset and close OSD;",
+   // Button names for the firmware's "Define buttons" flow.  get_btn()
+   // (Main_MiSTer input.cpp) scans CONF_STR from index 2, so this must not sit
+   // at 0/1 -- the same rule that hid the Cheats "C" token.  Plain "J", NOT
+   // "J1": the 1 sets joy_force, which locks the keyboard into joystick
+   // emulation and would steal the cursor keys from MSX software.  The stock
+   // MSX_MiSTer core spells it "J,Fire 1,Fire 2;" for the same reason.
+   // Name n lands on joystick_0[4+n].  4/5 are the MSX joystick port's two
+   // triggers; 6..10 press keys (joykey.sv) and 11 is a core function.
+   "J,Fire 1,Fire 2,Space,Return,F1,Esc,Stop,Pause;",
+   // Default map for a pad that has never been through "Define buttons".
+   // map_joystick() only recognises the base names (A B X Y L R Select Start),
+   // so the readable names above would otherwise map to nothing.
+   "jn,A,B,X,Y,L,R,Select,Start;",
    "V,v",`BUILD_DATE 
 };
 
@@ -432,8 +450,8 @@ hps_io #(.CONF_STR(CONF_STR),.VDNUM(VDNUM)) hps_io
    .status_menumask(status_menumask),
    .ps2_key(ps2_key),
    .ps2_mouse(ps2_mouse),
-   .joystick_0(joy0),
-   .joystick_1(joy1),
+   .joystick_0(joy0_all),
+   .joystick_1(joy1_all),
    .ioctl_download(ioctl_download),
    .ioctl_index(ioctl_index),
    .ioctl_wr(ioctl_wr),
@@ -647,9 +665,12 @@ assign selected_mapper[1] = cart_conf[1].selected_mapper;
 // Pause logic: flash DMA, OSD-open (if option enabled), or manual toggle (T[44])
 reg pause_toggle = 1'b0;
 reg status44_prev = 1'b0;
+reg joypause_prev = 1'b0;
+wire joy_pause = joy0_all[11] | joy1_all[11];   // "Pause" button of either pad
 always @(posedge clk21m) begin
    status44_prev <= status[44];
-   if (~status44_prev & status[44]) pause_toggle <= ~pause_toggle;
+   joypause_prev <= joy_pause;
+   if ((~status44_prev & status[44]) | (~joypause_prev & joy_pause)) pause_toggle <= ~pause_toggle;
 end
 // flash_changelog (A: ASCII16X change-log engine) ch1 master + CPU pause
 // reuses the dump_* mux wires (ch1 + VD0)

@@ -41,8 +41,8 @@ module msx
    output signed     [15:0] audio_l,
    output signed     [15:0] audio_r,
    input  [           10:0] ps2_key,
-   input              [5:0] joy0,
-   input              [5:0] joy1,
+   input             [11:0] joy0,
+   input             [11:0] joy1,
    //Cassete
    output                   cas_motor,
    input                    cas_audio_in,
@@ -659,6 +659,7 @@ assign d_to_cpu = rd_n              ? 8'hFF           :
 //  -----------------------------------------------------------------------------
 //  -- Keyboard decoder
 //  -----------------------------------------------------------------------------
+wire [7:0] d_from_kb_raw;
 wire [7:0] d_from_kb;
 keyboard msx_key
 (
@@ -666,12 +667,23 @@ keyboard msx_key
    .clk(clk21m),
    .ps2_key(ps2_key),
    .kb_row(ppi_out_c[3:0]),
-   .kb_data(d_from_kb),
+   .kb_data(d_from_kb_raw),
    .kbd_addr(kbd_addr),
    .kbd_din(kbd_din),
    .kbd_we(kbd_we),
    .kbd_request(kbd_request)
 );
+
+// Buttons past the second trigger press keys instead -- see joykey.sv.  Either
+// pad can press any of them; the two are simply OR'd.
+wire [7:0] joykey_mask;
+joykey msx_joykey
+(
+   .btn   (joy0[10:6] | joy1[10:6]),
+   .kb_row(ppi_out_c[3:0]),
+   .mask  (joykey_mask)
+);
+assign d_from_kb = d_from_kb_raw & ~joykey_mask;
 
 //  -----------------------------------------------------------------------------
 //  -- Sound AY-3-8910

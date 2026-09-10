@@ -29,6 +29,8 @@ accuracy fixes.
   *Per-source gain (±8dB), mute, and per-channel SCC mute.*
 - **일시정지 / Pause** — OSD 열림 또는 단축키, 화면에 ⏸ 표시
   *On OSD open or a hotkey, with an on-screen ⏸ indicator.*
+- **패드 버튼 / Pad buttons** — 6버튼 패드의 남는 버튼이 MSX 키(Space·Return·F1·Esc·Stop)를 누르거나 일시정지
+  *A 6-button pad's spare buttons press MSX keys (Space, Return, F1, Esc, Stop) or pause the machine.*
 
 **곁들여 고친 것 / Also fixed**
 
@@ -100,6 +102,20 @@ Standard MiSTer OSD cheat support using the common Kitrinx `.gg` format.
 ### Pause
 - `Pause on OSD` — freeze the machine whenever the OSD is open
 - `Pause` — hotkey-triggered pause with an on-screen ⏸ indicator
+
+### Pad buttons
+The MSX joystick port carries two triggers, so the buttons past the second do
+something else instead of going to waste.
+
+- `Fire 1` / `Fire 2` are the joystick port's own triggers, as on a real MSX
+- `Space`, `Return`, `F1`, `Esc`, `Stop` press that key in the keyboard matrix
+- `Pause` freezes the machine without opening the OSD
+- Either pad can press any of them, and nothing is taken away from the keyboard
+
+Assign them once with `Define buttons` in the main MiSTer menu. A pad that has
+never been through it falls back to the usual A/B/X/Y/L/R/Select/Start layout.
+For anything past this list -- a different key, a two-button chord, autofire --
+the firmware's own `Advanced` button map does it without a core change.
 
 ### Storage & saves
 - `MegaFlashROM SCC+ SD` cartridge in slot A, with `Load SD card` mounting a `.VHD` image
