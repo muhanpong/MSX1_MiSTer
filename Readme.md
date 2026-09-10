@@ -132,32 +132,19 @@ Several timing and behaviour fixes measured against real hardware and openMSX:
 - reference HW Philips SVG8020/00
 - RAM 64kB in slot 3
 - Sound YM2149(PSG)
-- Support two cartrige
-- Automatic detect cartrige mapper
-- Manual select mapper: `none, ASCII8, ASCII16X, Konami, KonamiSCC, KOEI, linear64, R-TYPE, WIZARDRY`
+- Support two cartridges
+- Automatic cartridge mapper detection
+- Manual select mapper: `none, ASCII8, ASCII16X, Konami, KonamiSCC, KOEI, linear64, R-TYPE, WIZARDRY, Yamanooto, NEO-8, NEO-16`
 - Joystick.
 - FDD support (VY0010). Use DSK image
-- Cassete support. Analog or CAS emmulation
+- Cassette support: analog input or CAS emulation
 - PAL/NTSC mode
-- Load bios for experimets
+- Load BIOS for experiments
 
 ## Memory limitations
-- No SDRAM 
-  - Slot 1 ROM image max size 128kB
-  - Slot 2 ROM image max size  64kB
-  - Slot 3 64Kb RAM
-- 32MB SDRAM
-  - Slot 1 ROM image max size 1MB
-  - Slot 2 ROM image max size 2MB
-  - Slot 3 64Kb RAM
-- 64MB SDRAM
-  - Slot 1 ROM image max size 2MB
-  - Slot 2 ROM image max size 4MB
-  - Slot 3 64Kb RAM
-- 128MB SDRAM
-  - Slot 1 ROM image max size 4MB
-  - Slot 2 ROM image max size 4MB
-  - Slot 3 64Kb RAM
+- With SDRAM (any size): ROM images up to 8MB per cartridge slot
+  (ASCII16X / Yamanooto flash carts are exactly 8MB; NEO-8/16 images up to 8MB today)
+- Without SDRAM (BRAM fallback): small ROMs only, 64kB machine RAM
 
 ## ROM BIOS
 Load them manually from the menu
@@ -167,37 +154,27 @@ Load them manually from the menu
 - RAM in slot 3/2
 - Sound YM2149(PSG)
 - Video V9938 (V9958 selectable)
-- Support two cartrige
-- Cartrige emulation:
-  - Slot A: `ROM, SCC, SCC+, FM-PAC, MegaFlashROM SCC+ SD, GameMaster2, FDC`
-  - Slot B: `ROM, SCC, SCC+, FM-PAC`
-- Automatic detect cartrige mapper
-- Manual select mapper: `none, ASCII8, ASCII16X, Konami, KonamiSCC, KOEI, linear64, R-TYPE, WIZARDRY`
+- Support two cartridges
+- Cartridge emulation:
+  - Slot A: `ROM, SCC, SCC+, FM-PAC, MegaFlashROM SCC+ SD, GameMaster2, FDC, Empty`
+  - Slot B: `ROM, SCC, SCC+, FM-PAC, Empty`
+  - Either slot can instead be expanded into four sub-slots (see *Expanded slots* above)
+- Automatic cartridge mapper detection
+- Manual select mapper: `none, ASCII8, ASCII16X, Konami, KonamiSCC, KOEI, linear64, R-TYPE, WIZARDRY, Yamanooto, NEO-8, NEO-16`
 - Selectable SRAM size (auto, 1kB-32kB, none)
 - Joystick.
 - FDD support.
 - RTC support
-- Cassete support. Analog or CAS emmulation
+- Cassette support: analog input or CAS emulation
 - PAL/NTSC mode
-- Load bios for experimets
+- Load BIOS for experiments
 
 ## Memory limitations
-- No SDRAM 
-  - Slot 1 ROM image max size 128kB
-  - Slot 2 ROM image max size  64kB
-  - Slot 3/2 64Kb RAM
-- 32MB SDRAM
-  - Slot 1 ROM image max size 1MB
-  - Slot 2 ROM image max size 2MB
-  - Slot 3/2 512Kb RAM
-- 64MB SDRAM
-  - Slot 1 ROM image max size 2MB
-  - Slot 2 ROM image max size 4MB
-  - Slot 3/2 512Kb RAM
-- 128MB SDRAM
-  - Slot 1 ROM image max size 4MB
-  - Slot 2 ROM image max size 4MB
-  - Slot 3/2 512Kb RAM
+- With SDRAM (any size): ROM images up to 8MB per cartridge slot
+  (ASCII16X / Yamanooto flash carts are exactly 8MB; NEO-8/16 images up to 8MB today)
+- Machine RAM comes from the machine pack — packs with 1MB / 2MB / 4MB memory mappers
+  are provided (Sony HB-F1XDmk2, Panasonic FS-A1F, ...)
+- Without SDRAM (BRAM fallback): small ROMs only, reduced machine RAM
 
 ## ROM BIOS
 Copy bios files to Games/MSX1 folder or load them manually from the menu
