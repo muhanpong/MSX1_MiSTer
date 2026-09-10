@@ -7,7 +7,7 @@
 `timescale 1ns/1ps
 module tb_joykey;
 
-   logic [4:0] btn;
+   logic [2:0] btn;
    logic [3:0] kb_row;
    wire  [7:0] mask;
    int         fails = 0, checks = 0;
@@ -28,7 +28,7 @@ module tb_joykey;
    // one button at a time, in the row it belongs to
    task one(input int b, input [3:0] r, input int bit_pos, input string name);
       begin
-         btn = 5'b0; btn[b] = 1'b1; kb_row = r;
+         btn = 3'b0; btn[b] = 1'b1; kb_row = r;
          check(8'b1 << bit_pos, {name, " asserts its own bit"});
       end
    endtask
@@ -36,7 +36,7 @@ module tb_joykey;
    // the same button must do nothing in every other row
    task quiet_elsewhere(input int b, input [3:0] own, input string name);
       begin
-         btn = 5'b0; btn[b] = 1'b1;
+         btn = 3'b0; btn[b] = 1'b1;
          for (int r = 0; r < 16; r++) begin
             if (r[3:0] != own) begin
                kb_row = r[3:0];
@@ -51,31 +51,25 @@ module tb_joykey;
       one(0, 4'd8, 0, "Space");
       one(1, 4'd7, 7, "Return");
       one(2, 4'd6, 5, "F1");
-      one(3, 4'd7, 2, "Esc");
-      one(4, 4'd7, 4, "Stop");
+
 
       // 6..10 -- and nowhere else
       quiet_elsewhere(0, 4'd8, "Space");
       quiet_elsewhere(1, 4'd7, "Return");
       quiet_elsewhere(2, 4'd6, "F1");
-      quiet_elsewhere(3, 4'd7, "Esc");
-      quiet_elsewhere(4, 4'd7, "Stop");
+
 
       // 11 -- nothing pressed is a clean matrix in every row
-      btn = 5'b0;
+      btn = 3'b0;
       for (int r = 0; r < 16; r++) begin
          kb_row = r[3:0];
          check(8'b0, "idle leaves the row alone");
       end
 
-      // 12 -- the three row-7 keys combine without disturbing each other
-      btn = 5'b0; btn[1] = 1'b1; btn[3] = 1'b1; btn[4] = 1'b1; kb_row = 4'd7;
-      check(8'b1001_0100, "Return+Esc+Stop together");
-
-      // 13 -- a full press is confined to its row
-      btn = 5'b11111;
+      // a full press is confined to its row
+      btn = 3'b111;
       kb_row = 4'd8; check(8'b0000_0001, "all pressed, row 8");
-      kb_row = 4'd7; check(8'b1001_0100, "all pressed, row 7");
+      kb_row = 4'd7; check(8'b1000_0000, "all pressed, row 7");
       kb_row = 4'd6; check(8'b0010_0000, "all pressed, row 6");
       kb_row = 4'd0; check(8'b0000_0000, "all pressed, row 0");
 

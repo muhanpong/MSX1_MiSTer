@@ -29,8 +29,10 @@ accuracy fixes.
   *Per-source gain (±8dB), mute, and per-channel SCC mute.*
 - **일시정지 / Pause** — OSD 열림 또는 단축키, 화면에 ⏸ 표시
   *On OSD open or a hotkey, with an on-screen ⏸ indicator.*
-- **패드 버튼 / Pad buttons** — 6버튼 패드의 남는 버튼이 MSX 키(Space·Return·F1·Esc·Stop)를 누르거나 일시정지
-  *A 6-button pad's spare buttons press MSX keys (Space, Return, F1, Esc, Stop) or pause the machine.*
+- **JoyMega 패드 / JoyMega pad** — MSX 조이스틱 포트에 메가드라이브 6버튼 패드, openMSX와 같은 핀 8 위상 프로토콜
+  *A 6-button Mega Drive pad on the MSX joystick port, on the same pin-8 phase protocol openMSX uses.*
+- **패드 버튼 / Pad buttons** — 남는 버튼으로 Space·Return·F1을 누르거나 일시정지
+  *Spare pad buttons press Space, Return or F1, or pause the machine.*
 
 **곁들여 고친 것 / Also fixed**
 
@@ -103,17 +105,34 @@ Standard MiSTer OSD cheat support using the common Kitrinx `.gg` format.
 - `Pause on OSD` — freeze the machine whenever the OSD is open
 - `Pause` — hotkey-triggered pause with an on-screen ⏸ indicator
 
-### Pad buttons
-The MSX joystick port carries two triggers, so the buttons past the second do
-something else instead of going to waste.
+### JoyMega pad
+A Mega Drive pad on the MSX joystick port. The MSX toggles pin 8 of the port
+and the pad answers with a different slice of itself on each of eight phases,
+which is how six buttons fit through a port built for two. Phases 5 and 7 differ
+only in the direction lines, and that is what software looks at to tell a
+6-button pad from a 3-button one.
 
-- `Fire 1` / `Fire 2` are the joystick port's own triggers, as on a real MSX
-- `Space`, `Return`, `F1`, `Esc`, `Stop` press that key in the keyboard matrix
+`JoyMega Pad` in the menu puts one on port A, port B or both. With it off the
+port behaves exactly as it did before, as a plain two-button joystick.
+
+The phase table is transcribed from openMSX `src/input/JoyMega.cc`, and the
+testbench checks the RTL against that source's own masks and shifts rather than
+against a re-typed copy of itself. It is always a 6-button pad: openMSX only
+picks 3-button when Mode is held as the pad is plugged in, which has no meaning
+for a USB pad that is simply always there.
+
+### Pad buttons
+Buttons the MSX cannot reach through the joystick port do something else instead
+of going to waste.
+
+- `A` / `B` are the port's two triggers when JoyMega is off, and the pad's A and
+  B when it is on; `C`, `Start`, `X`, `Y`, `Z`, `Mode` are JoyMega only
+- `Space`, `Return`, `F1` press that key in the keyboard matrix
 - `Pause` freezes the machine without opening the OSD
 - Either pad can press any of them, and nothing is taken away from the keyboard
 
 Assign them once with `Define buttons` in the main MiSTer menu. A pad that has
-never been through it falls back to the usual A/B/X/Y/L/R/Select/Start layout.
+never been through it falls back to a sensible A/B/X/Start/L/Y/R/Select layout.
 For anything past this list -- a different key, a two-button chord, autofire --
 the firmware's own `Advanced` button map does it without a core change.
 

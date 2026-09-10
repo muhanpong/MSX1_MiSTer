@@ -213,12 +213,14 @@ wire       [1:0] buttons;
 wire     [127:0] status;
 wire      [10:0] ps2_key;
 wire      [24:0] ps2_mouse;
-// hps_io delivers up to 32 buttons.  The MSX joystick port has exactly two
-// triggers, so bits 4/5 drive them, 6..10 are routed into the keyboard matrix
-// (msx.sv) and 11 is a core function (Pause) that never reaches the machine.
+// hps_io delivers up to 32 buttons, but only the low 16 are worth taking: the
+// firmware sends the upper half of the word conditionally, and the framework's
+// own documentation stops at twelve buttons.  Bits 4..11 are the Mega Drive pad
+// (joymega.sv), 12..14 press keys (joykey.sv) and 15 is Pause, a core function
+// that never reaches the machine.
 wire      [31:0] joy0_all, joy1_all;
-wire      [11:0] joy0 = joy0_all[11:0];
-wire      [11:0] joy1 = joy1_all[11:0];
+wire      [15:0] joy0 = joy0_all[15:0];
+wire      [15:0] joy1 = joy1_all[15:0];
 wire             ioctl_download;
 wire      [15:0] ioctl_index;
 wire             ioctl_wr;
@@ -330,6 +332,7 @@ localparam CONF_STR = {
    "P1O[41],Border,No,Yes;",
    "P1O[42],V9958,No,Yes;",
    "-;",
+   "O[16:15],JoyMega Pad,Off,Port A,Port B,Both;",
    "O[43],Pause on OSD,No,Yes;",
    "T[44],Pause;",
    "-;",
@@ -402,13 +405,18 @@ localparam CONF_STR = {
    // "J1": the 1 sets joy_force, which locks the keyboard into joystick
    // emulation and would steal the cursor keys from MSX software.  The stock
    // MSX_MiSTer core spells it "J,Fire 1,Fire 2;" for the same reason.
-   // Name n lands on joystick_0[4+n].  4/5 are the MSX joystick port's two
-   // triggers; 6..10 press keys (joykey.sv) and 11 is a core function.
-   "J,Fire 1,Fire 2,Space,Return,F1,Esc,Stop,Pause;",
+   // Name n lands on joystick_0[4+n].  4..11 are the Mega Drive pad in the order
+   // openMSX's JoyMega uses, so with JoyMega off A and B are simply the MSX
+   // port's two triggers; 12..14 press keys (joykey.sv) and 15 is Pause.
+   // Twelve names is also where the framework's own documented ceiling sits,
+   // and it keeps every button inside the low 16 bits of the joystick word.
+   "J,A,B,C,Start,X,Y,Z,Mode,Space,Return,F1,Pause;",
    // Default map for a pad that has never been through "Define buttons".
    // map_joystick() only recognises the base names (A B X Y L R Select Start),
-   // so the readable names above would otherwise map to nothing.
-   "jn,A,B,X,Y,L,R,Select,Start;",
+   // so the readable names above would otherwise map to nothing; a blank entry
+   // means "no default".  A and B stay on the pad's A and B because that is the
+   // plain-MSX two-trigger case, which is what most software uses.
+   "jn,A,B,X,Start,L,Y,R,Select,,,,;",
    "V,v",`BUILD_DATE 
 };
 
@@ -666,7 +674,7 @@ assign selected_mapper[1] = cart_conf[1].selected_mapper;
 reg pause_toggle = 1'b0;
 reg status44_prev = 1'b0;
 reg joypause_prev = 1'b0;
-wire joy_pause = joy0_all[11] | joy1_all[11];   // "Pause" button of either pad
+wire joy_pause = joy0[15] | joy1[15];   // "Pause" button of either pad
 always @(posedge clk21m) begin
    status44_prev <= status[44];
    joypause_prev <= joy_pause;
@@ -776,6 +784,9 @@ msx MSX
    .dbg_keyon_count(dbg_keyon_count),
    .dbg_accum_cnt  (dbg_accum_cnt),
    .dbg_env_min    (dbg_env_min),
+   // Off / Port A / Port B / Both is already a per-port bit pair, so the menu
+   // value is the enable pair unchanged.
+   .joymega_en(status[16:15]),
    .cheat_en_master(~status[51]),   // global "Cheats On/Off" (O[51], default On=0): gates ALL cheats (standard+FC7), non-destructive
    .*
 );

@@ -41,8 +41,9 @@ module msx
    output signed     [15:0] audio_l,
    output signed     [15:0] audio_r,
    input  [           10:0] ps2_key,
-   input             [11:0] joy0,
-   input             [11:0] joy1,
+   input             [15:0] joy0,
+   input             [15:0] joy1,
+   input              [1:0] joymega_en,   // [0] port A, [1] port B
    //Cassete
    output                   cas_motor,
    input                    cas_audio_in,
@@ -679,7 +680,7 @@ keyboard msx_key
 wire [7:0] joykey_mask;
 joykey msx_joykey
 (
-   .btn   (joy0[10:6] | joy1[10:6]),
+   .btn   (joy0[14:12] | joy1[14:12]),
    .kb_row(ppi_out_c[3:0]),
    .mask  (joykey_mask)
 );
@@ -689,8 +690,23 @@ assign d_from_kb = d_from_kb_raw & ~joykey_mask;
 //  -- Sound AY-3-8910
 //  -----------------------------------------------------------------------------
 wire [7:0] d_from_psg, psg_ioa, psg_iob;
-wire [5:0] joy_a = psg_iob[4] ? 6'b111111 : {~joy0[5], ~joy0[4], ~joy0[0], ~joy0[1], ~joy0[2], ~joy0[3]};
-wire [5:0] joy_b = psg_iob[5] ? 6'b111111 : {~joy1[5], ~joy1[4], ~joy1[0], ~joy1[1], ~joy1[2], ~joy1[3]};
+// A Mega Drive pad on the port, if the menu asked for one.  joymega.sv wants
+// the openMSX status order (up/down/left/right first), which is the reverse of
+// the MiSTer direction bits, hence the swizzle.  Note it takes pin 8 raw: that
+// line is the pad's phase clock, so the "pin 8 high releases everything" rule
+// below must not be applied to it.
+wire [5:0] jm_a_dout, jm_b_dout;
+joymega jm_a (.clk(clk21m), .reset(reset), .pin8(psg_iob[4]),
+              .btn({joy0[11:4], joy0[0], joy0[1], joy0[2], joy0[3]}), .dout(jm_a_dout));
+joymega jm_b (.clk(clk21m), .reset(reset), .pin8(psg_iob[5]),
+              .btn({joy1[11:4], joy1[0], joy1[1], joy1[2], joy1[3]}), .dout(jm_b_dout));
+
+wire [5:0] joy_a = joymega_en[0] ? jm_a_dout
+                 : psg_iob[4]    ? 6'b111111
+                 : {~joy0[5], ~joy0[4], ~joy0[0], ~joy0[1], ~joy0[2], ~joy0[3]};
+wire [5:0] joy_b = joymega_en[1] ? jm_b_dout
+                 : psg_iob[5]    ? 6'b111111
+                 : {~joy1[5], ~joy1[4], ~joy1[0], ~joy1[1], ~joy1[2], ~joy1[3]};
 wire [5:0] joyA = joy_a & {psg_iob[0], psg_iob[1], 4'b1111};
 wire [5:0] joyB = joy_b & {psg_iob[2], psg_iob[3], 4'b1111};
 assign psg_ioa = {cas_audio_in,1'b0, psg_iob[6] ? joyB : joyA};
