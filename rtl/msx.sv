@@ -15,6 +15,7 @@ module msx
    input                    ce_cpu_n,
    input                    cpu_turbo,           // 1 while ce_cpu_* runs faster than ce_3m58_*
    input                    sdram_rdtog,         // flips once per completed SDRAM ch2 READ (P3 closed loop)
+   input                    sdram_hit,           // level: this ch2 READ was answered from sdram.sv's word latch
    input              [1:0] cpu_speed_q,         // LATCHED speed, selects the guard limit
    output                   cpu_bus_idle,        // -> clock.sv: safe point to change speed
    output                   msx_turbo_req,       // Panasonic 40H/41H: software asked for 5.37MHz
@@ -450,12 +451,26 @@ always @(posedge clk21m) begin
    end else if (sdram_rdtog != hs_tog0) hs_done <= 1'b1;
 end
 
+// P4: WORD-LATCH HIT.  sdram.sv now answers a ch2 read from the word it
+// already holds when the request lands on the same 16-bit word as the last
+// completed ch2 read (sequential fetch, the paired byte).  No SDRAM access is
+// issued, so sdram_rdtog does NOT flip and the closed loop above would sit on
+// its 15-cycle watchdog -- ~700ns, eight times worse than the access it just
+// saved.  sdram_hit is a LEVEL held for the whole request window (cleared when
+// sdram_ce drops), not a toggle: the completion is immediate, so it cannot
+// satisfy the ">= 2 clk21m away" assumption hs_tog0 relies on, and a
+// one-clk_sdram pulse could be missed here.  It is asserted on the same
+// clk_sdram edge that updates ch2_saved_a0, so sdram_hit high == sdram_dout
+// valid, by construction.  Worst case it is seen one clk21m late (the
+// request edge has to reach the clk_sdram domain first); that is still far
+// inside what a real access costs.
+//
 // The ce_3m58 requirement protects only the slow set; dropping it on the fast
 // path is what recovers the throughput (a fast read no longer waits up to a
 // full 3.58MHz period for an edge it does not need).
 wire guard_open  = guard_slow           ? (guard_ce & (guard_cnt >= guard_min)) :
                    ~wr_n                ? (guard_cnt >= guard_min)              :  // fast write
-                   (sdram_ce & ram_rnw) ? (hs_done | (&guard_cnt))              :  // fast SDRAM read: closed loop
+                   (sdram_ce & ram_rnw) ? (hs_done | sdram_hit | (&guard_cnt)) :  // fast SDRAM read: closed loop / latch hit
                                           (guard_cnt >= guard_min);                // fast BRAM/unmapped read
 wire bus_guard_n = ~cpu_turbo | ~bus_cycle | (mreq_n & rd_n & wr_n) | guard_open;
 

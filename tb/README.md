@@ -48,3 +48,23 @@ so the unimplemented rows are trustworthy on this trace.
 
 Caveat: the four patterns are synthetic and weighted equally. The ratios
 between variants carry more weight than the absolute percentages.
+
+## Guard interaction (`make guard`)
+
+`guard_tb.sv` puts the real `sdram.sv` next to a transcription of `msx.sv`'s
+fast-SDRAM-read bus guard (P3 closed loop + P4 hit path) and checks, on every
+clk21m edge of every read, that `guard_open` is never high while `ch2_dout` is
+not yet the requested byte. clk21m is derived from clk_sdram at /4 with the
+60-degree lag `pll.v` applies.
+
+| read                          | P4=0 (before) | P4=1 (after) |
+|-------------------------------|---------------|--------------|
+| miss                          | clk21m 2, closed loop | clk21m 2, closed loop |
+| hit (paired byte)             | **clk21m 15, watchdog** | **clk21m 1, hit path** |
+| hit after write to that word  | miss, clk21m 2 | miss, clk21m 2 |
+| hit after unrelated write     | clk21m 15, watchdog | clk21m 1, hit path |
+
+Neither configuration ever opened the guard on stale data. Without the
+`msx.sv` change every latch hit sits on the 15-cycle watchdog, which is the
+stall the P4 change exists to remove. The guard block in `guard_tb.sv` is a
+copy; keep it in step with `msx.sv`.
