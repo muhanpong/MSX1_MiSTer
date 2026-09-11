@@ -15,6 +15,7 @@ module msx
    input                    ce_cpu_n,
    input                    cpu_turbo,           // 1 while ce_cpu_* runs faster than ce_3m58_*
    input                    sdram_rdtog,         // flips once per completed SDRAM ch2 READ (P3 closed loop)
+   input                    sdram_hit,           // level: this ch2 READ was answered from sdram.sv's word latch
    input              [1:0] cpu_speed_q,         // LATCHED speed, selects the guard limit
    output                   cpu_bus_idle,        // -> clock.sv: safe point to change speed
    output                   msx_turbo_req,       // Panasonic 40H/41H: software asked for 5.37MHz
@@ -161,6 +162,8 @@ module msx
    output logic       [15:0] dbg_trap_cnt,      // {escapes, bus strobes at freeze}
    output logic       [15:0] dbg_trap_bus,      // CPU address bus frozen at the trap
    output logic       [15:0] dbg_spin,          // consecutive opcode fetches AT 0038 = RST 38 spin
+   output logic       [15:0] dbg_wait_ratio,    // P5: CPU T-states with WAIT_n low, per 65536 T-states
+   output logic       [15:0] dbg_hit_ratio,     // P5: SDRAM reads answered by the read cache, per 65536 reads
    output logic       [15:0] dbg_a8_pc,         // PC of the last OUT (A8) -- who moved page 0
    output logic       [15:0] dbg_a8_vc,         // {value written to A8, write count}
    output logic       [15:0] dbg_ppi_a8,        // {PPI port A at the trap, PPI port A live}
@@ -450,14 +453,78 @@ always @(posedge clk21m) begin
    end else if (sdram_rdtog != hs_tog0) hs_done <= 1'b1;
 end
 
+// P4: CACHE HIT.  sdram.sv answers a ch2 read from its direct-mapped read
+// cache (one 16-bit word per line) when the word is present.  No SDRAM access is
+// issued, so sdram_rdtog does NOT flip and the closed loop above would sit on
+// its 15-cycle watchdog -- ~700ns, eight times worse than the access it just
+// saved.  sdram_hit is a LEVEL held for the whole request window (cleared when
+// sdram_ce drops), not a toggle: the completion is immediate, so it cannot
+// satisfy the ">= 2 clk21m away" assumption hs_tog0 relies on, and a
+// one-clk_sdram pulse could be missed here.  It is asserted on the same
+// clk_sdram edge that updates ch2_saved_a0, so sdram_hit high == sdram_dout
+// valid, by construction.  Worst case it is seen one clk21m late (the
+// request edge has to reach the clk_sdram domain first); that is still far
+// inside what a real access costs.
+//
 // The ce_3m58 requirement protects only the slow set; dropping it on the fast
 // path is what recovers the throughput (a fast read no longer waits up to a
 // full 3.58MHz period for an edge it does not need).
 wire guard_open  = guard_slow           ? (guard_ce & (guard_cnt >= guard_min)) :
                    ~wr_n                ? (guard_cnt >= guard_min)              :  // fast write
-                   (sdram_ce & ram_rnw) ? (hs_done | (&guard_cnt))              :  // fast SDRAM read: closed loop
+                   (sdram_ce & ram_rnw) ? (hs_done | sdram_hit | (&guard_cnt)) :  // fast SDRAM read: closed loop / latch hit
                                           (guard_cnt >= guard_min);                // fast BRAM/unmapped read
 wire bus_guard_n = ~cpu_turbo | ~bus_cycle | (mreq_n & rd_n & wr_n) | guard_open;
+
+//  -----------------------------------------------------------------------------
+//  -- P5: STALL / WORD-LATCH HIT RATIO (debug overlay)
+//  -----------------------------------------------------------------------------
+// Two ratios, each over a window of exactly 65536 events, so the count IS the
+// per-65536 ratio and no divider is needed (0x8000 = 50%).  Both live in the
+// clk21m domain and are consumed by debug_overlay through its usual two-stage
+// sync, like the other 16-bit fields.
+//
+// dbg_wait_ratio: T-states in which tv80a inserts a wait, per 65536 T-states.
+//   Sampled on ce_cpu_n because that is the edge tv80a latches WAIT_n on
+//   (Wait_s <= WAIT_n at negedge CLK_n), so the count matches what the CPU
+//   actually did, and it scales with cpu_speed.  This is the number that says
+//   whether a faster core would help at all: a CPU already stalled most of the
+//   time gains nothing from executing faster between stalls.
+//
+// dbg_hit_ratio: fast SDRAM reads answered from sdram.sv's read cache, per
+//   65536 such reads.  One event per read window; NOT gated on cpu_turbo so it
+//   can be read at stock speed too.
+logic [15:0] sw_tot = 16'd0, sw_wait = 16'd0;
+always @(posedge clk21m) begin
+   if (reset) begin
+      sw_tot <= 16'd0; sw_wait <= 16'd0; dbg_wait_ratio <= 16'd0;
+   end else if (ce_cpu_n) begin
+      sw_tot <= sw_tot + 16'd1;
+      if (&sw_tot) begin
+         dbg_wait_ratio <= sw_wait + {15'd0, ~wait_n};
+         sw_wait        <= 16'd0;
+      end else if (~wait_n) sw_wait <= sw_wait + 16'd1;
+   end
+end
+
+wire  rd_win = bus_xfer & sdram_ce & ram_rnw;
+logic rd_win_q = 1'b0, rd_win_hit = 1'b0;
+logic [15:0] hr_tot = 16'd0, hr_hit = 16'd0;
+always @(posedge clk21m) begin
+   rd_win_q <= rd_win;
+   if (reset) begin
+      hr_tot <= 16'd0; hr_hit <= 16'd0; rd_win_hit <= 1'b0; dbg_hit_ratio <= 16'd0;
+   end else begin
+      if (rd_win & sdram_hit) rd_win_hit <= 1'b1;
+      if (rd_win_q & ~rd_win) begin            // window closed: one SDRAM read done
+         hr_tot <= hr_tot + 16'd1;
+         if (&hr_tot) begin
+            dbg_hit_ratio <= hr_hit + {15'd0, rd_win_hit};
+            hr_hit        <= 16'd0;
+         end else if (rd_win_hit) hr_hit <= hr_hit + 16'd1;
+         rd_win_hit <= 1'b0;
+      end
+   end
+end
 
 //  -----------------------------------------------------------------------------
 //  -- TURBO VDP PACER

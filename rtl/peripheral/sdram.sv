@@ -19,6 +19,15 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 module sdram
+#(
+    // ch2 (CPU) read cache: direct-mapped, one 16-bit word per line, so a fill
+    // is exactly one ordinary SDRAM read and no burst mode is involved.  The
+    // 1-line version of this (the "word latch") measured 40% of CPU reads
+    // answered without touching the chip; more lines stop code, stack and data
+    // evicting each other.  Power of two; 0 = disabled (A/B without revert).
+    // 8192 lines = 16 kB of data, ~30 M10K blocks with tags.
+    parameter CACHE_LINES = 8192
+)
 (
     input             init,        // reset to initialize RAM
     input             clk,         // clock 64MHz
@@ -57,6 +66,12 @@ module sdram
     // sampler.  Consumer: the turbo bus guard's closed-loop read release
     // (msx.sv P3, 20260826).
     output reg        ch2_rdtog,
+    // This ch2 read was answered from the cache: no SDRAM access is issued and
+    // ch2_rdtog will NOT toggle, so msx.sv's closed-loop guard must open on
+    // this instead of sitting on its watchdog.  A level held for the request
+    // window (not a toggle) because the completion is near-immediate and
+    // cannot satisfy the ">= 2 clk21m away" ordering the toggle path relies on.
+    output            ch2_hit,
 
     input      [26:0] ch3_addr,
     output reg  [7:0] ch3_dout,
@@ -110,6 +125,55 @@ reg [13:0] refresh_count = startup_refresh_max - sdram_startup_cycles;
 reg  [2:0] command;
 reg        chip;
 reg        ch1_saved_a0, ch2_saved_a0, ch3_saved_a0, ch4_saved_a0;
+// ---------------------------------------------------------------------------
+// ch2 read cache
+//   line  = {valid, tag, data[15:0]}   index = word address low bits
+//   fill  = at ch2 read-data capture, from the same SDRAM_DQ word
+//   drop  = at every write ISSUE (ch1..ch4), by index only -- a direct-mapped
+//           cache has one line per index, so clearing that line is always
+//           correct whether or not the tag matched (a lost hit at worst) and
+//           needs no tag lookup on the write path
+//   hit   = decided one clk_sdram after the request edge (M10K read is
+//           synchronous); a miss therefore issues one cycle later than before
+//   RAM read-during-write to the same index is undefined on M10K, so a lookup
+//   that overlaps a write to its own index (either the edge it read on or the
+//   edge after) is forced to miss.  Writes are rare next to reads; the cost is
+//   an occasional redundant fetch, never a stale hit.
+// ---------------------------------------------------------------------------
+localparam CL = (CACHE_LINES > 1) ? CACHE_LINES : 2;
+localparam CW = $clog2(CL);          // index bits
+localparam TW = 26 - CW;             // tag bits (word address is 26 bits)
+localparam LW = 1 + TW + 16;         // line width
+
+reg  [LW-1:0] cmem [0:CL-1];
+reg  [LW-1:0] c_rdata;
+reg           c_we = 1'b0;
+reg  [CW-1:0] c_waddr;
+reg  [LW-1:0] c_wdata;
+reg           c_we_d = 1'b0;         // write applied on the previous edge
+reg  [CW-1:0] c_waddr_d;
+always @(posedge clk) begin
+    if (c_we) cmem[c_waddr] <= c_wdata;
+    c_rdata  <= cmem[ch2_addr[CW:1]];
+    c_we_d   <= c_we;
+    c_waddr_d<= c_waddr;
+end
+
+reg           c_flush = 1'b1;        // valid-bit sweep after init; no hits until done
+reg  [CW-1:0] c_flush_idx = '0;
+reg           c_pend = 1'b0;         // a ch2 read is waiting for its tag compare
+reg  [26:0]   c_pend_addr;
+reg [25:0]    ch2_inflight_word;     // word address of the read given to SDRAM
+
+wire [CW-1:0] c_pidx   = c_pend_addr[CW:1];
+wire          c_hazard = (c_we   && c_waddr   == c_pidx)
+                       | (c_we_d && c_waddr_d == c_pidx);
+wire          c_match  = c_rdata[LW-1] && c_rdata[LW-2:16] == c_pend_addr[26:CW+1];
+
+// Held for the whole request window rather than pulsed: clk21m samples this and
+// a one-clk_sdram pulse would be missed, exactly as the ch2_ready comment warns.
+reg        ch2_hit_r = 1'b0;
+assign     ch2_hit = ch2_hit_r;
 reg [15:0] ch1_saved_data, ch2_saved_data, ch3_saved_data, ch4_saved_data;
 
 localparam STATE_STARTUP = 0;
@@ -171,11 +235,34 @@ always @(posedge clk) begin
         ch1_addr_1 <= ch1_addr;
         ch1_din_1  <= ch1_din;
     end
+    c_we <= 0;                                   // one-cycle write pulses below
+    if (~ch2_req) ch2_hit_r <= 0;
     if (ch2_req & ~ch2_req_1) begin
-        ch2_rq <= 1;
-        ch2_rnw_1  <= ch2_rnw;
-        ch2_addr_1 <= ch2_addr;
-        ch2_din_1  <= ch2_din;
+        if (CACHE_LINES != 0 && ch2_rnw) begin
+            // the RAM was read at idx(ch2_addr) on this same edge; compare next cycle
+            c_pend      <= 1;
+            c_pend_addr <= ch2_addr;
+        end else begin
+            ch2_rq <= 1;
+            ch2_rnw_1  <= ch2_rnw;
+            ch2_addr_1 <= ch2_addr;
+            ch2_din_1  <= ch2_din;
+        end
+    end
+    if (c_pend) begin
+        c_pend <= 0;
+        if (~c_flush && ~ch2_rq && c_match && ~c_hazard) begin
+            // ~ch2_rq: no ch2 access is queued, so ch2_saved_data cannot be
+            // replaced underneath this reply.  Does NOT toggle ch2_rdtog.
+            ch2_saved_data <= c_rdata[15:0];
+            ch2_saved_a0   <= c_pend_addr[0];
+            ch2_ready      <= 1;
+            ch2_hit_r      <= 1;
+        end else begin
+            ch2_rq     <= 1;
+            ch2_rnw_1  <= 1;
+            ch2_addr_1 <= c_pend_addr;
+        end
     end
     if (ch3_req & ~ch3_req_1) begin
         ch3_rq <= 1;
@@ -205,6 +292,12 @@ always @(posedge clk) begin
     if(data_ready_delay2[CAS_LATENCY+BURST_LENGTH-1]) ch2_saved_data <= SDRAM_DQ;
 	if(data_ready_delay2[CAS_LATENCY+BURST_LENGTH-1]) ch2_ready <= 1;
 	if(data_ready_delay2[CAS_LATENCY+BURST_LENGTH-1]) ch2_rdtog <= ~ch2_rdtog;
+    if(data_ready_delay2[CAS_LATENCY+BURST_LENGTH-1]) begin   // fill
+        c_we    <= 1;
+        c_waddr <= ch2_inflight_word[CW-1:0];
+        c_wdata <= {1'b1, ch2_inflight_word[25:CW], SDRAM_DQ};
+    end
+
 	
 	if(data_ready_delay3[CAS_LATENCY+BURST_LENGTH-1]) ch3_saved_data <= SDRAM_DQ;
 	if(data_ready_delay3[CAS_LATENCY+BURST_LENGTH-1]) ch3_ready <= 1;
@@ -284,6 +377,10 @@ always @(posedge clk) begin
                 saved_data <= {ch2_din_1,ch2_din_1};
                 saved_wr   <= ~ch2_rnw_1;
 				ch2_saved_a0 <= ch2_addr_1[0];
+                ch2_inflight_word <= ch2_addr_1[26:1];
+                if (~ch2_rnw_1) begin                          // drop the line at this index
+                    c_we <= 1; c_waddr <= ch2_addr_1[CW:1]; c_wdata <= '0;
+                end
                 ch         <= 1;
                 ch2_rq     <= 0;
                 command    <= CMD_ACTIVE;
@@ -299,6 +396,9 @@ always @(posedge clk) begin
                 saved_data <= {ch1_din_1,ch1_din_1};
                 saved_wr   <= ~ch1_rnw_1;
                 ch1_saved_a0 <= ch1_addr_1[0];
+                if (~ch1_rnw_1) begin                          // drop the line at this index
+                    c_we <= 1; c_waddr <= ch1_addr_1[CW:1]; c_wdata <= '0;
+                end
                 ch         <= 0;
                 ch1_rq     <= 0;
                 command    <= CMD_ACTIVE;
@@ -310,6 +410,9 @@ always @(posedge clk) begin
                 saved_data <= {ch3_din_1,ch3_din_1};
                 saved_wr   <= ~ch3_rnw_1;
 				ch3_saved_a0 <= ch3_addr_1[0];
+                if (~ch3_rnw_1) begin                          // drop the line at this index
+                    c_we <= 1; c_waddr <= ch3_addr_1[CW:1]; c_wdata <= '0;
+                end
                 ch         <= 2;
                 ch3_rq     <= 0;
                 if (ch3_rnw) 
@@ -325,6 +428,9 @@ always @(posedge clk) begin
                 saved_data <= {ch4_din_1,ch4_din_1};
                 saved_wr   <= ~ch4_rnw_1;
 				ch4_saved_a0 <= ch4_addr_1[0];
+                if (~ch4_rnw_1) begin                          // drop the line at this index
+                    c_we <= 1; c_waddr <= ch4_addr_1[CW:1]; c_wdata <= '0;
+                end
                 ch         <= 3;
                 ch4_rq     <= 0;
                 if (ch4_rnw_1)
@@ -367,8 +473,21 @@ always @(posedge clk) begin
       
     endcase
 
+    // valid-bit sweep: runs concurrently with the SDRAM start-up sequence and
+    // takes CL cycles; hits are gated on ~c_flush until it completes.  Placed
+    // last so it wins the write port over anything above during that window.
+    if (c_flush && ~init) begin
+        c_we <= 1; c_waddr <= c_flush_idx; c_wdata <= '0;
+        c_flush_idx <= c_flush_idx + 1'b1;
+        if (&c_flush_idx) c_flush <= 0;
+    end
+
     if (init) begin
         state <= STATE_STARTUP;
+        c_flush     <= 1;
+        c_flush_idx <= '0;
+        c_pend      <= 0;
+        ch2_hit_r   <= 0;
         refresh_count <= startup_refresh_max - sdram_startup_cycles;
     end
 end
