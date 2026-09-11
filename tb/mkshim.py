@@ -23,6 +23,21 @@ s = re.sub(r"<= SDRAM_DQ;", "<= SDRAM_DQ_i;", s)
 s = s.replace(", SDRAM_DQ};", ", SDRAM_DQ_i};")          # cache fill concatenation
 s = s.replace("from the same SDRAM_DQ word", "from the same SDRAM_DQ_i word")  # comment
 
+# M10K read-during-write to the SAME address has no defined result in hardware,
+# but a Verilog array is perfectly well defined (it returns old data), so a
+# simulation built straight from the RTL cannot tell whether the read-edge arm
+# of c_hazard is load-bearing -- delete it and nothing changes.  Model the
+# collision adversarially instead: return a line that is VALID with a MATCHING
+# TAG and wrong data, i.e. the worst thing the block could hand back.  With
+# this in place, removing that arm turns into a visible false hit.
+old = "    c_rdata  <= cmem[ch2_caddr[CW:1]];   // registered index -- see note above"
+new = ("    c_rdata  <= (c_we && c_waddr == ch2_caddr[CW:1])\n"
+       "              ? {1'b1, ch2_caddr[26:CW+1], ~cmem[ch2_caddr[CW:1]][15:0]}\n"
+       "              : cmem[ch2_caddr[CW:1]];")
+if old not in s:
+    sys.exit("mkshim: read-during-write model could not be inserted")
+s = s.replace(old, new, 1)
+
 s = s.replace("    reg  [3:0] state = STATE_STARTUP;\n", "")
 s = s.replace("reg [13:0] refresh_count = startup_refresh_max - sdram_startup_cycles;",
               "reg [13:0] refresh_count = startup_refresh_max - sdram_startup_cycles;\n"

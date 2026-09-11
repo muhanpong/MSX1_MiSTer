@@ -18,12 +18,12 @@ module sdram_tb #(parameter CACHE_LINES = 8192);
     logic clk = 0, init = 1;
     always #5.82 clk = ~clk;          // 85.909 MHz
 
-    logic [26:0] ch1_addr = 0;
-    logic  [7:0] ch1_din  = 0;
-    logic        ch1_req  = 0;
     logic [26:0] ch3_addr = 0, ch4_addr = 0;
     logic  [7:0] ch3_din  = 0, ch4_din  = 0;
     logic        ch3_req  = 0, ch4_req  = 0;
+    logic [26:0] ch1_addr = 0;
+    logic  [7:0] ch1_din  = 0;
+    logic        ch1_req  = 0;
     logic [26:0] ch2_addr = 0;
     logic  [7:0] ch2_din  = 0;
     logic        ch2_req  = 0, ch2_rnw = 1;
@@ -99,9 +99,20 @@ module sdram_tb #(parameter CACHE_LINES = 8192);
     endfunction
 
     task automatic rd(input [26:0] a, input [7:0] want, input string tag);
+        int n; bit was_hit;
         model_access(a, 0);
         @(negedge clk); ch2_addr = a; ch2_rnw = 1; ch2_req = 1;
-        repeat (14) @(negedge clk);
+        n = 0; was_hit = 0;
+        for (int c = 1; c <= SETTLE; c++) begin
+            @(negedge clk);
+            if (n == 0 && ch2_dout === want) begin n = c; was_hit = ch2_hit; end
+        end
+        if (n == 0) begin
+            $display("  FAIL %s addr=%06h not answered within %0d cycles", tag, a, SETTLE);
+            errors++;
+        end else if (was_hit) begin
+            if (n > lat_hit_max)  lat_hit_max  = n;
+        end else if (n > lat_miss_max) lat_miss_max = n;
         if (ch2_dout !== want) begin
             $display("  FAIL %s addr=%06h got=%02h want=%02h", tag, a, ch2_dout, want);
             errors++;
@@ -113,7 +124,7 @@ module sdram_tb #(parameter CACHE_LINES = 8192);
     // excluded from the self-check as a whole)
     task automatic rd_raw(input [26:0] a, input [7:0] want, input string tag);
         @(negedge clk); ch2_addr = a; ch2_rnw = 1; ch2_req = 1;
-        repeat (14) @(negedge clk);
+        repeat (20) @(negedge clk);
         if (ch2_dout !== want) begin
             $display("  FAIL %s addr=%06h got=%02h want=%02h", tag, a, ch2_dout, want);
             errors++;
@@ -137,11 +148,13 @@ module sdram_tb #(parameter CACHE_LINES = 8192);
     task automatic wr(input [26:0] a, input [7:0] d);
         model_access(a, 1);
         @(negedge clk); ch2_addr = a; ch2_din = d; ch2_rnw = 0; ch2_req = 1;
-        repeat (14) @(negedge clk);
+        repeat (20) @(negedge clk);
         ch2_req = 0; @(negedge clk);
     endtask
 
     int base, f_reads = 0, f_active = 0, f_active_base = 0;
+    int lat_hit_max = 0, lat_miss_max = 0;
+    localparam SETTLE = 24;   // must stay > lat_miss_max, checked below
     task automatic report(input string name, input int n_acc);
         $display("  %-34s %3d ACTIVE  (%0d accesses)", name, active_count - base, n_acc);
     endtask
@@ -219,31 +232,48 @@ module sdram_tb #(parameter CACHE_LINES = 8192);
         begin
             int stale = 0, base_r, base_w, base_hc;
             base_r = reads; base_w = writes; base_hc = hit_cache;
-            for (int off = 0; off < 16; off++) begin
+            for (int off = 0; off < 24; off++) begin
                 logic [26:0] X; logic [7:0] v;
-                X = 27'h00C000 + off*2; v = 8'h80 + off;
+                X = 27'h00C000 + off*4; v = 8'h80 + off;
                 rd_raw(X, exp_byte(X), "F-prime");
                 @(negedge clk); ch1_addr = X; ch1_din = v; ch1_req = 1;
                 repeat (off) @(negedge clk);
                 ch2_addr = X; ch2_rnw = 1; ch2_req = 1;
-                repeat (14) @(negedge clk);
+                repeat (24) @(negedge clk);
+                // The racing read may legitimately be ordered before or after
+                // the write, so either value is acceptable -- but ONLY those
+                // two.  A line corrupted by a read-during-write collision
+                // returns neither, which is what makes the c_hazard read-edge
+                // arm testable at all.
+                if (ch2_dout !== exp_byte(X) && ch2_dout !== v) begin
+                    $display("  CORRUPT off=%0d: racing read got %02h, legal are %02h/%02h",
+                             off, ch2_dout, exp_byte(X), v);
+                    stale++;
+                end
                 ch1_req = 0; ch2_req = 0;
                 repeat (24) @(negedge clk);              // let everything drain
                 @(negedge clk); ch2_addr = X; ch2_req = 1;
-                repeat (14) @(negedge clk);
+                repeat (20) @(negedge clk);
                 if (ch2_dout !== v) begin
                     $display("  STALE off=%0d: post-race read got %02h want %02h", off, ch2_dout, v);
                     stale++;
                 end
                 ch2_req = 0; @(negedge clk);
             end
-            $display("  F write/read race sweep, 16 offsets: %0d stale", stale);
+            $display("  F write/read race sweep, 24 offsets: %0d bad", stale);
             if (stale) errors++;
             f_active = active_count - f_active_base;   // excluded from the self-check
             f_reads  = reads - base_r;
         end
 
+
         $display("");
+        $display("  latency: hit <= %0d, miss <= %0d clk (settle window %0d)",
+                 lat_hit_max, lat_miss_max, SETTLE);
+        if (lat_miss_max > SETTLE - 4) begin
+            $display("  -> settle window is within 4 cycles of the worst miss; raise SETTLE");
+            errors++;
+        end
         $display("  ---- over the same %0d reads / %0d writes ----", reads, writes);
         $display("  1-word latch (previous commit)  would hit %4d  (%0d%%)", hit_latch, (100*hit_latch)/reads);
         $display("  %0d-line cache (model)        hits       %4d  (%0d%%)", CACHE_LINES, hit_cache, (100*hit_cache)/reads);
