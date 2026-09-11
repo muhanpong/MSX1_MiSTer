@@ -133,8 +133,17 @@ reg        ch1_saved_a0, ch2_saved_a0, ch3_saved_a0, ch4_saved_a0;
 //           cache has one line per index, so clearing that line is always
 //           correct whether or not the tag matched (a lost hit at worst) and
 //           needs no tag lookup on the write path
-//   hit   = decided one clk_sdram after the request edge (M10K read is
-//           synchronous); a miss therefore issues one cycle later than before
+//   hit   = decided two clk_sdram after the request edge.  The index handed to
+//           the M10K is REGISTERED (ch2_caddr), not ch2_addr straight off the
+//           CPU bus: the combinational mapper chain from the T80 into an M10K
+//           address port does not close in one clk_sdram, and MSX1.sdc's
+//           multicycle exception is name-matched on {*sdram*ch2_*}, so a
+//           register called c_* or an inferred RAM's portb_address_reg falls
+//           outside it and gets analysed single-cycle (measured -11.9 ns; the
+//           SDC comment records -9.1 ns for the same chain into ch2_addr_1).
+//           Capturing into ch2_caddr puts the cross-domain hop back inside the
+//           exception and leaves the RAM port fed from a local flop.  A miss
+//           therefore issues two cycles after the request instead of one
 //   RAM read-during-write to the same index is undefined on M10K, so a lookup
 //   that overlaps a write to its own index (either the edge it read on or the
 //   edge after) is forced to miss.  Writes are rare next to reads; the cost is
@@ -154,21 +163,26 @@ reg           c_we_d = 1'b0;         // write applied on the previous edge
 reg  [CW-1:0] c_waddr_d;
 always @(posedge clk) begin
     if (c_we) cmem[c_waddr] <= c_wdata;
-    c_rdata  <= cmem[ch2_addr[CW:1]];
+    c_rdata  <= cmem[ch2_caddr[CW:1]];   // registered index -- see note above
     c_we_d   <= c_we;
     c_waddr_d<= c_waddr;
 end
 
 reg           c_flush = 1'b1;        // valid-bit sweep after init; no hits until done
 reg  [CW-1:0] c_flush_idx = '0;
-reg           c_pend = 1'b0;         // a ch2 read is waiting for its tag compare
-reg  [26:0]   c_pend_addr;
+// Stage 1 is named ch2_* so MSX1.sdc's {*sdram*ch2_*} multicycle covers the
+// clk21m -> clk_sdram hop, exactly as it does for ch2_addr_1.  Stage 2 must NOT
+// be: it is a plain clk_sdram -> clk_sdram dependency and relaxing it by 6
+// cycles would be wrong.
+reg           ch2_cpend = 1'b0;      // index captured; the RAM is read this cycle
+reg  [26:0]   ch2_caddr;
+reg           c_pend2   = 1'b0;      // c_rdata valid; compare this cycle
 reg [25:0]    ch2_inflight_word;     // word address of the read given to SDRAM
 
-wire [CW-1:0] c_pidx   = c_pend_addr[CW:1];
+wire [CW-1:0] c_pidx   = ch2_caddr[CW:1];
 wire          c_hazard = (c_we   && c_waddr   == c_pidx)
                        | (c_we_d && c_waddr_d == c_pidx);
-wire          c_match  = c_rdata[LW-1] && c_rdata[LW-2:16] == c_pend_addr[26:CW+1];
+wire          c_match  = c_rdata[LW-1] && c_rdata[LW-2:16] == ch2_caddr[26:CW+1];
 
 // Held for the whole request window rather than pulsed: clk21m samples this and
 // a one-clk_sdram pulse would be missed, exactly as the ch2_ready comment warns.
@@ -239,9 +253,8 @@ always @(posedge clk) begin
     if (~ch2_req) ch2_hit_r <= 0;
     if (ch2_req & ~ch2_req_1) begin
         if (CACHE_LINES != 0 && ch2_rnw) begin
-            // the RAM was read at idx(ch2_addr) on this same edge; compare next cycle
-            c_pend      <= 1;
-            c_pend_addr <= ch2_addr;
+            ch2_cpend <= 1;          // RAM is read next cycle, compared the one after
+            ch2_caddr <= ch2_addr;
         end else begin
             ch2_rq <= 1;
             ch2_rnw_1  <= ch2_rnw;
@@ -249,19 +262,22 @@ always @(posedge clk) begin
             ch2_din_1  <= ch2_din;
         end
     end
-    if (c_pend) begin
-        c_pend <= 0;
+    if (ch2_cpend) begin
+        ch2_cpend <= 0;
+        c_pend2   <= 1;
+    end else if (c_pend2) begin
+        c_pend2 <= 0;
         if (~c_flush && ~ch2_rq && c_match && ~c_hazard) begin
             // ~ch2_rq: no ch2 access is queued, so ch2_saved_data cannot be
             // replaced underneath this reply.  Does NOT toggle ch2_rdtog.
             ch2_saved_data <= c_rdata[15:0];
-            ch2_saved_a0   <= c_pend_addr[0];
+            ch2_saved_a0   <= ch2_caddr[0];
             ch2_ready      <= 1;
             ch2_hit_r      <= 1;
         end else begin
             ch2_rq     <= 1;
             ch2_rnw_1  <= 1;
-            ch2_addr_1 <= c_pend_addr;
+            ch2_addr_1 <= ch2_caddr;
         end
     end
     if (ch3_req & ~ch3_req_1) begin
@@ -486,7 +502,8 @@ always @(posedge clk) begin
         state <= STATE_STARTUP;
         c_flush     <= 1;
         c_flush_idx <= '0;
-        c_pend      <= 0;
+        ch2_cpend   <= 0;
+        c_pend2     <= 0;
         ch2_hit_r   <= 0;
         refresh_count <= startup_refresh_max - sdram_startup_cycles;
     end
