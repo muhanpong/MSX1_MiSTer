@@ -405,12 +405,13 @@ localparam CONF_STR = {
    // "J1": the 1 sets joy_force, which locks the keyboard into joystick
    // emulation and would steal the cursor keys from MSX software.  The stock
    // MSX_MiSTer core spells it "J,Fire 1,Fire 2;" for the same reason.
-   // Name n lands on joystick_0[4+n].  4..11 are the Mega Drive pad in the order
-   // openMSX's JoyMega uses, so with JoyMega off A and B are simply the MSX
-   // port's two triggers; 12..14 press keys (joykey.sv) and 15 is Pause.
+   // Name n lands on joystick_0[4+n].  4..11 are the Mega Drive pad; 4 and 5 are
+   // its B and C because those are the two the MSX port reads as triggers, so
+   // they stay the MSX's two triggers with JoyMega off as well.  12..14 press
+   // keys (joykey.sv) and 15 is Pause.
    // Twelve names is also where the framework's own documented ceiling sits,
    // and it keeps every button inside the low 16 bits of the joystick word.
-   "J,A,B,C,Start,X,Y,Z,Mode,Space,Return,F1,Pause;",
+   "J,Fire 1 (B),Fire 2 (C),A,Start,X,Y,Z,Mode,Space,Return,F1,Pause;",
    // Default map for a pad that has never been through "Define buttons".
    // map_joystick() only recognises the base names (A B X Y L R Select Start),
    // so the readable names above would otherwise map to nothing; a blank entry

@@ -698,11 +698,20 @@ wire [7:0] d_from_psg, psg_ioa, psg_iob;
 // the MiSTer direction bits, hence the swizzle.  Note it takes pin 8 raw: that
 // line is the pad's phase clock, so the "pin 8 high releases everything" rule
 // below must not be applied to it.
+//
+// The pad's B and C are what a Mega Drive pad puts on the MSX port's two
+// triggers (phase 0 of joymega.sv), so they take joystick bits 4 and 5 -- the
+// same two the plain path below uses.  That keeps fire on the same physical
+// buttons whether JoyMega is on or off; wiring the pad's A to bit 4 instead
+// would move fire every time the menu option is toggled.  The pad's A lands on
+// bit 6 and is reachable only in JoyMega mode, which is where it exists.
 wire [5:0] jm_a_dout, jm_b_dout;
 joymega jm_a (.clk(clk21m), .reset(reset), .pin8(psg_iob[4]),
-              .btn({joy0[11:4], joy0[0], joy0[1], joy0[2], joy0[3]}), .dout(jm_a_dout));
+              .btn({joy0[11:7], joy0[5], joy0[4], joy0[6], joy0[0], joy0[1], joy0[2], joy0[3]}),
+              .dout(jm_a_dout));
 joymega jm_b (.clk(clk21m), .reset(reset), .pin8(psg_iob[5]),
-              .btn({joy1[11:4], joy1[0], joy1[1], joy1[2], joy1[3]}), .dout(jm_b_dout));
+              .btn({joy1[11:7], joy1[5], joy1[4], joy1[6], joy1[0], joy1[1], joy1[2], joy1[3]}),
+              .dout(jm_b_dout));
 
 wire [5:0] joy_a = joymega_en[0] ? jm_a_dout
                  : psg_iob[4]    ? 6'b111111
