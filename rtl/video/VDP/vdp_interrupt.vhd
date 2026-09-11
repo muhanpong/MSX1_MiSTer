@@ -148,7 +148,12 @@ BEGIN
             -- & 0x10).  We latched the flag regardless, and software that
             -- dispatches its interrupt handler on the S#1 FH bit (Zanac-EX)
             -- ran its raster-split handler from the VBLANK interrupt while
-            -- IE1 was off -- during its game-over R#23 roll the wandering
+            -- IE1 was off.  (20260912: the symptom is NOT limited to the
+            -- game-over roll described below -- with this enable term removed
+            -- the title garbles from the first seconds after boot, alternating
+            -- one good frame with one bad one.  See the memory note; the term
+            -- is a stopgap, and the real defect is the set/clear timing of FH
+            -- against vblank.)  During its game-over R#23 roll the wandering
             -- Y_CNT==R#19 match set the flag and the split handler then
             -- overwrote the title-screen R#2 with the gameplay page (=63),
             -- leaving the title permanently garbled.
