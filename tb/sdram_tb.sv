@@ -21,6 +21,9 @@ module sdram_tb #(parameter CACHE_LINES = 8192);
     logic [26:0] ch1_addr = 0;
     logic  [7:0] ch1_din  = 0;
     logic        ch1_req  = 0;
+    logic [26:0] ch3_addr = 0, ch4_addr = 0;
+    logic  [7:0] ch3_din  = 0, ch4_din  = 0;
+    logic        ch3_req  = 0, ch4_req  = 0;
     logic [26:0] ch2_addr = 0;
     logic  [7:0] ch2_din  = 0;
     logic        ch2_req  = 0, ch2_rnw = 1;
@@ -43,10 +46,10 @@ module sdram_tb #(parameter CACHE_LINES = 8192);
         .ch1_addr(ch1_addr), .ch1_dout(), .ch1_din(ch1_din), .ch1_req(ch1_req), .ch1_rnw(1'b0), .ch1_ready(),
         .ch2_addr(ch2_addr), .ch2_dout(ch2_dout), .ch2_din(ch2_din), .ch2_req(ch2_req),
         .ch2_rnw(ch2_rnw), .ch2_ready(ch2_ready), .ch2_rdtog(ch2_rdtog), .ch2_hit(ch2_hit),
-        .ch3_addr(27'd0), .ch3_dout(), .ch3_din(8'd0), .ch3_req(1'b0), .ch3_rnw(1'b1),
+        .ch3_addr(ch3_addr), .ch3_dout(), .ch3_din(ch3_din), .ch3_req(ch3_req), .ch3_rnw(1'b0),
         .ch3_ready(), .ch3_done(),
-        .ch4_addr(27'd0), .ch4_dout(), .ch4_dout16(), .ch4_din(8'd0), .ch4_req(1'b0),
-        .ch4_rnw(1'b1), .ch4_ready()
+        .ch4_addr(ch4_addr), .ch4_dout(), .ch4_dout16(), .ch4_din(ch4_din), .ch4_req(ch4_req),
+        .ch4_rnw(1'b0), .ch4_ready()
     );
 
     sdram_model model (
@@ -116,6 +119,19 @@ module sdram_tb #(parameter CACHE_LINES = 8192);
             errors++;
         end
         ch2_req = 0; @(negedge clk);
+    endtask
+
+    // ch3 (flash) and ch4 (PCM) writers.  Not fed to the offline models: these
+    // run after the self-check, which is why they may perturb active_count.
+    task automatic wr3(input [26:0] a, input [7:0] d);
+        @(negedge clk); ch3_addr = a; ch3_din = d; ch3_req = 1;
+        repeat (20) @(negedge clk);
+        ch3_req = 0; @(negedge clk);
+    endtask
+    task automatic wr4(input [26:0] a, input [7:0] d);
+        @(negedge clk); ch4_addr = a; ch4_din = d; ch4_req = 1;
+        repeat (20) @(negedge clk);
+        ch4_req = 0; @(negedge clk);
     endtask
 
     task automatic wr(input [26:0] a, input [7:0] d);
@@ -246,6 +262,51 @@ module sdram_tb #(parameter CACHE_LINES = 8192);
                 errors++;
             end
         end
+        $display("");
+        // ---- G: invalidation paths the trace above never exercises -----------
+        // ch3 and ch4 used to be tied off here, so a cache that ignored their
+        // writes passed.  Each case caches a word through ch2, overwrites it
+        // from the other channel, and reads it back.
+        begin
+            logic [26:0] ga, gb;
+            ga = 27'h0040100;
+            rd_raw(ga, exp_byte(ga), "G ch3 fill");
+            wr3(ga, 8'h5A);
+            rd_raw(ga, 8'h5A, "G ch3 invalidates");
+
+            gb = 27'h0040200;
+            rd_raw(gb, exp_byte(gb), "G ch4 fill");
+            wr4(gb, 8'hA5);
+            rd_raw(gb, 8'hA5, "G ch4 invalidates");
+        end
+
+        // A line the flush sweep left as {valid=0, tag=0} must not answer a read
+        // whose tag is also 0 -- i.e. any address in the first cache-sized span.
+        begin
+            logic [26:0] gl;
+            gl = 27'h0000042;
+            rd_raw(gl, exp_byte(gl), "G low address, tag 0");
+        end
+
+        // Same index, adjacent tag: the pair the direct-mapped cache must tell
+        // apart.  Word address bit CW is the lowest tag bit, and the memory
+        // model does distinguish it.
+        begin
+            logic [26:0] t0, t1;
+            // The pair must differ in EXACTLY the lowest tag bit (word address
+            // bit CW), or a truncated tag compare still tells them apart and
+            // the test proves nothing.
+            // Odd byte, because the bit that separates the two tags lands in
+            // the high half of the model's word: at the even byte the two
+            // addresses happen to carry the same value and a wrong hit is
+            // invisible.
+            t0 = 27'h0000081;             // word 0x0040, tag 0
+            t1 = 27'h0004081;             // word 0x2040: same index, tag 1
+            rd_raw(t0, exp_byte(t0), "G tag pair, low");
+            rd_raw(t1, exp_byte(t1), "G tag pair, high");
+            rd_raw(t0, exp_byte(t0), "G tag pair, low again");
+        end
+
         $display("");
         if (errors) $display("RESULT: %0d data mismatch(es)", errors);
         else        $display("RESULT: all data correct");
