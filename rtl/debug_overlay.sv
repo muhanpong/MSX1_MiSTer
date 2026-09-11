@@ -69,6 +69,9 @@ module debug_overlay (
     input  wire [23:0] probe_r2,
     input  wire [23:0] probe_r23,
     input  wire [23:0] probe_r0,
+    input  wire [23:0] probe_r1,
+    input  wire [23:0] probe_r9,
+    input  wire [23:0] probe_r19,
     input  wire [15:0] probe_frame
 );
 
@@ -312,11 +315,11 @@ logic        pb;      // reg-probe current bit (comb temp)
 // ─── Render ──────────────────────────────────────────────────────────────────
 localparam PW = 11'd66;
 `ifdef MOONSOUND_DIAG
-// 34 bands (13 base + 17 diag + 4 reg-probe) x 7 lines + top/bottom border.
-// Band height dropped 8 -> 7 so the reg-probe rows fit INSIDE the panel and
-// the whole stack stays within the ~245-line visible area.
-localparam [2:0] ROWH = 3'd7;
-localparam PH = 8'd240;   // 1 + 34*7 + 1
+// 37 bands (13 base + 17 diag + 7 reg-probe) x 6 lines + top/bottom border.
+// Band height went 8 -> 7 when the reg-probe rows arrived and 7 -> 6 when R#1
+// joined them; the whole stack has to stay within the ~245-line visible area.
+localparam [2:0] ROWH = 3'd6;
+localparam PH = 8'd224;   // 1 + 37*6 + 1
 `else
 localparam [2:0] ROWH = 3'd8;
 localparam PH = 8'd58;  // 7 rows: PCM diagnosis + ch4 latency probe
@@ -557,6 +560,23 @@ always_comb begin
                 if (px < 8'd48) begin
                     pb = probe_r0[5'd23 - {1'b0, px[5:1]}];
                     R_out = pb ? 8'hFF : 8'h30; G_out = pb ? 8'hC0 : 8'h24; B_out = 8'h00;
+                end
+            end else if (row < 6'd34) begin // probe_r1 — white.  bit6 of the value
+                                            // byte is DISPLAY ON, the one that
+                                            // says whether the screen is blanked.
+                if (px < 8'd48) begin
+                    pb = probe_r1[5'd23 - {1'b0, px[5:1]}];
+                    R_out = pb ? 8'hFF : 8'h30; G_out = pb ? 8'hFF : 8'h30; B_out = pb ? 8'hFF : 8'h30;
+                end
+            end else if (row < 6'd35) begin // probe_r9 — orange.  bit7 = 212 lines
+                if (px < 8'd48) begin
+                    pb = probe_r9[5'd23 - {1'b0, px[5:1]}];
+                    R_out = pb ? 8'hFF : 8'h30; G_out = pb ? 8'h80 : 8'h18; B_out = 8'h00;
+                end
+            end else if (row < 6'd36) begin // probe_r19 — violet.  line-interrupt line
+                if (px < 8'd48) begin
+                    pb = probe_r19[5'd23 - {1'b0, px[5:1]}];
+                    R_out = pb ? 8'hC0 : 8'h28; G_out = 8'h00; B_out = pb ? 8'hFF : 8'h30;
                 end
             end else begin                 // probe frame — cyan (16 bits, 2px each)
                 if (px < 8'd32) begin

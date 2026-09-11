@@ -24,6 +24,9 @@ module msx
    output            [23:0] probe_r2,
    output            [23:0] probe_r23,
    output            [23:0] probe_r0,
+   output            [23:0] probe_r1,
+   output            [23:0] probe_r9,
+   output            [23:0] probe_r19,
    output            [15:0] probe_frame,
    input                    clk_sdram,
    input                    dma_active,
@@ -923,7 +926,7 @@ vdp_regprobe u_regprobe (
    .wr_n(wr_n), .rd_n(rd_n), .iorq_n(iorq_n), .m1_n(m1_n),
    .vdp_en(vdp_en), .vblank(vblank), .hblank(hblank),
    .msx_pause(probe_freeze),
-   .p_r2(probe_r2), .p_r23(probe_r23), .p_r0(probe_r0), .p_frame(probe_frame)
+   .p_r2(probe_r2), .p_r23(probe_r23), .p_r0(probe_r0), .p_r1(probe_r1), .p_r9(probe_r9), .p_r19(probe_r19), .p_frame(probe_frame)
 );
 
 wire [15:0] VRAM_address;

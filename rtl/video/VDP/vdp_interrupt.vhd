@@ -119,7 +119,27 @@ BEGIN
         IF (RESET = '1') THEN
             FF_HSYNC_INT_N <= '1';
         ELSIF (CLK21M'EVENT AND CLK21M = '1') THEN
-            IF( CLR_HSYNC_INT = '1' OR (W_VSYNC_INTR_TIMING = '1' AND V_BLANKING_START = '1') )THEN
+            -- FH is cleared by reading S#1 (and, as this core has always done,
+            -- by a write to R#19 or an IE1-on write to R#0) -- CLR_HSYNC_INT.
+            -- It is NOT cleared at vertical blanking.  The real chip resets the
+            -- flag only on the S#1 read, and openMSX matches that: VDP.cc calls
+            -- irqHorizontal.reset() in exactly three places -- chip reset, the
+            -- S#1 read while IE1 is on, and an R#0 write that turns IE1 off.
+            --
+            -- The clear used to include `V_BLANKING_START`, which destroyed a
+            -- flag the CPU had not read yet.  That is not a narrow window: a
+            -- handler that moves R#9 mid-frame moves the blanking point with it,
+            -- because vdp_ssg.vhd derives V_BLANKING_START from the LIVE R#9
+            -- (counter 192 or 212), not from the value latched at frame start.
+            -- ASO (a turboR title patched for MSX2+) sets R#19 = 210 and R#9 =
+            -- 212-lines from its line-104 handler, which parks the flag's
+            -- destruction exactly 2 lines after the line-210 match; its ISR
+            -- needs 3.6 lines to reach the S#1 read, so it always read FH = 0,
+            -- never ran its raster handler, and never set the frame flag its
+            -- main loop waits on -- a permanent black screen on the first pass.
+            -- Measured against openMSX on the same machine, DOS and RAM by a
+            -- companion session; it plays there because the flag survives.
+            IF( CLR_HSYNC_INT = '1' )THEN
                 -- H-BLANKING INTERRUPT CLEAR
                 FF_HSYNC_INT_N <= '1';
             -- The FH flag only arms while IE1 (R#0 bit4) is enabled: with IE1

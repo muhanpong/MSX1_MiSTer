@@ -690,7 +690,7 @@ wire        flash16x_prog_we;
 wire [22:0] flash16x_prog_addr;
 wire  [7:0] flash16x_prog_data;
 wire        log_clear;
-wire [23:0] probe_r2, probe_r23, probe_r0;
+wire [23:0] probe_r2, probe_r23, probe_r0, probe_r1, probe_r9, probe_r19;
 wire [15:0] probe_frame;
 wire msx_pause = nvbak_dma_active | dump_active | (status[43] & OSD_STATUS) | pause_toggle | upload_hold;
 
@@ -718,7 +718,7 @@ msx MSX
    .ce_5m39_n(ce_5m39_n),
    .ce_10hz  (ce_10hz   & ~msx_pause),
    .probe_freeze(msx_pause),
-   .probe_r2(probe_r2), .probe_r23(probe_r23), .probe_r0(probe_r0), .probe_frame(probe_frame),
+   .probe_r2(probe_r2), .probe_r23(probe_r23), .probe_r0(probe_r0), .probe_r1(probe_r1), .probe_r9(probe_r9), .probe_r19(probe_r19), .probe_frame(probe_frame),
    .HS(hsync),
    .DE(blank_n),
    .VS(vsync),
@@ -929,6 +929,9 @@ debug_overlay u_overlay (
    .probe_r2       (probe_r2),
    .probe_r23      (probe_r23),
    .probe_r0       (probe_r0),
+   .probe_r1       (probe_r1),
+   .probe_r9       (probe_r9),
+   .probe_r19      (probe_r19),
    .probe_frame    (probe_frame),
    .dbg_pcm_valid  (dbg_pcm_valid),
    .dbg_opl3_valid (dbg_opl3_valid),
