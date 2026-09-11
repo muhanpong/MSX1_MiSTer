@@ -22,7 +22,7 @@ MAPPER_TYPES = ["MAPPER_UNUSED" , "MAPPER_RAM"    , "MAPPER_AUTO"  , "MAPPER_NON
                 "MAPPER_KOEI"   , "MAPPER_LINEAR" , "MAPPER_RTYPE" , "MAPPER_WIZARDY"   ,
                 "MAPPER_FMPAC"  , "MAPPER_OFFSET" , "MAPPER_MFRSD1", "MAPPER_MFRSD2"    ,
                 "MAPPER_MFRSD3" , "MAPPER_GM2"    , "MAPPER_HALNOTE", "MAPPER_ASCII16X"  ,
-                "MAPPER_YAMANOOTO", "MAPPER_NEO8" , "MAPPER_NEO16" ]
+                "MAPPER_YAMANOOTO", "MAPPER_NEO8" , "MAPPER_NEO16" , "MAPPER_MSXDOS2"   ]
 MSX_TYPES    = ["MSX1", "MSX2"]
 
 BLOCK_TYPES = {"NONE"       : {"MEMORY": "NONE", "DEVICE" : "NONE" , "MAPPER" : "MAPPER_UNUSED" , "CONFIG" : "NONE"         , "SRAM": 0  },
@@ -36,9 +36,10 @@ BLOCK_TYPES = {"NONE"       : {"MEMORY": "NONE", "DEVICE" : "NONE" , "MAPPER" : 
                "ROM_MIRROR" : {"MEMORY": "NONE", "DEVICE" : "NONE" , "MAPPER" : "MAPPER_NONE"   , "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
                "IO_MIRROR"  : {"MEMORY": "NONE", "DEVICE" : "NONE" , "MAPPER" : "MAPPER_UNUSED" , "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
                "MIRROR"     : {"MEMORY": "NONE", "DEVICE" : "NONE" , "MAPPER" : "MAPPER_NONE"   , "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
-               "HALNOTE"    : {"MEMORY": "ROM" , "DEVICE" : "NONE" , "MAPPER" : "MAPPER_HALNOTE" , "CONFIG" : "SLOT_INTERNAL", "SRAM": 16 },
-               "ASCII16X"   : {"MEMORY": "ROM" , "DEVICE" : "NONE" , "MAPPER" : "MAPPER_ASCII16X", "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
+               "HALNOTE"    : {"MEMORY": "ROM" , "DEVICE" : "NONE" , "MAPPER" : "MAPPER_HALNOTE", "CONFIG" : "SLOT_INTERNAL", "SRAM": 16 },
+               "ASCII8"     : {"MEMORY": "ROM" , "DEVICE" : "NONE" , "MAPPER" : "MAPPER_ASCII8" , "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
                "MSX-MUSIC"  : {"MEMORY": "ROM" , "DEVICE" : "OPL3" , "MAPPER" : "MAPPER_NONE"   , "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
+               "MSXDOS2"    : {"MEMORY": "ROM" , "DEVICE" : "NONE" , "MAPPER" : "MAPPER_MSXDOS2", "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
                }
 
 def file_hash(filename):
@@ -273,6 +274,7 @@ def parseDir(dir) :
             if filename.endswith('.xml'):
                 filepath = os.path.join(dirpath, filename)
                 filename_without_extension, extension = os.path.splitext(filename)
+                print(filepath)
                 dir_save = "MSX" + dirpath[len(dir):]
                 output_filename = os.path.join(dir_save, filename_without_extension) + ".MSX"
                 if not os.path.exists(dir_save):

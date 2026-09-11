@@ -113,11 +113,18 @@
       </block>
     </secondary>
     <secondary slot="3">
-      <block start="1" id="A1 Cockpit">
-        <type>ROM</type>
-        <block_count>2</block_count>
-        <filename>fs-a1fx_cockpit.rom</filename>
-        <SHA1>9d67fab55b85f4ac4f5924323a70020eb8589057</SHA1>
+      <!-- MSX-DOS 2.  Kernel only: the driver comes from the disk ROM in 3-2,
+           which is why this block is only in packs that carry an FDC.  DOS 2
+           also needs two free memory-mapper pages, so 64 kB stock packs cannot
+           have it; these are all 1 MB or larger.
+           ascii_msxdos22.rom is the Japanese ASCII cartridge (rom[0x94] = 7Fh,
+           so it banks on 7FFEh); the European msxdos22.rom and mk_dos220.rom
+           bank on 6000-6FFFh instead.  mapper_msxdos2 decodes all three. -->
+      <block start="1" id="MSX-DOS2 ROM">
+        <type>MSXDOS2</type>
+        <block_count>4</block_count>
+        <filename>ascii_msxdos22.rom</filename>
+        <SHA1>42f4e3360eb134857b0efa82c1abedf342680124</SHA1>
       </block>
     </secondary>
   </primary>

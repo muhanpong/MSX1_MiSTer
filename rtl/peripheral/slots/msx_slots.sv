@@ -194,6 +194,7 @@ wire [26:0] mapper_addr = mem_unmaped                 ? 27'hDEAD                
                           mapper == MAPPER_MFRSD1     ? 27'(mapper_mfrsd1_addr)     :
                           mapper == MAPPER_MFRSD2     ? 27'(mapper_mfrsd2_addr)     :
                           mapper == MAPPER_MFRSD3     ? 27'(mapper_mfrsd3_addr)     :
+                          mapper == MAPPER_MSXDOS2    ? 27'(mapper_msxdos2_addr)    :
                           mapper == MAPPER_HALNOTE    ? 27'(mapper_halnote_addr)    :
                           cart_ascii8                 ? 27'(mapper_ascii8_addr)     :
                           cart_ascii16                ? 27'(mapper_ascii16_addr)    :
@@ -235,6 +236,7 @@ wire mem_unmaped = mapper_konami_unmaped     |
                    mapper_neo8_unmaped       |
                    mapper_neo16_unmaped      |
                    mapper_yamanooto_unmaped  |
+                   mapper_msxdos2_unmaped    | 
                    mapper_halnote_unmaped    | 
                    mapper_rd                 | 
                    FDC_req                   |
@@ -253,6 +255,18 @@ wire [26:0] mapper_linear_addr = 27'(cpu_addr[15:0]) & ((27'(size) << 14)-27'd1)
 //NONE 
 wire [26:0] mapper_offset_addr  = 27'({(cpu_addr[15:14] - offset_ram),cpu_addr[13:0]});
 //wire mapper_offset_unmaped      = cpu_addr[15:14] < offset_ram; //TODO podminit mapperem
+
+wire [24:0] mapper_msxdos2_addr;
+wire        mapper_msxdos2_unmaped;
+mapper_msxdos2 msxdos2
+(
+   .rom_size(25'(size) << 14),
+   .din(cpu_dout),
+   .cs(mapper == MAPPER_MSXDOS2),
+   .mem_unmaped(mapper_msxdos2_unmaped),
+   .mem_addr(mapper_msxdos2_addr),
+   .*
+);
 
 wire [24:0] mapper_halnote_addr;
 wire        mapper_halnote_unmaped;
