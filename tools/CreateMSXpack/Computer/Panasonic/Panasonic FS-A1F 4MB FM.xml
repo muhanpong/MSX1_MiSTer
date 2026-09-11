@@ -1,62 +1,56 @@
 <?xml version="1.0" ?>
 <!--
-  Panasonic FS-A1FX (1988, Japanese MSX2+) with a 4MB memory mapper.
-  Stock is 64 KB; this variant only changes the 3-0 mapper size
-  (block_count is in 16 KB units: 4=64KB, 64=1MB, 128=2MB, 256=4MB).
+  Panasonic FS-A1F basic 4MB.xml with MSX-MUSIC added in slot 0-2.
 
-  Slot layout follows openMSX share/machines/Panasonic_FS-A1FX.xml.  The BIOS,
-  sub ROM and kanji BASIC are byte identical to the FS-A1WX dumps (same SHA1s).
+  The real machine has none; slot 0 is expanded to make room, exactly as the
+  FS-A1FX and FS-A1WX packs already do, and the FM BASIC ROM is the FS-A1WX one
+  (SHA1 aad42ba4).  Everything else is identical to Panasonic FS-A1F basic 4MB.xml.
 
-  Three deliberate differences from the real machine, all requested:
+  Built 2026-09-04 to test one variable: FS-A1FX 1MB plays two SCC+ cartridges
+  cleanly under SCMD while FS-A1F 1MB does not, and MSX-MUSIC in 0-2 is one of
+  only four differences between those two packs.
+-->
+<!--
+  Panasonic FS-A1F (1987, Japanese MSX2).  One drive, kanji ROM.
 
-  1. MSX-MUSIC in slot 0-2.  The real FS-A1FX has NO MSX-MUSIC ("No MSX-MUSIC"
-     in openMSX's own description); the FM BASIC ROM here is the FS-A1WX one.
-     Slot 0 is expanded to make room, exactly as the FS-A1WX pack does.
+  Slot layout follows openMSX share/machines/Panasonic_FS-A1F.xml.
+  RAM: 4MB.
 
-  2. The floppy controller.  The real machine has a TC8566AF (uPD765 family) and
-     this core models only a WD2793, so the original fs-a1fx_disk.rom hangs
-     before DOS1.  Slot 3-2 carries the WD2793 disk ROM instead, SHA1 12f2cc79,
-     the same substitution the FS-A1WX pack uses.  See the FS-A1WX header.
+  basic build: the A1 Cockpit ROM(s) are left out entirely, so the machine
+  always comes up in MSX-BASIC.  Everything else is identical to the
+  'firmware' pack.  This is the same idea as Daewoo CPC-300_no_tutor.
 
-  3. The A1 Cockpit built-in software IS included (slot 3-3, a plain 32K ROM at
-     4000H-BFFFH, no mapper).  It does NOT take over at boot, and that needs no
-     patching: entry is gated by the front panel FIRMWARE SWITCH, which software
-     reads as bit7 of I/O port 41H.  dev_matsushita reports bit7 = 1 (switch
-     OFF), so the machine boots to BASIC and the Cockpit simply sits there.
-     Verified on the reference model: openMSX firmwareswitch=false boots to
-     BASIC, firmwareswitch=true boots into the Cockpit menu.
-     (A future OSD toggle for that switch would drive bit7 here.  Recorded as a
-     relationship, not as scheduled work.)
+  The real FS-A1F has a TC8566AF floppy controller and this core models
+  only a WD2793, so fs-a1f_disk.rom would hang before DOS1.  Slot 3-2
+  carries the WD2793 disk ROM instead, SHA1 12f2cc79, the same
+  substitution the FS-A1FX and FS-A1WX packs use.
+  VERIFIED ON HARDWARE 2026-09-04: this pack reaches MSX-DOS.
 
-  The turbo itself is real on this machine: FS-A1FX is one of the only three
-  models that have it (with FS-A1WX and FS-A1WSX), so <device typ="MATSUSHITA">
-  is correct here.  Measured identical to the FS-A1WX: OUT 40H,8 then
-  INP(40H);INP(41H) = 247 251, turbo on = 250, off = 251.
+  <pattern>5</pattern> = 128 bytes 00 then 128 bytes FF, which is exactly
+  the power-on RAM content openMSX records for this machine.
 
-  MoonSound is this core's extension rather than FS-A1FX hardware; it is
-  declared here for parity with the other packs.
+  BIOS and SUB ROM are byte identical across FS-A1, FS-A1mk2 and FS-A1F
+  (SHA1 0081ea0d / 0fbd45ef); the packs differ only in firmware, kanji
+  and disk.
 -->
 <msxConfig>
   <type>MSX2</type>
   <kbd_layout>/yX/cWdlZv//ZP//cHMh////YP9hRgH///9XUCZUAv//MFUxMgQD//+AUzNRRwX//0MnNTRWBv///0I3UgcQ//8iQDZEABH//yMkQRdFEv///yD/FRP//2Ngdxb/FP//////////df///////////////////3L/dv//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////Yv//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////hIH///+Cg4b/h4X///////90//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////8=</kbd_layout>
   <device typ="KANJI" id="Kanji ROM">
     <rom>
-      <!-- lowercase <sha1> for device/rom; block/SHA1 is uppercase.  Mixing them
-           up is fail-quiet: the ROM is silently dropped from the pack. -->
-      <filename>fs-a1fx_kanjifont.rom</filename>
-      <sha1>e0e99cd91e88ce2676445663f832c835d74d6fd4</sha1>
+      <!-- lowercase <sha1> here; <block> uses uppercase <SHA1>.
+           Mixing them up is fail-quiet: the ROM is silently dropped. -->
+      <filename>fs-a1f_kanjifont.rom</filename>
+      <sha1>5e872d5853698731a0ed22fb72dbcdfd59cd19c3</sha1>
     </rom>
   </device>
-  <device typ="RESET_STATUS" id="Reset Status register"></device>
-  <device typ="MATSUSHITA" id="Matsushita switched I/O (5.37MHz turbo)"></device>
-  <device typ="MOONSOUND" id="MoonSound PCM Wave ROM"></device>
   <primary slot="0">
     <secondary slot="0">
       <block start="0" id="MSX BIOS with BASIC ROM">
         <type>ROM</type>
         <block_count>2</block_count>
-        <filename>fs-a1fx_basic-bios2p.rom</filename>
-        <SHA1>e90f80a61d94c617850c415e12ad70ac41e66bb7</SHA1>
+        <filename>fs-a1f_basic-bios2.rom</filename>
+        <SHA1>0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd</SHA1>
       </block>
     </secondary>
     <secondary slot="2">
@@ -87,21 +81,21 @@
       <block start="0" id="Main RAM">
         <type>RAM MAPPER</type>
         <block_count>256</block_count>
-        <pattern>4</pattern>
+        <pattern>5</pattern>
       </block>
     </secondary>
     <secondary slot="1">
       <block start="0" id="MSX Sub ROM">
         <type>ROM</type>
         <block_count>1</block_count>
-        <filename>fs-a1fx_msx2psub.rom</filename>
-        <SHA1>fe0254cbfc11405b79e7c86c7769bd6322b04995</SHA1>
+        <filename>fs-a1f_msx2sub.rom</filename>
+        <SHA1>0fbd45ef3dd7bb82d4c31f1947884f411f1ca344</SHA1>
       </block>
       <block start="1" id="MSX Kanji Driver with BASIC">
         <type>ROM</type>
         <block_count>2</block_count>
-        <filename>fs-a1fx_kanjibasic.rom</filename>
-        <SHA1>1ef3956f7f918873fb9b031339bba45d1e5e5878</SHA1>
+        <filename>fs-a1f_kanjibasic.rom</filename>
+        <SHA1>ea35cc2cad9cfdf56cae224d8ee41579de37f000</SHA1>
       </block>
     </secondary>
     <secondary slot="2">
