@@ -17,7 +17,7 @@ is true of the case this exists for (a black screen that never came back).
 import sys
 from PIL import Image
 
-PW, ROWH, NBANDS = 66, 6, 37          # must match rtl/debug_overlay.sv
+PW, ROWH, NBANDS = 66, 6, 39          # must match rtl/debug_overlay.sv
 PH = 1 + NBANDS * ROWH + 1
 BANDS = {30: ("R#2", 24), 31: ("R#23", 24), 32: ("R#0", 24), 33: ("R#1", 24),
          34: ("R#9", 24), 35: ("R#19", 24), 36: ("frame", 16)}

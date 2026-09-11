@@ -40,6 +40,8 @@ module debug_overlay (
     input  wire [15:0] dbg_trap_cnt,          // {times PC hit 0000, bus strobes at freeze}
     input  wire [15:0] dbg_trap_bus,          // CPU address bus frozen at the trap
     input  wire [15:0] dbg_spin,              // RST 38 spin iterations (0 on a healthy machine)
+    input  wire [15:0] dbg_wait_ratio,        // P5: wait T-states per 65536 (0x8000 = 50%)
+    input  wire [15:0] dbg_hit_ratio,         // P5: cache hits per 65536 SDRAM reads
     input  wire [15:0] dbg_a8_pc,             // PC of the last OUT (A8)
     input  wire [15:0] dbg_a8_vc,             // {A8 value written, A8 write count}
     input  wire [15:0] dbg_ppi_a8,            // {PPI port A at trap, PPI port A live}
@@ -97,6 +99,7 @@ logic [15:0] pcs_s1, pcs_s2, pcl_s1, pcl_s2;            // PC snapshot / vec
 logic [15:0] tfr_s1,tfr_s2, tpv_s1,tpv_s2, tsp_s1,tsp_s2, tb1_s1,tb1_s2, tb3_s1,tb3_s2, tct_s1,tct_s2;
 logic [15:0] tbu_s1,tbu_s2;
 logic [15:0] spn_s1,spn_s2, apc_s1,apc_s2, avc_s1,avc_s2, ppa_s1,ppa_s2;
+logic [15:0] wrt_s1,wrt_s2, hrt_s1,hrt_s2;   // P5 ratios
 logic [15:0] rvc_s1,rvc_s2, rpc_s1,rpc_s2;
 logic [15:0] pct_s1,pct_s2;
 logic [15:0] abv_s1,abv_s2, abp_s1,abp_s2;
@@ -129,6 +132,8 @@ always_ff @(posedge CLK_VIDEO) begin
     tct_s1 <= dbg_trap_cnt;  tct_s2 <= tct_s1;
     tbu_s1 <= dbg_trap_bus;  tbu_s2 <= tbu_s1;
     spn_s1 <= dbg_spin;      spn_s2 <= spn_s1;
+    wrt_s1 <= dbg_wait_ratio; wrt_s2 <= wrt_s1;
+    hrt_s1 <= dbg_hit_ratio;  hrt_s2 <= hrt_s1;
     apc_s1 <= dbg_a8_pc;     apc_s2 <= apc_s1;
     avc_s1 <= dbg_a8_vc;     avc_s2 <= avc_s1;
     ppa_s1 <= dbg_ppi_a8;    ppa_s2 <= ppa_s1;
@@ -319,10 +324,10 @@ localparam PW = 11'd66;
 // Band height went 8 -> 7 when the reg-probe rows arrived and 7 -> 6 when R#1
 // joined them; the whole stack has to stay within the ~245-line visible area.
 localparam [2:0] ROWH = 3'd6;
-localparam PH = 8'd224;   // 1 + 37*6 + 1
+localparam PH = 8'd236;   // 1 + 39*6 + 1  (37 + P5 wait/hit ratio rows)
 `else
 localparam [2:0] ROWH = 3'd8;
-localparam PH = 8'd58;  // 7 rows: PCM diagnosis + ch4 latency probe
+localparam PH = 8'd74;  // 9 rows: PCM diagnosis + ch4 latency probe + P5 ratios
 `endif
 logic [5:0] row; logic [2:0] lir;   // band index / line-in-row (see v_cnt block)
 wire in_panel = en && !hblank && !vblank && (h_cnt < PW) && (v_cnt < PH) && !drew_this_line;
@@ -578,11 +583,23 @@ always_comb begin
                     pb = probe_r19[5'd23 - {1'b0, px[5:1]}];
                     R_out = pb ? 8'hC0 : 8'h28; G_out = 8'h00; B_out = pb ? 8'hFF : 8'h30;
                 end
-            end else begin                 // probe frame — cyan (16 bits, 2px each)
+            end else if (row < 6'd37) begin // probe frame — cyan (16 bits, 2px each)
                 if (px < 8'd32) begin
                     pb = probe_frame[4'd15 - px[4:1]];
                     R_out = 8'h00; G_out = pb ? 8'hFF : 8'h30; B_out = pb ? 8'hFF : 8'h30;
                 end
+            end else if (row < 6'd38) begin // P5 WAIT RATIO -- red bar, 64px = 100%
+                // T-states the CPU spent in WAIT, per 65536.  At stock speed
+                // this is the M1 wait alone; at turbo it is the honest cost of
+                // the bus guard + pacers + SDRAM.  Read it BEFORE deciding a
+                // faster core is worth anything.
+                if (px < {2'd0, wrt_s2[15:10]}) begin R_out=8'hFF; G_out=8'h30; B_out=8'h30; end
+                else begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
+            end else begin                  // P5 LATCH HIT RATIO -- green bar, 64px = 100%
+                // SDRAM reads answered from sdram.sv's read cache, per 65536.
+                // Testbench trace: 40% for the 1-line latch, 76% for 8192 lines.
+                if (px < {2'd0, hrt_s2[15:10]}) begin R_out=8'h30; G_out=8'hFF; B_out=8'h30; end
+                else begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
             end
 `else
             end else if (row < 6'd7) begin // CH4 SDRAM LATENCY (measurement build)
@@ -594,6 +611,18 @@ always_comb begin
                     G_out = lat_hi  ? 8'h00 : (lat_mid ? 8'hE0 : 8'hFF);
                     B_out = 8'h00;
                 end else begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
+            end else if (row < 6'd8) begin // P5 WAIT RATIO -- red bar, 64px = 100%
+                // T-states the CPU spent in WAIT, per 65536.  At stock speed
+                // this is the M1 wait alone (~20%); at turbo it is the honest
+                // cost of the bus guard + pacers + SDRAM.  Read it BEFORE
+                // deciding a faster core is worth anything.
+                if (px < {2'd0, wrt_s2[15:10]}) begin R_out=8'hFF; G_out=8'h30; B_out=8'h30; end
+                else begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
+            end else if (row < 6'd9) begin // P5 LATCH HIT RATIO -- green bar, 64px = 100%
+                // SDRAM reads answered from sdram.sv's read cache, per 65536.
+                // Testbench trace: 40% for the 1-line latch, 76% for 8192 lines.
+                if (px < {2'd0, hrt_s2[15:10]}) begin R_out=8'h30; G_out=8'hFF; B_out=8'h30; end
+                else begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
             end
 `endif
         end

@@ -1,0 +1,5 @@
+obj_latch/
+obj_nolatch/
+obj_guard/
+obj_guard0/
+sdram_sim.sv
