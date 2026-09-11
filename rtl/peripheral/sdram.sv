@@ -19,6 +19,13 @@
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 module sdram
+#(
+    // ch2 (CPU) read word latch.  The data bus is 16 bits and ch2_saved_data
+    // already holds the whole word, but the MSX bus consumes one byte per
+    // access, so sequential fetch pays for the same word twice.  1 = answer the
+    // paired byte from the latch, 0 = original behaviour (A/B without revert).
+    parameter WORD_LATCH = 1
+)
 (
     input             init,        // reset to initialize RAM
     input             clk,         // clock 64MHz
@@ -57,6 +64,12 @@ module sdram
     // sampler.  Consumer: the turbo bus guard's closed-loop read release
     // (msx.sv P3, 20260826).
     output reg        ch2_rdtog,
+    // Combinational: this cycle's ch2 request is answered from the latch, so no
+    // SDRAM access is issued and ch2_rdtog will NOT toggle.  msx.sv's closed-loop
+    // guard arms on the toggle and would otherwise sit until its watchdog, so it
+    // must open on this instead.  A level (not a toggle) because the completion
+    // is immediate and cannot be >= 2 clk21m away from the arming edge.
+    output            ch2_hit,
 
     input      [26:0] ch3_addr,
     output reg  [7:0] ch3_dout,
@@ -110,6 +123,13 @@ reg [13:0] refresh_count = startup_refresh_max - sdram_startup_cycles;
 reg  [2:0] command;
 reg        chip;
 reg        ch1_saved_a0, ch2_saved_a0, ch3_saved_a0, ch4_saved_a0;
+reg [25:0] ch2_latch_word;              // word address held in ch2_saved_data
+reg        ch2_latch_valid = 1'b0;
+reg [25:0] ch2_inflight_word;           // word address of the read given to SDRAM
+// Held for the whole request window rather than pulsed: clk21m samples this and
+// a one-clk_sdram pulse would be missed, exactly as the ch2_ready comment warns.
+reg        ch2_hit_r = 1'b0;
+assign     ch2_hit = ch2_hit_r;
 reg [15:0] ch1_saved_data, ch2_saved_data, ch3_saved_data, ch4_saved_data;
 
 localparam STATE_STARTUP = 0;
@@ -171,11 +191,23 @@ always @(posedge clk) begin
         ch1_addr_1 <= ch1_addr;
         ch1_din_1  <= ch1_din;
     end
+    if (~ch2_req) ch2_hit_r <= 0;
     if (ch2_req & ~ch2_req_1) begin
-        ch2_rq <= 1;
-        ch2_rnw_1  <= ch2_rnw;
-        ch2_addr_1 <= ch2_addr;
-        ch2_din_1  <= ch2_din;
+        if (WORD_LATCH && ch2_rnw && ch2_latch_valid && ~ch2_rq
+            && ch2_addr[26:1] == ch2_latch_word) begin
+            // Same word as the last completed ch2 read: the byte is already in
+            // ch2_saved_data.  ~ch2_rq guarantees no ch2 access is queued, so
+            // ch2_saved_data cannot be replaced underneath this reply.
+            // Deliberately does NOT toggle ch2_rdtog -- see the ch2_hit comment.
+            ch2_saved_a0 <= ch2_addr[0];
+            ch2_ready    <= 1;
+            ch2_hit_r    <= 1;
+        end else begin
+            ch2_rq <= 1;
+            ch2_rnw_1  <= ch2_rnw;
+            ch2_addr_1 <= ch2_addr;
+            ch2_din_1  <= ch2_din;
+        end
     end
     if (ch3_req & ~ch3_req_1) begin
         ch3_rq <= 1;
@@ -205,6 +237,25 @@ always @(posedge clk) begin
     if(data_ready_delay2[CAS_LATENCY+BURST_LENGTH-1]) ch2_saved_data <= SDRAM_DQ;
 	if(data_ready_delay2[CAS_LATENCY+BURST_LENGTH-1]) ch2_ready <= 1;
 	if(data_ready_delay2[CAS_LATENCY+BURST_LENGTH-1]) ch2_rdtog <= ~ch2_rdtog;
+    if(data_ready_delay2[CAS_LATENCY+BURST_LENGTH-1]) begin
+        ch2_latch_word  <= ch2_inflight_word;
+        ch2_latch_valid <= 1;
+    end
+
+    // Writer invalidation is done where each write is ISSUED (STATE_IDLE), not
+    // where it is requested.  A request can sit queued while a ch2 read -- which
+    // has absolute priority -- overtakes it, fills the latch with pre-write data
+    // and leaves no later edge to catch: comparing at request time would miss
+    // that and serve a stale byte.  At issue time the latch already reflects
+    // every completed read, because a read's data is captured before the next
+    // access can be issued.
+    //
+    // Every SDRAM writer can land on the latched word: ch1 (ROM upload, flash
+    // dump, nvram_backup -- including flash_dirtysave restoring dirty 64 kB
+    // blocks into the cartridge area the CPU executes from), ch2 (CPU), ch3
+    // (flash, rnw tied low), ch4 (PCM, rnw variable).  msx_pause freezes the CPU
+    // during DMA but the latch outlives the pause, so this is required, not
+    // merely prudent.
 	
 	if(data_ready_delay3[CAS_LATENCY+BURST_LENGTH-1]) ch3_saved_data <= SDRAM_DQ;
 	if(data_ready_delay3[CAS_LATENCY+BURST_LENGTH-1]) ch3_ready <= 1;
@@ -284,6 +335,11 @@ always @(posedge clk) begin
                 saved_data <= {ch2_din_1,ch2_din_1};
                 saved_wr   <= ~ch2_rnw_1;
 				ch2_saved_a0 <= ch2_addr_1[0];
+                ch2_inflight_word <= ch2_addr_1[26:1];
+                // read: latch is stale until this access completes.
+                // write: only drop it when the write lands on the latched word.
+                if (ch2_rnw_1 || ch2_addr_1[26:1] == ch2_latch_word)
+                    ch2_latch_valid <= 0;
                 ch         <= 1;
                 ch2_rq     <= 0;
                 command    <= CMD_ACTIVE;
@@ -299,6 +355,8 @@ always @(posedge clk) begin
                 saved_data <= {ch1_din_1,ch1_din_1};
                 saved_wr   <= ~ch1_rnw_1;
                 ch1_saved_a0 <= ch1_addr_1[0];
+                if (~ch1_rnw_1 && ch1_addr_1[26:1] == ch2_latch_word)
+                    ch2_latch_valid <= 0;
                 ch         <= 0;
                 ch1_rq     <= 0;
                 command    <= CMD_ACTIVE;
@@ -310,6 +368,8 @@ always @(posedge clk) begin
                 saved_data <= {ch3_din_1,ch3_din_1};
                 saved_wr   <= ~ch3_rnw_1;
 				ch3_saved_a0 <= ch3_addr_1[0];
+                if (~ch3_rnw_1 && ch3_addr_1[26:1] == ch2_latch_word)
+                    ch2_latch_valid <= 0;
                 ch         <= 2;
                 ch3_rq     <= 0;
                 if (ch3_rnw) 
@@ -325,6 +385,8 @@ always @(posedge clk) begin
                 saved_data <= {ch4_din_1,ch4_din_1};
                 saved_wr   <= ~ch4_rnw_1;
 				ch4_saved_a0 <= ch4_addr_1[0];
+                if (~ch4_rnw_1 && ch4_addr_1[26:1] == ch2_latch_word)
+                    ch2_latch_valid <= 0;
                 ch         <= 3;
                 ch4_rq     <= 0;
                 if (ch4_rnw_1)
@@ -369,6 +431,8 @@ always @(posedge clk) begin
 
     if (init) begin
         state <= STATE_STARTUP;
+        ch2_latch_valid <= 0;
+        ch2_hit_r       <= 0;
         refresh_count <= startup_refresh_max - sdram_startup_cycles;
     end
 end
