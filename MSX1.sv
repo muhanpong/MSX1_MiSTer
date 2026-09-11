@@ -612,6 +612,7 @@ wire [15:0] dbg_pc_vec;
 wire [15:0] dbg_pc_now;
 wire [15:0] dbg_trap_from, dbg_trap_prev, dbg_trap_sp, dbg_trap_b10, dbg_trap_b32, dbg_trap_cnt, dbg_trap_bus;
 wire [15:0] dbg_spin, dbg_a8_pc, dbg_a8_vc, dbg_ppi_a8;
+wire [15:0] dbg_wait_ratio, dbg_hit_ratio;   // from msx (.* auto-bind): P5 stall / latch-hit ratios
 wire [15:0] dbg_a8r_vc, dbg_a8r_pc;
 wire  [6:0] dbg_ppi_ctrl;   // from msx (.* auto-bind): jt8255 live ctrl word
 wire        dbg_ppi_ms;     // from msx (.* auto-bind): a mode-set write was executed
@@ -964,6 +965,8 @@ debug_overlay u_overlay (
    .dbg_trap_cnt(dbg_trap_cnt),
    .dbg_trap_bus(dbg_trap_bus),
    .dbg_spin(dbg_spin),
+   .dbg_wait_ratio(dbg_wait_ratio),
+   .dbg_hit_ratio(dbg_hit_ratio),
    .dbg_a8_pc(dbg_a8_pc),
    .dbg_a8_vc(dbg_a8_vc),
    .dbg_ppi_a8(dbg_ppi_a8),
