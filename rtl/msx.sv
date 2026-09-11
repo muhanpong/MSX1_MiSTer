@@ -163,7 +163,7 @@ module msx
    output logic       [15:0] dbg_trap_bus,      // CPU address bus frozen at the trap
    output logic       [15:0] dbg_spin,          // consecutive opcode fetches AT 0038 = RST 38 spin
    output logic       [15:0] dbg_wait_ratio,    // P5: CPU T-states with WAIT_n low, per 65536 T-states
-   output logic       [15:0] dbg_hit_ratio,     // P5: SDRAM reads answered by the word latch, per 65536 reads
+   output logic       [15:0] dbg_hit_ratio,     // P5: SDRAM reads answered by the read cache, per 65536 reads
    output logic       [15:0] dbg_a8_pc,         // PC of the last OUT (A8) -- who moved page 0
    output logic       [15:0] dbg_a8_vc,         // {value written to A8, write count}
    output logic       [15:0] dbg_ppi_a8,        // {PPI port A at the trap, PPI port A live}
@@ -453,9 +453,8 @@ always @(posedge clk21m) begin
    end else if (sdram_rdtog != hs_tog0) hs_done <= 1'b1;
 end
 
-// P4: WORD-LATCH HIT.  sdram.sv now answers a ch2 read from the word it
-// already holds when the request lands on the same 16-bit word as the last
-// completed ch2 read (sequential fetch, the paired byte).  No SDRAM access is
+// P4: CACHE HIT.  sdram.sv answers a ch2 read from its direct-mapped read
+// cache (one 16-bit word per line) when the word is present.  No SDRAM access is
 // issued, so sdram_rdtog does NOT flip and the closed loop above would sit on
 // its 15-cycle watchdog -- ~700ns, eight times worse than the access it just
 // saved.  sdram_hit is a LEVEL held for the whole request window (cleared when
@@ -491,7 +490,7 @@ wire bus_guard_n = ~cpu_turbo | ~bus_cycle | (mreq_n & rd_n & wr_n) | guard_open
 //   whether a faster core would help at all: a CPU already stalled most of the
 //   time gains nothing from executing faster between stalls.
 //
-// dbg_hit_ratio: fast SDRAM reads answered from sdram.sv's word latch, per
+// dbg_hit_ratio: fast SDRAM reads answered from sdram.sv's read cache, per
 //   65536 such reads.  One event per read window; NOT gated on cpu_turbo so it
 //   can be read at stock speed too.
 logic [15:0] sw_tot = 16'd0, sw_wait = 16'd0;

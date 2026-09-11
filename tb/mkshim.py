@@ -20,6 +20,8 @@ s = s.replace("                SDRAM_DQ <= saved_data;",
               "                SDRAM_DQ_oe <= 1'b1;")
 s = s.replace("    SDRAM_DQ <= 16'bz;", "    SDRAM_DQ_oe <= 1'b0;")
 s = re.sub(r"<= SDRAM_DQ;", "<= SDRAM_DQ_i;", s)
+s = s.replace(", SDRAM_DQ};", ", SDRAM_DQ_i};")          # cache fill concatenation
+s = s.replace("from the same SDRAM_DQ word", "from the same SDRAM_DQ_i word")  # comment
 
 s = s.replace("    reg  [3:0] state = STATE_STARTUP;\n", "")
 s = s.replace("reg [13:0] refresh_count = startup_refresh_max - sdram_startup_cycles;",

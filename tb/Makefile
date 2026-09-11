@@ -6,16 +6,18 @@ FLAGS = --binary --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT \
 .PHONY: all latch nolatch guard clean
 all: nolatch latch guard
 
+# 'latch'/'nolatch' target names kept: cache on (8192 lines) / off
+
 sdram_sim.sv: ../rtl/peripheral/sdram.sv mkshim.py
 	@python3 mkshim.py $< $@
 
 nolatch: sdram_sim.sv
-	@verilator $(FLAGS) --top-module sdram_tb -GWORD_LATCH=0 \
+	@verilator $(FLAGS) --top-module sdram_tb -GCACHE_LINES=0 \
 		--Mdir obj_nolatch -o sim $(RTL) sdram_tb.sv >/dev/null
 	@./obj_nolatch/sim
 
 latch: sdram_sim.sv
-	@verilator $(FLAGS) --top-module sdram_tb -GWORD_LATCH=1 \
+	@verilator $(FLAGS) --top-module sdram_tb -GCACHE_LINES=8192 \
 		--Mdir obj_latch -o sim $(RTL) sdram_tb.sv >/dev/null
 	@./obj_latch/sim
 

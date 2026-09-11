@@ -13,11 +13,14 @@
 
 `timescale 1ns/1ps
 
-module sdram_tb #(parameter WORD_LATCH = 1);
+module sdram_tb #(parameter CACHE_LINES = 8192);
 
     logic clk = 0, init = 1;
     always #5.82 clk = ~clk;          // 85.909 MHz
 
+    logic [26:0] ch1_addr = 0;
+    logic  [7:0] ch1_din  = 0;
+    logic        ch1_req  = 0;
     logic [26:0] ch2_addr = 0;
     logic  [7:0] ch2_din  = 0;
     logic        ch2_req  = 0, ch2_rnw = 1;
@@ -31,13 +34,13 @@ module sdram_tb #(parameter WORD_LATCH = 1);
     wire nCS, nWE, nRAS, nCAS, DQML, DQMH, CKE, SDCLK;
     assign DQ = dut_dq_oe ? dut_dq_o : model_dq;
 
-    sdram #(.WORD_LATCH(WORD_LATCH)) dut (
+    sdram #(.CACHE_LINES(CACHE_LINES)) dut (
         .init(init), .clk(clk), .doRefresh(1'b0),
         .SDRAM_DQ_o(dut_dq_o), .SDRAM_DQ_oe(dut_dq_oe), .SDRAM_DQ_i(DQ),
         .SDRAM_A(A), .SDRAM_DQML(DQML), .SDRAM_DQMH(DQMH), .SDRAM_BA(BA),
         .SDRAM_nCS(nCS), .SDRAM_nWE(nWE), .SDRAM_nRAS(nRAS), .SDRAM_nCAS(nCAS),
         .SDRAM_CKE(CKE), .SDRAM_CLK(SDCLK),
-        .ch1_addr(27'd0), .ch1_dout(), .ch1_din(8'd0), .ch1_req(1'b0), .ch1_rnw(1'b1), .ch1_ready(),
+        .ch1_addr(ch1_addr), .ch1_dout(), .ch1_din(ch1_din), .ch1_req(ch1_req), .ch1_rnw(1'b0), .ch1_ready(),
         .ch2_addr(ch2_addr), .ch2_dout(ch2_dout), .ch2_din(ch2_din), .ch2_req(ch2_req),
         .ch2_rnw(ch2_rnw), .ch2_ready(ch2_ready), .ch2_rdtog(ch2_rdtog), .ch2_hit(ch2_hit),
         .ch3_addr(27'd0), .ch3_dout(), .ch3_din(8'd0), .ch3_req(1'b0), .ch3_rnw(1'b1),
@@ -55,38 +58,31 @@ module sdram_tb #(parameter WORD_LATCH = 1);
     always @(posedge clk)
         if (!nCS && {nRAS, nCAS, nWE} == 3'b011) active_count++;
 
-    // ---- offline models of line variants, fed by the same trace -------------
-    // Pure bookkeeping; no effect on the DUT. Counts what each configuration
-    // would have answered without going to the chip.
-    int    writes = 0, reads = 0, hit1 = 0, hit2 = 0, hit4 = 0, hit1x2 = 0;
-    int    hit1ac = 0, hit2ac = 0, hit4ac = 0;   // address-compare invalidation
-    logic [25:0] m1 = '1; logic [24:0] m2 = '1; logic [23:0] m4 = '1;
-    logic        u1 = 0, u2 = 0, u4 = 0;
-    logic [25:0] l1 = '1;                       // 1 word
-    logic [24:0] l2 = '1;                       // 2 words (4 bytes)
-    logic [23:0] l4 = '1;                       // 4 words (8 bytes)
-    logic [25:0] w0 = '1, w1 = '1;              // two 1-word lines, LRU
-    logic        v1 = 0, v2 = 0, v4 = 0, v0a = 0, v0b = 0;
+    // ---- offline models fed by the same trace --------------------------------
+    // (a) 1-word latch with address-compare invalidation: what the previous
+    //     commit delivered, kept for comparison.
+    // (b) direct-mapped cache with the DUT's exact geometry and its
+    //     invalidate-by-index rule -- used by the self-check below.
+    int    writes = 0, reads = 0, hit_latch = 0, hit_cache = 0;
+    logic [25:0] l1 = '1; logic u1 = 0;
+    localparam MCL = (CACHE_LINES > 1) ? CACHE_LINES : 2;
+    localparam MCW = $clog2(MCL);
+    logic        mvalid [0:MCL-1];
+    logic [25:0] mword  [0:MCL-1];
+    initial for (int i = 0; i < MCL; i++) mvalid[i] = 0;
 
     task automatic model_access(input [26:0] a, input bit is_write);
+        logic [MCW-1:0] ix;
+        ix = a[MCW:1];
         if (is_write) begin
             writes++;
-            v1 = 0; v2 = 0; v4 = 0; v0a = 0; v0b = 0;   // blanket invalidation
-            // address-compare variant: only drop the line the write lands in
-            if (a[26:1] == m1) u1 = 0;
-            if (a[26:2] == m2) u2 = 0;
-            if (a[26:3] == m4) u4 = 0;
+            if (a[26:1] == l1) u1 = 0;
+            mvalid[ix] = 0;                       // invalidate-by-index
         end else begin
             reads++;
-            if (v1 && a[26:1]  == l1) hit1++; else begin l1 = a[26:1];  v1 = 1; end
-            if (v2 && a[26:2]  == l2) hit2++; else begin l2 = a[26:2];  v2 = 1; end
-            if (v4 && a[26:3]  == l4) hit4++; else begin l4 = a[26:3];  v4 = 1; end
-            if (u1 && a[26:1] == m1) hit1ac++; else begin m1 = a[26:1]; u1 = 1; end
-            if (u2 && a[26:2] == m2) hit2ac++; else begin m2 = a[26:2]; u2 = 1; end
-            if (u4 && a[26:3] == m4) hit4ac++; else begin m4 = a[26:3]; u4 = 1; end
-            if      (v0a && a[26:1] == w0) hit1x2++;
-            else if (v0b && a[26:1] == w1) begin hit1x2++; w1 = w0; w0 = a[26:1]; v0b = v0a; v0a = 1; end
-            else begin w1 = w0; v0b = v0a; w0 = a[26:1]; v0a = 1; end
+            if (u1 && a[26:1] == l1) hit_latch++; else begin l1 = a[26:1]; u1 = 1; end
+            if (CACHE_LINES != 0 && mvalid[ix] && mword[ix] == a[26:1]) hit_cache++;
+            else begin mvalid[ix] = 1; mword[ix] = a[26:1]; end
         end
     endtask
 
@@ -110,6 +106,18 @@ module sdram_tb #(parameter WORD_LATCH = 1);
         ch2_req = 0; @(negedge clk);
     endtask
 
+    // same as rd() but not fed to the offline models (used inside F, which is
+    // excluded from the self-check as a whole)
+    task automatic rd_raw(input [26:0] a, input [7:0] want, input string tag);
+        @(negedge clk); ch2_addr = a; ch2_rnw = 1; ch2_req = 1;
+        repeat (14) @(negedge clk);
+        if (ch2_dout !== want) begin
+            $display("  FAIL %s addr=%06h got=%02h want=%02h", tag, a, ch2_dout, want);
+            errors++;
+        end
+        ch2_req = 0; @(negedge clk);
+    endtask
+
     task automatic wr(input [26:0] a, input [7:0] d);
         model_access(a, 1);
         @(negedge clk); ch2_addr = a; ch2_din = d; ch2_rnw = 0; ch2_req = 1;
@@ -117,7 +125,7 @@ module sdram_tb #(parameter WORD_LATCH = 1);
         ch2_req = 0; @(negedge clk);
     endtask
 
-    int base;
+    int base, f_reads = 0, f_active = 0, f_active_base = 0;
     task automatic report(input string name, input int n_acc);
         $display("  %-34s %3d ACTIVE  (%0d accesses)", name, active_count - base, n_acc);
     endtask
@@ -132,7 +140,7 @@ module sdram_tb #(parameter WORD_LATCH = 1);
         init = 0;
         wait (ch2_ready === 1'b1);
         repeat (10) @(negedge clk);
-        $display("WORD_LATCH = %0d", WORD_LATCH);
+        $display("CACHE_LINES = %0d", CACHE_LINES);
 
         // A. straight-line opcode fetch
         base = active_count;
@@ -168,27 +176,72 @@ module sdram_tb #(parameter WORD_LATCH = 1);
         end
         report("D random reads in 4 kB", 32);
 
+        // E. game main loop: the same 48-byte code block, 4 PUSH/POP pairs and
+        //    8 data bytes, repeated 8 times.  This is what a cache is for.
+        base = active_count;
+        for (int it = 0; it < 8; it++) begin
+            pc = 27'h004100; sp = 27'h00F380;
+            for (int i = 0; i < 48; i++) begin rd(pc, exp_byte(pc), "E-code"); pc++; end
+            for (int i = 0; i < 4; i++) begin
+                sp -= 2; wr(sp, 8'h10 + i); wr(sp+1, 8'h20 + i);
+            end
+            for (int i = 0; i < 8; i++) rd(27'h008000 + i, exp_byte(27'h008000 + i), "E-data");
+            for (int i = 3; i >= 0; i--) begin
+                rd(sp, 8'h10 + i, "E-pop"); rd(sp+1, 8'h20 + i, "E-pop"); sp += 2;
+            end
+        end
+        report("E main loop x8 (code+stack+data)", 8*(48+8+8+8));
+
+        // F. read-during-write hazard sweep.  Prime the cache with X, then fire a
+        //    ch1 WRITE to X and a ch2 READ of X `off` clk cycles apart, for every
+        //    offset that can land the invalidate on or next to the lookup edge.
+        //    Whatever that racing read returned, a later read of X must see the
+        //    written value: a stale line surviving the race would fail here.
+        //    Not counted in the model/self-check (cross-channel order is
+        //    unspecified), so the counters are excluded from that comparison.
+        f_active_base = active_count;
+        begin
+            int stale = 0, base_r, base_w, base_hc;
+            base_r = reads; base_w = writes; base_hc = hit_cache;
+            for (int off = 0; off < 16; off++) begin
+                logic [26:0] X; logic [7:0] v;
+                X = 27'h00C000 + off*2; v = 8'h80 + off;
+                rd_raw(X, exp_byte(X), "F-prime");
+                @(negedge clk); ch1_addr = X; ch1_din = v; ch1_req = 1;
+                repeat (off) @(negedge clk);
+                ch2_addr = X; ch2_rnw = 1; ch2_req = 1;
+                repeat (14) @(negedge clk);
+                ch1_req = 0; ch2_req = 0;
+                repeat (24) @(negedge clk);              // let everything drain
+                @(negedge clk); ch2_addr = X; ch2_req = 1;
+                repeat (14) @(negedge clk);
+                if (ch2_dout !== v) begin
+                    $display("  STALE off=%0d: post-race read got %02h want %02h", off, ch2_dout, v);
+                    stale++;
+                end
+                ch2_req = 0; @(negedge clk);
+            end
+            $display("  F write/read race sweep, 16 offsets: %0d stale", stale);
+            if (stale) errors++;
+            f_active = active_count - f_active_base;   // excluded from the self-check
+            f_reads  = reads - base_r;
+        end
+
         $display("");
-        $display("  ---- line-variant model over the same %0d reads ----", reads);
-        $display("  1 word  (implemented)  hits %3d  (%0d%%)", hit1,   (100*hit1)/reads);
-        $display("  2 words (4-byte line)  hits %3d  (%0d%%)", hit2,   (100*hit2)/reads);
-        $display("  4 words (8-byte line)  hits %3d  (%0d%%)", hit4,   (100*hit4)/reads);
-        $display("  2 lines x 1 word       hits %3d  (%0d%%)", hit1x2, (100*hit1x2)/reads);
-        $display("  -- same, but invalidating only the line the write lands in --");
-        $display("  1 word  + addr-compare  hits %3d  (%0d%%)", hit1ac, (100*hit1ac)/reads);
-        $display("  2 words + addr-compare  hits %3d  (%0d%%)", hit2ac, (100*hit2ac)/reads);
-        $display("  4 words + addr-compare  hits %3d  (%0d%%)", hit4ac, (100*hit4ac)/reads);
+        $display("  ---- over the same %0d reads / %0d writes ----", reads, writes);
+        $display("  1-word latch (previous commit)  would hit %4d  (%0d%%)", hit_latch, (100*hit_latch)/reads);
+        $display("  %0d-line cache (model)        hits       %4d  (%0d%%)", CACHE_LINES, hit_cache, (100*hit_cache)/reads);
         $display("");
-        // Ties the offline model to the DUT: with the latch on, the controller
-        // must have issued exactly one access per read that the 1-word
-        // address-compare model called a miss, plus one per write. If this
-        // holds, the 2-word / 4-word rows above are trustworthy too.
+        // Ties the cache model to the DUT: the controller must have issued
+        // exactly one access per write plus one per read the model called a
+        // miss.  A read-during-write hazard in the DUT would show up here as a
+        // surplus access (never as a missing one).
         begin
             int expect_active;
-            expect_active = writes + (WORD_LATCH ? reads - hit1ac : reads);
-            $display("  self-check: ACTIVE=%0d expected=%0d  (%0d reads, %0d writes)",
-                     active_count, expect_active, reads, writes);
-            if (active_count != expect_active) begin
+            expect_active = writes + reads - hit_cache;
+            $display("  self-check: ACTIVE=%0d expected=%0d  (%0d reads, %0d writes; F excluded)",
+                     active_count - f_active, expect_active, reads, writes);
+            if (active_count - f_active != expect_active) begin
                 $display("  -> model and DUT disagree");
                 errors++;
             end

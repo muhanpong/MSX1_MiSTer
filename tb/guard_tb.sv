@@ -39,7 +39,7 @@ module guard_tb #(parameter P4 = 1);   // P4=0: guard as before the ch2_hit chan
     wire nCS, nWE, nRAS, nCAS, DQML, DQMH, CKE, SDCLK;
     assign DQ = dut_dq_oe ? dut_dq_o : model_dq;
 
-    sdram #(.WORD_LATCH(1)) dut (
+    sdram #(.CACHE_LINES(8192)) dut (
         .init(init), .clk(clk), .doRefresh(1'b0),
         .SDRAM_DQ_o(dut_dq_o), .SDRAM_DQ_oe(dut_dq_oe), .SDRAM_DQ_i(DQ),
         .SDRAM_A(A), .SDRAM_DQML(DQML), .SDRAM_DQMH(DQMH), .SDRAM_BA(BA),

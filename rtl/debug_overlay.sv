@@ -41,7 +41,7 @@ module debug_overlay (
     input  wire [15:0] dbg_trap_bus,          // CPU address bus frozen at the trap
     input  wire [15:0] dbg_spin,              // RST 38 spin iterations (0 on a healthy machine)
     input  wire [15:0] dbg_wait_ratio,        // P5: wait T-states per 65536 (0x8000 = 50%)
-    input  wire [15:0] dbg_hit_ratio,         // P5: word-latch hits per 65536 SDRAM reads
+    input  wire [15:0] dbg_hit_ratio,         // P5: cache hits per 65536 SDRAM reads
     input  wire [15:0] dbg_a8_pc,             // PC of the last OUT (A8)
     input  wire [15:0] dbg_a8_vc,             // {A8 value written, A8 write count}
     input  wire [15:0] dbg_ppi_a8,            // {PPI port A at trap, PPI port A live}
@@ -596,8 +596,8 @@ always_comb begin
                 if (px < {2'd0, wrt_s2[15:10]}) begin R_out=8'hFF; G_out=8'h30; B_out=8'h30; end
                 else begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
             end else begin                  // P5 LATCH HIT RATIO -- green bar, 64px = 100%
-                // SDRAM reads answered from sdram.sv's word latch, per 65536.
-                // Testbench trace says ~40%; this is the real-workload figure.
+                // SDRAM reads answered from sdram.sv's read cache, per 65536.
+                // Testbench trace: 40% for the 1-line latch, 76% for 8192 lines.
                 if (px < {2'd0, hrt_s2[15:10]}) begin R_out=8'h30; G_out=8'hFF; B_out=8'h30; end
                 else begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
             end
@@ -619,8 +619,8 @@ always_comb begin
                 if (px < {2'd0, wrt_s2[15:10]}) begin R_out=8'hFF; G_out=8'h30; B_out=8'h30; end
                 else begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
             end else if (row < 6'd9) begin // P5 LATCH HIT RATIO -- green bar, 64px = 100%
-                // SDRAM reads answered from sdram.sv's word latch, per 65536.
-                // Testbench trace says ~40%; this is the real-workload figure.
+                // SDRAM reads answered from sdram.sv's read cache, per 65536.
+                // Testbench trace: 40% for the 1-line latch, 76% for 8192 lines.
                 if (px < {2'd0, hrt_s2[15:10]}) begin R_out=8'h30; G_out=8'hFF; B_out=8'h30; end
                 else begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
             end
