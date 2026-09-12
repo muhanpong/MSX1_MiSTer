@@ -157,9 +157,20 @@ BEGIN
     --      stall costs a further DELTA-plus-slot.  802.76 lines, only 0.5%
     --      better than the accumulator it replaced.
     --
-    --  XFER is the arbiter's VDPW/VDPR cycle and excludes VDPS.  It is
-    --  registered, hence one cycle late, so the reset value is 1: at the edge
-    --  where XFER arrives, one cycle has already elapsed since the access.
+    --  XFER is the arbiter's VDPW/VDPR cycle and excludes VDPS.  The reset
+    --  value is 2 because there are TWO registers between the grant and this
+    --  counter, not one: the arbiter registers VDP_CMD_XFER at the edge that
+    --  ends the granted cycle g, so XFER is high during g+1, and this process
+    --  then registers the reset at the edge ending g+1, so the value lands in
+    --  g+2.  Seeding it with 1 made FF_SINCE(g+k) = k-1, one short, so
+    --  W_DELTA_MET went true a cycle late and the engine's effective wait was
+    --  DELTA+1.  That sounds harmless and is not: every slot in the vertical
+    --  border sits on an 8-cycle grid and every DELTA is a multiple of 8, so
+    --  one cycle threw away a whole slot on every border access; and in the
+    --  display window LMMM's 32 and 64 are exact slot distances, so both of
+    --  its reads missed and it ran at 228 cycles/pixel instead of 152.
+    --  Measured over the real table: HMMV +4.5%, HMMM +4.0%, LMMV +5.5%,
+    --  YMMM +9.1%, LMMM +36.5% -- all of it from this one cycle.
     PROCESS( RESET, CLK21M )
     BEGIN
         IF( CLK21M'EVENT AND CLK21M = '1' )THEN
@@ -167,7 +178,7 @@ BEGIN
                 FF_SINCE <= (OTHERS => '1');
                 FF_LAST_WR <= '1';
             ELSIF( XFER = '1' )THEN
-                FF_SINCE <= X"01";
+                FF_SINCE <= X"02";
                 FF_LAST_WR <= XFER_WR;
             ELSIF( FF_SINCE /= X"FF" )THEN
                 FF_SINCE <= FF_SINCE + 1;

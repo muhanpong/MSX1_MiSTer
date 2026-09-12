@@ -15,14 +15,13 @@ OUT=${OUT:-/tmp/vdpcmd7par}
 rm -rf "$OUT"; mkdir -p "$OUT"
 NAMES=(HMMV HMMM LMMV LMMM YMMM LINE SRCH)
 
-# K=0 comes free with every other run, so only 1..6 need their own process.
-for K in 1 2 3 4 5 6; do
+# Every run executes K=0 because it fills the source rectangle, but the TB only
+# PRINTS the command that CMDSEL selects -- so HMMV still needs a job of its own.
+for K in 0 1 2 3 4 5 6; do
     ( OUT="$OUT/k$K" bash sim/run_vdpcmd7.sh "$K" > "$OUT/k$K.txt" 2>&1 ) &
 done
 wait
 
-# HMMV's own line is identical in all six logs; take it from the first.
-grep -h "^HMMV" "$OUT/k1.txt" || true
-for K in 1 2 3 4 5 6; do
+for K in 0 1 2 3 4 5 6; do
     grep -h "^${NAMES[$K]}" "$OUT/k$K.txt" || echo "${NAMES[$K]}: no result -- see $OUT/k$K.txt"
 done
