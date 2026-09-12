@@ -95,6 +95,10 @@ ENTITY VDP_COMMAND IS
         PBD                 : OUT   STD_LOGIC;                          -- S#2 (BIT 4)
         PTR                 : OUT   STD_LOGIC;                          -- S#2 (BIT 7)
         PSXTMP              : OUT   STD_LOGIC_VECTOR( 10 DOWNTO 0 );    -- S#8, S#9
+        --  '1' when the LINE just taken stepped on its minor axis.  The chip
+        --  charges 32 extra cycles before the next access when it does; see
+        --  the MINORSTEP note in vdp_access_slots.vhd.
+        PMINORSTEP          : OUT   STD_LOGIC;
 
         CUR_VDP_COMMAND     : OUT   STD_LOGIC_VECTOR(  7 DOWNTO 4 );
 
@@ -139,6 +143,7 @@ ARCHITECTURE RTL OF VDP_COMMAND IS
     SIGNAL TR                   : STD_LOGIC;                            -- S#2 (BIT 7)
     SIGNAL SXTMP                : STD_LOGIC_VECTOR( 10 DOWNTO 0 );      -- S#8, S#9
 
+    SIGNAL MINORSTEP            : STD_LOGIC;
     SIGNAL W_VDPCMD_EN          : STD_LOGIC;
 
     -- VDP COMMAND STATE REGISTER
@@ -189,6 +194,7 @@ BEGIN
     PBD             <=  BD;
     PTR             <=  TR;
     PSXTMP          <=  SXTMP;
+    PMINORSTEP      <=  MINORSTEP;
 
     CUR_VDP_COMMAND <=  CMR( 7 DOWNTO 4 );
 
@@ -249,6 +255,7 @@ BEGIN
             VRAMRDREQ <= '0';
             VRAMWRDATA <= (OTHERS => '0');
 
+            MINORSTEP <= '0';
             TR <= '1'; -- TRANSFER READY
             CE <= '0'; -- COMMAND EXECUTING
             BD <= '0'; -- BORDER COLOR FOUND
@@ -480,6 +487,7 @@ BEGIN
                             CMRWR <= '0';
                             CE <= '1';
                             BD <= '0';
+                            MINORSTEP <= '0';
                             IF CMR(7 DOWNTO 4) = LINE THEN
                                 -- LINE COMMAND REQUIRES SPECIAL SXTMP AND NXTMP SET-UP
                                 NX_MINUS_ONE := NX - 1;
@@ -652,6 +660,13 @@ BEGIN
 
                     WHEN STLINENEWPOS =>
                         -- APPLICABLE TO LINE
+                        --  SXTMP(10) is the borrow out of SXTMP - NY, i.e. the
+                        --  Bresenham step onto the next minor-axis position.
+                        --  This state runs after the write has been acknowledged
+                        --  and before STPRERDVRAM raises the next read request,
+                        --  so the flag is already settled when the slot gate
+                        --  computes that read's delta.
+                        MINORSTEP <= SXTMP(10);
                         IF (SXTMP(10) = '1') THEN
                             SXTMP <= '0' & (SXTMP(9 DOWNTO 0) + NX);
                             IF (MM = '0') THEN

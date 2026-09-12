@@ -509,6 +509,7 @@ ARCHITECTURE RTL OF VDP IS
             PBD                 : OUT   STD_LOGIC;                          -- S#2 (BIT 4)
             PTR                 : OUT   STD_LOGIC;                          -- S#2 (BIT 7)
             PSXTMP              : OUT   STD_LOGIC_VECTOR( 10 DOWNTO 0 );    -- S#8, S#9
+            PMINORSTEP          : OUT   STD_LOGIC;
 
             CUR_VDP_COMMAND     : OUT   STD_LOGIC_VECTOR(  7 DOWNTO 4 );
 
@@ -530,6 +531,7 @@ ARCHITECTURE RTL OF VDP IS
             XFER            : IN    STD_LOGIC;
             XFER_WR         : IN    STD_LOGIC;
             WRPEND          : IN    STD_LOGIC;
+            MINORSTEP       : IN    STD_LOGIC;
             ACTIVE          : OUT   STD_LOGIC
         );
     END COMPONENT;
@@ -1008,6 +1010,7 @@ ARCHITECTURE RTL OF VDP IS
     SIGNAL VDP_CMD_XFER                 : STD_LOGIC;
     SIGNAL VDP_CMD_XFER_WR              : STD_LOGIC;
     SIGNAL W_VDPCMD_WRPEND              : STD_LOGIC;
+    SIGNAL VDPCMD_MINORSTEP             : STD_LOGIC;
     SIGNAL CUR_VDP_COMMAND              : STD_LOGIC_VECTOR(  7 DOWNTO 4 );
 
     -- VIDEO OUTPUT SIGNALS
@@ -1964,6 +1967,7 @@ BEGIN
         PBD                 => VDPCMDBD             ,
         PTR                 => VDPCMDTR             ,
         PSXTMP              => VDPCMDSXTMP          ,
+        PMINORSTEP          => VDPCMD_MINORSTEP     ,
         CUR_VDP_COMMAND     => CUR_VDP_COMMAND      ,
         REG_R25_CMD         => REG_R25_CMD
     );
@@ -2004,6 +2008,7 @@ BEGIN
         XFER                => VDP_CMD_XFER         ,
         XFER_WR             => VDP_CMD_XFER_WR      ,
         WRPEND              => W_VDPCMD_WRPEND      ,
+        MINORSTEP           => VDPCMD_MINORSTEP     ,
 
         ACTIVE              => CMD_ACTIVE_SLOTS
     );

@@ -60,6 +60,7 @@ ENTITY VDP_ACCESS_SLOTS IS
         XFER            : IN    STD_LOGIC;   -- a real VDPW/VDPR cycle happened
         XFER_WR         : IN    STD_LOGIC;   -- ...and it was the write
         WRPEND          : IN    STD_LOGIC;   -- the engine's next access is a write
+        MINORSTEP       : IN    STD_LOGIC;   -- the last LINE pixel stepped its minor axis
 
         ACTIVE          : OUT   STD_LOGIC
     );
@@ -91,7 +92,18 @@ ARCHITECTURE RTL OF VDP_ACCESS_SLOTS IS
     --  read.  Index is the command opcode's high nibble.  0 = not throttled
     --  (POINT/PSET and the CPU-paced LMCM/LMMC/HMMC, which VDP_WAIT_TABLE
     --  also left at full speed).  The end-of-row variants (D104/D120/D128/
-    --  D136) are still deliberately absent, as before.
+    --  D136) are NOT implemented for the block commands: they fire once per
+    --  rectangle row, 1 unit in 256 here, and adding them moved the modelled
+    --  HMMV further from the reference rather than closer.
+    --
+    --  LINE's +32 IS implemented, because for LINE it is not an end-of-row
+    --  case at all.  openMSX charges D120 instead of D88 whenever the
+    --  Bresenham accumulator steps onto the next minor-axis position, which
+    --  happens NY/NX of the time -- 39% for the benchmark's 100/255 line, not
+    --  0.4%.  Leaving it out made LINE run 12.9% FAST; a replay of the rule
+    --  over the measured table gives 778.6 lines without it against 781.2
+    --  measured, and 904.1 with it against a 897.4 reference, so it accounts
+    --  for the whole divergence in both directions.
     TYPE DELTA_T IS ARRAY(0 TO 15) OF INTEGER RANGE 0 TO 255;
     CONSTANT WR_DELTA : DELTA_T := (
     --  STOP  ----  ----  ----  POINT PSET  SRCH  LINE
@@ -114,6 +126,7 @@ ARCHITECTURE RTL OF VDP_ACCESS_SLOTS IS
     SIGNAL W_SLOT_BITS  : STD_LOGIC_VECTOR( 2 DOWNTO 0 );
     SIGNAL W_SLOT_NOW   : STD_LOGIC;
     SIGNAL W_DELTA      : INTEGER RANGE 0 TO 255;
+    SIGNAL W_MINOR      : INTEGER RANGE 0 TO 32;
     SIGNAL W_DELTA_MET  : STD_LOGIC;
     SIGNAL W_GRANT      : STD_LOGIC;
     SIGNAL W_HPOS       : INTEGER RANGE 0 TO 2734;
@@ -130,8 +143,15 @@ BEGIN
                     W_SLOT_BITS(1) WHEN( REG_R8_SP_OFF  = '0' )ELSE
                     W_SLOT_BITS(2);
 
+    --  MINORSTEP only ever rises on the LINE path (vdp_command.vhd's
+    --  STLINENEWPOS, cleared when any command starts), so it needs no opcode
+    --  guard of its own.  It applies to the read that follows the write, which
+    --  is the transition openMSX charges the extra 32 to.
+    W_MINOR     <= 32 WHEN( MINORSTEP = '1' )ELSE 0;
+
     W_DELTA     <=  WR_DELTA          ( CONV_INTEGER( VDP_COMMAND ) ) WHEN( WRPEND = '1' )ELSE
-                    RD_DELTA_AFTER_WR ( CONV_INTEGER( VDP_COMMAND ) ) WHEN( FF_LAST_WR = '1' )ELSE
+                    RD_DELTA_AFTER_WR ( CONV_INTEGER( VDP_COMMAND ) ) + W_MINOR
+                                                                      WHEN( FF_LAST_WR = '1' )ELSE
                     RD_DELTA_AFTER_RD ( CONV_INTEGER( VDP_COMMAND ) );
     W_DELTA_MET <= '1' WHEN( CONV_INTEGER( FF_SINCE ) >= W_DELTA )ELSE '0';
 
