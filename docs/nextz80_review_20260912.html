@@ -1,0 +1,246 @@
+<title>NextZ80 기각 재심</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#EEF0F3; --panel:#FFFFFF; --ink:#172033; --mute:#5B6577; --line:#C9CFD8;
+  --acc:#1F5FBF; --acc-soft:#E3ECFA;
+  --fatal:#B42318; --fatal-soft:#FBE9E7; --costly:#B7791F; --costly-soft:#FBF1DC; --ok:#1E7F4F; --ok-soft:#E1F3E9;
+  --code-bg:#F3F5F8;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0F141B; --panel:#161D27; --ink:#E6EAF0; --mute:#98A2B3; --line:#2A3442;
+    --acc:#6FA3FF; --acc-soft:#18263C;
+    --fatal:#F97066; --fatal-soft:#3A1A17; --costly:#F0B84A; --costly-soft:#3A2D12; --ok:#4FC98A; --ok-soft:#14301F;
+    --code-bg:#0B1016;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0F141B; --panel:#161D27; --ink:#E6EAF0; --mute:#98A2B3; --line:#2A3442;
+  --acc:#6FA3FF; --acc-soft:#18263C;
+  --fatal:#F97066; --fatal-soft:#3A1A17; --costly:#F0B84A; --costly-soft:#3A2D12; --ok:#4FC98A; --ok-soft:#14301F;
+  --code-bg:#0B1016;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans KR","Noto Sans KR","Apple SD Gothic Neo",system-ui,sans-serif;font-size:15.5px;line-height:1.7;padding-block:40px 80px;padding-inline:20px}
+.wrap{max-width:860px;margin:0 auto}
+h1,h2,h3{text-wrap:balance;line-height:1.25;margin:0}
+h1{font-size:clamp(28px,4.5vw,38px);font-weight:700;letter-spacing:-.01em}
+h2{font-size:21px;font-weight:600;margin-top:56px;padding-top:18px;border-top:1px solid var(--line)}
+h3{font-size:16.5px;font-weight:600;margin-top:28px}
+p{margin:12px 0;max-width:68ch}
+.eyebrow{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute)}
+.meta{display:flex;flex-wrap:wrap;gap:6px 22px;margin-top:10px;font-size:13.5px;color:var(--mute)}
+code,pre,.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+code{font-size:.92em;background:var(--code-bg);padding:1px 5px;border-radius:3px}
+pre{background:var(--code-bg);border:1px solid var(--line);padding:14px 16px;border-radius:4px;overflow-x:auto;font-size:13px;line-height:1.55;margin:14px 0}
+pre code{background:none;padding:0}
+.verdict{margin-top:28px;border:1px solid var(--line);border-left:4px solid var(--acc);background:var(--panel);padding:18px 22px;border-radius:4px}
+.verdict .eyebrow{color:var(--acc)}
+.verdict p{margin:8px 0 0}
+.verdict strong{font-weight:600}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:16px 0}
+.tablewrap{overflow-x:auto;margin:16px 0}
+th,td{text-align:left;vertical-align:top;padding:9px 12px;border-bottom:1px solid var(--line)}
+th{font-weight:600;font-size:12.5px;letter-spacing:.04em;text-transform:uppercase;color:var(--mute);border-bottom:2px solid var(--line)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.pill{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:11.5px;letter-spacing:.04em;padding:2px 8px;border-radius:999px;white-space:nowrap}
+.p-fatal{background:var(--fatal-soft);color:var(--fatal)}
+.p-costly{background:var(--costly-soft);color:var(--costly)}
+.p-ok{background:var(--ok-soft);color:var(--ok)}
+.p-acc{background:var(--acc-soft);color:var(--acc)}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin:18px 0}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:16px 18px}
+.box h3{margin-top:0;font-size:15px}
+.box p{font-size:14px;margin:8px 0 0}
+ul,ol{margin:10px 0;padding-left:22px;max-width:70ch}
+li{margin:5px 0}
+li::marker{color:var(--mute)}
+.note{border-left:3px solid var(--line);padding:6px 16px;color:var(--mute);font-size:14px;margin:14px 0}
+.correction{border-left-color:var(--costly)}
+.correction strong{color:var(--costly)}
+figure{margin:20px 0;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:16px 18px 10px}
+figcaption{font-size:13px;color:var(--mute);margin-top:8px}
+svg text{font-family:"IBM Plex Mono",monospace;fill:var(--ink)}
+.src{font-size:13px;color:var(--mute)}
+.src li{margin:3px 0}
+a{color:var(--acc);text-decoration:none;border-bottom:1px solid transparent}
+a:hover,a:focus-visible{border-bottom-color:currentColor;outline:none}
+</style>
+
+<div class="wrap">
+  <div class="eyebrow">CPU 트랙 · 기각 재심 · 2026-09-12</div>
+  <h1>NextZ80 기각 재심</h1>
+  <div class="meta">
+    <span>대상: NextZ80 v1.0 (OpenCores, Nicolae Dumitrache 님, 2011, LGPL 2.1+)</span>
+    <span>비교 기준: 현행 <code>t80pa #(.Mode(0))</code></span>
+    <span>검토 근거: 소스 3파일 2,075줄 직접 열람 + <code>rtl/msx.sv</code> 소비처 전수</span>
+  </div>
+
+  <div class="verdict">
+    <div class="eyebrow">재판정</div>
+    <p><strong>기각은 불가피하지 않다. 앞선 "세 조건 3/3 탈락"은 과했다.</strong> 결손 여섯 중 넷은 사소하거나 국소 패치이고, 진짜 구조적 결손은 하나 — <strong>사이클 정확 모드가 없다</strong>는 것 — 뿐이다. 그 하나 때문에 NextZ80은 T80을 <em>대체</em>하지 못하고 <em>옆에 붙어야</em> 한다(듀얼 CPU). 그래서 판정은 "기각"이 아니라 <strong>"보류 — T80s 다음 순번의 D2 후보"</strong>가 맞다. R800급(5–10×)에 실제로 닿는 후보는 이것뿐이다.</p>
+  </div>
+
+  <h2>1. 앞선 기각 근거와 그 근거의 상태</h2>
+  <p>같은 세션 앞에서 세 조건을 걸고 NextZ80을 떨어뜨렸다. 다시 읽은 결과는 이렇다.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>앞선 조건</th><th>당시 판정</th><th>재검토</th></tr></thead>
+    <tbody>
+      <tr><td>T-state 구조 유지</td><td><span class="pill p-fatal">탈락</span></td><td><span class="pill p-costly">비쌈</span> 구조가 다른 건 사실. 단 "치명"이 아니라 "버스 계약이 바뀐다"이고, 그 계약은 T80pa의 것보다 <em>단순</em>하다. §4</td></tr>
+      <tr><td>CEN(클럭 인에이블) 있음</td><td><span class="pill p-fatal">탈락</span></td><td><span class="pill p-ok">사소</span> <strong>틀린 판정.</strong> <code>WAIT</code>가 코어 전체(상태기계·레지스터 파일)를 얼린다 = 액티브로우 CEN. §3</td></tr>
+      <tr><td>ZEXALL 통과</td><td><span class="pill p-fatal">탈락</span></td><td><span class="pill p-costly">국소 패치</span> 불합격 항목이 4개로 특정돼 있고 ALU에 XF/YF 자리가 이미 나 있다. §3</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note correction"><strong>정정.</strong> "CEN 없음"을 블로커로 세운 것은 포트 이름만 보고 의미를 안 읽은 실수다. <code>nextz80cpu.v:168</code> <code>always @(posedge CLK) if(!WAIT)</code>, <code>nextz80reg.v:96,106,112</code> <code>WE &amp; !WAIT</code> — WAIT=1이면 아무것도 안 움직인다. 우리 <code>ce_cpu_p</code>를 <code>WAIT = ~ce</code>로 물리면 지금과 같은 3.58~10.74 분주가 그대로 된다.</div>
+
+  <h2>2. 포트 대조 — 빠진 것의 의미</h2>
+  <p>NextZ80 포트는 13개다. T80pa에 있고 여기 없는 것, 그리고 그것이 <em>우리 코어에서</em> 무엇을 뜻하는지.</p>
+  <pre><code>module NextZ80 ( DI, DO, ADDR, WR, MREQ, IORQ, HALT, M1, CLK, RESET, INT, NMI, WAIT );
+// T80pa 에는 있고 여기 없는 것:  RD_n  RFSH_n  BUSRQ_n/BUSAK_n  CEN_p/CEN_n  REG(212bit 덤프)</code></pre>
+  <div class="tablewrap"><table>
+    <thead><tr><th>빠진 포트</th><th>실칩에서의 의미</th><th>우리 코어의 소비처</th><th>우회</th><th>판정</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><code>RD_n</code></td>
+        <td>읽기 사이클 스트로브. 리프레시 사이클(MREQ만 뜨고 RD/WR 없음)과 읽기를 가르는 유일한 신호.</td>
+        <td><code>rd_n</code> 22곳 — <code>bus_xfer</code>, <code>d_to_cpu</code> 먹스(<code>msx.sv:722</code>), 슬롯 디코드, VDP 읽기 게이트</td>
+        <td>NextZ80엔 리프레시 사이클이 없으므로 <code>rd_n = ~(MREQ &amp; ~WR)</code>, IO는 <code>~(IORQ &amp; ~WR)</code>로 모호함 없이 유도된다.</td>
+        <td><span class="pill p-ok">사소</span></td>
+      </tr>
+      <tr>
+        <td><code>RFSH_n</code></td>
+        <td>DRAM 리프레시 사이클 표시. R 레지스터를 주소 하위에 실어 내보내는 구간.</td>
+        <td><code>rfrsh_n</code> 실사용 <strong>1곳</strong> — <code>cheat_act</code>(<code>msx.sv:684</code>)에서 리프레시 주소를 치트 매칭에서 제외</td>
+        <td>리프레시 사이클 자체가 없으니 그 항은 상수 1. R 레지스터는 NextZ80 내부에 있다(<code>LD A,R</code> 동작).</td>
+        <td><span class="pill p-ok">사소</span></td>
+      </tr>
+      <tr>
+        <td><code>BUSRQ_n / BUSAK_n</code></td>
+        <td>DMA 버스 양도.</td>
+        <td>없음 — 현재 <code>BUSRQ_n(1)</code> 고정</td>
+        <td>불필요.</td>
+        <td><span class="pill p-ok">무관</span></td>
+      </tr>
+      <tr>
+        <td><code>CEN_p / CEN_n</code></td>
+        <td>T80pa 고유. T-state 한 개를 두 위상으로 진행시키는 인에이블 쌍 — 그래서 상한이 <code>clk21m/2</code>였다.</td>
+        <td><code>ce_cpu_p</code> 15곳, <code>ce_cpu_n</code> 4곳</td>
+        <td><code>WAIT</code>가 전 상태를 얼리므로 <code>WAIT = ~ce_cpu | real_wait</code>. 위상 쌍이 필요 없어 <strong>상한이 <code>clk21m/1</code>로 올라간다.</strong></td>
+        <td><span class="pill p-ok">사소</span></td>
+      </tr>
+      <tr>
+        <td><code>REG[211:0]</code></td>
+        <td>T80 확장. 레지스터 전량 덤프.</td>
+        <td><code>t80_reg</code> — 프리즈 진단, <code>dbg_trap_bus &lt;= t80_reg[63:48]</code>(<code>msx.sv:1693</code>)</td>
+        <td>NextZ80 내부 <code>Z80Reg</code>에 탭을 내면 되나 서드파티 소스 수정. 진단 인프라 손실.</td>
+        <td><span class="pill p-costly">진단만</span></td>
+      </tr>
+    </tbody>
+  </table></div>
+  <p>포트 결손 자체로는 막히는 것이 없다. 막는 것은 포트가 아니라 <strong>버스가 도는 방식</strong>이다.</p>
+
+  <h2>3. 결손 여섯, 치명 / 비쌈 / 사소</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>#</th><th>결손</th><th>근거 (파일:줄)</th><th>우회 가능성</th><th>판정</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>RD / RFSH 없음</td><td>포트 목록 <code>nextz80cpu.v:69-81</code></td><td>조합 유도 두 줄. §2</td><td><span class="pill p-ok">사소</span></td></tr>
+      <tr><td class="num">2</td><td>CEN 없음</td><td><code>nextz80cpu.v:168</code>, <code>nextz80reg.v:96,106,112</code></td><td>WAIT가 CEN이다. §1 정정</td><td><span class="pill p-ok">사소</span></td></tr>
+      <tr><td class="num">3</td><td>ZEXALL 불합격</td><td>헤더 주석: <em>"all OK except CPx(R), LDx(R), BIT n,(IX/IY+d), BIT n,(HL) — un-documented XF and YF"</em></td><td>ALU에 <code>FOUT[3]/FOUT[5]</code>가 연산별로 이미 분기돼 있다(<code>nextz80alu.v:160-262</code>). LDx/CPx는 공식이 문서화됨(<code>A+n</code>, <code>A-n-HF</code>의 bit1/bit3). BIT n,(HL)만 WZ(MEMPTR) 상위바이트가 필요해 레지스터 하나 추가.</td><td><span class="pill p-costly">국소 패치</span></td></tr>
+      <tr><td class="num">4</td><td>단일 사이클 버스 계약</td><td><code>nextz80cpu.v:215-220</code> 기본값 <code>M1=1 MREQ=1 WR=0</code>, 조합 <code>ADDR</code>(ALU16 직결), <code>DI</code>는 posedge 샘플</td><td>가드층 재작성. 단 §4에서 보듯 계약이 T80pa보다 단순하다.</td><td><span class="pill p-costly">비쌈</span></td></tr>
+      <tr><td class="num">5</td><td><strong>사이클 정확 모드 부재</strong></td><td>헤더: <em>"Each CPU machine cycle takes (mainly) one clock T state … over 4 times faster"</em></td><td><strong>없다.</strong> 명령별 Z80 T수를 외부 테이블로 재현하려 해도 명령 <em>내부</em>의 버스 타이밍(읽기가 몇 번째 T에 오는가)은 못 맞춘다. 스톡 모드는 T80이 계속 맡아야 한다.</td><td><span class="pill p-fatal">구조적</span></td></tr>
+      <tr><td class="num">6</td><td>정통성 / 유지보수</td><td>OpenCores 최종 갱신 2018-09-20, SVN 2019-03-12. OCM 팩 v3.8.1 / 3.9.1 / 3.9.2 사본이 <strong>바이트 동일</strong> = 14년간 손 안 댄 1.0 원본. OCM도 메인 CPU가 아니라 OPL3 애드온 내장 CPU로만 씀.</td><td>우회할 것이 아니라 감수할 것. 우리가 첫 사용자급 검증자가 된다.</td><td><span class="pill p-costly">위험</span></td></tr>
+    </tbody>
+  </table></div>
+  <p>여섯 중 <strong>진짜 구조적인 것은 #5 하나</strong>다. #4는 크지만 구조적이지 않다 — 돈과 시간의 문제다. #6은 기술이 아니라 리스크 관리다.</p>
+
+  <h2>4. 버스 계약이 어떻게 다른가</h2>
+  <figure>
+    <svg viewBox="0 0 760 210" width="100%" role="img" aria-label="T80pa 3 T-state 읽기 사이클과 NextZ80 1클럭 사이클 비교">
+      <defs><style>.lab{font-size:12px}.sm{font-size:11px;fill:var(--mute)}</style></defs>
+      <text x="8" y="18" class="lab">T80pa — 메모리 읽기 M-cycle (T1 · T2 · T3), 각 T = 2 clk21m</text>
+      <g transform="translate(8,28)">
+        <rect x="0" y="0" width="240" height="26" fill="var(--acc-soft)" stroke="var(--line)"/>
+        <line x1="80" y1="0" x2="80" y2="26" stroke="var(--line)"/><line x1="160" y1="0" x2="160" y2="26" stroke="var(--line)"/>
+        <text x="32" y="17" class="lab">T1</text><text x="112" y="17" class="lab">T2</text><text x="192" y="17" class="lab">T3</text>
+        <text x="0" y="46" class="sm">ADDR 유효 ─────────────────────────────▶</text>
+        <text x="80" y="62" class="sm">MREQ/RD ↓          WAIT 샘플 ●          DI 래치 ●</text>
+        <text x="0" y="82" class="sm">가드층·SDC 멀티사이클이 앵커하는 것: "주소 유효 → 스트로브 ≥ 1 T", "WAIT는 T2에서만", "IACK는 IORQ만 3틱"</text>
+      </g>
+      <text x="8" y="128" class="lab">NextZ80 — 모든 버스 사이클 = 1 clk</text>
+      <g transform="translate(8,138)">
+        <rect x="0" y="0" width="80" height="26" fill="var(--costly-soft)" stroke="var(--line)"/>
+        <text x="22" y="17" class="lab">1 clk</text>
+        <text x="0" y="46" class="sm">ADDR · MREQ · WR 조합 출력 ── 같은 엣지에서 DI 샘플 ── WAIT=1 이면 그 자리에서 전부 정지</text>
+        <text x="0" y="62" class="sm">앵커할 T-state가 없음. 대신 규칙이 하나뿐: "WAIT를 내리기 전까지 아무것도 안 움직인다"</text>
+      </g>
+    </svg>
+    <figcaption>왼쪽 계약 위에 이 프로젝트가 값을 치른 유도 여섯 개가 서 있다(<code>msx.sv:332,381,411,412,417,1693</code>). 오른쪽 계약에는 그 유도가 하나도 남지 않지만, 새로 세워야 할 규칙은 더 적다.</figcaption>
+  </figure>
+  <p>여기서 두 가지를 정직하게 갈라 적어야 한다.</p>
+  <div class="grid2">
+    <div class="box"><h3>비싸지는 쪽</h3>
+      <p><strong>SDRAM ch2 SDC 예외.</strong> 방금 닫은 읽기 캐시 경로(+5.6ns)의 멀티사이클 정당화가 "주소→스트로브 ≥ 1 T-state"였다. 1클럭 계약에선 주소와 스트로브가 같은 엣지에 바뀌므로 그 예외가 무효가 되고, ch2 경로를 단일사이클로 다시 닫아야 한다. −11.9ns 사건이 이 동네였다.</p>
+      <p><strong>BRAM 읽기.</strong> <code>spram</code>은 1클럭 레지스터드 읽기인데 NextZ80은 같은 엣지에서 DI를 샘플한다. 스톡 속도에서도 <strong>모든 BRAM 읽기에 최소 1 wait</strong>가 필요하다. 지금은 T80의 T-state가 그 지연을 공짜로 준다.</p>
+    </div>
+    <div class="box"><h3>싸지는 쪽</h3>
+      <p><strong>가드 규칙이 하나로 준다.</strong> T80pa 가드는 "언제 WAIT를 샘플하는가"를 T-state 별로 추적해야 했다. NextZ80은 WAIT가 곧 정지라, 가드가 할 일이 "이 사이클을 몇 clk 늘릴 것인가"뿐이다. 주변장치 최소창(<code>slow_dev</code>, IO, VDP 페이서)은 지금 상수(12/6 clk21m)를 그대로 쓴다.</p>
+      <p><strong>클럭 상한이 오른다.</strong> CEN 위상 쌍이 없으니 <code>clk21m/1</code>이 상한. 저자 실측 Spartan-3AN -4에서 ~40MHz, Cyclone V는 더 빠르다(우리 쪽 합성 미실시).</p>
+    </div>
+  </div>
+
+  <h2>5. #5가 강제하는 구조 — 듀얼 CPU</h2>
+  <p>스톡(3.58MHz) 모드는 사이클 정확해야 한다. 게임이 루프를 T수로 세고, PSG/VDP 포트 접근 간격이 화면과 소리를 만든다. NextZ80은 이걸 원리적으로 못 준다. 따라서 NextZ80은 <strong>터보 전용 두 번째 CPU</strong>가 되고, T80은 남는다.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>항목</th><th>수치 / 판단</th></tr></thead>
+    <tbody>
+      <tr><td>면적</td><td>저자 ~700 Spartan-3 slice. Cyclone V ALM 환산 <strong>추정 1,000–1,500</strong>(미합성). 현재 여유 41,910 − 31,006 = <strong>10,904 ALM</strong>. 들어간다.</td></tr>
+      <tr><td>전환 시점</td><td>리셋 시 선택(OSD). 실행 중 핫스왑은 레지스터 상태 이관이 필요해 비추천.</td></tr>
+      <tr><td>버스</td><td>두 CPU의 출력을 먹스. 가드층은 <strong>두 계약을 모두</strong> 알아야 한다 — 이것이 D 트랙에서 가장 큰 덩어리.</td></tr>
+      <tr><td>성능</td><td>저자: 같은 클럭에서 Z80의 4배 이상. <code>clk21m/2</code>(10.74MHz)에 물려도 <strong>~12× 스톡</strong>, <code>clk21m/1</code>이면 그 두 배. R800(7.16MHz, 5–10×)을 넘는다. 실효는 IO/<code>slow_dev</code> 고정창이 깎는다 — P5 실측처럼 재봐야 한다.</td></tr>
+      <tr><td>타이밍 마진</td><td>worst setup +0.249ns. 코어 하나가 더 들어가면 배치가 흔들린다. <code>ascal</code>·오버레이 등 회수 후보를 먼저 정리할 것.</td></tr>
+    </tbody>
+  </table></div>
+
+  <h2>6. T80s 경로와의 정면 비교</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th></th><th>T80s + CEN=1 (+Mode1)</th><th>NextZ80 (듀얼)</th></tr></thead>
+    <tbody>
+      <tr><td>도달 성능</td><td>클럭 2× × Mode1 ~1.15 → <strong>~2.3× 스톡</strong> 상한</td><td><strong>8–24× 스톡</strong>(클럭 선택에 따라). R800급은 이쪽만 닿는다</td></tr>
+      <tr><td>가드층</td><td>T-state 유지 → 기존 유도 8개 <em>수정</em></td><td>계약 교체 → 유도 8개 <em>폐기</em> + 단순 규칙 신설 + 듀얼 먹스</td></tr>
+      <tr><td>SDC ch2 예외</td><td>유지(≥1 T 전제 유효)</td><td>재정당화 필요</td></tr>
+      <tr><td>사이클 정확 스톡</td><td>같은 코어의 Mode 0</td><td>T80 잔류 필수</td></tr>
+      <tr><td>정확도 회귀</td><td>없음(T80 그대로)</td><td>XF/YF 4항목 패치 전까지 있음</td></tr>
+      <tr><td>면적</td><td>0</td><td>+1,000–1,500 ALM(추정)</td></tr>
+      <tr><td>선례</td><td>T80s는 리포에 이미 있음</td><td>메인 CPU로 쓴 공개 사례 미확인</td></tr>
+    </tbody>
+  </table></div>
+  <p>표가 말하는 것: <strong>T80s는 싸고 낮고, NextZ80은 비싸고 높다.</strong> 둘은 대체재가 아니라 단계다.</p>
+
+  <h2>7. 재판정과 순서, 그리고 반론</h2>
+  <h3>판정</h3>
+  <p><strong>기각 철회 → 보류(D2).</strong> 조건: T80s(D1)로 가드층 재작성을 한 번 겪어 검증 병목(보드·발주자)을 통과한 뒤, 발주자가 "2.3×로는 부족하다"고 판단할 때 착수.</p>
+  <h3>왜 이 순서인가</h3>
+  <ol>
+    <li>D1은 T-state를 유지해 <strong>델타가 작다.</strong> 회귀가 나도 원인 공간이 좁다.</li>
+    <li>D1의 실효 배수를 실측하면 "R800급이 정말 필요한가"에 숫자가 생긴다. 지금은 열망이지 수치가 아니다.</li>
+    <li>D2의 가장 큰 위험(ch2 SDC 재정당화, 듀얼 먹스)은 D1이 지나간 뒤에도 그대로다. 미룬다고 커지지 않는다.</li>
+  </ol>
+  <h3>정직한 반론</h3>
+  <div class="note"><strong>가드층을 두 번 재작성한다.</strong> D1에서 T-state 형태로 고치고, D2에서 다시 1클럭 계약으로 갈아엎는다. D2까지 갈 것이 확실하다면 D1을 건너뛰는 편이 총비용이 적다. — 이 반론은 옳다. 다만 "확실하다"가 아직 아니다. D1 실측치가 그 확실성을 사거나 없앤다.</div>
+  <h3>반증 조건 — 이 보류가 틀렸다는 첫 신호</h3>
+  <ul>
+    <li>D1 실효 배수가 1.5× 미만으로 나오고 그 원인이 CPU 자체(명령당 사이클)로 특정되면 → D1은 헛수고였고 곧장 D2로 갔어야 했다.</li>
+    <li>D2 착수 후 ch2 경로가 단일사이클로 <em>닫히지 않으면</em>(setup 음수 지속) → 그때 비로소 "기각"이 맞다. 지금은 그 실험을 안 했다.</li>
+  </ul>
+
+  <h2>8. 근거</h2>
+  <ul class="src">
+    <li>NextZ80 소스: <code>~/Downloads/20250629 OCM-PLD Pack v3.9/ocm-pld v3.9.2/ocm_sm/src_addons/sound/opl3/nextz80{cpu,alu,reg}.v</code> — 1,501 / 372 / 202 줄. v3.8.1·v3.9.1 사본과 <code>diff</code> 무차이.</li>
+    <li>WAIT 의미: <code>nextz80cpu.v:168</code>, <code>nextz80reg.v:96,106,112</code>. 버스 기본값: <code>nextz80cpu.v:215-220</code>. XF/YF 분기: <code>nextz80alu.v:160-262</code>.</li>
+    <li>우리 소비처: <code>rtl/msx.sv</code> — <code>rd_n</code> 22, <code>wr_n</code> 31, <code>mreq_n</code> 16, <code>iorq_n</code> 37, <code>m1_n</code> 33, <code>rfrsh_n</code> 3(실사용 1), <code>wait_n</code> 7, <code>ce_cpu_p/n</code> 15/4. T80 내부 줄번호 앵커 주석 6곳.</li>
+    <li>리소스: <code>output_files/MSX1.fit.rpt</code> — ALM 31,006/41,910, worst setup +0.249ns.</li>
+    <li>OpenCores 프로젝트 페이지 — 생성 2011-03-18, 최종 갱신 2018-09-20, SVN 2019-03-12. 2024–25년 포크·수정 검색 결과 없음: <a href="https://opencores.org/projects/nextz80">opencores.org/projects/nextz80</a>, <a href="https://www.allaboutcircuits.com/ip-cores/processor/nextz80/">allaboutcircuits.com — NextZ80</a>. T80 수정 집약 저장소(대조용): <a href="https://github.com/mist-devel/T80">github.com/mist-devel/T80</a>.</li>
+    <li>이 세션 앞부분의 T80 상한 분석(clk21m/2 = T80pa 위상 쌍 구조)과 P5 병목 실측(WAIT 기울기 불증가)은 별도 기록.</li>
+  </ul>
+</div>

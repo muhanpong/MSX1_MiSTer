@@ -898,8 +898,13 @@ assign VRAM_we_lo     = vdp18 ? VRAM_we_vdp18               : VRAM_we_lo_vdp;
 assign VRAM_we_hi     = vdp18 ? 1'b0                        : VRAM_we_hi_vdp;
 assign VRAM_do        = vdp18 ? VRAM_do_vdp18               : VRAM_do_vdp;
 
-assign VRAM_we_lo_vdp = ~VRAM_we_n_vdp & DLClk_vdp & ~VRAM_address_vdp[16];
-assign VRAM_we_hi_vdp = ~VRAM_we_n_vdp & DLClk_vdp &  VRAM_address_vdp[16];
+// No DLClk gate: VRAM_we_n_vdp is only ever low for the two cycles after a
+// grant, with address and data held, so ungated it writes the same byte twice
+// -- harmless.  Gated, it dropped every write the command engine issues from
+// its DOTSTATE "01" access slots (the DLClk=0 half of the dot) while the ACK
+// still toggled: commands completed having written nothing.
+assign VRAM_we_lo_vdp = ~VRAM_we_n_vdp & ~VRAM_address_vdp[16];
+assign VRAM_we_hi_vdp = ~VRAM_we_n_vdp &  VRAM_address_vdp[16];
 
 logic iack;
 always @(posedge clk21m) begin

@@ -16,3 +16,5 @@ set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) vdp_ssg.vh
 set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) vdp_text12.vhd       ]
 set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) vdp_vga.vhd          ]
 set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) vdp_wait_control.vhd ]
+set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) vdp_slot_pack.vhd ]
+set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) vdp_access_slots.vhd ]

@@ -15,9 +15,12 @@
 ; C3 is the overrun case itself: a second command issued while the first
 ; is still running.  The byte read back says which one won.
 ;
-; Runs in G4 (SCREEN 5) with the command area kept above VRAM 0x2000 so
-; the text screen it prints into survives.  R#0/R#1 are restored from the
-; BIOS save area afterwards.
+; Runs in G4 (SCREEN 5).  The command area sits above VRAM 0x4000, which
+; clears EVERY text-mode table: SCREEN 1 puts its COLOUR table at 0x2000
+; and its sprite patterns at 0x3800, so the old y=64 block (0x2000-0x5FFF)
+; filled the colour table with 0xEE = fg 14 on bg 14 and printed the whole
+; report in grey-on-grey.  The text was there all along; it was invisible.
+; R#0/R#1 are restored from the BIOS save area afterwards.
 ;----------------------------------------------------------------------
 
 start:
@@ -30,10 +33,8 @@ start:
         ld      de, #banner         ; print first: a hang after this still
         call    puts                ; leaves the banner on screen
 
-        call    g4_on
-        call    c0_frame
-        call    g4_off
-        ld      de, #l_frame
+        call    c0_frame            ; in the TEXT screen, not G4 -- C6..C9 below
+        ld      de, #l_frame        ; say whether the mode changes the poll rate
         call    show
 
         call    g4_on
@@ -62,6 +63,23 @@ start:
 
         call    c5_f_ie0
         ld      de, #l_fie0
+        call    show
+
+        ld      a, #0
+        call    fvrloss
+        ld      de, #l_p0
+        call    show
+        ld      a, #4
+        call    fvrloss
+        ld      de, #l_p4
+        call    show
+        ld      a, #16
+        call    fvrloss
+        ld      de, #l_p16
+        call    show
+
+        call    scrmode
+        ld      de, #l_scr
         call    show
 
         ld      de, #legend
@@ -222,7 +240,8 @@ c3_overrun:
         ld      hl, #cmd_small2     ; no wait_ce here -- that is the point
         call    docmd
         call    wait_ce
-        ld      hl, #0x2000         ; y=64, x=0  (64 * 128)
+        ld      c, #1               ; A16..A14 = 1
+        ld      hl, #0x0000         ; y=128, x=0  (128 * 128 = 0x04000)
         call    rdvram
         ld      h, #0
         ld      l, a
@@ -281,9 +300,86 @@ c5_out:
         ret
 
 ;----------------------------------------------------------------------
-; read VRAM byte at HL (bits 16.14 assumed 0) -> A
+; C6..C8  how many vblank F flags survive 32 frames, at three poll spacings.
+;     VR (S#2 bit6) is a LEVEL -- reading it cannot destroy it -- so it is
+;     the honest frame clock; the loop runs until VR has risen 0x20 times.
+;     F (S#0 bit7) is a FLAG the read itself clears.  Result is packed
+;     H = VR edges reached (0x20 unless the watchdog fired), L = F seen.
+;     2020 = nothing lost.  A is the spacing: each unit is ~51 T of pad
+;     between one poll pair and the next, so the sweep says whether the
+;     loss is a race against the poll rate or something slower.
+;     (The 20260912c build read bit5 here, which is HR, not VR.)
+fvrloss:
+        ld      (#pad_n), a
+        call    wait_vbl
+        ld      a, #2
+        call    rdst
+        and     #0x40
+        ld      (#vrprev), a
+        ld      de, #0              ; F events
+        ld      hl, #0              ; VR rising edges
+        ld      bc, #0              ; watchdog
+fv1:
+        ld      a, (#pad_n)
+        or      a
+        jr      z, fv2
+        push    bc
+        ld      b, a
+fvp:
+        ex      (sp), hl            ; 19 T each, restores HL and the stack
+        ex      (sp), hl
+        djnz    fvp
+        pop     bc
+fv2:
+        xor     a
+        call    rdst                ; S#0
+        and     #0x80
+        jr      z, fv3
+        inc     de
+fv3:
+        ld      a, #2
+        call    rdst                ; S#2
+        and     #0x40               ; VR
+        ld      (#vrcur), a
+        ld      a, (#vrprev)
+        or      a
+        jr      nz, fv4             ; already high -- not an edge
+        ld      a, (#vrcur)
+        or      a
+        jr      z, fv4
+        inc     hl
+fv4:
+        ld      a, (#vrcur)
+        ld      (#vrprev), a
+        ld      a, l
+        cp      #0x20
+        jr      nc, fv5             ; 32 frames done
+        inc     bc
+        ld      a, b
+        cp      #0xF0
+        jr      c, fv1
+fv5:
+        ld      h, l                ; H = VR edges reached
+        ld      l, e                ; L = F events seen
+        jp      st0
+
+;----------------------------------------------------------------------
+; CA  which screen this report is actually printed on: H = SCRMOD, L =
+;     LINLEN.  The 20260912 build's 0xEE fill at VRAM 0x2000 made the
+;     whole report invisible; WHICH table that destroyed depends on the
+;     mode, so measure the mode rather than assume it.
+scrmode:
+        ld      a, (#0xFCAF)        ; SCRMOD
+        ld      h, a
+        ld      a, (#0xF3B0)        ; LINLEN
+        ld      l, a
+        ret
+
+;----------------------------------------------------------------------
+; read VRAM byte at C:HL  (C = A16..A14, HL = A13..A0) -> A
+; R#14 goes back to 0 before returning -- the BIOS text routines assume it.
 rdvram:
-        ld      e, #0               ; R#14 = A16..A14 = 0
+        ld      e, c                ; R#14 = A16..A14
         ld      d, #14
         call    wrvdp
         ld      a, l
@@ -293,6 +389,11 @@ rdvram:
         out     (#0x99), a
         nop
         in      a, (#0x98)
+        push    af
+        ld      e, #0
+        ld      d, #14
+        call    wrvdp
+        pop     af
         ret
 
 ;----------------------------------------------------------------------
@@ -352,22 +453,22 @@ ph1:
 ; command blocks: R#32 .. R#46
 cmd_big:
         .db     0, 0, 0, 0          ; SX, SY
-        .db     0, 0, 64, 0         ; DX=0, DY=64
+        .db     0, 0, 128, 0        ; DX=0, DY=128  -> VRAM 0x4000
         .db     0, 1, 128, 0        ; NX=256, NY=128
         .db     0xEE, 0x00, 0xC0    ; CLR, ARG, CMD = HMMV
 cmd_small:
         .db     0, 0, 0, 0
-        .db     0, 0, 200, 0        ; DY=200, out of the big block's way
+        .db     0, 0, 0x48, 1       ; DY=328, out of the big block's way
         .db     8, 0, 8, 0          ; NX=8, NY=8
         .db     0x55, 0x00, 0xC0
 cmd_small2:
         .db     0, 0, 0, 0
-        .db     0, 0, 210, 0        ; DY=210
+        .db     0, 0, 0x52, 1       ; DY=338
         .db     8, 0, 8, 0
         .db     0x22, 0x00, 0xC0
 
 banner:
-        .ascii  "CEPROBE 20260912 - command engine"
+        .ascii  "CEPROBE 20260912d - cmd engine"
         .db     13, 10, 13, 10, 0x24
 l_frame:
         .ascii  "C0 frame len   $"
@@ -381,19 +482,32 @@ l_ce:
         .ascii  "C4 CE after cmd$"
 l_fie0:
         .ascii  "C5 F w/ IE0=0  $"
+l_p0:
+        .ascii  "C6 F:VR pad0   $"
+l_p4:
+        .ascii  "C7 F:VR pad4   $"
+l_p16:
+        .ascii  "C8 F:VR pad16  $"
+l_scr:
+        .ascii  "CA scrmod:width$"
 crlf:
         .db     13, 10, 0x24
 legend:
         .db     13, 10
-        .ascii  "C1/C0 = frames per command. MUST be"
+        .ascii  "C1/C0 = frames per command; same at"
         .db     13, 10
-        .ascii  "the same at every clock. C3 want 00EE"
+        .ascii  "every clock. C3=00EE C4=C5=0001."
         .db     13, 10
-        .ascii  "C4 want 0001. C5 want 0001."
+        .ascii  "C6-C8 want 2020 (H=frames L=F seen)"
         .db     13, 10, 0x24
 
 r0sav:   .db 0
 r1sav:   .db 0
+vrprev:  .db 0
+vrcur:   .db 0
+pad_n:   .db 0
+v_vr:    .dw 0
+v_f:     .dw 0
 v_frame: .dw 0
 v_big:   .dw 0
 v_small: .dw 0

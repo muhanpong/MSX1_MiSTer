@@ -516,6 +516,24 @@ ARCHITECTURE RTL OF VDP IS
         );
     END COMPONENT;
 
+    COMPONENT VDP_ACCESS_SLOTS
+        PORT(
+            RESET           : IN    STD_LOGIC;
+            CLK21M          : IN    STD_LOGIC;
+            VDP_COMMAND     : IN    STD_LOGIC_VECTOR(  7 DOWNTO 4 );
+            REG_R1_DISP_ON  : IN    STD_LOGIC;
+            REG_R8_SP_OFF   : IN    STD_LOGIC;
+            PREWINDOW_Y     : IN    STD_LOGIC;
+            H_CNT           : IN    STD_LOGIC_VECTOR( 10 DOWNTO 0 );
+            VDPSPEEDMODE    : IN    STD_LOGIC;
+            DRIVE           : IN    STD_LOGIC;
+            XFER            : IN    STD_LOGIC;
+            XFER_WR         : IN    STD_LOGIC;
+            WRPEND          : IN    STD_LOGIC;
+            ACTIVE          : OUT   STD_LOGIC
+        );
+    END COMPONENT;
+
     COMPONENT VDP_WAIT_CONTROL
         PORT(
             RESET           : IN    STD_LOGIC;
@@ -981,6 +999,15 @@ ARCHITECTURE RTL OF VDP IS
 
     SIGNAL VDP_COMMAND_DRIVE            : STD_LOGIC;
     SIGNAL VDP_COMMAND_ACTIVE           : STD_LOGIC;
+    --  '1' = measured access-slot map (vdp_access_slots), '0' = the old
+    --  average-rate accumulator (vdp_wait_control).  Both are instantiated so
+    --  the control group cannot rot; synthesis drops the unused one.
+    CONSTANT USE_SLOT_MAP               : STD_LOGIC := '1';
+    SIGNAL CMD_ACTIVE_SLOTS             : STD_LOGIC;
+    SIGNAL CMD_ACTIVE_WAITTAB           : STD_LOGIC;
+    SIGNAL VDP_CMD_XFER                 : STD_LOGIC;
+    SIGNAL VDP_CMD_XFER_WR              : STD_LOGIC;
+    SIGNAL W_VDPCMD_WRPEND              : STD_LOGIC;
     SIGNAL CUR_VDP_COMMAND              : STD_LOGIC_VECTOR(  7 DOWNTO 4 );
 
     -- VIDEO OUTPUT SIGNALS
@@ -1339,7 +1366,20 @@ BEGIN
             VDPCMDVRAMRDACK     <= '0';
             VDPCMDVRAMREADINGA  <= '0';
         ELSIF( CLK21M'EVENT AND CLK21M = '1' )THEN
-            IF( DOTSTATE = "01" )THEN
+            --  A read granted at the end of "10" presents its address during
+            --  "00", the RAM's registered q holds the data during "01", and this
+            --  latch captures it at the edge ending "01" -- grant plus three
+            --  phases.  A read granted at the end of "01" (USE_SLOT_MAP slots)
+            --  is the same pipeline shifted half a dot: address during "11",
+            --  data during "10", captured at the edge ending "10".  The first
+            --  version of this latch used "11" instead -- one cycle early, so
+            --  it captured RAM[previous address]; timing looked perfect and
+            --  every copied byte was stale.
+            --  No double latch: after a "10" grant the phases run 00,01,11,10,
+            --  so "01" fires first and clears the READINGR/READINGA mismatch
+            --  before "10" is reached; after a "01" grant they run 11,10 and
+            --  "10" fires before the next "01".
+            IF( DOTSTATE = "01" OR (USE_SLOT_MAP = '1' AND DOTSTATE = "10") )THEN
                 IF( VDPCMDVRAMREADINGR /= VDPCMDVRAMREADINGA )THEN
                     VDPCMDVRAMRDDATA    <= PRAMDAT;
                     VDPCMDVRAMRDACK     <= NOT VDPCMDVRAMRDACK;
@@ -1409,7 +1449,22 @@ BEGIN
                     VRAMACCESSSWITCH := VRAM_ACCESS_CPUR;
 --              ELSIF( EIGHTDOTSTATE="111" )THEN
                 ELSE
-                    -- VDP COMMAND
+                    --  VDP COMMAND.  This branch serves both throttles: with
+                    --  USE_SLOT_MAP, VDP_COMMAND_ACTIVE is the measured slot
+                    --  map (3 of the real chip's 31 sprites-on slots land on
+                    --  H_CNT mod 4 = 3, i.e. here); without it, the average-
+                    --  rate accumulator.  The 2026-09-12 session believed a
+                    --  transfer granted here and one granted at "01" could not
+                    --  coexist ("breaks the REQ/ACK handshake") -- wrong.  The
+                    --  missing writes had nothing to do with the handshake:
+                    --  msx.sv:901 gates the VRAM write strobe with DLCLK, which
+                    --  is low in the half-dot a "01" grant drives, so every
+                    --  such write was silently dropped WHILE ITS ACK STILL
+                    --  TOGGLED, and the engine ran to completion writing
+                    --  nothing.  (That is also why those runs "deadlocked" at
+                    --  zero writes with this branch handed VDPS-only: all
+                    --  transfers had moved to "01" and every one was dropped.)
+                    --  The gate is removed together with this code.
                     IF( VDP_COMMAND_ACTIVE = '1' )THEN
                         IF( VDPCMDVRAMWRREQ /= VDPCMDVRAMWRACK )THEN
                             VRAMACCESSSWITCH := VRAM_ACCESS_VDPW;
@@ -1422,6 +1477,25 @@ BEGIN
                         VRAMACCESSSWITCH := VRAM_ACCESS_VDPS;
                     END IF;
                 END IF;
+            --  SECOND ACCESS OPPORTUNITY (DOTSTATE "01").
+            --  28 of the 31 slots the real chip gives the command engine with
+            --  sprites on land on this dot phase, so gating on the chip's map
+            --  is worthless without it.  It is free to take in GRAPHIC4/5: the
+            --  DRAW branch below asserts PRAMOE_N here but only reloads IRAMADR
+            --  for GRAPHIC6/7, i.e. in G4/G5 this cycle is a dummy re-read that
+            --  nothing consumes.  G6/G7 genuinely need it (double bandwidth),
+            --  so they are excluded.  The slot is only claimed when the engine
+            --  actually has a transfer pending; otherwise the dummy read stands.
+            ELSIF( USE_SLOT_MAP = '1' AND DOTSTATE = "01" AND
+                   (VDPMODEGRAPHIC4 = '1' OR VDPMODEGRAPHIC5 = '1') AND
+                   VDP_COMMAND_ACTIVE = '1' AND
+                   ((VDPCMDVRAMWRREQ /= VDPCMDVRAMWRACK) OR
+                    (VDPCMDVRAMRDREQ /= VDPCMDVRAMRDACK)) )THEN
+                IF( VDPCMDVRAMWRREQ /= VDPCMDVRAMWRACK )THEN
+                    VRAMACCESSSWITCH := VRAM_ACCESS_VDPW;
+                ELSE
+                    VRAMACCESSSWITCH := VRAM_ACCESS_VDPR;
+                END IF;
             ELSE
                 VRAMACCESSSWITCH := VRAM_ACCESS_DRAW;
             END IF;
@@ -1432,6 +1506,23 @@ BEGIN
                 VDP_COMMAND_DRIVE <= '1';
             ELSE
                 VDP_COMMAND_DRIVE <= '0';
+            END IF;
+
+            --  A real transfer, as opposed to DRIVE which also covers VDPS --
+            --  the "engine was offered a slot but had nothing to send" case.
+            --  vdp_access_slots times the next slot from the last real
+            --  transfer; counting wasted offers instead makes every stall cost
+            --  a further full DELTA-plus-slot wait.
+            IF( VRAMACCESSSWITCH = VRAM_ACCESS_VDPW OR
+                VRAMACCESSSWITCH = VRAM_ACCESS_VDPR )THEN
+                VDP_CMD_XFER <= '1';
+            ELSE
+                VDP_CMD_XFER <= '0';
+            END IF;
+            IF( VRAMACCESSSWITCH = VRAM_ACCESS_VDPW )THEN
+                VDP_CMD_XFER_WR <= '1';
+            ELSE
+                VDP_CMD_XFER_WR <= '0';
             END IF;
 
             --
@@ -1893,8 +1984,47 @@ BEGIN
         VDPSPEEDMODE        => VDPSPEEDMODE         ,
         DRIVE               => VDP_COMMAND_DRIVE    ,
 
-        ACTIVE              => VDP_COMMAND_ACTIVE
+        ACTIVE              => CMD_ACTIVE_WAITTAB
     );
+
+    U_VDP_ACCESS_SLOTS: VDP_ACCESS_SLOTS
+    PORT MAP (
+        RESET               => RESET                ,
+        CLK21M              => CLK21M               ,
+
+        VDP_COMMAND         => CUR_VDP_COMMAND      ,
+
+        REG_R1_DISP_ON      => REG_R1_DISP_ON       ,
+        REG_R8_SP_OFF       => REG_R8_SP_OFF        ,
+        PREWINDOW_Y         => PREWINDOW_Y          ,
+        H_CNT               => H_CNT                ,
+
+        VDPSPEEDMODE        => VDPSPEEDMODE         ,
+        DRIVE               => VDP_COMMAND_DRIVE    ,
+        XFER                => VDP_CMD_XFER         ,
+        XFER_WR             => VDP_CMD_XFER_WR      ,
+        WRPEND              => W_VDPCMD_WRPEND      ,
+
+        ACTIVE              => CMD_ACTIVE_SLOTS
+    );
+
+    W_VDPCMD_WRPEND <= '1' WHEN( VDPCMDVRAMWRREQ /= VDPCMDVRAMWRACK )ELSE '0';
+
+    --  The slot map is only usable where the command engine can actually reach
+    --  the slots it describes.  28 of the 31 sprites-on slots fall on
+    --  DOTSTATE "01", and that dot phase is free only in GRAPHIC4/5: the
+    --  arbiter's DRAW branch re-reads there without reloading IRAMADR, and
+    --  nothing consumes the result.  Every other mode does consume it --
+    --  GRAPHIC6/7 reload IRAMADR for their second byte (vdp.vhd's DRAW branch),
+    --  and vdp_text12.vhd:243 and vdp_graphic123m.vhd:193/204/215/226 all latch
+    --  PRAMDAT at "01".  Gating the map on those modes would leave the engine
+    --  the three "10" slots per line -- SCREEN 8 HMMV would take 5461 lines
+    --  against a 722-line reference -- so they keep the average-rate
+    --  accumulator instead.
+    VDP_COMMAND_ACTIVE <= CMD_ACTIVE_SLOTS
+                              WHEN( USE_SLOT_MAP = '1' AND
+                                    (VDPMODEGRAPHIC4 = '1' OR VDPMODEGRAPHIC5 = '1') )
+                          ELSE CMD_ACTIVE_WAITTAB;
 
 END RTL;
 
