@@ -1,13 +1,21 @@
 <?xml version="1.0" ?>
 <!--
+  Sony_HB-F1XDmk2_1MB.xml with MSX-MUSIC added in slot 0-2.
+
+  The real machine has none; slot 0 is expanded to make room, exactly as the
+  FS-A1FX and FS-A1WX packs already do, and the FM BASIC ROM is the FS-A1WX one
+  (SHA1 aad42ba4).  Everything else is identical to Sony_HB-F1XDmk2_1MB.xml.
+
+  Built 2026-09-04 to test one variable: FS-A1FX 1MB plays two SCC+ cartridges
+  cleanly under SCMD while FS-A1F 1MB does not, and MSX-MUSIC in 0-2 is one of
+  only four differences between those two packs.
+-->
+<!--
   Sony HB-F1XDmk2 with an expanded memory mapper (1MB).
 
   Identical to Sony_HB-F1XDmk2.xml except the RAM MAPPER block_count in slot
   3-3: 64 x 16K.  Same sizes the HB-F1XV variants use.  No <pattern> here,
   matching the stock pack, so the power-on RAM fill is left as it was.
-
-  MSX-DOS 2 kernel added in the free 3-1 sub-slot; the driver comes from the
-  disk ROM in 3-0.  Same block the A1 packs use (ascii_msxdos22.rom).
 -->
 <msxConfig>
   <type>MSX2</type>
@@ -19,6 +27,14 @@
         <block_count>2</block_count>
         <filename>hb-f1xdmk2_basic-bios2.rom</filename>
         <SHA1>4ce41fcc1a603411ec4e99556409c442078f0ecf</SHA1>
+      </block>
+    </secondary>
+    <secondary slot="2">
+      <block start="1" id="MSX Music">
+        <type>MSX-MUSIC</type>
+        <block_count>1</block_count>
+        <filename>fs-a1wx_fmbasic.rom</filename>
+        <SHA1>aad42ba4289b33d8eed225d42cea930b7fc5c228</SHA1>
       </block>
     </secondary>
   </primary>
@@ -52,12 +68,9 @@
       </block>
     </secondary>
     <secondary slot="1">
-      <!-- MSX-DOS 2.  Kernel only: the driver comes from the disk ROM in 3-0,
-           which is why this block is only in packs that carry an FDC.  DOS 2
-           also needs two free memory-mapper pages, so 64 kB stock packs cannot
-           have it; these are all 1 MB or larger.
-           3-1 is free on this machine, so nothing is displaced (unlike the
-           FS-A1FX pack, where the A1 Cockpit gives up 3-3). -->
+      <!-- MSX-DOS 2, same block and same free 3-1 as the non-FM variants,
+           which are confirmed on the board.  Kernel only; the driver comes
+           from the disk ROM in 3-0. -->
       <block start="1" id="MSX-DOS2 ROM">
         <type>MSXDOS2</type>
         <block_count>4</block_count>
