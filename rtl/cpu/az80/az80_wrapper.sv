@@ -51,7 +51,16 @@ module az80_wrapper
    //  -- and outside them nothing samples do_, so leaving D undriven is fine.
    wire fetching = ~rd_n | (~iorq_n & ~m1_n);
    assign D   = fetching ? di : 8'bz;
-   assign do_ = D;
+
+   //  do_ must NOT be a plain read of D.  While we are driving di onto D for a
+   //  fetch, `assign do_ = D` makes do_ equal di, and the core's d_to_cpu and
+   //  d_from_cpu become one combinational net THROUGH the CPU -- a path with no
+   //  register in it from a clk_sdram source to a clk21m destination.  It showed
+   //  up as -8.3 ns from MoonSound's ms_io_dout_lat to the SCC wavetable RAM,
+   //  two blocks with no business being connected, on a clock pair whose edges
+   //  nearly coincide so the requirement is ~0 ns.  Gating on wr_n leaves do_
+   //  meaningful exactly when the CPU is the one driving.
+   assign do_ = wr_n ? 8'h00 : D;
 
    z80_top_direct_n cpu
    (
