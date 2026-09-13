@@ -155,11 +155,16 @@ def main():
     ap.add_argument("--bias", type=int, default=0)
     ap.add_argument("--no-line-minor", action="store_true")
     ap.add_argument("--tol", type=float, default=0.05)
+    ap.add_argument("--drop-slots", default="",
+                    help="comma-separated openMSX slot indices to remove from the "
+                         "sprites-on column, e.g. 162,1330 -- for asking what a "
+                         "slot our arbiter fails to deliver would have been worth")
     a = ap.parse_args()
 
     on, off_spr, blank = slot_tables()
     dt = delta_tables()
     frame = Frame(on, off_spr, blank)
+    dropped = [int(x) for x in a.drop_slots.split(",") if x.strip()]
 
     print(f"model reads: {RTL}/vdp_slot_pack.vhd, {RTL}/vdp_access_slots.vhd")
     print(f"SELF-CHECK  bias=0, LINE minor step on, tolerance {a.tol*100:.0f}%\n")
@@ -180,6 +185,26 @@ def main():
         print("is wrong -- that is the exact error this gate exists to prevent.")
         return 1
     print("\nSELF-CHECK PASSED -- the model may now be used to predict.")
+
+    if dropped:
+        #  Deleting slots must happen AFTER the self-check: the check proves the
+        #  unmodified model is sound, and only then does a modified one mean
+        #  anything.  Indices are openMSX's; SLOT_OFFSET maps them to our H_CNT.
+        off = int(re.search(r"CONSTANT SLOT_OFFSET\s*:\s*INTEGER\s*:=\s*(\d+)",
+                            read("vdp_access_slots.vhd")).group(1))
+        on2 = list(on)
+        for idx in dropped:
+            h = (idx - off) % 1368
+            if not on2[h]:
+                sys.exit(f"slot {idx} (H_CNT {h}) is not a sprites-on slot")
+            on2[h] = False
+        f2 = Frame(on2, off_spr, blank)
+        alt = run_all(f2, dt, 0, True)
+        print(f"\nPREDICTION with slots {dropped} never delivered "
+              f"(H_CNT {[(i-off)%1368 for i in dropped]}):\n")
+        print(f"{'cmd':6}{'base':>9}{'dropped':>9}{'openMSX':>9}{'drop/ref':>10}")
+        for c, r in REFERENCE.items():
+            print(f"{c:6}{base[c]:9.1f}{alt[c]:9.1f}{r:9.1f}{alt[c]/r:10.3f}")
 
     if a.bias or a.no_line_minor:
         what = []
