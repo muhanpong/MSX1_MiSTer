@@ -687,6 +687,9 @@ wire [26:0] ram_addr;
 wire  [7:0] ram_din, ram_dout;
 wire        ram_rnw, sdram_ce, bram_ce;
 wire        sd_tx, sd_rx;
+//  spi_divmmc's busy/idle flag.  It was left unconnected until 20260913 and
+//  nothing throttled the CPU against it; see the pacer in rtl/msx.sv.
+wire        sd_ready;
 wire  [7:0] d_to_sd, d_from_sd;
 
 dev_typ_t    cart_device[2];
@@ -782,6 +785,7 @@ msx MSX
    .d_from_sd(d_from_sd),
    .sd_tx(sd_tx),
    .sd_rx(sd_rx),
+   .sd_ready(sd_ready),
    .flash16x_active(flash16x_active),
    .flash16x_base(flash16x_base),
    .flash16x_size(flash16x_size),
@@ -855,7 +859,7 @@ spi_divmmc spi
    .rx(sd_rx),
    .din(d_to_sd),
    .dout(d_from_sd),
-   .ready(),
+   .ready(sd_ready),
 
    .spi_ce(1'b1),
    .spi_clk(sdclk),
