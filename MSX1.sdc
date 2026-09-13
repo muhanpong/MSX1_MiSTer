@@ -283,3 +283,10 @@ set_false_path -from [get_registers {*msx:MSX|T80s:T80|*}] \
                -to   [get_registers {*msx:MSX|az80_wrapper:CPU|*}]
 set_false_path -from [get_registers {*msx:MSX|az80_wrapper:CPU|*}] \
                -to   [get_registers {*msx:MSX|T80s:T80|*}]
+
+#  The core-select flop.  It changes only at a speed-4 boundary crossing, and
+#  that crossing raises core_switch_rst for ~12 ms -- both CPUs, the guard and
+#  every bus consumer are in machine reset for thousands of cycles around the
+#  transition, so no path launched by this register is ever consumed near its
+#  transition.  Quasi-static by construction.
+set_false_path -from [get_registers {*|use_t80}]

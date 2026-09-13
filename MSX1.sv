@@ -554,10 +554,16 @@ wire  [2:0] cpu_speed     = (msx_turbo_req & cpu_speed_sel == 3'd0) ? 3'd1 : cpu
 //  with margin.  Switching cores mid-run would hand a live machine to a CPU
 //  whose registers are reset garbage, so a boundary crossing forces a machine
 //  reset, stretched well past the az80_clk/T80s reset synchronisers.
-wire use_t80 = cpu_speed == 3'd4;
+//  Registered, not a wire: raw status[58:56] would otherwise reach the bus
+//  strobe muxes, the guard and A-Z80's nWAIT as one combinational cone from
+//  hps_io (-13.0 ns, build byjwm5mcl).  One flop cuts that at the source, and
+//  since the value only ever changes inside the stretched reset below, the
+//  flop's output is quasi-static and false-pathed in MSX1.sdc.
+reg  use_t80 = 1'b0;
 reg  use_t80_q = 1'b0;
 reg  [17:0] core_switch_cnt = '0;              // ~12 ms at 21.477 MHz
 always @(posedge clk21m) begin
+   use_t80   <= cpu_speed == 3'd4;
    use_t80_q <= use_t80;
    if (use_t80_q != use_t80)      core_switch_cnt <= '1;
    else if (|core_switch_cnt)     core_switch_cnt <= core_switch_cnt - 1'd1;
