@@ -119,7 +119,8 @@ T80은 레지스터파일 전체를 벡터로 노출(msx.sv dbg_* 약 20곳 사�
 | ca97172 | −8.125 | 20.08 | 21.84 | wr_n 게이트(무효), 피드스루 잔존 |
 | **6697e64** | **−4.476** | **21.33** | **28.52** | 피드스루 소멸. 잔여=ch2_saved→dout |
 | 3f66022 | −2.145 | 19.66 | 28.47 | MCP 적중(ch2→dout 소멸)했으나 az80_clk 악화 |
-| 5fe9a3d | (진행 중) | ? | ? | **az80_clk 글로벌 클럭버퍼 탑승** |
+| 5fe9a3d | −2.698 | 19.27 | 28.67 | ★지정이 **조용히 무시됨** — 승격목록에 az80_clk 없음 |
+| (수정) | (진행 중) | ? | ? | To 패턴 와일드카드화 `*az80_clkgen*\|az80_clk` |
 
 요구: az80_clk ≥ 21.477MHz.
 
@@ -132,6 +133,12 @@ apin_latch`, 예산 23.28ns)과 az80→clk21m 크로싱(**skew −3.59ns**)으�
 19.66/20.08/21.33/22.10을 오간 원인이 시드가 아니라 클럭 삽입지연 산포였던 것.
 수정 = qsf `GLOBAL_SIGNAL GLOBAL_CLOCK` 고정. ★교훈: **레지스터 분주 클럭은 fit.rpt
 글로벌 테이블부터 확인** — create_generated_clock은 STA 선언일 뿐 배선을 안 정한다.
+
+★2차 함정(5fe9a3d): To를 `az80_clkgen:az80_clkgen|az80_clk`로 썼더니 **경고 없이 무시**
+— sys_top 기준 실계층은 `emu:emu|az80_clkgen:...`이라 미매치. Global Signal 할당표에는
+버젓이 실리면서 Fitter 승격 목록(Info 11178/11191)에는 없는 상태가 "무시됨"의 증거.
+와일드카드 `*az80_clkgen*|az80_clk`로 교정. **판정은 할당표가 아니라 승격 Info와
+Control Signals 표의 Global=yes로 할 것.**
 
 ### ch2_saved_* → dout MCP의 정당화 (3f66022)
 clk_sdram과 az80_clk는 같은 PLL 분주라 0.001ns 엣지쌍 존재 → cpu_din mux 클라우드

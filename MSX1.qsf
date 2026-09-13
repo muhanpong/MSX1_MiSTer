@@ -367,4 +367,4 @@ set_global_assignment -name ENABLE_SIGNALTAP OFF
 # 19.66..22.10 MHz across otherwise-similar builds (need 21.477): every seed
 # re-scatters the clock insertion delays, and the az80->clk21m crossings showed
 # -3.59 ns of pure clock skew.  Pin it to a global buffer.
-set_instance_assignment -name GLOBAL_SIGNAL GLOBAL_CLOCK -to "az80_clkgen:az80_clkgen|az80_clk"
+set_instance_assignment -name GLOBAL_SIGNAL GLOBAL_CLOCK -to "*az80_clkgen*|az80_clk" -entity sys_top
