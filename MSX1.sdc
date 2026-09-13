@@ -270,3 +270,16 @@ set_multicycle_path -setup -end 2 \
 set_multicycle_path -hold  -end 1 \
     -from [get_registers {*z80_top_direct_n:cpu|ir:ir_|opcode* *z80_top_direct_n:cpu|decode_state:decode_state_|*}] \
     -to   [get_registers {*data_pins:data_pins_|dout*}]
+
+#  Core-to-core paths in the dual-CPU arrangement are false BY CONSTRUCTION:
+#  exactly one of T80s / A-Z80 is ever out of reset (use_t80 changes only
+#  inside the stretched core-switch machine reset, MSX1.sv), and a core held
+#  in reset neither launches transitions nor acts on captures.  Without this,
+#  T80s' combinational wait cone (IR and friends -> guard -> wait_n) reaches
+#  A-Z80's nWAIT sampler as a -16.5 ns clk21m -> az80_clk path that no real
+#  execution can ever traverse.  A-Z80's own wait loop (its strobes -> guard ->
+#  wait_n -> its nWAIT) is NOT covered by these two lines and stays timed.
+set_false_path -from [get_registers {*msx:MSX|T80s:T80|*}] \
+               -to   [get_registers {*msx:MSX|az80_wrapper:CPU|*}]
+set_false_path -from [get_registers {*msx:MSX|az80_wrapper:CPU|*}] \
+               -to   [get_registers {*msx:MSX|T80s:T80|*}]
