@@ -161,3 +161,26 @@ create_generated_clock -name az80_clk \
 #  in msx.sv (async assert, sync deassert) is what makes the crossing safe; the
 #  path into its first stage is what must not be timed.
 set_false_path -to [get_registers {*msx:MSX|az_rst_sync[0]}]
+
+#  SDRAM read data into A-Z80's input register (data_pins' dout).  ch2_saved_*
+#  are the read-cache registers on clk_sdram; dout is the CPU's one and only
+#  data entry point, clocked on ~az80_clk.  The two clocks divide the same PLL
+#  output, so the analyser finds a 0.001 ns edge pairing and asks the whole
+#  cpu_din mux cloud to settle in nothing (-4.5 ns, build 6697e64) -- but the
+#  transfer is not single-cycle by construction:
+#    settle -> pacer/guard sees ready (>= 1 registered clk21m edge)
+#           -> wait_n released (registered)
+#           -> the CPU, having sampled nWAIT high at a falling edge, consumes
+#              the byte at the NEXT falling edge, one full T-state later.
+#  At /4 (21.477 MHz, the fastest and the declared rate) one T-state is
+#  46.6 ns, so the true budget from last data change to consumption is at
+#  least one az80_clk period.  Setup 2 moves the capture to exactly that edge;
+#  hold 1 keeps the coincident edge's hold check, trivially met.
+#  Scoped to the ch2 read-return only -- every other cpu_din source is on
+#  clk21m and meets its pairing as-is; do not widen this.
+set_multicycle_path -setup -end 2 \
+    -from [get_registers {*sdram:sdram|ch2_saved_*}] \
+    -to   [get_registers {*data_pins:data_pins_|dout*}]
+set_multicycle_path -hold  -end 1 \
+    -from [get_registers {*sdram:sdram|ch2_saved_*}] \
+    -to   [get_registers {*data_pins:data_pins_|dout*}]
