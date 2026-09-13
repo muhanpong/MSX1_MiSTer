@@ -200,18 +200,33 @@ set_multicycle_path -hold  -end 1 \
     -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
     -to   [get_registers {*data_pins:data_pins_|dout*}]
 
-#  a8r_val is debug forensics: it shadows d_to_cpu while an I/O read of port A8
-#  is ACTIVE (msx.sv:1944, level-qualified by iorq/rd/address).  An I/O read
-#  holds that qualification for >= 3 T-states, so the capture condition and the
-#  address feeding it have whole T-states to settle; the single-cycle 23.28 ns
-#  pairing against az80_clk is pessimism.  This was the -12.6 ns / several-
-#  hundred-path class that was eating the fitter's entire effort budget.
+#  az80_clk -> clk21m, the WHOLE domain pair: every clk21m consumer of a CPU
+#  output is strobe-qualified, because that is what a Z80 bus is.  The contract
+#  arithmetic on the /4 grid (T-state = 46.566 ns, tightest edge pairing
+#  23.283 ns, so -end 2 = 69.849 ns):
+#    WRITES  address valid at T1 rise, nWR falls at T2 fall = 1.5 T = 69.849 ns
+#            later.  A write-enable-qualified capture therefore cannot fire
+#            before the very edge the MCP budget delivers the address to.
+#            Equality is by construction -- both are 1.5 grid periods -- so
+#            this is deterministic, not lucky.
+#    READS   nRD falls 0.5 T after the address; a torn first-cycle view of a
+#            read address produces one clk21m cycle of garbage dout, which
+#            self-corrects long before the CPU consumes at the T3 falling edge.
+#            Consumers that ACT on a read address (sdram ch2 capture) are
+#            already behind their own -end 6 exception above.
+#    STROBES themselves stay effectively single-cycle -- they are the
+#            qualifiers; the MCP merely also covers them, and a uniformly
+#            1-cycle-late strobe view shifts guard windows without shrinking
+#            them (the guard counts in its own clk21m time base).
+#  First measured on the a8r_val debug shadow (-12.6 ns x hundreds of paths,
+#  build 5b6b9fd), then the next tier (systemRAM write ports, -5.98) made it
+#  clear the class is the domain pair, not any single endpoint.
 set_multicycle_path -setup -end 2 \
     -from [get_clocks {az80_clk}] \
-    -to   [get_registers {*msx:MSX|a8r_val*}]
+    -to   [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}]
 set_multicycle_path -hold  -end 1 \
     -from [get_clocks {az80_clk}] \
-    -to   [get_registers {*msx:MSX|a8r_val*}]
+    -to   [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}]
 
 #  az80_clkgen's divisor latch samples CPU bus-idle to pick a glitch-free moment
 #  to change the division.  The inputs (mreq/m1/wait state from the core) are
