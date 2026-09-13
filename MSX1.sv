@@ -343,10 +343,18 @@ localparam CONF_STR = {
    // The OPL4 rows are indented and carry the OPL4 prefix because "FM" alone was
    // ambiguous: OPLL is what everyone calls FM sound, but fm_mute gates the
    // MoonSound OPL3 side and never touches the OPLL.
-   // They are NOT hidden when MoonSound is off.  An "HD" (menumask[13]) hide was
-   // tried and made all four vanish in BOTH states on hardware -- mask index 13 is
-   // one past anything this core had used, and nothing here can verify how the
-   // firmware parses it.  Showing them always costs four rows; guessing cost a build.
+   // They are NOT hidden when MoonSound is off, but the reason recorded here used
+   // to be wrong and is worth correcting.  An "HD" (menumask[13]) hide was tried in
+   // d504712, made all four vanish in BOTH states, and was blamed on index 13 being
+   // out of range.  It is not: menu.cpp's index decoder is user_io_status_bits(),
+   // which maps '0'-'9' to 0-9 and 'A'-'V' to 10-41, so 'D' is 13, and hdmask comes
+   // from spi_uio_cmd16 so bits 0-15 are all live.  The actual fault was the prefix
+   // ORDER.  menu.cpp:1960 runs `while (p[0]=='H'||'D'||'h'||'d') {...; p+=2;}`
+   // and only THEN looks at 'P' -- there is no second H/D pass afterwards.  The
+   // attempt wrote "P2HDO[46]", so p[0] was 'P', the mask loop never ran, and the
+   // leftover "HD" corrupted the option parse.  Every working hide in this core puts
+   // H first: "H2P1O[12]", "H9HBP3O[23:20]", "H7H3FS3".  Written "HDP2O[46]" it
+   // would work, and menumask 13/14/15 are all still free.
    "P2O[46], OPL4 PCM Mute,Off,On;",
    "P2O[47], OPL4 FM Mute,Off,On;",
    // Labels are dB VS UNITY, matching the PSG/OPLL/SCC menus below (0dB = no gain).
@@ -421,7 +429,10 @@ localparam CONF_STR = {
    "V,v",`BUILD_DATE 
 };
 
-wire [12:0] status_menumask;  // hps_io takes 16; [12:7] = expanded-slot menu masks (CONF_STR H7..HC)
+//  hps_io takes 16 and all sixteen are live (menu.cpp reads hdmask through
+//  spi_uio_cmd16), so 13/14/15 are free -- see the note on the OPL4 rows for why
+//  the one attempt at 13 failed.  [12:7] = expanded-slot menu masks (H7..HC).
+wire [12:0] status_menumask;
 wire [1:0] sdram_size;
 assign status_menumask[0] = msxConfig.cas_audio_src == CAS_AUDIO_ADC;
 assign status_menumask[1] = fdc_enabled;
