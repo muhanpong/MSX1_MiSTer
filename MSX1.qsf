@@ -368,3 +368,16 @@ set_global_assignment -name ENABLE_SIGNALTAP OFF
 # re-scatters the clock insertion delays, and the az80->clk21m crossings showed
 # -3.59 ns of pure clock skew.  Pin it to a global buffer.
 set_instance_assignment -name GLOBAL_SIGNAL GLOBAL_CLOCK -to "*az80_clkgen*|az80_clk" -entity sys_top
+
+# A-Z80 placement region.  With every cross-domain class constrained away
+# (MSX1.sdc boundary MCPs), az80_clk's worst paths are the core's own
+# half-cycle latch paths (ir|opcode -> data_pins dout, -2.7 ns over the
+# 23.283 ns half-period at /4).  Standalone the same core closes at 29.2 MHz
+# on this device, so the in-context 19-21 MHz is placement scatter, not logic
+# depth.  A floating auto-sized LogicLock region keeps the 925 ALMs together
+# without pinning them to coordinates.  Membership uses a wildcard -- a fully
+# qualified name here would repeat the GLOBAL_SIGNAL silent-mismatch mistake.
+set_global_assignment -name LL_ENABLED ON -section_id az80_region
+set_global_assignment -name LL_AUTO_SIZE ON -section_id az80_region
+set_global_assignment -name LL_STATE FLOATING -section_id az80_region
+set_instance_assignment -name LL_MEMBER_OF az80_region -to "*az80_wrapper:CPU*" -section_id az80_region
