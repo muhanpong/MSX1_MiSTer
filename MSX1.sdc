@@ -178,9 +178,49 @@ set_false_path -to [get_registers {*msx:MSX|az_rst_sync[0]}]
 #  hold 1 keeps the coincident edge's hold check, trivially met.
 #  Scoped to the ch2 read-return only -- every other cpu_din source is on
 #  clk21m and meets its pairing as-is; do not widen this.
+#  GENERALISED after the 5b6b9fd build's cross-domain survey (docs/
+#  az80_migration_20260913.md): every clk_sdram source that can reach dout is a
+#  paced read (SDRAM ch2 via the pacer, MoonSound via its WAIT/status hold), and
+#  every clk21m source is an I/O or memory device whose read data is consumed at
+#  the T3 falling edge -- at /4 that is >= 1.5 T-states (69.9 ns) after the T2
+#  clk21m edge that could last have launched it, and the -end 2 budget is 69.85.
+#  Devices that update later than T2 do so under WAIT (VDP DBI, MoonSound), which
+#  only adds whole T-states of margin.  Hold stays on the coincident edge and is
+#  met by any positive route delay.
 set_multicycle_path -setup -end 2 \
-    -from [get_registers {*sdram:sdram|ch2_saved_*}] \
+    -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}] \
     -to   [get_registers {*data_pins:data_pins_|dout*}]
 set_multicycle_path -hold  -end 1 \
-    -from [get_registers {*sdram:sdram|ch2_saved_*}] \
+    -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}] \
     -to   [get_registers {*data_pins:data_pins_|dout*}]
+set_multicycle_path -setup -end 2 \
+    -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+    -to   [get_registers {*data_pins:data_pins_|dout*}]
+set_multicycle_path -hold  -end 1 \
+    -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+    -to   [get_registers {*data_pins:data_pins_|dout*}]
+
+#  a8r_val is debug forensics: it shadows d_to_cpu while an I/O read of port A8
+#  is ACTIVE (msx.sv:1944, level-qualified by iorq/rd/address).  An I/O read
+#  holds that qualification for >= 3 T-states, so the capture condition and the
+#  address feeding it have whole T-states to settle; the single-cycle 23.28 ns
+#  pairing against az80_clk is pessimism.  This was the -12.6 ns / several-
+#  hundred-path class that was eating the fitter's entire effort budget.
+set_multicycle_path -setup -end 2 \
+    -from [get_clocks {az80_clk}] \
+    -to   [get_registers {*msx:MSX|a8r_val*}]
+set_multicycle_path -hold  -end 1 \
+    -from [get_clocks {az80_clk}] \
+    -to   [get_registers {*msx:MSX|a8r_val*}]
+
+#  az80_clkgen's divisor latch samples CPU bus-idle to pick a glitch-free moment
+#  to change the division.  The inputs (mreq/m1/wait state from the core) are
+#  level-stable whenever bus-idle is actually true, and the divisor itself only
+#  changes on an OSD speed change -- single-cycle analysis of the sampling cone
+#  is pessimism.
+set_multicycle_path -setup -end 2 \
+    -from [get_clocks {az80_clk}] \
+    -to   [get_registers {*az80_clkgen*|speed_q*}]
+set_multicycle_path -hold  -end 1 \
+    -from [get_clocks {az80_clk}] \
+    -to   [get_registers {*az80_clkgen*|speed_q*}]
