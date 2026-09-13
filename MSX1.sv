@@ -545,6 +545,24 @@ wire        msx_turbo_req;          // from msx.sv <- msx_slots <- dev_matsushit
 //  lands on speed 0 = 3.58 MHz, which is the safe default.
 wire  [2:0] cpu_speed_sel = (status[58:56] > 3'd4) ? 3'd4 : status[58:56];
 wire  [2:0] cpu_speed     = (msx_turbo_req & cpu_speed_sel == 3'd0) ? 3'd1 : cpu_speed_sel;
+
+//  Two CPUs, split by speed.  A-Z80 (die-derived, T-state exact) takes 3.58 to
+//  10.74 -- the speeds where cycle accuracy means anything.  21.5 MHz is T80s
+//  on clk21m/CEN: measured over 7 full fits, A-Z80's /4 half-cycle paths top
+//  out at 18.6-21.0 MHz against the 21.477 required (docs/
+//  az80_migration_20260913.md), so the turbo step keeps the core that closes
+//  with margin.  Switching cores mid-run would hand a live machine to a CPU
+//  whose registers are reset garbage, so a boundary crossing forces a machine
+//  reset, stretched well past the az80_clk/T80s reset synchronisers.
+wire use_t80 = cpu_speed == 3'd4;
+reg  use_t80_q = 1'b0;
+reg  [17:0] core_switch_cnt = '0;              // ~12 ms at 21.477 MHz
+always @(posedge clk21m) begin
+   use_t80_q <= use_t80;
+   if (use_t80_q != use_t80)      core_switch_cnt <= '1;
+   else if (|core_switch_cnt)     core_switch_cnt <= core_switch_cnt - 1'd1;
+end
+wire core_switch_rst = |core_switch_cnt;
 wire        cpu_turbo;              // driven by clock.sv from the latched speed
 wire  [2:0] cpu_speed_q;            // latched speed, back out of clock.sv
 wire        cpu_bus_idle;           // from msx.sv, gates the speed latch
@@ -572,7 +590,10 @@ az80_clkgen az80_clkgen
 (
    .clk_sdram   (clk_sdram),
    .reset       (reset | msx_pause),
-   .cpu_speed   (cpu_speed),
+   //  While T80s owns the machine the divider is parked at /8; the A-Z80 sits
+   //  in reset then, and the SDC declares az80_clk at /8, so nothing may ever
+   //  clock it faster.
+   .cpu_speed   (use_t80 ? 3'd3 : cpu_speed),
    .cpu_bus_idle(cpu_bus_idle),
    .az80_clk    (az80_clk),
    .cpu_speed_q ()
@@ -623,7 +644,7 @@ save_guard u_save_guard
    .hold_load (hold_load)
 );
 
-wire reset = RESET | reset_now | (reset_rq & ~status[64]);
+wire reset = RESET | reset_now | (reset_rq & ~status[64]) | core_switch_rst;
 
 ///////////////// Computer /////////////////
 wire  [7:0] R, G, B, cpu_din, cpu_dout;
@@ -757,6 +778,7 @@ msx MSX
    // divider in reset, so a paused machine is a stopped CPU and not a CPU
    // running against a frozen bus.
    .az80_clk (az80_clk),
+   .use_t80  (use_t80),
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),
    .cpu_bus_idle(cpu_bus_idle),

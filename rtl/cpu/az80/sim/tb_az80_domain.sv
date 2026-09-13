@@ -102,7 +102,7 @@ module tb_az80_domain;
       mem['h10]=8'h76;                                     // HALT
    end
 
-   string names [0:4] = '{"3.58MHz", "5.37MHz", "7.16MHz", "10.7MHz", "21.5MHz"};
+   string names [0:4] = '{"3.58MHz", "5.37MHz", "7.16MHz", "10.7MHz", "21.5r(/8 clamp)"};
    int errors = 0, n;
    //  Instrumentation: how many clk21m edges land inside each write strobe, and
    //  how long the strobe is in clk21m periods.  A write the memory never sees

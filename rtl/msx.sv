@@ -13,6 +13,7 @@ module msx
    input                    ce_3m58_n,
    input                    ce_cpu,            // turbo rate enable: PSG bus strobe, M1 wait pair, FDC
    input                    az80_clk,          // the CPU's own clock, from az80_clkgen
+   input                    use_t80,           // speed 4 (21.5MHz): T80s owns the bus, A-Z80 held in reset
    input                    cpu_turbo,           // 1 while ce_cpu_* runs faster than ce_3m58_*
    input                    sdram_rdtog,         // flips once per completed SDRAM ch2 READ (P3 closed loop)
    input                    sdram_hit,           // level: this ch2 READ was answered from sdram.sv's word latch
@@ -278,10 +279,14 @@ wire        az_wait_n;
 //  has stopped.  The deassert must be synchronous so the CPU's internal flops,
 //  which include five on the inverted edge (control/resets.v), all come out of
 //  reset on the same edge.
+//  While T80s owns the machine (use_t80), the A-Z80 is held in reset the same
+//  way -- use_t80 only ever changes inside the stretched core-switch machine
+//  reset (MSX1.sv), so the async assert cannot glitch mid-run.
+wire az_arst = reset | use_t80;
 logic [1:0] az_rst_sync = 2'b11;
-always @(posedge az80_clk, posedge reset) begin
-   if (reset) az_rst_sync <= 2'b11;
-   else       az_rst_sync <= {az_rst_sync[0], 1'b0};
+always @(posedge az80_clk, posedge az_arst) begin
+   if (az_arst) az_rst_sync <= 2'b11;
+   else         az_rst_sync <= {az_rst_sync[0], 1'b0};
 end
 wire az_reset = az_rst_sync[1];
 
@@ -321,24 +326,58 @@ az80_wrapper CPU
 //  worth knowing, but it is a guarantee rather than luck.  See
 //  rtl/cpu/az80/sim/tb_az80_nobridge.sv, which is the same bench with the CPU
 //  wired straight to the fabric.
-assign mreq_n = az_mreq_n;
-assign iorq_n = az_iorq_n;
-assign rd_n   = az_rd_n;
-assign wr_n   = az_wr_n;
-assign m1_n   = az_m1_n;
-assign rfrsh_n = az_rfsh_n;
-assign a          = az_a;
-assign d_from_cpu = az_do;
+//  The 21.5 MHz core.  T80s on clk21m with a single clock enable reached /1 and
+//  was verified on hardware (20260913b); A-Z80's half-cycle latch paths cannot
+//  close /4 on this device (best 20.99 of 21.477 MHz over 7 fits), so the top
+//  speed keeps T80s and every accuracy-relevant speed below it runs A-Z80.
+//  Held in reset whenever A-Z80 owns the bus; ce_cpu keeps ticking either way,
+//  which is harmless in reset and keeps the FDC/M1-wait cadence logic common.
+wire        t_m1_n, t_mreq_n, t_iorq_n, t_rd_n, t_wr_n, t_rfsh_n;
+wire [15:0] t_a;
+wire  [7:0] t_do;
+wire [211:0] t80_reg_t80;
+T80s #(.Mode(0), .T2Write(1), .IOWait(1)) T80
+(
+   .RESET_n(~reset & use_t80),
+   .CLK(clk21m),
+   .CEN(ce_cpu),
+   .WAIT_n(wait_n),
+   .INT_n(vdp_int_n & ms_int_n),
+   .NMI_n(1),
+   .BUSRQ_n(1),
+   .M1_n(t_m1_n),
+   .MREQ_n(t_mreq_n),
+   .IORQ_n(t_iorq_n),
+   .RD_n(t_rd_n),
+   .WR_n(t_wr_n),
+   .RFSH_n(t_rfsh_n),
+   .HALT_n(1),
+   .BUSAK_n(),
+   .A(t_a),
+   .DI(d_to_cpu),
+   .DO(t_do),
+   .REG(t80_reg_t80)
+);
+
+//  The bus belongs to exactly one core; use_t80 is stable outside the stretched
+//  core-switch reset, so these muxes never switch under a live cycle.
+assign mreq_n  = use_t80 ? t_mreq_n : az_mreq_n;
+assign iorq_n  = use_t80 ? t_iorq_n : az_iorq_n;
+assign rd_n    = use_t80 ? t_rd_n   : az_rd_n;
+assign wr_n    = use_t80 ? t_wr_n   : az_wr_n;
+assign m1_n    = use_t80 ? t_m1_n   : az_m1_n;
+assign rfrsh_n = use_t80 ? t_rfsh_n : az_rfsh_n;
+assign a          = use_t80 ? t_a  : az_a;
+assign d_from_cpu = use_t80 ? t_do : az_do;
 assign az_di      = d_to_cpu;
 assign az_wait_n  = wait_n;
 
-//  T80 handed its whole register file out as REG(211:0); A-Z80 keeps each
-//  register in its own reg_latch on an internal tri-state bus, so there is no
-//  bundle to forward.  All twenty readers below are dbg_* forensics -- every one
-//  was checked, including `booted` and `im2_tbl_hi`, which read as functional
-//  and are not -- so the vector ties off and those diagnostics go dark on this
-//  core.  Worth remembering: a CPU swap is exactly when they would be wanted.
-wire [211:0] t80_reg = 212'd0;
+//  A-Z80 has no REG(211:0) to forward (its registers live in individual
+//  reg_latch instances on an internal tri-state bus), so the twenty dbg_*
+//  readers of t80_reg see the real register file at 21.5 MHz and zeros on the
+//  accuracy cores -- checked one by one (including `booted` and `im2_tbl_hi`)
+//  that every reader is forensics, not machine logic.
+wire [211:0] t80_reg = use_t80 ? t80_reg_t80 : 212'd0;
 
 //  -----------------------------------------------------------------------------
 //  -- WAIT CPU

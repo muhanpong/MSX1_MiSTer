@@ -11,7 +11,9 @@ module tb_az80_clkgen;
    az80_clkgen dut (.clk_sdram(clk_sdram), .reset(reset), .cpu_speed(cpu_speed),
                     .cpu_bus_idle(bus_idle), .az80_clk(az80_clk), .cpu_speed_q(speed_q));
 
-   real  expect_mhz [0:4] = '{3.579545, 5.369318, 7.159090, 10.738635, 21.477270};
+   //  speed 4 now expects the /8 clamp -- 21.5 MHz is T80s, and az80_clkgen must
+   //  never emit /4 (the SDC declares this clock at /8).
+   real  expect_mhz [0:4] = '{3.579545, 5.369318, 7.159090, 10.738635, 10.738635};
    int   errors = 0;
    task chk(input bit c, input string m); if(!c) begin $display("  FAIL: %s", m); errors++; end endtask
 
@@ -66,11 +68,13 @@ module tb_az80_clkgen;
          @(posedge clk_sdram);
          if ($urandom_range(0,60) == 0) cpu_speed = $urandom_range(0,4);
       end
-      //  /4 is the fastest mode: half period = 2 clk_sdram periods = 23.28 ns.
+      //  /8 is now the fastest mode (speed 4 clamps to it): half period =
+      //  4 clk_sdram periods = 46.57 ns.  A 23 ns half would mean the clamp
+      //  failed and the divider emitted the retired /4.
       //  $time is in timeunits and this bench is `timescale 1ns/1ps, so the
-      //  figure below is nanoseconds -- 23, not 23282.
-      $display("  shortest half-period seen: %0d ns (floor 23 ns = /4)", min_half);
-      chk(min_half >= 23, "a speed change produced a runt clock pulse");
+      //  figure below is nanoseconds.
+      $display("  shortest half-period seen: %0d ns (floor 46 ns = /8, /4 retired)", min_half);
+      chk(min_half >= 46, "runt pulse, or the retired /4 leaked past the clamp");
 
       $display("");
       if (errors == 0) $display("tb_az80_clkgen: PASS");

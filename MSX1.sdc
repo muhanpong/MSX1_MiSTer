@@ -140,13 +140,17 @@ set_multicycle_path -hold  -end 3 \
 #  clk21m domain purely because the flops az80_clk drives were being related to
 #  clk21m instead of to their own clock.
 #
-#  The divisor is variable (24/16/12/8/4 for 3.58 .. 21.5 MHz) and SDC cannot
-#  express that, so it is declared at its FASTEST -- /4, one toggle every two
-#  clk_sdram, giving a 21.477 MHz clock.  Constraining the fast case constrains
-#  every slower one, which is what we want.
+#  The divisor is variable (24/16/12/8 for 3.58 .. 10.74 MHz) and SDC cannot
+#  express that, so it is declared at its FASTEST -- /8, one toggle every four
+#  clk_sdram, giving a 10.74 MHz clock.  Constraining the fast case constrains
+#  every slower one.  /4 is RETIRED: 21.5 MHz is T80s on clk21m (see msx.sv) --
+#  seven full fits put A-Z80's /4 half-cycle paths at 18.6-21.0 MHz against the
+#  21.477 required, and az80_clkgen clamps the divisor so nothing can ever
+#  clock the core past what is analysed here.  At /8 the half-period is
+#  46.57 ns and the same paths close with ~20 ns of margin, seed-independent.
 create_generated_clock -name az80_clk \
     -source [get_pins {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}] \
-    -divide_by 4 \
+    -divide_by 8 \
     [get_registers {*az80_clkgen*|az80_clk}]
 
 #  clk21m and az80_clk are integer divides of the same PLL output, so they are
@@ -200,6 +204,11 @@ set_multicycle_path -hold  -end 1 \
     -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
     -to   [get_registers {*data_pins:data_pins_|dout*}]
 
+#  (The arithmetic below was derived at /4.  The clock is now declared /8 --
+#  T-states double, every contract lead doubles, the -end 2 budgets stay the
+#  same 46.57 ns -- so each relation only gains margin.  Left in /4 terms
+#  because that is the tightest case that was ever argued.)
+#
 #  az80_clk -> clk21m, the WHOLE domain pair: every clk21m consumer of a CPU
 #  output is strobe-qualified, because that is what a Z80 bus is.  The contract
 #  arithmetic on the /4 grid (T-state = 46.566 ns, tightest edge pairing

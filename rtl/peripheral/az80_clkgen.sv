@@ -27,7 +27,7 @@ module az80_clkgen
 (
    input        clk_sdram,      // 85.909090 MHz
    input        reset,
-   input  [2:0] cpu_speed,      // 0=3.58 1=5.37 2=7.16 3=10.7 4=21.5
+   input  [2:0] cpu_speed,      // 0=3.58 1=5.37 2=7.16 3=10.7 (4=T80s: clamped to /8 here)
    input        cpu_bus_idle,   // safe point to change the divisor
    output logic az80_clk,
    output [2:0] cpu_speed_q
@@ -40,8 +40,12 @@ function automatic [3:0] half_of(input [2:0] spd);
       3'd0:    half_of = 4'd12;   // /24 -> 3.579545
       3'd1:    half_of = 4'd8;    // /16 -> 5.369318
       3'd2:    half_of = 4'd6;    // /12 -> 7.159090
-      3'd3:    half_of = 4'd4;    //  /8 -> 10.738635
-      default: half_of = 4'd2;    //  /4 -> 21.477270
+      //  /4 (21.477) is RETIRED: A-Z80's half-cycle latch paths cannot close
+      //  23.28 ns on this device (best 20.99 MHz over 7 fits) -- speed 4 is
+      //  T80s territory and MSX1.sv parks this divider at /8 then.  The clamp
+      //  is defense in depth: the SDC declares az80_clk as /8, so a /4 output
+      //  would be a clock the analyser never checked.
+      default: half_of = 4'd4;    //  /8 -> 10.738635 (and the speed-4 clamp)
    endcase
 endfunction
 
