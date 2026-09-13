@@ -252,7 +252,8 @@ wire mreq_n, wr_n, m1_n, iorq_n, rd_n, rfrsh_n;
 //  T80s reached, in 925 ALMs.  Accuracy is not costing speed here.
 //
 //  It has no clock enable -- parts of it latch on ~clk by construction -- so it
-//  runs from a real clock and its bus is retimed onto clk21m by az80_bridge.
+//  runs from a real clock, and its strobes are wired straight to the fabric --
+//  see the note below on why no retiming layer is needed.
 //  See rtl/cpu/az80/README.md for the measurements behind all of that.
 wire        az_m1_n, az_mreq_n, az_iorq_n, az_rd_n, az_wr_n, az_rfsh_n;
 wire [15:0] az_a;
@@ -284,32 +285,27 @@ az80_wrapper CPU
    .do_     (az_do)
 );
 
-az80_bridge BRIDGE
-(
-   .clk_sdram    (clk_sdram),
-   .clk21m       (clk21m),
-   .reset        (reset),
-   .cpu_mreq_n   (az_mreq_n),
-   .cpu_iorq_n   (az_iorq_n),
-   .cpu_rd_n     (az_rd_n),
-   .cpu_wr_n     (az_wr_n),
-   .cpu_m1_n     (az_m1_n),
-   .cpu_rfsh_n   (az_rfsh_n),
-   .cpu_a        (az_a),
-   .cpu_do       (az_do),
-   .cpu_wait_n   (az_wait_n),
-   .cpu_di       (az_di),
-   .mreq_n       (mreq_n),
-   .iorq_n       (iorq_n),
-   .rd_n         (rd_n),
-   .wr_n         (wr_n),
-   .m1_n         (m1_n),
-   .rfsh_n       (rfsh_n),
-   .a            (a),
-   .d_from_cpu   (d_from_cpu),
-   .d_to_cpu     (d_to_cpu),
-   .fabric_wait_n(wait_n)
-);
+//  No bridge.  One was built on the belief that at clk21m/1 a one-T-state
+//  strobe could fall entirely between two clk21m edges and be seen by nothing.
+//  That came from a testbench whose clk21m divider was wrong by 2x
+//  (`div4 == 2'd1` toggles once per four clk_sdram, giving 10.74 MHz, not
+//  21.477).  With the divider fixed the strobes are 6/4/3/2/1 clk21m wide at
+//  /24 /16 /12 /8 /4 and none is ever invisible at any phase: a window of
+//  exactly one clk21m period contains exactly one clk21m posedge no matter
+//  where it starts.  At /4 that is one sample of margin and no more, which is
+//  worth knowing, but it is a guarantee rather than luck.  See
+//  rtl/cpu/az80/sim/tb_az80_nobridge.sv, which is the same bench with the CPU
+//  wired straight to the fabric.
+assign mreq_n = az_mreq_n;
+assign iorq_n = az_iorq_n;
+assign rd_n   = az_rd_n;
+assign wr_n   = az_wr_n;
+assign m1_n   = az_m1_n;
+assign rfrsh_n = az_rfsh_n;
+assign a          = az_a;
+assign d_from_cpu = az_do;
+assign az_di      = d_to_cpu;
+assign az_wait_n  = wait_n;
 
 //  T80 handed its whole register file out as REG(211:0); A-Z80 keeps each
 //  register in its own reg_latch on an internal tri-state bus, so there is no

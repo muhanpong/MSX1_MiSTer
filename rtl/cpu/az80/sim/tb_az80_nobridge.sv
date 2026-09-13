@@ -23,7 +23,7 @@
 //  memory has had a cycle to answer, which is what the real guard does.
 //
 `timescale 1ns/1ps
-module tb_az80_domain;
+module tb_az80_nobridge;
 
    //  One PLL: clk_sdram, and clk21m as its /4, phase aligned like the real one.
    logic clk_sdram = 0;  always #5.8207 clk_sdram = ~clk_sdram;
@@ -59,15 +59,11 @@ module tb_az80_domain;
                      .wr_n(c_wr_n), .rfsh_n(c_rfsh_n), .halt_n(halt_n), .busak_n(busak_n),
                      .a(c_a), .di(c_di), .do_(c_do));
 
-   //  Bridge: retimes the CPU's real-clock bus onto clk21m
-   az80_bridge bridge (
-      .clk_sdram(clk_sdram), .clk21m(clk21m), .reset(reset),
-      .cpu_mreq_n(c_mreq_n), .cpu_iorq_n(c_iorq_n), .cpu_rd_n(c_rd_n),
-      .cpu_wr_n(c_wr_n), .cpu_m1_n(c_m1_n), .cpu_rfsh_n(c_rfsh_n),
-      .cpu_a(c_a), .cpu_do(c_do), .cpu_wait_n(c_wait_n), .cpu_di(c_di),
-      .mreq_n(mreq_n), .iorq_n(iorq_n), .rd_n(rd_n), .wr_n(wr_n),
-      .m1_n(m1_n), .rfsh_n(rfsh_n), .a(a), .d_from_cpu(do_),
-      .d_to_cpu(di), .fabric_wait_n(wait_n));
+   //  NO BRIDGE: CPU wired straight to the clk21m fabric, to test whether the
+   //  bridge is needed at all once clk21m is actually 21.477 MHz.
+   assign mreq_n = c_mreq_n; assign iorq_n = c_iorq_n; assign rd_n = c_rd_n;
+   assign wr_n = c_wr_n; assign m1_n = c_m1_n; assign rfsh_n = c_rfsh_n;
+   assign a = c_a; assign do_ = c_do; assign c_di = di; assign c_wait_n = wait_n;
 
    //  Memory on clk21m with a REGISTERED q, like rtl/peripheral/bram.vhd.
    logic [7:0] mem [0:255];
@@ -149,11 +145,11 @@ module tb_az80_domain;
    endtask
 
    initial begin
-      $display("=== tb_az80_domain: A-Z80 on az80_clk, memory and guard on clk21m ===");
+      $display("=== tb_az80_nobridge: A-Z80 on az80_clk, memory and guard on clk21m ===");
       for (int s = 0; s < 5; s++) run_at(s[2:0]);
       $display("");
-      if (errors == 0) $display("tb_az80_domain: PASS -- every speed, including the two that are off-grid");
-      else             $display("tb_az80_domain: FAIL (%0d)", errors);
+      if (errors == 0) $display("tb_az80_nobridge: PASS -- every speed, including the two that are off-grid");
+      else             $display("tb_az80_nobridge: FAIL (%0d)", errors);
       $finish;
    end
 endmodule

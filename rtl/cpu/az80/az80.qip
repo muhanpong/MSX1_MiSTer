@@ -45,4 +45,3 @@ set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) registe
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) registers/reg_latch.v ]
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) toplevel/z80_top_direct_n.v ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) az80_wrapper.sv ]
-set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) az80_bridge.sv ]
