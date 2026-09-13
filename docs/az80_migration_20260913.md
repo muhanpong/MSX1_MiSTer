@@ -123,7 +123,8 @@ T80은 레지스터파일 전체를 벡터로 노출(msx.sv dbg_* 약 20곳 사�
 | 5b6b9fd | −12.623 | 17.63 | 25.67 | 승격 성공(CLKCTRL_G2)했으나 **크로싱 skew −8.2로 악화** |
 | e836e38 | −5.977 | 18.63 | 27.02 | 다음 층 노출: apin→systemRAM 쓰기포트 |
 | (도메인쌍) | −2.729 | 19.22 | 26.09 | ★크로스도메인 전소멸 — worst가 코어 내부(ir→dout) |
-| (LogicLock) | (진행 중) | ? | ? | CPU 925 ALM 부동 영역 |
+| (LogicLock ×3) | −2.277 | 19.56 | 24.73 | ★LL은 **17.1 Lite서 조용히 미지원** 판정 |
+| 4c33126 | (진행 중) | ? | ? | 명령-안정 소스(IR/decode)→dout MCP2 |
 
 요구: az80_clk ≥ 21.477MHz.
 
@@ -182,6 +183,23 @@ quartus_sta로 5방향(az→21m/21m→az/intra/sdram→az/az→sdram) 위반 전
 
 결과: 크로스도메인 전소멸, worst = **코어 내부 반사이클 −2.729**(ir|opcode→dout).
 단독 29.2MHz vs in-context 19.2 → 배치 산포 → LogicLock 부동영역 투입.
+
+### LogicLock 3연속 무시 → Lite 미지원 판정
+수동 qsf(4줄) → 무시. logiclock Tcl 패키지가 쓴 정식 블록(WIDTH/HEIGHT/ORIGIN 포함)
+→ 무시. `--read_settings_files=on` 강제 풀-fit(14분, CPU 43분) → **소수점까지 동일한
+결정적 재현 + fit.rpt에 LogicLock Region Summary 부재** = 제약이 아예 안 들어감.
+Quartus Prime Lite 17.1의 이 흐름에서 LogicLock은 조용히 미지원으로 결론. 물리합성
+(COMBO/DUPLICATION)은 qsf에 이미 켜져 있었음.
+
+### 코어 내부 위반의 최종 해부 (4c33126)
+400경로 전수집계 — **17클래스 전부 끝점이 `data_pins|dout` 하나**. 원인 = 내부
+트라이스테이트 버스 `db`(드라이버 ~30개)를 Quartus가 10~12 로직레벨 우선순위 mux로
+평탄화(347노드 조합루프 경고). 다이에서는 wired bus = 0레벨 — **A-Z80의 FPGA 세금**.
+소스 2부류:
+- `ir|opcode`(×312, −2.28)·`decode_state` 플래그: **명령 단위 안정**. dout의 we-스테이징은
+  쓰기 M-사이클(IR 로드 후 ≥1 M-사이클 = ≥4반주기). 인에이블 콘도 같은 논리 → MCP2 정당
+- `sequencer` T/M 비트(−1.9): 반주기마다 변함 = 진짜 단일사이클. **고의로 안 풀었음** —
+  이게 물리적으로 안 닫히면 그것이 이 코어의 이 소자 위 진짜 천장임
 
 ## 4. 검증 자산
 
