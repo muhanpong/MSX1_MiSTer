@@ -327,7 +327,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE MSX1.sv
 # gave -0.207 on the fourth, all ten worst paths in ascal again; moved to 6.
 # There used to be a stale `SEED 1`
 # above this line as well -- Quartus takes the last, so it was inert, now removed.
-set_global_assignment -name SEED 6
+set_global_assignment -name SEED 9
 
 
 
@@ -393,3 +393,9 @@ set_global_assignment -name LL_WIDTH 1 -section_id az80_region
 set_global_assignment -name LL_HEIGHT 1 -section_id az80_region
 set_global_assignment -name LL_ORIGIN X1_Y1 -section_id az80_region
 set_instance_assignment -name LL_MEMBER_OF az80_region -to "emu:emu|msx:MSX|az80_wrapper:CPU" -section_id az80_region
+# az80_clk sits 0.5 ns short at the best of 5 seeds (18.6..21.0 MHz, need
+# 21.477).  Auto Fit backs off effort once timing looks "close enough"; make
+# it actually try.  Costs fit time, buys determinism-adjacent margin.
+set_global_assignment -name FITTER_EFFORT "STANDARD FIT"
+set_global_assignment -name PLACEMENT_EFFORT_MULTIPLIER 4.0
+set_global_assignment -name ROUTER_EFFORT_MULTIPLIER 2.0
