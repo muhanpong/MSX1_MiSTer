@@ -1,6 +1,10 @@
 set_global_assignment -name QIP_FILE           [file join $::quartus(qip_path) video/video.qip                       ]
 set_global_assignment -name QIP_FILE           [file join $::quartus(qip_path) sound/sound.qip                       ]
+#  T80 stays compiled: the enable-driven wrappers are no longer instantiated,
+#  but the sources are the reference the A-Z80 work is measured against and
+#  the fallback if it has to be reverted.
 set_global_assignment -name QIP_FILE           [file join $::quartus(qip_path) cpu/T80.qip                           ]
+set_global_assignment -name QIP_FILE           [file join $::quartus(qip_path) cpu/az80/az80.qip                     ]
 set_global_assignment -name QIP_FILE           [file join $::quartus(qip_path) peripheral/peripheral.qip             ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) package.sv                            ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) msx.sv                                ]

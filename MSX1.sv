@@ -549,6 +549,7 @@ wire        cpu_turbo;              // driven by clock.sv from the latched speed
 wire  [2:0] cpu_speed_q;            // latched speed, back out of clock.sv
 wire        cpu_bus_idle;           // from msx.sv, gates the speed latch
 wire        ce_cpu;
+wire        az80_clk;   // the CPU's own clock (az80_clkgen)
 pll pll
 (
    .refclk(CLK_50M),
@@ -561,6 +562,20 @@ pll pll
 clock clock
 (
 	.*
+);
+
+//  A-Z80 needs a real clock, not an enable.  From clk_sdram rather than clk21m
+//  because 85.909090 divides evenly by 24/16/12/8/4 for all five speeds, so each
+//  is 50% duty -- and A-Z80's pin latches sit on a half-cycle path, so a skewed
+//  duty would eat the margin of exactly the paths that cap it.
+az80_clkgen az80_clkgen
+(
+   .clk_sdram   (clk_sdram),
+   .reset       (reset | msx_pause),
+   .cpu_speed   (cpu_speed),
+   .cpu_bus_idle(cpu_bus_idle),
+   .az80_clk    (az80_clk),
+   .cpu_speed_q ()
 );
 
 /////////////////    RESET   /////////////////
@@ -734,9 +749,14 @@ msx MSX
    .ce_10m7_p(ce_10m7_p),
    .ce_3m58_p(ce_3m58_p & ~msx_pause),
    .ce_3m58_n(ce_3m58_n & ~msx_pause),
-   // CPU clock enable.  Pause-gated exactly like ce_3m58_*, so the pause
-   // mechanism is unchanged; with cpu_speed==0 this IS ce_3m58_p.
+   // ce_cpu is no longer the CPU's clock -- A-Z80 has its own -- but it is
+   // still the turbo-rate enable the PSG bus strobe, the M1 wait pair and the
+   // FDC scale from, so it keeps its pause gate.
    .ce_cpu   (ce_cpu    & ~msx_pause),
+   // The CPU's real clock.  Pause stops it the same way, by holding the
+   // divider in reset, so a paused machine is a stopped CPU and not a CPU
+   // running against a frozen bus.
+   .az80_clk (az80_clk),
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),
    .cpu_bus_idle(cpu_bus_idle),

@@ -9,6 +9,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) d
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) sdram.sv        ]
 set_global_assignment -name VHDL_FILE          [file join $::quartus(qip_path) bram.vhd        ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) clock.sv        ]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) az80_clkgen.sv        ]
 set_global_assignment -name VHDL_FILE          [file join $::quartus(qip_path) megasd.vhd      ]
 set_global_assignment -name VHDL_FILE          [file join $::quartus(qip_path) ram.vhd         ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) spi_divmmc.sv   ]

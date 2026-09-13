@@ -11,7 +11,8 @@ module msx
    input                    ce_10m7_p,
    input                    ce_3m58_p,
    input                    ce_3m58_n,
-   input                    ce_cpu,            // turbo: CPU clock enable (>= ce_3m58_p)
+   input                    ce_cpu,            // turbo rate enable: PSG bus strobe, M1 wait pair, FDC
+   input                    az80_clk,          // the CPU's own clock, from az80_clkgen
    input                    cpu_turbo,           // 1 while ce_cpu_* runs faster than ce_3m58_*
    input                    sdram_rdtog,         // flips once per completed SDRAM ch2 READ (P3 closed loop)
    input                    sdram_hit,           // level: this ch2 READ was answered from sdram.sv's word latch
@@ -240,47 +241,83 @@ assign audio_r = (mix_r[16] == mix_r[15]) ? mix_r[15:0] : (mix_r[16] ? 16'sh8000
 wire [15:0] a;
 wire [7:0] d_to_cpu, d_from_cpu;
 wire mreq_n, wr_n, m1_n, iorq_n, rd_n, rfrsh_n;
-//  T80s, not T80pa.  T80pa advances one T-state per CEN_p/CEN_n PAIR
-//  (T80pa.vhd:153,168), which is what capped the CPU at clk21m/2: at that speed
-//  the two enable trains already use every clock.  T80s takes a single enable
-//  and reaches clk21m/1.
+//  A-Z80, on its own clock, bridged onto clk21m.
 //
-//  The strobes move as a result, and rtl/cpu/sim/tb_t80_contract.vhd is where
-//  that was measured rather than argued.  Running the same program through both
-//  wrappers at the same T-state rate: the SEQUENCE is identical (38 MREQ, 24 RD,
-//  2 WR, 2 IORQ, 14 RFSH, 40 gaps where MREQ and IORQ are both high), so no bus
-//  cycle is added, removed or reordered.  What changes is geometry -- T80pa's
-//  strobes are 6, 9 or 12 clk21m wide at /6 because it can move them on a half
-//  T-state; T80s' are a clean 6 or 12.  In particular RD narrows from 9-12 to 6:
-//  the address-to-data window is one T-state where it used to be two.
-T80s #(.Mode(0), .T2Write(1), .IOWait(1)) T80
+//  T80/T80pa/T80s are documentation-derived: twenty years of community fixes on
+//  top of a 2001 core, with SCF/CCF's XF/YF still open in the header and WAIT
+//  broken badly enough that T80pa hardwires the core's WAIT_n to '1' and stops
+//  the clock instead (T80pa.vhd:51,123,170).  A-Z80 was reconstructed from die
+//  images and patents with a per-opcode M/T timing matrix, and on this part it
+//  is also FASTER: 29.2 MHz standalone Fmax against the 21.5 the enable-driven
+//  T80s reached, in 925 ALMs.  Accuracy is not costing speed here.
+//
+//  It has no clock enable -- parts of it latch on ~clk by construction -- so it
+//  runs from a real clock and its bus is retimed onto clk21m by az80_bridge.
+//  See rtl/cpu/az80/README.md for the measurements behind all of that.
+wire        az_m1_n, az_mreq_n, az_iorq_n, az_rd_n, az_wr_n, az_rfsh_n;
+wire [15:0] az_a;
+wire  [7:0] az_do, az_di;
+wire        az_wait_n;
+
+az80_wrapper CPU
 (
-   .RESET_n(~reset),
-   .CLK(clk21m),
-   .CEN(ce_cpu),
-   .WAIT_n(wait_n),
-   // Z80 /INT is shared (wired-AND, active-low) between the VDP and the
-   // MoonSound (YMF278B/OPL4) Timer-1 IRQ.  MoonSound music players (e.g.
-   // MBwave, vgmplay OPLTimer) drive their playback tick from the OPL Timer-1
-   // overflow interrupt, so its irq line must reach the CPU.  ms_int_n is the
-   // 2-FF-synced irq with I/O-cycle deferral (defined in the MoonSound block).
-   .INT_n(vdp_int_n & ms_int_n),
-   .NMI_n(1),
-   .BUSRQ_n(1),
-   .M1_n(m1_n),
-   .MREQ_n(mreq_n),
-   .IORQ_n(iorq_n),
-   .RD_n(rd_n),
-   .WR_n(wr_n),
-   .RFSH_n(rfrsh_n),
-   .HALT_n(1),
-   .BUSAK_n(),
-   .A(a),
-   .DI(d_to_cpu),
-   .DO(d_from_cpu),
-   .REG(t80_reg)        // [211]=IFF2 [210]=IFF1 ... — freeze diagnosis
+   .clk     (az80_clk),
+   .reset   (reset),
+   .wait_n  (az_wait_n),
+   //  Z80 /INT is shared (wired-AND, active-low) between the VDP and the
+   //  MoonSound (YMF278B/OPL4) Timer-1 IRQ.  MoonSound music players drive
+   //  their playback tick from the OPL Timer-1 overflow interrupt, so its irq
+   //  line must reach the CPU.
+   .int_n   (vdp_int_n & ms_int_n),
+   .nmi_n   (1'b1),
+   .busrq_n (1'b1),
+   .m1_n    (az_m1_n),
+   .mreq_n  (az_mreq_n),
+   .iorq_n  (az_iorq_n),
+   .rd_n    (az_rd_n),
+   .wr_n    (az_wr_n),
+   .rfsh_n  (az_rfsh_n),
+   .halt_n  (),
+   .busak_n (),
+   .a       (az_a),
+   .di      (az_di),
+   .do_     (az_do)
 );
-wire [211:0] t80_reg;
+
+az80_bridge BRIDGE
+(
+   .clk_sdram    (clk_sdram),
+   .clk21m       (clk21m),
+   .reset        (reset),
+   .cpu_mreq_n   (az_mreq_n),
+   .cpu_iorq_n   (az_iorq_n),
+   .cpu_rd_n     (az_rd_n),
+   .cpu_wr_n     (az_wr_n),
+   .cpu_m1_n     (az_m1_n),
+   .cpu_rfsh_n   (az_rfsh_n),
+   .cpu_a        (az_a),
+   .cpu_do       (az_do),
+   .cpu_wait_n   (az_wait_n),
+   .cpu_di       (az_di),
+   .mreq_n       (mreq_n),
+   .iorq_n       (iorq_n),
+   .rd_n         (rd_n),
+   .wr_n         (wr_n),
+   .m1_n         (m1_n),
+   .rfsh_n       (rfsh_n),
+   .a            (a),
+   .d_from_cpu   (d_from_cpu),
+   .d_to_cpu     (d_to_cpu),
+   .fabric_wait_n(wait_n)
+);
+
+//  T80 handed its whole register file out as REG(211:0); A-Z80 keeps each
+//  register in its own reg_latch on an internal tri-state bus, so there is no
+//  bundle to forward.  All twenty readers below are dbg_* forensics -- every one
+//  was checked, including `booted` and `im2_tbl_hi`, which read as functional
+//  and are not -- so the vector ties off and those diagnostics go dark on this
+//  core.  Worth remembering: a CPU swap is exactly when they would be wanted.
+wire [211:0] t80_reg = 212'd0;
 
 //  -----------------------------------------------------------------------------
 //  -- WAIT CPU
