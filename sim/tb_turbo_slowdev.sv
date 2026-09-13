@@ -19,7 +19,7 @@
 //               the strobe idle - it then merges them and loses one write.
 //
 // Each device is instantiated twice: once fed ce_3m58_p (what the stock core
-// does) and once fed ce_cpu_p (what the modified core does for the FDC).
+// does) and once fed ce_cpu (what the modified core does for the FDC).
 //
 // Scored per run: writes issued, writes committed, out-of-order/duplicate
 // commits, and LOST writes.  A lost write is a corrupted SCC register or a
@@ -202,7 +202,7 @@ endmodule
 
 // --- T80pa phase / T-state / strobe model, emitting a write stream ---------
 module cpu_model_wr (
-   input  logic clk21m, reset, ce_cpu_p, ce_cpu_n, wait_n,
+   input  logic clk21m, reset, ce_cpu, wait_n,
    input  int   pattern,          // 0 = LD (HL),A loop (M1+WR), 1 = pure WR,WR
    input  int   gap_t,            // pattern 2: this many internal T-states between writes
    output logic mreq_n, iorq_n, rd_n, wr_n,
@@ -211,7 +211,6 @@ module cpu_model_wr (
 );
    localparam int K_M1 = 0, K_WR = 2, K_INT = 4;
 
-   logic cen_pol = 1'b0;
    int   tstate  = 1;
    int   twait   = 0;
    int   kind    = K_M1;
@@ -230,18 +229,16 @@ module cpu_model_wr (
 
    always @(posedge clk21m) begin
       if (reset) begin
-         cen_pol <= 0; tstate <= 1; twait <= 0;
+         tstate <= 1; twait <= 0;
          kind <= (pattern == 0) ? K_M1 : K_WR;
          {mreq_n, iorq_n, rd_n, wr_n} <= 4'b1111;
          wdata <= 8'd0; n_issued <= 0;
-      end else if (ce_cpu_p && !cen_pol) begin
-         cen_pol <= 1'b1;
-      end else if (ce_cpu_n && cen_pol) begin
+      end else if (ce_cpu) begin
+         //  T80s: one enable per T-state, so the CEN_p/CEN_n pair and the
+         //  cen_pol that tracked it are gone.  The M-cycle advances here.
          if (tstate == 2 && (!wait_n || twait < int_waits(kind))) begin
-            cen_pol <= 1'b1;
             if (wait_n && twait < int_waits(kind)) twait <= twait + 1;
          end else begin
-            cen_pol <= 1'b0;
             if (tstate >= last_t(kind)) begin   // >= : gap_t can change mid-M-cycle
                tstate <= 1; twait <= 0;
                if (kind == K_WR) begin
@@ -274,19 +271,19 @@ module tb_turbo_slowdev;
    localparam int NCYC = 400008;
 
    logic clk21m = 0, reset = 1;
-   logic [1:0] cpu_speed = 2'd0;
+   logic [2:0] cpu_speed = 3'd0;
    int         pattern   = 0;
    int         gap_t     = 1;
 
    wire ce_10m7_p, ce_10m7_n, ce_5m39_p, ce_5m39_n;
-   wire ce_3m58_p, ce_3m58_n, ce_10hz, ce_cpu_p, ce_cpu_n;
+   wire ce_3m58_p, ce_3m58_n, ce_10hz, ce_cpu;
 
    clock u_clock (
       .clk21m(clk21m), .reset(reset),
       .ce_10m7_p(ce_10m7_p), .ce_10m7_n(ce_10m7_n),
       .ce_5m39_p(ce_5m39_p), .ce_5m39_n(ce_5m39_n),
       .ce_3m58_p(ce_3m58_p), .ce_3m58_n(ce_3m58_n), .ce_10hz(ce_10hz),
-      .cpu_speed(cpu_speed), .cpu_bus_idle(1'b1), .ce_cpu_p(ce_cpu_p), .ce_cpu_n(ce_cpu_n)
+      .cpu_speed(cpu_speed), .cpu_bus_idle(1'b1), .cpu_turbo(), .ce_cpu(ce_cpu)
    );
 
    wire mreq_n, iorq_n, rd_n, wr_n, bus_guard_n;
@@ -310,7 +307,7 @@ module tb_turbo_slowdev;
 
    cpu_model_wr u_cpu (
       .clk21m(clk21m), .reset(reset),
-      .ce_cpu_p(ce_cpu_p), .ce_cpu_n(ce_cpu_n), .wait_n(bus_guard_n & opll_pace_n_tb),
+      .ce_cpu(ce_cpu), .wait_n(bus_guard_n & opll_pace_n_tb),
       .pattern(pattern), .gap_t(gap_t),
       .mreq_n(mreq_n), .iorq_n(iorq_n), .rd_n(rd_n), .wr_n(wr_n),
       .wdata(wdata), .n_issued(issued)
@@ -332,7 +329,7 @@ module tb_turbo_slowdev;
                         .cs(dev_cs), .wr(dev_wr), .din(wdata),
                         .n_commit(edg358_c), .n_lost(edg358_x));
    // FDC style on the CPU train = the fix shipped in msx_slots.sv
-   dev_edge  u_edg_cpu (.clk21m(clk21m), .reset(reset | dev_rst), .ce(ce_cpu_p),
+   dev_edge  u_edg_cpu (.clk21m(clk21m), .reset(reset | dev_rst), .ce(ce_cpu),
                         .cs(dev_cs), .wr(dev_wr), .din(wdata),
                         .n_commit(edgcpu_c), .n_lost(edgcpu_x));
 
@@ -370,7 +367,7 @@ module tb_turbo_slowdev;
    int last_scclost, last_fdccpu, last_issued;
 
    // OPLL pacer scenario: separate scoring (temp-latch clobber model).
-   task automatic run_opll(input [1:0] spd, input bit p_en, input string label,
+   task automatic run_opll(input [2:0] spd, input bit p_en, input string label,
                            input bit expect_loss);
       int c0, x0, i0l, c1, x1, i1l;
       begin
@@ -401,7 +398,7 @@ module tb_turbo_slowdev;
       end
    endtask
 
-   task automatic run(input [1:0] spd, input bit g_on, input int pat,
+   task automatic run(input [2:0] spd, input bit g_on, input int pat,
                       input string label, input int gt = 1,
                       input bit sdev = 1'b1);
       int i1, l3, d3, e3, ec, x3, xe, xc;
@@ -424,7 +421,7 @@ module tb_turbo_slowdev;
          $display("  %-24s %7d %8d %6d %7d %9d %8d %9d",
                   label, i1, l3, d3, x3, xe, ec, xc);
          // SCC checks only apply when the device is classified slow (shipped
-         // config).  The FDC-on-ce_cpu_p device scales with the CPU by
+         // config).  The FDC-on-ce_cpu device scales with the CPU by
          // construction and must never lose, even misclassified fast.
          if (g_on && sdev) begin
             if (l3 == 0 && i1 > 0) begin
@@ -439,7 +436,7 @@ module tb_turbo_slowdev;
          if (g_on) begin
             if (xc != 0) begin
                errors++;
-               $display("    *** FDC-style device on ce_cpu_p LOST %0d writes", xc);
+               $display("    *** FDC-style device on ce_cpu LOST %0d writes", xc);
             end
          end
       end
@@ -462,19 +459,23 @@ module tb_turbo_slowdev;
       $display("");
       $display("  run                      issued   SCCok    dup  SCClost  FDC@3m58l  FDCok  FDC@cpul");
       $display("  ------------------------------------------------------------------------------------");
-      run(2'd0, 1'b1, 0, "A 3.58MHz stock");
-      run(2'd1, 1'b1, 0, "A 5.37MHz guard ON");
-      run(2'd2, 1'b1, 0, "A 7.16MHz guard ON");
-      run(2'd3, 1'b1, 0, "A 10.7MHz guard ON");
-      run(2'd2, 1'b0, 0, "A 7.16MHz guard OFF");
-      run(2'd3, 1'b0, 0, "A 10.7MHz guard OFF");
+      run(3'd0, 1'b1, 0, "A 3.58MHz stock");
+      run(3'd1, 1'b1, 0, "A 5.37MHz guard ON");
+      run(3'd2, 1'b1, 0, "A 7.16MHz guard ON");
+      run(3'd3, 1'b1, 0, "A 10.7MHz guard ON");
+      run(3'd4, 1'b1, 0, "A 21.5MHz guard ON");
+      run(3'd2, 1'b0, 0, "A 7.16MHz guard OFF");
+      run(3'd3, 1'b0, 0, "A 10.7MHz guard OFF");
+      run(3'd4, 1'b0, 0, "A 21.5MHz guard OFF");
       $display("");
-      run(2'd0, 1'b1, 1, "B 3.58MHz stock");
-      run(2'd1, 1'b1, 1, "B 5.37MHz guard ON");
-      run(2'd2, 1'b1, 1, "B 7.16MHz guard ON");
-      run(2'd3, 1'b1, 1, "B 10.7MHz guard ON");
-      run(2'd2, 1'b0, 1, "B 7.16MHz guard OFF");
-      run(2'd3, 1'b0, 1, "B 10.7MHz guard OFF");
+      run(3'd0, 1'b1, 1, "B 3.58MHz stock");
+      run(3'd1, 1'b1, 1, "B 5.37MHz guard ON");
+      run(3'd2, 1'b1, 1, "B 7.16MHz guard ON");
+      run(3'd3, 1'b1, 1, "B 10.7MHz guard ON");
+      run(3'd4, 1'b1, 1, "B 21.5MHz guard ON");
+      run(3'd2, 1'b0, 1, "B 7.16MHz guard OFF");
+      run(3'd3, 1'b0, 1, "B 10.7MHz guard OFF");
+      run(3'd4, 1'b0, 1, "B 21.5MHz guard OFF");
       $display("");
       $display("  P2 scoping, misclassification probe: the same worst-case write stream");
       $display("  with the device MISCLASSIFIED onto the fast path.  Measured result: the");
@@ -487,17 +488,18 @@ module tb_turbo_slowdev;
       $display("  GUARD_RD_FAST are ever reduced.  These rows pin the invariant; if one");
       $display("  ever reports a loss, the fast floor has been cut below the ce period");
       $display("  and the scoped classification just became the only protection left.");
-      run(2'd3, 1'b1, 1, "B 10.7MHz fast-misclass", 1, 1'b0);
+      run(3'd3, 1'b1, 1, "B 10.7MHz fast-misclass", 1, 1'b0);
+      run(3'd4, 1'b1, 1, "B 21.5MHz fast-misclass", 1, 1'b0);
       if (last_scclost != 0) begin
          errors++;
          $display("    *** fast write windows can now miss ce_3m58 (%0d lost) -- the fast floor dropped below one ce period", last_scclost);
       end
-      run(2'd2, 1'b1, 1, "B 7.16MHz fast-misclass", 1, 1'b0);
+      run(3'd2, 1'b1, 1, "B 7.16MHz fast-misclass", 1, 1'b0);
       if (last_scclost != 0) begin
          errors++;
          $display("    *** fast write windows can now miss ce_3m58 (%0d lost) -- the fast floor dropped below one ce period", last_scclost);
       end
-      run(2'd1, 1'b1, 1, "B 5.37MHz fast-misclass", 1, 1'b0);
+      run(3'd1, 1'b1, 1, "B 5.37MHz fast-misclass", 1, 1'b0);
       if (last_scclost != 0) begin
          errors++;
          $display("    *** fast write windows can now miss ce_3m58 (%0d lost) -- the fast floor dropped below one ce period", last_scclost);
@@ -512,11 +514,11 @@ module tb_turbo_slowdev;
       $display("");
       $display("  run                       issued  commits    lost");
       $display("  --------------------------------------------------");
-      run_opll(2'd3, 1'b1, "OPLL 10.7MHz pacer ON",  1'b0);
-      run_opll(2'd2, 1'b1, "OPLL 7.16MHz pacer ON",  1'b0);
-      run_opll(2'd1, 1'b1, "OPLL 5.37MHz pacer ON",  1'b0);
-      run_opll(2'd3, 1'b0, "OPLL 10.7MHz pacer OFF", 1'b1);
-      run_opll(2'd0, 1'b1, "OPLL 3.58MHz (stock)",   1'b1);
+      run_opll(3'd3, 1'b1, "OPLL 10.7MHz pacer ON",  1'b0);
+      run_opll(3'd2, 1'b1, "OPLL 7.16MHz pacer ON",  1'b0);
+      run_opll(3'd1, 1'b1, "OPLL 5.37MHz pacer ON",  1'b0);
+      run_opll(3'd3, 1'b0, "OPLL 10.7MHz pacer OFF", 1'b1);
+      run_opll(3'd0, 1'b1, "OPLL 3.58MHz (stock)",   1'b1);
       pace_en = 1'b0;
       $display("");
       $display("");
@@ -527,15 +529,15 @@ module tb_turbo_slowdev;
       $display("  run                      issued   SCCok    dup  SCClost  FDC@3m58l  FDCok  FDC@cpul");
       $display("  ------------------------------------------------------------------------------------");
       for (int g = 1; g <= 8; g++)
-         run(2'd3, 1'b1, 2, $sformatf("x3 gap=%0d T-states", g), g);
+         run(3'd3, 1'b1, 2, $sformatf("x3 gap=%0d T-states", g), g);
       $display("");
       $display("  Same sweep at 7.16MHz (x2), guard ON:");
       for (int g = 1; g <= 8; g++)
-         run(2'd2, 1'b1, 2, $sformatf("x2 gap=%0d T-states", g), g);
+         run(3'd2, 1'b1, 2, $sformatf("x2 gap=%0d T-states", g), g);
       $display("");
       $display("  SCClost   = SCC/OPLL-style level capture on ce_3m58_p (shipped)");
       $display("  FDC@3m58l = wd1793-style edge capture left on clk_en (rejected)");
-      $display("  FDC@cpul  = wd1793-style edge capture on ce_cpu_p   (shipped)");
+      $display("  FDC@cpul  = wd1793-style edge capture on ce_cpu   (shipped)");
       $display("");
       if (errors == 0)
          $display("tb_turbo_slowdev: PASS - 0 writes lost in every shipped configuration");

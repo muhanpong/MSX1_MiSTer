@@ -75,9 +75,9 @@ module wd_edge_model (
 endmodule
 
 
-// --- T80pa-faithful CPU emitting whole instructions ------------------------
+// --- T80s-faithful CPU emitting whole instructions --------------------------
 module cpu_instr (
-   input  logic clk21m, reset, ce_cpu_p, ce_cpu_n, wait_n,
+   input  logic clk21m, reset, ce_cpu, wait_n,
    input  int   pattern,   // 0 = LD (nn),HL   1 = LD (nn),A   2 = LD HL,(nn)
    input  int   gap_t,     // extra internal T-states BETWEEN the two dev cycles
    output logic mreq_n, rd_n, wr_n,
@@ -106,7 +106,6 @@ module cpu_instr (
       endcase
    end
 
-   logic cen_pol = 1'b0;
    int   tstate  = 1, twait = 0, si = 0;
    int   kind;
    assign kind = seq[si];
@@ -129,17 +128,17 @@ module cpu_instr (
 
    always @(posedge clk21m) begin
       if (reset) begin
-         cen_pol <= 0; tstate <= 1; twait <= 0; si <= 0;
+         tstate <= 1; twait <= 0; si <= 0;
          {mreq_n, rd_n, wr_n} <= 3'b111;
          acc_addr <= 2'd1; acc_data <= 8'd0; n_issued <= 0;
-      end else if (ce_cpu_p && !cen_pol) begin
-         cen_pol <= 1'b1;
-      end else if (ce_cpu_n && cen_pol) begin
+      end else if (ce_cpu) begin
+         //  T80s: one enable per T-state.  Under T80pa this took a CEN_p/CEN_n
+         //  pair and the model tracked cen_pol to tell the halves apart; with a
+         //  single enable that state would just make the model consume two
+         //  pulses per T-state, i.e. run at half the CPU's real rate.
          if (tstate == 2 && (!wait_n || twait < int_waits(kind))) begin
-            cen_pol <= 1'b1;
             if (wait_n && twait < int_waits(kind)) twait <= twait + 1;
          end else begin
-            cen_pol <= 1'b0;
             if (tstate >= last_t(kind)) begin
                tstate <= 1; twait <= 0;
                if (is_dev) begin
@@ -167,20 +166,20 @@ endmodule
 module tb_fdc_edge;
 
    logic clk21m = 0, reset = 1;
-   logic [1:0] cpu_speed = 2'd0;
+   logic [2:0] cpu_speed = 3'd0;
    int   pattern = 0;
    int   phase   = 0;
    int   gap_t   = 0;
 
    wire ce_10m7_p, ce_10m7_n, ce_5m39_p, ce_5m39_n;
-   wire ce_3m58_p, ce_3m58_n, ce_10hz, ce_cpu_p, ce_cpu_n;
+   wire ce_3m58_p, ce_3m58_n, ce_10hz, ce_cpu;
 
    clock u_clock (
       .clk21m(clk21m), .reset(reset),
       .ce_10m7_p(ce_10m7_p), .ce_10m7_n(ce_10m7_n),
       .ce_5m39_p(ce_5m39_p), .ce_5m39_n(ce_5m39_n),
       .ce_3m58_p(ce_3m58_p), .ce_3m58_n(ce_3m58_n), .ce_10hz(ce_10hz),
-      .cpu_speed(cpu_speed), .ce_cpu_p(ce_cpu_p), .ce_cpu_n(ce_cpu_n)
+      .cpu_speed(cpu_speed), .cpu_turbo(), .ce_cpu(ce_cpu)
    );
 
    wire mreq_n, rd_n, wr_n, dev_cyc;
@@ -211,19 +210,19 @@ module tb_fdc_edge;
    wire wait_n_1tick = ~turbo_on | ~bus_cycle | (tick_cnt >= pacer_n[1:0]);
 
    cpu_instr u_cpu (
-      .clk21m(clk21m), .reset(reset), .ce_cpu_p(ce_cpu_p), .ce_cpu_n(ce_cpu_n),
+      .clk21m(clk21m), .reset(reset), .ce_cpu(ce_cpu),
       .wait_n(wait_n_1tick), .pattern(pattern), .gap_t(gap_t),
       .mreq_n(mreq_n), .rd_n(rd_n), .wr_n(wr_n),
       .dev_cyc(dev_cyc), .dev_addr(dev_addr), .dev_data(dev_data),
       .n_issued(issued)
    );
 
-   // device on ce_3m58_p (what T-clean/T-perf ship) and on ce_cpu_p (my fix)
+   // device on ce_3m58_p (what T-clean/T-perf ship) and on ce_cpu (my fix)
    int a_ok, a_bad, a_rd, a_cur, b_ok, b_bad, b_rd, b_cur;
    wd_edge_model u_dev_358 (.clk21m(clk21m), .reset(reset), .ce(ce_3m58_p),
       .wre(wre), .rde(rde), .addr(dev_addr), .din(dev_data),
       .n_wr_ok(a_ok), .n_wr_bad(a_bad), .n_rd_pulse(a_rd), .n_cur_bad(a_cur));
-   wd_edge_model u_dev_cpu (.clk21m(clk21m), .reset(reset), .ce(ce_cpu_p),
+   wd_edge_model u_dev_cpu (.clk21m(clk21m), .reset(reset), .ce(ce_cpu),
       .wre(wre), .rde(rde), .addr(dev_addr), .din(dev_data),
       .n_wr_ok(b_ok), .n_wr_bad(b_bad), .n_rd_pulse(b_rd), .n_cur_bad(b_cur));
 
@@ -233,7 +232,7 @@ module tb_fdc_edge;
    int errors = 0;
    int i0, a0, b0;
 
-   task automatic go(input [1:0] spd, input int pat, input int ph, input string label,
+   task automatic go(input [2:0] spd, input int pat, input int ph, input string label,
                      input int gt = 0, input int pn = 1);
       int i1, a1, b1;
       begin
@@ -248,7 +247,7 @@ module tb_fdc_edge;
          i1 = issued - i0;
          a1 = ((pat == 2) ? a_rd : a_ok) - a0;
          b1 = ((pat == 2) ? b_rd : b_ok) - b0;
-         $display("  %-16s ph=%0d g=%0d tick=%0d issued %6d | on ce_3m58_p: %6d  LOST %5d | on ce_cpu_p: %6d  LOST %5d",
+         $display("  %-16s ph=%0d g=%0d tick=%0d issued %6d | on ce_3m58_p: %6d  LOST %5d | on ce_cpu: %6d  LOST %5d",
                   label, ph, gt, pn, i1, a1, i1 - a1, b1, i1 - b1);
          if (i1 - a1 > 1) errors++;   // >1: tolerate the run-boundary partial access
       end

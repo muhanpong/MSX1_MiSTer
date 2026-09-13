@@ -46,20 +46,22 @@ module guard #(parameter int GUARD_RD = 8, parameter int GUARD_WR = 2,
    wire bus_cycle = ~(mreq_n & iorq_n);
    wire bus_xfer  = ~((iorq_n & mreq_n) | (wr_n & rd_n));
 
-   logic [3:0] guard_cnt = 4'd0;
+   logic [4:0] guard_cnt = 5'd0;
    logic       guard_ce  = 1'b0;
    always @(posedge clk21m) begin
       if (reset | ~bus_cycle) begin
-         guard_cnt <= 4'd0;
+         guard_cnt <= 5'd0;
          guard_ce  <= 1'b0;
       end else if (bus_xfer) begin
-         if (guard_cnt != 4'hF) guard_cnt <= guard_cnt + 4'd1;
+         if (guard_cnt != 5'h1F) guard_cnt <= guard_cnt + 5'd1;
          if (ce_3m58_p)         guard_ce  <= 1'b1;
       end
    end
    wire guard_slow = ~iorq_n | slow_dev;
-   wire [3:0] guard_min = wr_n ? (guard_slow ? GUARD_RD[3:0] : GUARD_RD_FAST[3:0])
-                               : GUARD_WR[3:0];
+   //  Slow path only -- mirrors rtl/msx.sv.
+   wire [4:0] guard_min = guard_slow
+       ? 5'd2 + (wr_n ? GUARD_RD[4:0] : GUARD_WR[4:0])
+       : (wr_n ? GUARD_RD_FAST[4:0] : GUARD_WR[4:0]);
 
    // P3 closed-loop release for fast SDRAM reads (mirror of msx.sv)
    wire hs_win = bus_xfer & sdram_rd & ~guard_slow & cpu_turbo;
@@ -119,8 +121,7 @@ endmodule
 module cpu_model (
    input  logic clk21m,
    input  logic reset,
-   input  logic ce_cpu_p,
-   input  logic ce_cpu_n,
+   input  logic ce_cpu,
    input  logic wait_n,
    output logic mreq_n,
    output logic iorq_n,
@@ -154,7 +155,6 @@ module cpu_model (
               K_M1, K_RD, K_RD,  K_WR, K_M1, K_IO,  K_M1, K_INT};
    end
 
-   logic       cen_pol = 1'b0;
    int         tstate  = 1;
    int         twait   = 0;      // extra internal T-states already consumed
    int         kind    = K_M1;
@@ -190,7 +190,7 @@ module cpu_model (
    // number of internal wait T-states this kind inserts at TState 2
    function automatic int int_waits(input int k);
       case (k)
-         K_M1  : int_waits = 1;   // MSX external M1 wait (scales with ce_cpu_p)
+         K_M1  : int_waits = 1;   // MSX external M1 wait (scales with ce_cpu)
          K_IO  : int_waits = 1;   // T80 IOWait=1
          K_INTA: int_waits = 2;   // Z80 INTA inserts two automatic wait states
          default: int_waits = 0;
@@ -199,25 +199,25 @@ module cpu_model (
 
    always @(posedge clk21m) begin
       if (reset) begin
-         cen_pol <= 1'b0; tstate <= 1; twait <= 0; seq_i <= 0; kind <= seq[0];
+         tstate <= 1; twait <= 0; seq_i <= 0; kind <= seq[0];
          {mreq_n, iorq_n, rd_n, wr_n} <= 4'b1111;
          mcycles_done <= 0;
-      end else if (ce_cpu_p && !cen_pol) begin
-         cen_pol <= 1'b1;
-         // ---- p-phase (T80pa: "elsif CEN_p = '1' and CEN_pol = '0'") -------
+      end else if (ce_cpu) begin
+         // ---- T80s: ONE enable per T-state.  T80pa split this across a
+         // CEN_p/CEN_n pair and the model had to track cen_pol; there is no
+         // second phase now, so the whole M-cycle advances here.  Strobes that
+         // T80pa raised on the p half (the I/O cycle's IORQ at T1) are raised on
+         // the same T-state, just at its single edge -- see the measured
+         // geometry in rtl/cpu/sim/tb_t80_contract.vhd.
          if (kind == K_IO && tstate == 1) begin
             iorq_n <= 1'b0;
             wr_n   <= ~is_write;
             rd_n   <=  is_write;
          end
-      end else if (ce_cpu_n && cen_pol) begin
-         // ---- n-phase (T80pa: "elsif CEN_n = '1' and CEN_pol = '1'") -------
          if (tstate == 2 && (!wait_n || twait < int_waits(kind))) begin
             // stall in T2: either the external WAIT_n or the core's own wait
-            cen_pol <= 1'b1;
             if (wait_n && twait < int_waits(kind)) twait <= twait + 1;
          end else begin
-            cen_pol <= 1'b0;
             if (tstate >= last_t(kind)) begin   // >= : gap_t can change mid-M-cycle
                tstate       <= 1;
                twait        <= 0;
@@ -259,12 +259,12 @@ module tb_turbo_guard;
 
    logic clk21m = 0;
    logic reset  = 1;
-   logic [1:0] cpu_speed = 2'd0;
+   logic [2:0] cpu_speed = 3'd0;
    logic       guard_on  = 1'b1;
    logic       force_turbo = 1'b0;
 
    wire ce_10m7_p, ce_10m7_n, ce_5m39_p, ce_5m39_n;
-   wire ce_3m58_p, ce_3m58_n, ce_10hz, ce_cpu_p, ce_cpu_n;
+   wire ce_3m58_p, ce_3m58_n, ce_10hz, ce_cpu;
 
    clock u_clock (
       .clk21m(clk21m), .reset(reset),
@@ -272,7 +272,7 @@ module tb_turbo_guard;
       .ce_5m39_p(ce_5m39_p), .ce_5m39_n(ce_5m39_n),
       .ce_3m58_p(ce_3m58_p), .ce_3m58_n(ce_3m58_n),
       .ce_10hz(ce_10hz),
-      .cpu_speed(cpu_speed), .cpu_bus_idle(1'b1), .ce_cpu_p(ce_cpu_p), .ce_cpu_n(ce_cpu_n)
+      .cpu_speed(cpu_speed), .cpu_bus_idle(1'b1), .cpu_turbo(), .ce_cpu(ce_cpu)
    );
 
    wire mreq_n, iorq_n, rd_n, wr_n;
@@ -327,7 +327,7 @@ module tb_turbo_guard;
 
    cpu_model u_cpu (
       .clk21m(clk21m), .reset(reset),
-      .ce_cpu_p(ce_cpu_p), .ce_cpu_n(ce_cpu_n),
+      .ce_cpu(ce_cpu),
       .wait_n(bus_guard_n),
       .mreq_n(mreq_n), .iorq_n(iorq_n), .rd_n(rd_n), .wr_n(wr_n),
       .slow_acc(cpu_slow_acc), .sdram_acc(cpu_sdram_acc),
@@ -351,7 +351,7 @@ module tb_turbo_guard;
 
    localparam int SDRAM_DEADLINE = 6;   // ~24 clk_sdram at 85.9MHz = 6 clk21m
 
-   task automatic measure(input [1:0] spd, input bit g_on, input string label,
+   task automatic measure(input [2:0] spd, input bit g_on, input string label,
                           input int thr = 8, input bit ftur = 1'b0,
                           input bit aslow = 1'b0, input int c2m = 0);
       begin
@@ -454,54 +454,63 @@ module tb_turbo_guard;
       $display("  configuration               sRDm  sWRm  fRDm  fWRm   max windows  noCEslow  rd<%0d  nHS  unsrv  M-cycles/run",
                SDRAM_DEADLINE);
       $display("  --------------------------------------------------------------------------------------------------------");
-      measure(2'd0, 1'b1, "3.58MHz (stock)");
+      measure(3'd0, 1'b1, "3.58MHz (stock)");
       // Diagnostic row: the guard is NOT inert at 3.58MHz.  A stock read
       // window is 12 clk21m and the guard needs cnt>=8 by the T2 CEN_n edge,
       // where only 6 have elapsed - so it inserts one extra T-state and costs
       // ~17%.  That is precisely why cpu_turbo hard-bypasses it
       // (bus_guard_n = ~cpu_turbo | ...), making turbo OFF bit-identical by
       // construction rather than by the guard happening to be harmless.
-      measure(2'd0, 1'b1, "3.58MHz +guard FORCED ON", 8, 1'b1);
+      measure(3'd0, 1'b1, "3.58MHz +guard FORCED ON", 8, 1'b1);
       // NEGATIVE CONTROL: with the guard bypassed, turbo must be demonstrably
       // unsafe.  If these pass, the stimulus is not stressing anything and the
       // "guard ON" results below prove nothing.
-      measure(2'd3, 1'b0, "10.7MHz  guard OFF");
+      measure(3'd3, 1'b0, "10.7MHz  guard OFF");
+      measure(3'd4, 1'b0, "21.5MHz  guard OFF");
       chk("negative control: guard OFF at 10.7MHz drops ce_3m58_p windows",
           n_win_noce > 0);
       chk("negative control: guard OFF at 10.7MHz breaks the SDRAM deadline",
           n_win_short > 0);
-      measure(2'd1, 1'b0, "5.37MHz  guard OFF", 5);
+      measure(3'd1, 1'b0, "5.37MHz  guard OFF", 5);
       chk("negative control: guard OFF at 5.37MHz drops ce_3m58_p windows",
           n_win_noce > 0);
-      measure(2'd2, 1'b0, "7.16MHz  guard OFF");
-      measure(2'd0, 1'b1, "3.58MHz (stock)");   // re-measure for the baseline
+      measure(3'd2, 1'b0, "7.16MHz  guard OFF");
+      measure(3'd0, 1'b1, "3.58MHz (stock)");   // re-measure for the baseline
       base_mcyc = last_mcyc;
       chk("stock: CPU is running", base_mcyc > 0);
 
       // 5.37MHz uses GUARD_RD=5, not 8: at /4 a T-state is 4 clk21m and 8 is
       // first satisfied a whole T-state late, stretching the read window to 16
       // instead of the stock 12 and cutting the gain from 1.24x to 1.09x.
-      measure(2'd1, 1'b1, "5.37MHz  guard ON", 5);
+      measure(3'd1, 1'b1, "5.37MHz  guard ON", 5);
       assert_safe("5.37MHz");
       chk($sformatf("5.37MHz is faster than stock (%0d vs %0d)", last_mcyc, base_mcyc),
           last_mcyc > base_mcyc);
       chk($sformatf("5.37MHz reaches at least 1.2x (got %0d vs %0d)", last_mcyc, base_mcyc),
           last_mcyc * 10 >= base_mcyc * 12);
 
-      measure(2'd2, 1'b1, "7.16MHz  guard ON");
+      measure(3'd2, 1'b1, "7.16MHz  guard ON");
       assert_safe("7.16MHz");
       chk($sformatf("7.16MHz is faster than stock (%0d vs %0d)", last_mcyc, base_mcyc),
           last_mcyc > base_mcyc);
 
-      measure(2'd3, 1'b1, "10.7MHz  guard ON");
+      measure(3'd3, 1'b1, "10.7MHz  guard ON");
+      //  The new /1 mode.  Same assertions as every other speed: no hang, every
+      //  transfer window contains a ce_3m58_p, the SDRAM ch2 deadline is met.
       assert_safe("10.7MHz");
       chk($sformatf("10.7MHz is faster than stock"), last_mcyc > base_mcyc);
 
+      //  The new /1 mode.  Same assertions as every other speed: no hang, every
+      //  transfer window contains a ce_3m58_p, the SDRAM ch2 deadline met.
+      measure(3'd4, 1'b1, "21.5MHz  guard ON");
+      assert_safe("21.5MHz");
+      chk($sformatf("21.5MHz is faster than stock"), last_mcyc > base_mcyc);
+
       // --- P2 scoping: legacy (everything slow) vs scoped, same speed --------
-      measure(2'd3, 1'b1, "10.7MHz  legacy all-slow", 8, 1'b0, 1'b1);
+      measure(3'd3, 1'b1, "10.7MHz  legacy all-slow", 8, 1'b0, 1'b1);
       assert_safe("10.7MHz legacy");
       legacy_mcyc = last_mcyc;
-      measure(2'd3, 1'b1, "10.7MHz  scoped (P2)");
+      measure(3'd3, 1'b1, "10.7MHz  scoped (P2)");
       assert_safe("10.7MHz scoped");
       chk($sformatf("scoped 10.7MHz beats legacy all-slow (%0d vs %0d)",
                     last_mcyc, legacy_mcyc), last_mcyc > legacy_mcyc);
@@ -511,7 +520,7 @@ module tb_turbo_guard;
           n_hs > 0);
 
       // --- P3 watchdog: a stuck ch2 must degrade, never hang ------------------
-      measure(2'd3, 1'b1, "10.7MHz  ch2 STUCK (wdog)", 8, 1'b0, 1'b0, 1);
+      measure(3'd3, 1'b1, "10.7MHz  ch2 STUCK (wdog)", 8, 1'b0, 1'b0, 1);
       chk("watchdog: CPU still runs with a stuck ch2", last_mcyc > 0);
       chk($sformatf("watchdog: stuck hs windows hit saturation (unserved=%0d)", n_hs_unserved),
           n_hs_unserved > 0);
@@ -521,7 +530,7 @@ module tb_turbo_guard;
                SDRAM_DEADLINE);
       $display("  --------------------------------------------------------------------------------------------------------");
       for (int t = 0; t <= 8; t++) begin
-         measure(2'd3, 1'b1, $sformatf("10.7MHz  GUARD_RD=%0d", t), t);
+         measure(3'd3, 1'b1, $sformatf("10.7MHz  GUARD_RD=%0d", t), t);
       end
       $display("");
       $display("  (GUARD_RD sweep is diagnostic only - not asserted)");

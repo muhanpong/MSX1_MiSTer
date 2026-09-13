@@ -388,12 +388,16 @@ localparam int GUARD_WR      = 2;
 localparam int GUARD_RD_FAST = 5;
 
 // ARM on the M-cycle (MREQ/IORQ), MEASURE on the transfer strobe (`req`).
-// The two must be separate: T80pa samples WAIT_n at the SAME CEN_n edge on
-// which it asserts WR_n (T80pa.vhd:169+180), so a guard armed on `req` alone
-// is one edge too late for every write cycle and never stalls it.  MREQ_n /
-// IORQ_n go active one T-state earlier, which is the arming signal we need.
-// (Verified: with the `req`-armed version, 7.16MHz still produced 845 windows
-// with no ce_3m58_p edge in them; with this version, zero.)
+// Under T80pa the two were separated in time -- it raised MREQ_n/IORQ_n a
+// T-state before it asserted WR_n, and it sampled WAIT_n on the very edge that
+// asserted WR_n, so a guard armed on `req` alone was one edge too late for
+// every write and never stalled it.  T80s raises the M-cycle strobe and the
+// transfer strobe on the SAME edge (measured: rtl/cpu/sim/tb_t80_contract.vhd),
+// so that head start is gone.  Arming on the M-cycle is still right -- it is
+// the earliest point the cycle is known -- but the counter now starts one
+// T-state later than the thresholds below were tuned for, and TSTATE_CLKS
+// gives that back.  Re-tuning the constants instead would have been wrong: what
+// the slow devices need is a wall-clock window, and that has not changed.
 wire bus_cycle = ~(mreq_n & iorq_n);
 assign cpu_bus_idle = mreq_n & iorq_n;
 
@@ -406,14 +410,14 @@ assign cpu_bus_idle = mreq_n & iorq_n;
 // never releases -- a hard hang on the first bus cycle in turbo.
 wire bus_xfer = ~((iorq_n & mreq_n) | (wr_n & rd_n));
 
-logic [3:0] guard_cnt = 4'd0;
+logic [4:0] guard_cnt = 5'd0;
 logic       guard_ce  = 1'b0;
 always @(posedge clk21m) begin
    if (reset | ~bus_cycle) begin
-      guard_cnt <= 4'd0;
+      guard_cnt <= 5'd0;
       guard_ce  <= 1'b0;
    end else if (bus_xfer) begin
-      if (guard_cnt != 4'hF) guard_cnt <= guard_cnt + 4'd1;
+      if (guard_cnt != 5'h1F) guard_cnt <= guard_cnt + 5'd1;
       if (ce_3m58_p)         guard_ce  <= 1'b1;
    end
 end
@@ -436,9 +440,32 @@ end
 // the stock core is reproduced exactly.
 wire slow_dev;   // from msx_slots: this memory access hits a ce_3m58-latched device
 wire guard_slow  = ~iorq_n | slow_dev;
-wire [3:0] guard_rd   = (cpu_speed_q == 2'd1) ? GUARD_RD_DIV4[3:0] : GUARD_RD[3:0];
-wire [3:0] guard_min  = wr_n ? (guard_slow ? guard_rd : GUARD_RD_FAST[3:0])
-                             : GUARD_WR[3:0];
+wire [3:0] guard_rd   = (cpu_speed_q == 3'd1) ? GUARD_RD_DIV4[3:0] : GUARD_RD[3:0];
+//  +2, and only on the SLOW path.
+//
+//  T80s holds the transfer strobe for less time than T80pa did -- measured at
+//  /6, RD is 6 or 12 clk21m where T80pa's was 9, 12 or 15, because T80pa could
+//  move a strobe on a half T-state and this one cannot.  guard_cnt counts while
+//  bus_xfer is high, so a narrower strobe is a shorter count and every slow
+//  window came out one step below the floor tb_turbo_guard asserts (10.7MHz
+//  gave 10/4 against the required 12/6).
+//
+//  Two things were tried before this.  Scaling the pad with the T-state length
+//  is the obvious reading of "it lost a T-state of strobe", and it is wrong in
+//  both directions: at /4 it over-pads (the 1.2x throughput floor fell to
+//  1.197) and at /1 it under-pads (21.5MHz still gave 11/5).  Padding the fast
+//  path as well costs throughput for nothing -- that path's deadline is the
+//  SDRAM ch2 consumption window, measured from the strobe, which did not move.
+//  A flat +2 on the slow path alone meets every floor with margin to spare at
+//  the low speeds and exactly at /1: 12/8, 15/9, 14/8, 12/6 for /4 /3 /2 /1.
+//
+//  What the slow devices actually need is a ce_3m58_p inside the window; the
+//  12/6 figures are the stock-speed proxy the bench asserts for it, and
+//  n_win_noce stays 0 at every speed here.
+wire [4:0] guard_min  = guard_slow
+    ? {1'b0, (wr_n ? guard_rd : GUARD_WR[3:0])} + 5'd2
+    : {1'b0, (wr_n ? GUARD_RD_FAST[3:0] : GUARD_WR[3:0])};
+
 
 // P3 (20260826): CLOSED-LOOP release for fast SDRAM reads.  The fixed
 // GUARD_RD_FAST floor existed only to cover ch2's open-loop consumption
