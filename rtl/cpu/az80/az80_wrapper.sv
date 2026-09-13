@@ -1,12 +1,30 @@
 //
-//  A-Z80 wrapper: unidirectional data bus, and the signal names this core uses.
+//  A-Z80 wrapper: unidirectional buses, board pull-ups, and the signal names
+//  this core uses.
 //
-//  A-Z80 reproduces the real Z80's pins, so its data bus is `inout [7:0] D`
-//  driven by `bus_db_pin_oe` (data_pins.v:74).  Inside an FPGA that is a mux,
-//  and Quartus resolves it, but the rest of this core speaks d_to_cpu/d_from_cpu
-//  -- two unidirectional buses -- so the tri-state is terminated here rather
-//  than being allowed to spread.  Everything else is a rename: A-Z80's control
-//  pins are already active low with the same meanings as T80pa's.
+//  A-Z80 reproduces the real Z80's pins.  Two of its habits are fine on a PCB
+//  and wrong inside this core, and both are handled here:
+//
+//  1) The data pin was `inout D`.  A wrapper that drives di onto D and also
+//     reads its do_ back off D gives static timing a combinational route from
+//     d_to_cpu to d_from_cpu THROUGH the CPU -- gating do_ with wr_n does not
+//     help, STA does no case analysis and walks both muxes.  Build ca97172:
+//     -8.125 ns, sdram ch2_saved_a0 -> SCC wavetable data-in, six logic levels
+//     on a clock pair whose edges coincide (clk_sdram -> clk21m), an earlier
+//     build showed the same path from MoonSound.  data_pins.v is therefore
+//     split into D_in / D_out (+ D_oe): D_out comes straight from its `dout`
+//     flop, so no topological path from di to do_ exists at all.  No SDC
+//     exception is needed and none should be added.
+//
+//  2) MREQ/IORQ/RD/WR tri-state while pin_control_oe is low -- during reset
+//     and bus grant (control_pins_n.v).  A real board has pull-ups, so the
+//     lines read inactive-high; leave them 'z' in here and the bus logic sees
+//     whatever the simulator or fitter turns 'z' into.  In Verilator that was
+//     LOW: tb_az80_bringup showed write strobes DURING RESET, which the old
+//     bidirectional wrapper masked by accident (do_ echoed di, so the phantom
+//     writes wrote back the bytes already there).  ctl_oe is pin_control_oe
+//     brought out, and the four strobes are forced inactive while it is low --
+//     the pull-ups, in mux form.
 //
 //  Not provided, and deliberately not faked:
 //    REG(211:0)/DIRSet/DIR.  T80 exposes its whole register file as one vector;
@@ -39,36 +57,35 @@ module az80_wrapper
    output  [7:0] do_
 );
 
-   wire [7:0] D;
+   wire [7:0] D_out;
+   wire       D_oe;
+   wire       ctl_oe;
+   wire       mreq_n_pin, iorq_n_pin, rd_n_pin, wr_n_pin;
 
-   //  Terminate the bidirectional pin here.  bus_db_pin_oe is internal, so the
-   //  direction comes from the strobes, and it has to be the READ condition
-   //  rather than ~wr_n: on an internal cycle wr_n is high too, and driving di
-   //  then would fight the CPU.  Two cases fetch a byte --
-   //    ~rd_n                  memory and I/O reads, and the M1 opcode fetch
-   //    ~iorq_n & ~m1_n        interrupt acknowledge, where the device puts the
-   //                           vector on the bus with RD_n staying HIGH
-   //  -- and outside them nothing samples do_, so leaving D undriven is fine.
-   wire fetching = ~rd_n | (~iorq_n & ~m1_n);
-   assign D   = fetching ? di : 8'bz;
+   //  The pull-ups (habit 2 above).  m1_n/rfsh_n/halt_n/busak_n are plain
+   //  outputs in control_pins_n and never float.
+   assign mreq_n = ctl_oe ? mreq_n_pin : 1'b1;
+   assign iorq_n = ctl_oe ? iorq_n_pin : 1'b1;
+   assign rd_n   = ctl_oe ? rd_n_pin   : 1'b1;
+   assign wr_n   = ctl_oe ? wr_n_pin   : 1'b1;
 
-   //  do_ must NOT be a plain read of D.  While we are driving di onto D for a
-   //  fetch, `assign do_ = D` makes do_ equal di, and the core's d_to_cpu and
-   //  d_from_cpu become one combinational net THROUGH the CPU -- a path with no
-   //  register in it from a clk_sdram source to a clk21m destination.  It showed
-   //  up as -8.3 ns from MoonSound's ms_io_dout_lat to the SCC wavetable RAM,
-   //  two blocks with no business being connected, on a clock pair whose edges
-   //  nearly coincide so the requirement is ~0 ns.  Gating on wr_n leaves do_
-   //  meaningful exactly when the CPU is the one driving.
-   assign do_ = wr_n ? 8'h00 : D;
+   //  do_ (habit 1 above).  D_out is data_pins' `dout` flop, but that flop is
+   //  ONE register shared by both directions (`ctl_bus_db_we | bus_db_pin_re`
+   //  loads it), so a read reloads the very register the write data lives in.
+   //  D_oe marks the window where dout is the core's own output; hold the last
+   //  value seen inside that window and present it the rest of the time.  Both
+   //  mux inputs are registers, so the di -> do_ route stays broken.
+   reg [7:0] do_hold;
+   always @(posedge clk) if (D_oe) do_hold <= D_out;
+   assign do_ = D_oe ? D_out : do_hold;
 
    z80_top_direct_n cpu
    (
       .nM1     (m1_n),
-      .nMREQ   (mreq_n),
-      .nIORQ   (iorq_n),
-      .nRD     (rd_n),
-      .nWR     (wr_n),
+      .nMREQ   (mreq_n_pin),
+      .nIORQ   (iorq_n_pin),
+      .nRD     (rd_n_pin),
+      .nWR     (wr_n_pin),
       .nRFSH   (rfsh_n),
       .nHALT   (halt_n),
       .nBUSACK (busak_n),
@@ -79,7 +96,10 @@ module az80_wrapper
       .nBUSRQ  (busrq_n),
       .CLK     (clk),
       .A       (a),
-      .D       (D)
+      .D_in    (di),
+      .D_out   (D_out),
+      .D_oe    (D_oe),
+      .ctl_oe  (ctl_oe)
    );
 
 endmodule

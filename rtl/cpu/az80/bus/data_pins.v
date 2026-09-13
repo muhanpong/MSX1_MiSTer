@@ -22,8 +22,10 @@ module data_pins(
 	ctl_bus_db_we,
 	clk,
 	ctl_bus_db_oe,
-	D,
-	db
+	D_in,
+	db,
+	D_out,
+	D_oe
 );
 
 
@@ -32,8 +34,18 @@ input wire	bus_db_pin_re;
 input wire	ctl_bus_db_we;
 input wire	clk;
 input wire	ctl_bus_db_oe;
-inout wire	[7:0] D;
+// MSX1 core change: the external data pins are unidirectional here.  The
+// original had `inout D` driven by bus_db_pin_oe; inside an FPGA that becomes
+// a mux, and any wrapper that also has to READ the net ends up with a
+// combinational route from data-in to data-out straight through the CPU
+// (-8.1 ns clk_sdram -> clk21m in build ca97172).  Splitting the pin kills
+// that route topologically.  `dout` (below) is already a flop, so D_out is
+// registered by construction.  The internal bus `db` keeps its tri-states --
+// they never leave the core.
+input wire	[7:0] D_in;
 inout wire	[7:0] db;
+output wire	[7:0] D_out;
+output wire	D_oe;
 
 reg	[7:0] dout;
 wire	[7:0] SYNTHESIZED_WIRE_0;
@@ -56,7 +68,7 @@ end
 
 assign	SYNTHESIZED_WIRE_4 = {ctl_bus_db_we,ctl_bus_db_we,ctl_bus_db_we,ctl_bus_db_we,ctl_bus_db_we,ctl_bus_db_we,ctl_bus_db_we,ctl_bus_db_we} & db;
 
-assign	SYNTHESIZED_WIRE_3 = {bus_db_pin_re,bus_db_pin_re,bus_db_pin_re,bus_db_pin_re,bus_db_pin_re,bus_db_pin_re,bus_db_pin_re,bus_db_pin_re} & D;
+assign	SYNTHESIZED_WIRE_3 = {bus_db_pin_re,bus_db_pin_re,bus_db_pin_re,bus_db_pin_re,bus_db_pin_re,bus_db_pin_re,bus_db_pin_re,bus_db_pin_re} & D_in;
 
 assign	SYNTHESIZED_WIRE_0 = SYNTHESIZED_WIRE_3 | SYNTHESIZED_WIRE_4;
 
@@ -71,16 +83,11 @@ assign	db[2] = ctl_bus_db_oe ? dout[2] : 1'bz;
 assign	db[1] = ctl_bus_db_oe ? dout[1] : 1'bz;
 assign	db[0] = ctl_bus_db_oe ? dout[0] : 1'bz;
 
-assign	D[7] = bus_db_pin_oe ? dout[7] : 1'bz;
-assign	D[6] = bus_db_pin_oe ? dout[6] : 1'bz;
-assign	D[5] = bus_db_pin_oe ? dout[5] : 1'bz;
-assign	D[4] = bus_db_pin_oe ? dout[4] : 1'bz;
-assign	D[3] = bus_db_pin_oe ? dout[3] : 1'bz;
-assign	D[2] = bus_db_pin_oe ? dout[2] : 1'bz;
-assign	D[1] = bus_db_pin_oe ? dout[1] : 1'bz;
-assign	D[0] = bus_db_pin_oe ? dout[0] : 1'bz;
 
 assign	SYNTHESIZED_WIRE_1 =  ~clk;
+
+assign	D_out = dout;
+assign	D_oe  = bus_db_pin_oe;
 
 
 endmodule

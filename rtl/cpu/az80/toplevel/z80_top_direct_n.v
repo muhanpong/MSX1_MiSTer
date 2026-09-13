@@ -21,7 +21,15 @@ module z80_top_direct_n(
 
     input wire CLK,
     output wire [15:0] A,
-    inout wire [7:0] D
+    // MSX1 core change -- see data_pins.v.  D_in/D_out replace the bidirectional
+    // D pin; D_oe is bus_db_pin_oe (D_out is the core's own drive exactly while
+    // it is high).  ctl_oe is pin_control_oe: LOW while the real chip would
+    // tri-state MREQ/IORQ/RD/WR (reset, bus grant), so the wrapper can stand in
+    // for the pull-up resistors a real board has on those lines.
+    input wire [7:0] D_in,
+    output wire [7:0] D_out,
+    output wire D_oe,
+    output wire ctl_oe
 );
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -47,8 +55,12 @@ data_pins data_pins_(
     .ctl_bus_db_oe  (ctl_bus_db_oe),
     .clk            (clk),
     .db             (db0),
-    .D              (D)
+    .D_in           (D_in),
+    .D_out          (D_out),
+    .D_oe           (D_oe)
 );
+
+assign ctl_oe = pin_control_oe;
 
 control_pins_n control_pins_(
     .busack        (busack),
