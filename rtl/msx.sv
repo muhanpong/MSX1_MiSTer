@@ -11,8 +11,7 @@ module msx
    input                    ce_10m7_p,
    input                    ce_3m58_p,
    input                    ce_3m58_n,
-   input                    ce_cpu_p,            // turbo: CPU clock enable (>= ce_3m58_p)
-   input                    ce_cpu_n,
+   input                    ce_cpu,            // turbo: CPU clock enable (>= ce_3m58_p)
    input                    cpu_turbo,           // 1 while ce_cpu_* runs faster than ce_3m58_*
    input                    sdram_rdtog,         // flips once per completed SDRAM ch2 READ (P3 closed loop)
    input                    sdram_hit,           // level: this ch2 READ was answered from sdram.sv's word latch
@@ -240,12 +239,24 @@ assign audio_r = (mix_r[16] == mix_r[15]) ? mix_r[15:0] : (mix_r[16] ? 16'sh8000
 wire [15:0] a;
 wire [7:0] d_to_cpu, d_from_cpu;
 wire mreq_n, wr_n, m1_n, iorq_n, rd_n, rfrsh_n;
-t80pa #(.Mode(0)) T80
+//  T80s, not T80pa.  T80pa advances one T-state per CEN_p/CEN_n PAIR
+//  (T80pa.vhd:153,168), which is what capped the CPU at clk21m/2: at that speed
+//  the two enable trains already use every clock.  T80s takes a single enable
+//  and reaches clk21m/1.
+//
+//  The strobes move as a result, and rtl/cpu/sim/tb_t80_contract.vhd is where
+//  that was measured rather than argued.  Running the same program through both
+//  wrappers at the same T-state rate: the SEQUENCE is identical (38 MREQ, 24 RD,
+//  2 WR, 2 IORQ, 14 RFSH, 40 gaps where MREQ and IORQ are both high), so no bus
+//  cycle is added, removed or reordered.  What changes is geometry -- T80pa's
+//  strobes are 6, 9 or 12 clk21m wide at /6 because it can move them on a half
+//  T-state; T80s' are a clean 6 or 12.  In particular RD narrows from 9-12 to 6:
+//  the address-to-data window is one T-state where it used to be two.
+T80s #(.Mode(0), .T2Write(1), .IOWait(1)) T80
 (
    .RESET_n(~reset),
    .CLK(clk21m),
-   .CEN_p(ce_cpu_p),
-   .CEN_n(ce_cpu_n),
+   .CEN(ce_cpu),
    .WAIT_n(wait_n),
    // Z80 /INT is shared (wired-AND, active-low) between the VDP and the
    // MoonSound (YMF278B/OPL4) Timer-1 IRQ.  MoonSound music players (e.g.
@@ -279,19 +290,19 @@ wire [211:0] t80_reg;
 // safety timeout (ms_wait_cnt) so a lost ack cannot hang the CPU.
 wire exwait_n = ~ms_io_pending;
 
-// The MSX2 M1 wait pair (74LS74 equivalent).  It is clocked from ce_cpu_p, not
+// The MSX2 M1 wait pair (74LS74 equivalent).  It is clocked from ce_cpu, not
 // ce_3m58_p: it is CPU-cycle logic, so it must scale WITH the CPU.  Left on
 // ce_3m58_p it would stretch the single M1 wait into 2 or 3 CPU T-states in
-// turbo, i.e. it would silently become a different machine.  On ce_cpu_p the
+// turbo, i.e. it would silently become a different machine.  On ce_cpu the
 // whole CPU+wait subsystem is a pure time-scaling of the stock design, and with
-// cpu_speed==0 (ce_cpu_p === ce_3m58_p) it is bit-identical to it.
+// cpu_speed==0 (ce_cpu === ce_3m58_p) it is bit-identical to it.
 logic wait_m1_n = 1'b0;
 always @(posedge clk21m, negedge exwait_n, negedge u1_2_q) begin
    if (~exwait_n)
       wait_m1_n <= 1'b0;
    else if (~u1_2_q)
       wait_m1_n <= 1'b1;
-   else if (ce_cpu_p)
+   else if (ce_cpu)
       wait_m1_n <= m1_n;
 end
 
@@ -299,7 +310,7 @@ logic u1_2_q = 1'b0;
 always @(posedge clk21m, negedge exwait_n) begin
    if (~exwait_n)
       u1_2_q <= 1'b1;
-   else if (ce_cpu_p)
+   else if (ce_cpu)
       u1_2_q <= wait_m1_n;
 end
 
@@ -315,7 +326,7 @@ end
 //       (= ce_3m58_p).  A write window that contains no ce_3m58_p edge is
 //       simply DROPPED -> SCC/OPLL music dies.  (SCC wave RAM is
 //       RAMCTRL_ASYNC=1, jt49's register file runs on raw clk21m, and the FDC
-//       runs on clk_en_cpu = ce_cpu_p which scales with the CPU, so those
+//       runs on clk_en_cpu = ce_cpu which scales with the CPU, so those
 //       three are already immune — device audit 20260825.)
 //   (b) SDRAM ch2 read latency.  ch2 is OPEN LOOP - sdram.sv states plainly
 //       "ch2 has NO handshake" and ch2_ready is left unconnected in MSX1.sv.
@@ -484,9 +495,10 @@ wire bus_guard_n = ~cpu_turbo | ~bus_cycle | (mreq_n & rd_n & wr_n) | guard_open
 // sync, like the other 16-bit fields.
 //
 // dbg_wait_ratio: T-states in which tv80a inserts a wait, per 65536 T-states.
-//   Sampled on ce_cpu_n because that is the edge tv80a latches WAIT_n on
-//   (Wait_s <= WAIT_n at negedge CLK_n), so the count matches what the CPU
-//   actually did, and it scales with cpu_speed.  This is the number that says
+//   Sampled on ce_cpu -- with T80s there is one enable per T-state, so counting
+//   on it counts T-states directly, which is what the ratio is meant to be.
+//   (Under T80pa this sampled ce_cpu_n, the phase on which that wrapper latched
+//   WAIT_n; the n phase no longer exists.)  This is the number that says
 //   whether a faster core would help at all: a CPU already stalled most of the
 //   time gains nothing from executing faster between stalls.
 //
@@ -497,7 +509,7 @@ logic [15:0] sw_tot = 16'd0, sw_wait = 16'd0;
 always @(posedge clk21m) begin
    if (reset) begin
       sw_tot <= 16'd0; sw_wait <= 16'd0; dbg_wait_ratio <= 16'd0;
-   end else if (ce_cpu_n) begin
+   end else if (ce_cpu) begin
       sw_tot <= sw_tot + 16'd1;
       if (&sw_tot) begin
          dbg_wait_ratio <= sw_wait + {15'd0, ~wait_n};
@@ -791,10 +803,10 @@ wire [5:0] joyB = joy_b & {psg_iob[2], psg_iob[3], 4'b1111};
 assign psg_ioa = {cas_audio_in,1'b0, psg_iob[6] ? joyB : joyA};
 wire [9:0] ay_ch_mix;
 
-// PSG *bus strobe* generator, clocked from ce_cpu_p.  It needs TWO clock-enable
+// PSG *bus strobe* generator, clocked from ce_cpu.  It needs TWO clock-enable
 // edges inside the I/O window before it opens BDIR/BC1; the turbo bus guard only
 // promises ONE ce_3m58_p, so on ce_3m58_p this circuit would stop emitting a
-// strobe in turbo and every PSG write would be lost.  On ce_cpu_p it scales with
+// strobe in turbo and every PSG write would be lost.  On ce_cpu it scales with
 // the CPU and always fires.  The PSG *sound generator* (jt49_bus .clk_en below)
 // stays on ce_3m58_p - that is what sets the pitch, and it must not move.
 // jt49_bus decodes BDIR/BC1 on raw clk21m ("I/O cannot use clk_en"), so a
@@ -803,7 +815,7 @@ logic u21_1_q = 1'b0;
 always @(posedge clk21m,  posedge psg_n) begin
    if (psg_n)
       u21_1_q <= 1'b0;
-   else if (ce_cpu_p)
+   else if (ce_cpu)
       u21_1_q <= ~psg_n;
 end
 
@@ -811,11 +823,11 @@ logic u21_2_q = 1'b0;
 always @(posedge clk21m, posedge psg_n) begin
    if (psg_n)
       u21_2_q <= 1'b0;
-   else if (ce_cpu_p)
+   else if (ce_cpu)
       u21_2_q <= u21_1_q;
 end
 
-wire psg_e = !(!u21_2_q | ce_cpu_p) | psg_n;
+wire psg_e = !(!u21_2_q | ce_cpu) | psg_n;
 wire psg_bc   = !(a[0] | psg_e);
 wire psg_bdir = !(a[1] | psg_e);
 jt49_bus PSG
@@ -1036,7 +1048,7 @@ msx_slots msx_slots
 (
    .clk(clk21m),
    .clk_en(ce_3m58_p),      // audio / chip rate - NEVER changes
-   .clk_en_cpu(ce_cpu_p),   // CPU rate - PSG bus strobe + FDC (see msx_slots.sv)
+   .clk_en_cpu(ce_cpu),   // CPU rate - PSG bus strobe + FDC (see msx_slots.sv)
    .reset(reset),
    .cpu_addr(a),
    .cpu_din(d_from_slots),  
@@ -1568,7 +1580,7 @@ always_ff @(posedge clk21m) begin
         dbg_jmp0 <= 0; fadr_p1 <= 0; boot0_hit <= 0;
     // *** PAUSE GATE (2026-09-01) -- this was the bug that made the first two
     // captures unreadable.  MSX1.sv:565 folds OSD-open and ROM-load into
-    // msx_pause, and MSX1.sv:581 gates ce_cpu_p with it, so the CPU stops for
+    // msx_pause, and MSX1.sv:581 gates ce_cpu with it, so the CPU stops for
     // far longer than 760us EVERY time the user opens the OSD or loads a ROM.
     // Ungated, dbg_cpu_nom1 (sticky) latched on the very act of starting the
     // game and read as "the CPU halted" in every capture.  probe_freeze is

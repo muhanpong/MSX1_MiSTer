@@ -336,7 +336,7 @@ localparam CONF_STR = {
    "O[43],Pause on OSD,No,Yes;",
    "T[44],Pause;",
    "-;",
-   "O[37:36],CPU Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz;",
+   "O[58:56],CPU Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz,21.5MHz;",
    "-;",
    "P2,Audio settings;",
    "P2O[45],MoonSound,Off,On;",
@@ -532,11 +532,23 @@ wire ce_10m7_p, ce_10m7_n, ce_5m39_p, ce_5m39_n, ce_3m58_p, ce_3m58_n, ce_10hz;
 // faster than 5.37MHz, software turning "turbo on" must not slow the machine
 // down.  Speeds are encoded in ascending frequency order, so this is a max().
 wire        msx_turbo_req;          // from msx.sv <- msx_slots <- dev_matsushita
-wire  [1:0] cpu_speed = (msx_turbo_req & status[37:36] == 2'd0) ? 2'd1 : status[37:36];
+//  Speed index, three bits now: 0=3.58 1=5.37 2=7.16 3=10.7 4=21.5.  The two
+//  higher labels the menu offers are NextZ80 territory and clamp to 4 here --
+//  T80s tops out at clk21m/1 and there is nothing above it to select.
+//  msx_turbo_req is the Panasonic port's software turbo request; it still only
+//  bumps a machine sitting at stock, and it still bumps it to 5.37.
+//  Moved off O[37:36]: the field needs three bits and 38 is SRAM Save.  56-58
+//  were picked by reading the board's own /media/fat/config/MSX1.CFG rather than
+//  by looking for gaps in the source -- a bit that is unused in the RTL can still
+//  hold a 1 left by an older build, and 49/50/55/59 do exactly that (measured
+//  0x...  bits 49,50,55,59 = 1).  56/57/58 are 0 there, so an un-updated CFG
+//  lands on speed 0 = 3.58 MHz, which is the safe default.
+wire  [2:0] cpu_speed_sel = (status[58:56] > 3'd4) ? 3'd4 : status[58:56];
+wire  [2:0] cpu_speed     = (msx_turbo_req & cpu_speed_sel == 3'd0) ? 3'd1 : cpu_speed_sel;
 wire        cpu_turbo;              // driven by clock.sv from the latched speed
-wire  [1:0] cpu_speed_q;            // latched speed, back out of clock.sv
+wire  [2:0] cpu_speed_q;            // latched speed, back out of clock.sv
 wire        cpu_bus_idle;           // from msx.sv, gates the speed latch
-wire        ce_cpu_p, ce_cpu_n;
+wire        ce_cpu;
 pll pll
 (
    .refclk(CLK_50M),
@@ -720,9 +732,8 @@ msx MSX
    .ce_3m58_p(ce_3m58_p & ~msx_pause),
    .ce_3m58_n(ce_3m58_n & ~msx_pause),
    // CPU clock enable.  Pause-gated exactly like ce_3m58_*, so the pause
-   // mechanism is unchanged; with cpu_speed==0 these ARE ce_3m58_p/n.
-   .ce_cpu_p (ce_cpu_p  & ~msx_pause),
-   .ce_cpu_n (ce_cpu_n  & ~msx_pause),
+   // mechanism is unchanged; with cpu_speed==0 this IS ce_3m58_p.
+   .ce_cpu   (ce_cpu    & ~msx_pause),
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),
    .cpu_bus_idle(cpu_bus_idle),

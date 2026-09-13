@@ -10,12 +10,12 @@ module clock
    output     ce_3m58_n,
    output     ce_10hz,
    //  -- CPU turbo ------------------------------------------------------------
-   input      [1:0] cpu_speed,   // 0 = 3.58MHz (stock), 1 = 5.37MHz, 2 = 7.16MHz, 3 = 10.74MHz
+   //  0 = 3.58MHz (stock), 1 = 5.37MHz, 2 = 7.16MHz, 3 = 10.74MHz, 4 = 21.48MHz
+   input      [2:0] cpu_speed,
    input      cpu_bus_idle,      // ~(mreq_n|iorq_n) low: safe point to change speed
-   output     ce_cpu_p,
-   output     ce_cpu_n,
+   output     ce_cpu,            // single-phase enable, one pulse per T-state (T80s)
    output     cpu_turbo,        // |speed_q: tracks the CE rate, not the raw OSD word
-   output     [1:0] cpu_speed_q // the LATCHED speed, for speed-dependent guard limits
+   output     [2:0] cpu_speed_q // the LATCHED speed, for speed-dependent guard limits
 );
 
 reg  [1:0] clkdiv4 =  2'd1;
@@ -96,11 +96,11 @@ assign ce_10hz   = div == 22'd0;
 //  deadline.  With it: zero.
 //  ---------------------------------------------------------------------------
 reg       half    = 1'b0;
-reg [1:0] speed_q = 2'd0;
+reg [2:0] speed_q = 3'd0;
 always @(posedge clk21m, posedge reset) begin
    if (reset) begin
       half    <= 1'b0;
-      speed_q <= 2'd0;
+      speed_q <= 3'd0;
    end else begin
       if (clkdiv6 == 3'd0) half <= ~half;
       if (clkdiv6 == 3'd0 && half && cpu_bus_idle) speed_q <= cpu_speed;
@@ -114,15 +114,27 @@ assign cpu_turbo   = |speed_q;
 assign cpu_speed_q = speed_q;
 
 wire p_div4 = (~half & ((clkdiv6 == 3'd5) | (clkdiv6 == 3'd1))) | ( half & (clkdiv6 == 3'd3));
-wire n_div4 = (~half &  (clkdiv6 == 3'd3))                      | ( half & ((clkdiv6 == 3'd5) | (clkdiv6 == 3'd1)));
 
-assign ce_cpu_p = (speed_q == 2'd0) ?  (clkdiv6 == 3'd5)                      :
-                  (speed_q == 2'd1) ?   p_div4                                :
-                  (speed_q == 2'd2) ? ((clkdiv6 == 3'd5) | (clkdiv6 == 3'd2)) :
-                                        clkdiv6[0];
-assign ce_cpu_n = (speed_q == 2'd0) ?  (clkdiv6 == 3'd2)                      :
-                  (speed_q == 2'd1) ?   n_div4                                :
-                  (speed_q == 2'd2) ? ((clkdiv6 == 3'd3) | (clkdiv6 == 3'd0)) :
-                                       ~clkdiv6[0];
+//  SINGLE-PHASE.  T80pa needed a CEN_p/CEN_n pair -- two enables to advance one
+//  T-state -- and that pair is exactly why the ceiling was clk21m/2: at /2 the
+//  two trains already occupy every clock.  T80s takes ONE enable per T-state, so
+//  the p train below is the whole clock enable and the n train is gone.  Nothing
+//  else changes: p already carried exactly one pulse per T-state in every mode,
+//  so /6 /4 /3 /2 keep their rates and their phases, and speed 0 is still
+//  literally the ce_3m58_p decode -- turbo off stays bit-identical to stock.
+//
+//  Speed 4 is the new one the pair could not express: an enable on every clock,
+//  clk21m/1 = 21.477 MHz.  Note what that costs at the memory: bram.vhd is
+//  altsyncram with a registered address, so a read presented in T1 is not on the
+//  bus until T3, and T80s latches DI at T2.  Every BRAM-backed read therefore
+//  needs one wait state at this speed.  SDRAM-backed reads may not -- that path
+//  runs on clk_sdram at 85.909 MHz, exactly 4x clk21m -- but which of the two
+//  answers a given read is a property of the machine configuration, so the real
+//  gain over /2 is a measurement (dbg_wait_ratio), not a calculation.
+assign ce_cpu = (speed_q == 3'd0) ?  (clkdiv6 == 3'd5)                      :
+                (speed_q == 3'd1) ?   p_div4                                :
+                (speed_q == 3'd2) ? ((clkdiv6 == 3'd5) | (clkdiv6 == 3'd2)) :
+                (speed_q == 3'd3) ?   clkdiv6[0]                            :
+                                      1'b1;
 
 endmodule
