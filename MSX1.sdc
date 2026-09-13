@@ -239,3 +239,25 @@ set_multicycle_path -setup -end 2 \
 set_multicycle_path -hold  -end 1 \
     -from [get_clocks {az80_clk}] \
     -to   [get_registers {*az80_clkgen*|speed_q*}]
+
+#  Inside A-Z80 itself: every remaining az80_clk violation ends at data_pins'
+#  dout, through the RESOLVED internal tri-state bus `db` (Quartus flattens its
+#  ~30 drivers into 10-12 logic levels; on the die this was a wired bus with
+#  zero levels -- this is A-Z80's FPGA tax).  The launch registers split into
+#  two kinds:
+#    ir|opcode, decode_state flags (instED/instCB/inst4/instIY*/in_halt):
+#      stable PER INSTRUCTION.  dout's we-load (write-data staging) happens
+#      only in a write M-cycle, at least one full M-cycle -- >= 4 half-periods
+#      -- after IR/prefix flags last changed.  The enable cone is the same
+#      argument: the IR-launched component of ctl_bus_db_we settles M-cycles
+#      before any staging edge that depends on it.  -end 2 asks for 2 half-
+#      periods of the >= 4 available.
+#    sequencer T/M state bits: change EVERY half-period -- genuinely single-
+#      cycle, deliberately NOT relaxed here.  If they cannot close physically,
+#      that is the real ceiling of this core on this device.
+set_multicycle_path -setup -end 2 \
+    -from [get_registers {*z80_top_direct_n:cpu|ir:ir_|opcode* *z80_top_direct_n:cpu|decode_state:decode_state_|*}] \
+    -to   [get_registers {*data_pins:data_pins_|dout*}]
+set_multicycle_path -hold  -end 1 \
+    -from [get_registers {*z80_top_direct_n:cpu|ir:ir_|opcode* *z80_top_direct_n:cpu|decode_state:decode_state_|*}] \
+    -to   [get_registers {*data_pins:data_pins_|dout*}]
