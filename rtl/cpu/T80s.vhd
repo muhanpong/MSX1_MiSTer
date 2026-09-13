@@ -96,7 +96,16 @@ entity T80s is
 		OUT0    : in  std_logic := '0';  -- 0 => OUT(C),0, 1 => OUT(C),255
 		A       : out std_logic_vector(15 downto 0);
 		DI      : in std_logic_vector(7 downto 0);
-		DO      : out std_logic_vector(7 downto 0)
+		DO      : out std_logic_vector(7 downto 0);
+		--  Forwarded from T80.  T80pa already exposed these and this core's
+		--  msx.sv uses REG in about twenty places -- the IM2 vector table page,
+		--  IFF1 tracking, the PC snapshots the freeze and RST38-spin diagnostics
+		--  hang off -- so a T80s without them does not elaborate.  DIRSet/DIR are
+		--  brought across at the same time: they are the write side of the same
+		--  register set, and a CPU swap at runtime needs them.
+		REG     : out std_logic_vector(211 downto 0);
+		DIRSet  : in  std_logic := '0';
+		DIR     : in  std_logic_vector(211 downto 0) := (others => '0')
 	);
 end T80s;
 
@@ -138,7 +147,10 @@ begin
 		MC => MCycle,
 		TS => TState,
 		OUT0 => OUT0,
-		IntCycle_n => IntCycle_n
+		IntCycle_n => IntCycle_n,
+		REG => REG,
+		DIRSet => DIRSet,
+		DIR => DIR
 	);
 
 	process (RESET_n, CLK)

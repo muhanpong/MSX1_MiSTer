@@ -15,7 +15,7 @@ module msx
    input                    cpu_turbo,           // 1 while ce_cpu_* runs faster than ce_3m58_*
    input                    sdram_rdtog,         // flips once per completed SDRAM ch2 READ (P3 closed loop)
    input                    sdram_hit,           // level: this ch2 READ was answered from sdram.sv's word latch
-   input              [1:0] cpu_speed_q,         // LATCHED speed, selects the guard limit
+   input              [2:0] cpu_speed_q,         // LATCHED speed, selects the guard limit
    output                   cpu_bus_idle,        // -> clock.sv: safe point to change speed
    output                   msx_turbo_req,       // Panasonic 40H/41H: software asked for 5.37MHz
    input                    ce_5m39_n,
@@ -398,7 +398,16 @@ localparam int GUARD_RD_FAST = 5;
 // T-state later than the thresholds below were tuned for, and TSTATE_CLKS
 // gives that back.  Re-tuning the constants instead would have been wrong: what
 // the slow devices need is a wall-clock window, and that has not changed.
-wire bus_cycle = ~(mreq_n & iorq_n);
+//  Refresh is not a bus cycle for the guard's purposes.  T80s releases MREQ_n
+//  during T3 and asserts it again for the refresh in T4, where T80pa held it low
+//  continuously from T1 to T4.  Left in, that second assertion drops and
+//  re-raises bus_cycle inside every M1, which resets guard_cnt and pulls WAIT_n
+//  low again.  The CPU ignores it -- T80.vhd:1129 honours Wait_n at TState 2
+//  only, and this is T4 -- but dbg_wait_ratio counts it, and that ratio is the
+//  number P5 reads to decide whether a faster core would help at all.  A
+//  measurement instrument that reports one spurious wait per M1 is worse than
+//  none.  rfrsh_n excludes exactly that cycle and nothing else.
+wire bus_cycle = ~(mreq_n & iorq_n) & rfrsh_n;
 assign cpu_bus_idle = mreq_n & iorq_n;
 
 // COUNT on the transfer strobe, which is a LEVEL.  It must NOT be `req`:
@@ -617,7 +626,26 @@ always @(posedge clk21m) begin
    end
 end
 wire vdp_hold  = cpu_turbo & vdp_bus & ~vdp_grant;
-wire vdp_pace_n = ~(cpu_turbo & vdp_bus & (~vdp_grant | (vdp18 & (vdp_hcnt < 3'd4))));
+
+//  Release the pacer one clk21m AFTER the grant, not on it.
+//
+//  vdp_register.vhd:388-392 registers DBI on the clock edge that ends the cycle
+//  REQ is asserted in, so the read data is one clk21m behind the grant:
+//  vdp_grant registers at the end of cycle C, `req` pulses during C+1, DBI
+//  updates at the end of C+1.  T80pa sampled WAIT_n mid-T2 and latched DI
+//  mid-T3, which left two clk21m of slack and hid this.  T80s latches DI on the
+//  T2->T3 edge, so at clk21m/2 the latch lands at C+2 and is still fine, but at
+//  clk21m/1 it lands exactly on C+1 and takes DBI's pre-edge value -- the
+//  PREVIOUS read's byte.  Silent: the timing looks correct and only the data is
+//  wrong, and it needs back-to-back VDP access in turbo for vdp_grant to be the
+//  last constraint to release, which is the case the pacer exists for.
+//
+//  One extra clk21m costs nothing measurable: the pacer already holds accesses
+//  32 clk21m apart (VDP_GAP38), so this is 3% of a gap it is already enforcing.
+logic vdp_grant_d = 1'b0;
+always @(posedge clk21m) vdp_grant_d <= vdp_grant & vdp_bus;
+
+wire vdp_pace_n = ~(cpu_turbo & vdp_bus & (~vdp_grant_d | (vdp18 & (vdp_hcnt < 3'd4))));
 
 wire opll_pace_n;   // turbo OPLL write pacer, from msx_slots (spec inter-write gaps)
 wire wait_n      = wait_m1_n & bus_guard_n & vdp_pace_n & opll_pace_n;
