@@ -19,6 +19,19 @@
         <SHA1>f2a1d326d72d4c70ea214d7883838de8847a82b7</SHA1>
       </block>
     </secondary>
+    <secondary slot="1">
+      <!-- MSX-DOS 2.  Slot 3 is full on this machine (RAM / sub+kanji / FDC /
+           MSX-MUSIC), so the kernel goes in the free 0-1 instead.  Placement
+           in an expanded slot 0 is NOT yet confirmed on hardware; the
+           HB-F1XDmk2 packs, which use 3-1, are.  Driver comes from the disk
+           ROM in 3-2. -->
+      <block start="1" id="MSX-DOS2 ROM">
+        <type>MSXDOS2</type>
+        <block_count>4</block_count>
+        <filename>ascii_msxdos22.rom</filename>
+        <SHA1>42f4e3360eb134857b0efa82c1abedf342680124</SHA1>
+      </block>
+    </secondary>
     <secondary slot="3">
       <block start="0" id="HB-F1XV MSX-JE">
         <type>HALNOTE</type>
