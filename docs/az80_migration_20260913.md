@@ -118,9 +118,20 @@ T80은 레지스터파일 전체를 벡터로 노출(msx.sv dbg_* 약 20곳 사�
 | 리셋 CDC 전 | −13.599 | 20.57 | — | reset 직결 |
 | ca97172 | −8.125 | 20.08 | 21.84 | wr_n 게이트(무효), 피드스루 잔존 |
 | **6697e64** | **−4.476** | **21.33** | **28.52** | 피드스루 소멸. 잔여=ch2_saved→dout |
-| 3f66022 | (진행 중) | ? | ? | ch2→dout MCP 2 적용 |
+| 3f66022 | −2.145 | 19.66 | 28.47 | MCP 적중(ch2→dout 소멸)했으나 az80_clk 악화 |
+| 5fe9a3d | (진행 중) | ? | ? | **az80_clk 글로벌 클럭버퍼 탑승** |
 
 요구: az80_clk ≥ 21.477MHz.
+
+### 로터리의 정체 — az80_clk가 글로벌 클럭망 밖에 있었다 (5fe9a3d)
+3f66022 빌드에서 ch2 위반이 사라지자 남은 worst가 코어 내부 반사이클(`ir|opcode →
+apin_latch`, 예산 23.28ns)과 az80→clk21m 크로싱(**skew −3.59ns**)으로 바뀜. skew를
+추적하니 fit.rpt "Global & Other Fast Signals"에:
+`az80_clkgen|az80_clk ; FF_X71_Y30_N50 ; Fan-Out 409 ; Clock ; Global=NO`
+— 클럭 부하 409개짜리 네트가 **일반 배선**으로 뿌려지고 있었음. 빌드마다 Fmax가
+19.66/20.08/21.33/22.10을 오간 원인이 시드가 아니라 클럭 삽입지연 산포였던 것.
+수정 = qsf `GLOBAL_SIGNAL GLOBAL_CLOCK` 고정. ★교훈: **레지스터 분주 클럭은 fit.rpt
+글로벌 테이블부터 확인** — create_generated_clock은 STA 선언일 뿐 배선을 안 정한다.
 
 ### ch2_saved_* → dout MCP의 정당화 (3f66022)
 clk_sdram과 az80_clk는 같은 PLL 분주라 0.001ns 엣지쌍 존재 → cpu_din mux 클라우드
