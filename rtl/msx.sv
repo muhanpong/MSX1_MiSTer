@@ -260,10 +260,35 @@ wire [15:0] az_a;
 wire  [7:0] az_do, az_di;
 wire        az_wait_n;
 
+//  Reset synchroniser for the CPU's own clock domain.
+//
+//  reset_req is framework logic in the FPGA_CLK2_50 domain (sys_top.v:554-570 --
+//  the OSD's Reset, a core load, the physical button, all arriving through
+//  gp_out[31:30] from the HPS), and until A-Z80 it was consumed inside clk21m,
+//  so the crossing was handled once and stayed handled.  Giving the CPU its own
+//  clock created a second boundary, 50 MHz to az80_clk, with nothing on it: the
+//  first build reported -13.599 ns on reset_req -> resets_|x1, a 16.3 ns routing
+//  path latched on az80_clk INVERTED between two unrelated clocks whose
+//  requirement comes out NEGATIVE (-1.005 ns).  Not a speed problem; an
+//  unconstrained crossing.
+//
+//  Assert asynchronously, deassert synchronously.  The assert must not wait for
+//  a clock edge because az80_clkgen holds az80_clk still while reset or
+//  msx_pause is high -- a synchronous assert would be waiting for a clock that
+//  has stopped.  The deassert must be synchronous so the CPU's internal flops,
+//  which include five on the inverted edge (control/resets.v), all come out of
+//  reset on the same edge.
+logic [1:0] az_rst_sync = 2'b11;
+always @(posedge az80_clk, posedge reset) begin
+   if (reset) az_rst_sync <= 2'b11;
+   else       az_rst_sync <= {az_rst_sync[0], 1'b0};
+end
+wire az_reset = az_rst_sync[1];
+
 az80_wrapper CPU
 (
    .clk     (az80_clk),
-   .reset   (reset),
+   .reset   (az_reset),
    .wait_n  (az_wait_n),
    //  Z80 /INT is shared (wired-AND, active-low) between the VDP and the
    //  MoonSound (YMF278B/OPL4) Timer-1 IRQ.  MoonSound music players drive

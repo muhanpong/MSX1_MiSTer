@@ -131,3 +131,33 @@ set_multicycle_path -setup -end 4 \
 set_multicycle_path -hold  -end 3 \
     -from [get_registers {*u_pcm|stage_c_reg*}] \
     -to   [get_registers {*u_pcm|d1a_pkt*}]
+
+# ─── A-Z80's clock ──────────────────────────────────────────────────────────
+#  A-Z80 has no clock enable -- parts of it latch on ~clk by construction -- so
+#  it runs from a real clock that az80_clkgen divides out of clk_sdram.  That
+#  clock has to be DECLARED or the analyser has no idea what it is: the first
+#  build with A-Z80 in it reported -6.903 ns worst setup and -1412 ns TNS on the
+#  clk21m domain purely because the flops az80_clk drives were being related to
+#  clk21m instead of to their own clock.
+#
+#  The divisor is variable (24/16/12/8/4 for 3.58 .. 21.5 MHz) and SDC cannot
+#  express that, so it is declared at its FASTEST -- /4, one toggle every two
+#  clk_sdram, giving a 21.477 MHz clock.  Constraining the fast case constrains
+#  every slower one, which is what we want.
+create_generated_clock -name az80_clk \
+    -source [get_pins {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+    -divide_by 4 \
+    [get_registers {*az80_clkgen*|az80_clk}]
+
+#  clk21m and az80_clk are integer divides of the same PLL output, so they are
+#  synchronous -- but the CPU's strobes still cross between them, and at /4 a
+#  transfer window is exactly one clk21m period.  Leave those paths timed; do
+#  NOT false-path them.  The existing PLL-to-PLL false path above covers the
+#  unrelated domains only.
+
+#  The reset crossing into az80_clk.  reset_req lives in FPGA_CLK2_50 and the
+#  two clocks are unrelated, so the analyser pairs their worst edges and asks
+#  for a negative setup time -- unsatisfiable by construction.  The synchroniser
+#  in msx.sv (async assert, sync deassert) is what makes the crossing safe; the
+#  path into its first stage is what must not be timed.
+set_false_path -to [get_registers {*msx:MSX|az_rst_sync[0]}]
