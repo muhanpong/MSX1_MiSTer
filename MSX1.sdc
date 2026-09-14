@@ -253,3 +253,21 @@ set_multicycle_path -setup -end 3 \
 set_multicycle_path -hold  -end 2 \
     -from [get_clocks {az80_clk}] \
     -to   [get_registers {*sdram*ch2_*}]
+
+#  A-Z80 read window -> the pacer's synchroniser (rtl/msx.sv az_win_s1).  Only
+#  this first flop is relaxed: the window has to be stable by the 3rd clk_sdram
+#  edge after the CPU edge, the second flop re-registers it for every pacer flop,
+#  so nothing downstream sees a torn sample.
+set_multicycle_path -setup -end 3 \
+    -from [get_clocks {az80_clk}] \
+    -to   [get_registers {*msx:MSX|az_win_s1}]
+set_multicycle_path -hold  -end 2 \
+    -from [get_clocks {az80_clk}] \
+    -to   [get_registers {*msx:MSX|az_win_s1}]
+
+#  Pacer release (clk_sdram) -> A-Z80's nWAIT sampler.  The analyser pairs the
+#  launch with a coincident az80_clk edge a picosecond later (per-clock period
+#  rounding, relationship 0.002 ns); physically that is the hold edge and the
+#  capture is the next clk_sdram-aligned edge, one clk_sdram period on.
+set_max_delay -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+              -to   [get_registers {*az80_wrapper:CPU*clk_delay*}] 11.641

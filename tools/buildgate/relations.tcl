@@ -18,8 +18,9 @@ set EXPECT [list \
   [list SD_to_AZ_dout  $csd     az80_clk "*data_pins:data_pins_|dout*"      40.000 "SDRAM read data, set_max_delay 40"] \
   [list SD_to_AZ_wait  $csd     az80_clk "*az80_wrapper:CPU*clk_delay*"     11.641 "clk_sdram pacer release -> nWAIT sampler, single cycle"] \
   [list AZ_to_SD_ch2   az80_clk $csd     "*sdram*ch2_*"                     34.923 "A-Z80 address -> ch2 capture on the 3rd clk_sdram edge"] \
-  [list AZ_to_SD_clkg  az80_clk $csd     "*az80_clkgen*"                    23.282 "bus-idle -> divisor latch, -end 2"] \
-  [list AZ_to_SD_pace  az80_clk $csd     "*msx:MSX|az_*"                    11.641 "strobes -> clk_sdram pacer flops, single cycle"] ]
+  [list AZ_to_SD_div   az80_clk $csd     "*az80_clkgen*|speed_q*"           23.282 "bus-idle -> divisor latch, -end 2"] \
+  [list AZ_to_SD_tgl   az80_clk $csd     "*az80_clkgen*|az80_clk"           11.641 "the clock's own toggle flop, single cycle"] \
+  [list AZ_to_SD_sync  az80_clk $csd     "*msx:MSX|az_win_s1"               34.923 "read window -> pacer synchroniser, -end 3"] ]
 set fail 0
 foreach e $EXPECT {
   lassign $e lbl f t filt want why

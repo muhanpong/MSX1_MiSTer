@@ -75,9 +75,11 @@ module tb_az80_ch2lat;
    bit   pacer_on = 1;
    wire  bus_xfer = ~((iorq_n & mreq_n) | (wr_n & rd_n));
    wire  az_rd_win = pacer_on & bus_xfer & ~mreq_n & ~rd_n;       // sdram_ce & ram_rnw
+   logic az_win_s1 = 0, az_win_s2 = 0;
+   always @(posedge clk_sdram) begin az_win_s1 <= az_rd_win; az_win_s2 <= az_win_s1; end
    logic az_armed = 0, az_done = 0, az_tog0 = 0;  logic [7:0] az_wd = 0;
    always @(posedge clk_sdram) begin
-      if (reset | ~az_rd_win) begin az_armed <= 0; az_done <= 0; az_wd <= 0; end
+      if (reset | ~az_win_s2) begin az_armed <= 0; az_done <= 0; az_wd <= 0; end
       else begin
          if (~az_armed) begin az_armed <= 1; az_tog0 <= rdtog; end
          else if (rdtog != az_tog0) az_done <= 1;

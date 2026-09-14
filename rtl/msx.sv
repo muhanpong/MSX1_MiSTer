@@ -827,10 +827,25 @@ wire sd_pace_n = ~(cpu_turbo & sd_rd_window & ~(sd_xfer_seen & sd_ready)
 //  on the edge that set the completion, >= 1 clk_sdram before the release.
 //  The watchdog only exists so a lost completion degrades, never hangs.
 wire  az_rd_win = ~use_t80 & bus_xfer & sdram_ce & ram_rnw;
+//  The window reaches clk_sdram through a two-flop synchroniser, never straight
+//  into the pacer flops.  az_rd_win is the slot/mapper decode of the CPU address
+//  (17 logic levels, ~23 ns) and changes on an az80_clk edge; build 04b6210 had
+//  it timed single-cycle into every pacer flop (-11.7 ns).  A multicycle alone
+//  would have been unsafe: on the violated edges az_armed and az_tog0 could
+//  capture different values, and a stale tog0 against a toggled rdtog releases
+//  WAIT before this read's data.  Only az_win_s1 is multicycled (MSX1.sdc,
+//  -end 3); every pacer flop then sees ONE registered copy, s2, valid by edge 4
+//  -- before the request completes (capture 3, hit 5) and before the next
+//  window can open (>= 8 clk_sdram after this one closes, at 10.7).
+logic az_win_s1 = 1'b0, az_win_s2 = 1'b0;
+always @(posedge clk_sdram) begin
+   az_win_s1 <= az_rd_win;
+   az_win_s2 <= az_win_s1;
+end
 logic az_armed = 1'b0, az_done = 1'b0, az_tog0 = 1'b0, az_hit = 1'b0;
 logic [7:0] az_wd = 8'd0;
 always @(posedge clk_sdram) begin
-   if (reset | ~az_rd_win) begin
+   if (reset | ~az_win_s2) begin
       az_armed <= 1'b0;
       az_done  <= 1'b0;
       az_hit   <= 1'b0;
