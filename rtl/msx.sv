@@ -843,7 +843,23 @@ always @(posedge clk21m) begin
 end
 wire az_rd_pace_n = ~(az_rd_win & ~(az_done | az_hit | (az_wd == 6'd63)));
 
-wire wait_n      = wait_m1_n & bus_guard_n & vdp_pace_n & opll_pace_n & sd_pace_n & az_rd_pace_n;
+//  A-Z80's M1 wait -- the MSX2 one-Tw-per-opcode-fetch, generated on the CPU's
+//  own clock.  The 74LS74 pair above runs on ce_cpu, T80's clock-enable grid;
+//  A-Z80 samples nWAIT on ITS falling edges, which that grid does not line up
+//  with, so the single low pulse was missed at half the phases
+//  (tb_az80_m1wait: 225 clocks instead of 253 on the test program) and
+//  Z80BENCH read 4.11 at 3.58 and 6.17 at 5.37 on 20260915a -- +15%, one T-state
+//  missing from every M1.  Here: low from T1's falling edge to T2's, so the CPU's
+//  own T2 falling-edge sample sees it and the Tw sample does not -- exactly one
+//  Tw, every M1, any speed.  exwait_n (MoonSound) keeps its old meaning.
+logic az_m1_q = 1'b1, az_m1w_n = 1'b1;
+always @(negedge az80_clk) begin
+   az_m1_q  <= az_m1_n;
+   az_m1w_n <= ~(~az_m1_n & az_m1_q);
+end
+wire wait_m1_eff_n = use_t80 ? wait_m1_n : (az_m1w_n & exwait_n);
+
+wire wait_n      = wait_m1_eff_n & bus_guard_n & vdp_pace_n & opll_pace_n & sd_pace_n & az_rd_pace_n;
 
 //  Diagnostic bus trace of the A-Z80 (see rtl/cpu/az80/az80_trace.sv).
 az80_trace u_aztrace (

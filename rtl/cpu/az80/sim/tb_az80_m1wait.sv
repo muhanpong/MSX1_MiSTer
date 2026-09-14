@@ -55,19 +55,30 @@ module tb_az80_m1wait;
       if (~exwait_n)      u1_2_q <= 1'b1;
       else if (ce_cpu)    u1_2_q <= wait_m1_n;
    end
-   assign wait_n = wait_m1_n;      // cpu_turbo=0 at boot: guard shorted, pair is everything
+   // ---- the A-Z80-domain M1 wait, verbatim from rtl/msx.sv (az_m1w_n) ----
+   logic az_m1_q = 1'b1, az_m1w_n = 1'b1;
+   always @(negedge az80_clk) begin
+      az_m1_q  <= m1_n;
+      az_m1w_n <= ~(~m1_n & az_m1_q);
+   end
+   bit use_new = 0;
+   assign wait_n = use_new ? az_m1w_n : wait_m1_n;
 
-   // counters
-   int clocks, m1s, waits_seen;
+   // counters.  m1_len = rising edges M1 stays low: 2 without a Tw, 3 with one.
+   //  Counting total clocks jitters by one at the halt boundary, so the check is
+   //  per M1 cycle instead.
+   int clocks, m1s, waits_seen, m1_tw1, m1_other, m1_len;
    logic m1_q = 1;
    always @(posedge az80_clk) begin
       clocks++;
       m1_q <= m1_n;
-      if (m1_q && !m1_n) m1s++;
+      if (m1_q && !m1_n) begin m1s++; m1_len = 1; end
+      else if (!m1_n) m1_len++;
+      if (!m1_q && m1_n) begin if (m1_len == 3) m1_tw1++; else m1_other++; end
       if (!wait_n) waits_seen++;
    end
 
-   int errors = 0, n;
+   int errors = 0, n, old_missed = 0;
    string names [0:3] = '{"3.58", "5.37", "7.16", "10.7"};
    task automatic run_at(input [2:0] spd, input int ph);
       begin
@@ -78,23 +89,32 @@ module tb_az80_m1wait;
          mem['h0A]=8'h3E; mem['h0B]=8'h00; mem['h0C]=8'h7E; mem['h0D]=8'h32; mem['h0E]=8'h81;
          mem['h0F]=8'h00; mem['h10]=8'h76;
          repeat (400) @(posedge clk_sdram);
-         clocks = 0; m1s = 0; waits_seen = 0;
+         clocks = 0; m1s = 0; waits_seen = 0; m1_tw1 = 0; m1_other = 0;
          reset = 0;
          n = 0; while (!halt_n && n < 100000) begin @(posedge clk_sdram); n++; end
          n = 0; while (halt_n && n < 600000) begin @(posedge clk_sdram); n++; end
-         $write("  %sMHz ph=%0d  halt=%s clocks=%0d m1=%0d waitclks=%0d mem80=%02h mem81=%02h",
-                names[spd], ph, halt_n ? "NO " : "yes", clocks, m1s, waits_seen, mem['h80], mem['h81]);
+         $write("  %sMHz ph=%0d  halt=%s clocks=%0d M1 cycles: %0d with one Tw, %0d without  mem80=%02h mem81=%02h",
+                names[spd], ph, halt_n ? "NO " : "yes", clocks, m1_tw1, m1_other, mem['h80], mem['h81]);
          if (halt_n) begin $display("   FAIL never halted (livelock?)"); errors++; end
          else if (mem['h80] !== 8'h37 || mem['h81] !== 8'h37) begin $display("   FAIL data"); errors++; end
+         else if (use_new && m1_other != 0) begin $display("   FAIL: %0d M1 cycle(s) without exactly one Tw", m1_other); errors++; end
          else $display("");
+         if (!use_new && m1_other != 0) old_missed++;
       end
    endtask
 
    initial begin
       $display("=== tb_az80_m1wait: A-Z80 with the MSX2 M1 wait pair, ce phase sweep ===");
-      $display("  reference without the pair: 225 clocks, ~35 M1 cycles -> expect ~260 with one Tw per M1");
+      $display("  every M1 must hold M1 low for exactly 3 CPU clocks (T1, T2, one Tw)");
+      $display("  --- old ce_cpu 74LS74 pair (NEGATIVE CONTROL: must miss the Tw at some phase) ---");
+      use_new = 0;
       for (int s = 0; s < 4; s++) for (int p = 0; p < div_of[s]; p++) run_at(s[2:0], p);
-      if (errors == 0) $display("tb_az80_m1wait: PASS"); else $display("tb_az80_m1wait: FAIL (%0d)", errors);
+      $display("  --- A-Z80-domain M1 wait (every M1 must carry exactly one Tw) ---");
+      use_new = 1;
+      for (int s = 0; s < 4; s++) for (int p = 0; p < div_of[s]; p++) run_at(s[2:0], p);
+      if (old_missed == 0)  $display("tb_az80_m1wait: FAIL -- negative control never missed a Tw; bench no longer models the hazard");
+      else if (errors == 0) $display("tb_az80_m1wait: PASS -- old pair missed the Tw at %0d phase(s); new one gives exactly one Tw everywhere", old_missed);
+      else                  $display("tb_az80_m1wait: FAIL (%0d)", errors);
       $finish;
    end
 endmodule
