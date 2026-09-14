@@ -1212,10 +1212,12 @@ wire        upload_active = upload_ram_ce & upload_sdram_rq;
 //  20260914e), so an undelayed request captured a half-settled address: the
 //  boot's first page change (OUT (AB),82 -> fetch 042A) read FF instead of AF.
 //
-//  Delay: sdram_ce rises right after an az80_clk edge (edge 0); two clk_sdram
-//  stages make the request visible on edge 3, so the address has had exactly
-//  3 clk_sdram (34.9 ns).  MSX1.sdc constrains az80_clk -> *sdram*ch2_* to
-//  -end 3, so STA checks the real decode path against that, honestly.
+//  Delay: sdram_ce settles after an az80_clk edge (edge 0); two clk_sdram stages
+//  put the capture on edge 3 at the earliest (first stage catches sdram_ce on
+//  edge 1) and edge 4 at the latest the SDC allows (-end 2 on that stage).
+//  Earliest still gives the 3 clk_sdram (34.9 ns) of address stability that
+//  MSX1.sdc's az80_clk -> *sdram*ch2_* -end 3 checks; latest still releases a
+//  cache hit (edge 7) before the 10.7 MHz WAIT sample (edge 8).
 //  (20260915a used 2 clk21m = 8 clk_sdram.  Correct but slow: a cache hit then
 //  released WAIT 3 clk21m after MREQ, exactly on the 7.16 sample edge and after
 //  the 10.7 one -- Z80BENCH 6.58 and 9.88, one extra T-state per memory read.)

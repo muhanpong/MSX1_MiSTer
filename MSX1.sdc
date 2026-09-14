@@ -271,3 +271,19 @@ set_multicycle_path -hold  -end 2 \
 #  capture is the next clk_sdram-aligned edge, one clk_sdram period on.
 set_max_delay -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}] \
               -to   [get_registers {*az80_wrapper:CPU*clk_delay*}] 11.641
+
+#  A-Z80 SDRAM request delay, first stage (MSX1.sv sdram_ce_sr[0]).  sdram_ce is
+#  the slot/mapper decode of the CPU address (~15.8 ns + ~6.6 ns clock skew) and
+#  was timed single-cycle into this flop (-10.9 ns, build a2e0b13).  Both bounds
+#  hold with -end 2: EARLIEST, the stage sees sdram_ce on edge 1 and the request
+#  is captured on edge 3 -- still the 3 clk_sdram of address stability the
+#  az80_clk -> *sdram*ch2_* -end 3 rule assumes; LATEST (what -end 2 allows),
+#  it sees it on edge 2, capture on 4, cache hit on 6, WAIT release on 7, which
+#  is still before the 10.7 MHz sample on edge 8.  The request is also ANDed
+#  with the live sdram_ce, so a late stage can only delay it, never extend it.
+set_multicycle_path -setup -end 2 \
+    -from [get_clocks {az80_clk}] \
+    -to   [get_registers {*sdram_ce_sr[0]}]
+set_multicycle_path -hold  -end 1 \
+    -from [get_clocks {az80_clk}] \
+    -to   [get_registers {*sdram_ce_sr[0]}]

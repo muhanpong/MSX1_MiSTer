@@ -20,7 +20,8 @@ set EXPECT [list \
   [list AZ_to_SD_ch2   az80_clk $csd     "*sdram*ch2_*"                     34.923 "A-Z80 address -> ch2 capture on the 3rd clk_sdram edge"] \
   [list AZ_to_SD_div   az80_clk $csd     "*az80_clkgen*|speed_q*"           23.282 "bus-idle -> divisor latch, -end 2"] \
   [list AZ_to_SD_tgl   az80_clk $csd     "*az80_clkgen*|az80_clk"           11.641 "the clock's own toggle flop, single cycle"] \
-  [list AZ_to_SD_sync  az80_clk $csd     "*msx:MSX|az_win_s1"               34.923 "read window -> pacer synchroniser, -end 3"] ]
+  [list AZ_to_SD_sync  az80_clk $csd     "*msx:MSX|az_win_s1"               34.923 "read window -> pacer synchroniser, -end 3"] \
+  [list AZ_to_SD_rqd   az80_clk $csd     "*sdram_ce_sr[0]"                  23.282 "request-delay first stage, -end 2"] ]
 set fail 0
 foreach e $EXPECT {
   lassign $e lbl f t filt want why
