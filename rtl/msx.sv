@@ -816,32 +816,36 @@ wire sd_pace_n = ~(cpu_turbo & sd_rd_window & ~(sd_xfer_seen & sd_ready)
 //  rdtog completion for a miss, sdram_hit for a cache hit -- and A-Z80 inserts
 //  Tw until then (its data latch moves with Tw; measured 23 -> 47 with one Tw).
 //
-//  Both completions are REGISTERED here on clk21m before they reach WAIT.
-//  az80_clk edges sit on clk21m rises (az80_clkgen), so a clk21m-launched WAIT
-//  release is a plain full-period path; sdram_hit straight off clk_sdram would
-//  have been an 11.6 ns one.  The data itself was valid >= 1 clk_sdram before
-//  either registered completion, and is consumed >= one clk21m after it.
+//  Both completions are REGISTERED on clk_sdram before they reach WAIT (moved
+//  from clk21m on 20260915: the clk21m register quantised a cache hit to 3
+//  clk21m after MREQ -- on the 7.16 sample edge and past the 10.7 one, one extra
+//  T-state per read, Z80BENCH 6.58 / 9.88).  Timeline from the CPU edge that
+//  drops MREQ/RD (clk_sdram edge 0): request captured at 3 (MSX1.sv), sdram.sv
+//  hit at 5, az_hit here at 6 -> WAIT released 2 clk_sdram before the 10.7
+//  sample (8) and 6 before 7.16's (12).  The release is a clk_sdram -> az80_clk
+//  path with an honest 11.64 ns single-cycle requirement.  The data was valid
+//  on the edge that set the completion, >= 1 clk_sdram before the release.
 //  The watchdog only exists so a lost completion degrades, never hangs.
 wire  az_rd_win = ~use_t80 & bus_xfer & sdram_ce & ram_rnw;
 logic az_armed = 1'b0, az_done = 1'b0, az_tog0 = 1'b0, az_hit = 1'b0;
-logic [5:0] az_wd = 6'd0;
-always @(posedge clk21m) begin
+logic [7:0] az_wd = 8'd0;
+always @(posedge clk_sdram) begin
    if (reset | ~az_rd_win) begin
       az_armed <= 1'b0;
       az_done  <= 1'b0;
       az_hit   <= 1'b0;
-      az_wd    <= 6'd0;
+      az_wd    <= 8'd0;
    end else begin
       if (~az_armed) begin
          az_armed <= 1'b1;
-         az_tog0  <= sdram_rdtog;       // a miss completes >= 2 clk21m later
+         az_tog0  <= sdram_rdtog;       // a miss completes >= 8 clk_sdram later
       end else if (sdram_rdtog != az_tog0)
          az_done  <= 1'b1;
       if (sdram_hit)          az_hit <= 1'b1;
-      if (az_wd != 6'd63)     az_wd  <= az_wd + 6'd1;
+      if (az_wd != 8'd255)    az_wd  <= az_wd + 8'd1;
    end
 end
-wire az_rd_pace_n = ~(az_rd_win & ~(az_done | az_hit | (az_wd == 6'd63)));
+wire az_rd_pace_n = ~(az_rd_win & ~(az_done | az_hit | (az_wd == 8'd255)));
 
 //  A-Z80's M1 wait -- the MSX2 one-Tw-per-opcode-fetch, generated on the CPU's
 //  own clock.  The 74LS74 pair above runs on ce_cpu, T80's clock-enable grid;

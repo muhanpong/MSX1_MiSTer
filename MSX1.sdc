@@ -240,3 +240,16 @@ set_multicycle_path -hold  -end 1 \
 #  of them and fail on congestion (build a80495e).  It is a sampler: a
 #  metastable bit in a trace word is acceptable, so nothing into it is timed.
 set_false_path -to [get_registers {*az80_trace:u_aztrace|*}]
+
+#  A-Z80 address -> SDRAM ch2 capture: exactly 3 clk_sdram.  The generic
+#  -end 6 above is a T80 argument (address half a T-state ahead of MREQ).  A-Z80
+#  changes its address on the MREQ edge, and MSX1.sv holds its request back two
+#  clk_sdram stages, so ch2_addr/ch2_caddr are captured on the 3rd clk_sdram edge
+#  after the az80_clk edge that changed the address.  This more specific
+#  exception (it has -from) overrides the generic one for az80_clk sources only.
+set_multicycle_path -setup -end 3 \
+    -from [get_clocks {az80_clk}] \
+    -to   [get_registers {*sdram*ch2_*}]
+set_multicycle_path -hold  -end 2 \
+    -from [get_clocks {az80_clk}] \
+    -to   [get_registers {*sdram*ch2_*}]

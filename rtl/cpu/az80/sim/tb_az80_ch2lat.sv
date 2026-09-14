@@ -26,15 +26,23 @@ module tb_az80_ch2lat;
    //  decode: model it as the CPU address SETTLE clk_sdram cycles late.  The
    //  hardware trace showed A-Z80 changing its address on the same edge as
    //  MREQ/RD, so a request edge taken immediately reads a stale address.
+   //  SETTLE = clk_sdram periods from the az80_clk edge that changes the address
+   //  to the first capture edge that may use it -- the same meaning as an STA
+   //  "-end SETTLE" multicycle.  A change launched by the CPU edge at clk_sdram
+   //  edge 0 is first sampled on edge 1 (a_hist[0] after edge 1); at capture
+   //  edge C the right-hand side a_hist[k] holds the sample taken at edge C-1-k,
+   //  so "launched at C-SETTLE" is a_hist[SETTLE-2].  (An earlier SETTLE-1 index
+   //  silently demanded one period more than it said, and failed a design that
+   //  captures on exactly the 3rd edge.)
    int SETTLE = 3;
    logic [15:0] a_hist [0:7];
    always @(posedge clk_sdram) begin a_hist[0] <= a; for (int k = 1; k < 8; k++) a_hist[k] <= a_hist[k-1]; end
-   wire [15:0] a_dec = (SETTLE == 0) ? a : a_hist[SETTLE-1];
-   bit   req_delay = 1;     // 1 = MSX1.sv ch2_req_cpu (two clk21m); 0 = raw strobe (20260914e hardware)
-   logic ce_q1 = 0, ce_q2 = 0;
+   wire [15:0] a_dec = (SETTLE <= 1) ? a : a_hist[SETTLE-2];
+   bit   req_delay = 1;     // 1 = MSX1.sv ch2_req_cpu (two clk_sdram stages); 0 = raw strobe (20260914e hardware)
+   logic [1:0] ce_sr = 2'b00;
    wire  req_raw = ~mreq_n & (~rd_n | ~wr_n);
-   always @(posedge clk21m) begin ce_q1 <= req_raw; ce_q2 <= ce_q1; end
-   wire  req = req_delay ? (req_raw & ce_q1 & ce_q2) : req_raw;
+   always @(posedge clk_sdram) ce_sr <= {ce_sr[0], req_raw};
+   wire  req = req_delay ? (req_raw & (&ce_sr)) : req_raw;
    logic req_1 = 0;  logic [7:0] saved = 8'h00;  logic [7:0] pend_a;  logic pend_rnw;
    logic rdtog = 0;
    int   cnt = -1;
@@ -67,16 +75,16 @@ module tb_az80_ch2lat;
    bit   pacer_on = 1;
    wire  bus_xfer = ~((iorq_n & mreq_n) | (wr_n & rd_n));
    wire  az_rd_win = pacer_on & bus_xfer & ~mreq_n & ~rd_n;       // sdram_ce & ram_rnw
-   logic az_armed = 0, az_done = 0, az_tog0 = 0;  logic [5:0] az_wd = 0;
-   always @(posedge clk21m) begin
+   logic az_armed = 0, az_done = 0, az_tog0 = 0;  logic [7:0] az_wd = 0;
+   always @(posedge clk_sdram) begin
       if (reset | ~az_rd_win) begin az_armed <= 0; az_done <= 0; az_wd <= 0; end
       else begin
          if (~az_armed) begin az_armed <= 1; az_tog0 <= rdtog; end
          else if (rdtog != az_tog0) az_done <= 1;
-         if (az_wd != 6'd63) az_wd <= az_wd + 1;
+         if (az_wd != 8'd255) az_wd <= az_wd + 1;
       end
    end
-   wire az_rd_pace_n = ~(az_rd_win & ~(az_done | (az_wd == 6'd63)));
+   wire az_rd_pace_n = ~(az_rd_win & ~(az_done | (az_wd == 8'd255)));
    assign wait_n = wait_m1_n & az_rd_pace_n;
 
    int errors = 0, n, neg_failures = 0, neg2_failures = 0;

@@ -22,7 +22,7 @@ STAGES="map,fit,asm"; EXPECT=(); SIGNOFF_ONLY=0
 while [ $# -gt 0 ]; do case "$1" in
   --stages) STAGES="$2"; shift 2;; --expect) EXPECT+=("$2"); shift 2;; --signoff-only) SIGNOFF_ONLY=1; shift;;
   *) echo "unknown arg $1"; exit 2;; esac; done
-LOG=${BUILDGATE_LOG:-/tmp/buildgate}; mkdir -p "$LOG"
+LOG=${BUILDGATE_LOG:-/tmp/buildgate}; mkdir -p "$LOG"; rm -f "$LOG/buildgate.out"
 fail=0
 if [ ! -x "$Q/quartus_map" ]; then
   echo "GATE-FAIL: Quartus volume not mounted at $Q"
@@ -55,4 +55,4 @@ awk '$2<0{f=1} END{exit f}' "$LOG/signoff.txt" || { echo "GATE-FAIL: negative sl
 grep -q '^GATE-FAIL' "$LOG/relations.txt" && fail=1
 tools/buildgate/sdc_ignored.sh "$LOG/sta.log" || fail=1
 grep -E 'M10K blocks|Logic utilization \(in ALMs\)' output_files/MSX1.fit.rpt | head -2 | sed 's/  */ /g'
-[ $fail = 0 ] && echo "BUILDGATE: PASS" || { echo "BUILDGATE: FAIL"; exit 1; }
+if [ $fail = 0 ]; then echo "BUILDGATE: PASS" | tee "$LOG/buildgate.out"; else echo "BUILDGATE: FAIL" | tee "$LOG/buildgate.out"; exit 1; fi

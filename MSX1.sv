@@ -1202,28 +1202,27 @@ wire        nvbak_sdram_req, nvbak_sdram_rnw;
 wire  [7:0] nvbak_sdram_din;
 wire        upload_active = upload_ram_ce & upload_sdram_rq;
 
-//  A-Z80: hold the SDRAM ch2 request back two clk21m periods.
+//  A-Z80: hold the SDRAM ch2 request back two clk_sdram cycles.
 //
-//  sdram.sv captures ch2_addr on the RISING edge of ch2_req (one clk_sdram to
-//  see it, then the capture), and ch2_addr is a long combinational function of
-//  the CPU address: slot (PPI port A, a[15:14]) -> slot_layout -> lookup_RAM
-//  base -> 27-bit add with the mapper offset.  The MSX1.sdc multicycle on
-//  *sdram*ch2_* (-end 6) is only true because T80 puts the address out half a
-//  T-state BEFORE MREQ/RD.  A-Z80 latches its address pins on the same edge
-//  MREQ/RD fall (JTAG trace, build 20260914e: address and MREQ change together),
-//  so the capture took a half-settled address.  Short paths (low address bits)
-//  survived; the first PAGE change of the boot did not -- OUT (AB),82 has A=82,
-//  page 2, and the next fetch at 042A came back FF instead of AF, then RST 38h.
-//  Two clk21m = 8 clk_sdram of address stability before the request edge, >=
-//  the 6 the SDC assumes.  The read still completes correctly: az_rd_pace_n in
-//  msx.sv opens its window on the undelayed sdram_ce and waits for this
-//  request's own completion.  T80s is untouched.
-logic sdram_ce_q1 = 1'b0, sdram_ce_q2 = 1'b0;
-always @(posedge clk21m) begin
-   sdram_ce_q1 <= sdram_ce;
-   sdram_ce_q2 <= sdram_ce_q1;
-end
-wire ch2_req_cpu = use_t80 ? sdram_ce : (sdram_ce & sdram_ce_q1 & sdram_ce_q2);
+//  sdram.sv captures ch2_addr on the RISING edge of ch2_req, and ch2_addr is a
+//  long combinational function of the CPU address (slot -> slot_layout ->
+//  lookup_RAM base -> 27-bit add).  T80 puts its address out half a T-state
+//  before MREQ/RD, which is what the generic -end 6 on *sdram*ch2_* leans on.
+//  A-Z80 latches its address pins on the SAME edge MREQ/RD fall (JTAG trace,
+//  20260914e), so an undelayed request captured a half-settled address: the
+//  boot's first page change (OUT (AB),82 -> fetch 042A) read FF instead of AF.
+//
+//  Delay: sdram_ce rises right after an az80_clk edge (edge 0); two clk_sdram
+//  stages make the request visible on edge 3, so the address has had exactly
+//  3 clk_sdram (34.9 ns).  MSX1.sdc constrains az80_clk -> *sdram*ch2_* to
+//  -end 3, so STA checks the real decode path against that, honestly.
+//  (20260915a used 2 clk21m = 8 clk_sdram.  Correct but slow: a cache hit then
+//  released WAIT 3 clk21m after MREQ, exactly on the 7.16 sample edge and after
+//  the 10.7 one -- Z80BENCH 6.58 and 9.88, one extra T-state per memory read.)
+//  T80s is untouched.
+logic [1:0] sdram_ce_sr = 2'b00;
+always @(posedge clk_sdram) sdram_ce_sr <= {sdram_ce_sr[0], sdram_ce};
+wire ch2_req_cpu = use_t80 ? sdram_ce : (sdram_ce & (&sdram_ce_sr));
 // log_clear: pulse on new ROM staging start -> reset change-log journal per game
 reg         upload_active_q;
 always @(posedge clk21m) upload_active_q <= upload_active;
