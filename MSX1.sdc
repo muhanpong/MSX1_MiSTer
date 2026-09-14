@@ -290,3 +290,15 @@ set_false_path -from [get_registers {*msx:MSX|az80_wrapper:CPU|*}] \
 #  transition, so no path launched by this register is ever consumed near its
 #  transition.  Quasi-static by construction.
 set_false_path -from [get_registers {*|use_t80}]
+
+#  status[58:56] are the OSD "CPU Speed" bits.  Registering use_t80 in MSX1.sv
+#  did not take the raw bits out of the address-mux select cone in the fitted
+#  netlist (build btvhccwyg: hps_io|status[58]|q -> MSX|a[14]~16 -> slot decode
+#  -> neo16 -> wait cone -> A-Z80 nWAIT, -13.0 ns), so constrain the source.
+#  These three bits are quasi-static by construction: they change only on an
+#  OSD interaction, every consumer latches them at a bus-idle point (clock.sv,
+#  az80_clkgen) or triggers the 12 ms core-switch reset (MSX1.sv), and a torn
+#  multi-bit capture can at worst select a neighbouring valid speed until the
+#  next idle re-latch, or extend that reset.  Nothing samples them under
+#  single-cycle timing on purpose.
+set_false_path -from [get_registers {*hps_io|status[56] *hps_io|status[57] *hps_io|status[58]}]
