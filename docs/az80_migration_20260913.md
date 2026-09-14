@@ -350,6 +350,14 @@ JTAG 회수, `tools/parse_aztrace.py`로 버스사이클 단위 렌더. 첫 시�
 
 ## 6. 교훈 모음 (다음 코어 교체 때 그대로 적용)
 
+★★**하네스로 고정됨(20260914)** — 읽는 교훈이 아니라 도는 검사:
+- `tools/buildgate/build.sh` — 볼륨 마운트 거부·단계별 rc/경과/산출물·fit 3분 미만 경고(smart recompile)·
+  `--expect` 인스턴스 존재·LL 무면허 경고·다코너 사인오프(`signoff.tcl`, 모델마다 read_sdc)·
+  클럭쌍 관계 단언(`relations.tcl`)·새로 무시된 SDC 줄(`sdc_ignored.sh`). README에 검사↔교훈 표.
+- `sim/run_az80.sh` — 벤치 7종. `tb_az80_ch2lat`는 **음성대조 내장**(페이서 OFF가 4/4 실패해야 PASS).
+- `tools/dump_aztrace.tcl` + `tools/parse_aztrace.py` + `rtl/cpu/az80/az80_trace.sv` — JTAG 프리트리거 버스 트레이스.
+
+
 1. **CEN 없는 코어는 실클럭 + 생성클럭 선언부터.** 선언 전 타이밍 수치는 전부 무효.
 2. **inout 핀은 경계에서 즉시 단방향화.** 게이팅으로 STA를 설득할 수 없다.
 3. **트라이스테이트가 뜨는 컨트롤 핀은 풀업을 에뮬레이션**해야 한다. 실보드에는

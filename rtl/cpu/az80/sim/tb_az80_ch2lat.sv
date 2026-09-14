@@ -67,7 +67,7 @@ module tb_az80_ch2lat;
    wire az_rd_pace_n = ~(az_rd_win & ~(az_done | (az_wd == 6'd63)));
    assign wait_n = wait_m1_n & az_rd_pace_n;
 
-   int errors = 0, n;
+   int errors = 0, n, neg_failures = 0;
    task automatic run(input [2:0] spd, input int lat);
       begin
          reset = 1; cpu_speed = spd; LAT = lat;
@@ -88,14 +88,16 @@ module tb_az80_ch2lat;
    endtask
    initial begin
       $display("=== tb_az80_ch2lat: A-Z80 vs SDRAM-ch2 edge-triggered read latency ===");
-      $display("  --- pacer OFF (the 20260914a hardware) ---");
-      pacer_on = 0;
+      $display("  --- pacer OFF (the 20260914a hardware): NEGATIVE CONTROL, must fail ---");
+      pacer_on = 0; errors = 0;
       foreach (div_of[s]) run(s[2:0], 24);
+      neg_failures = errors;
       $display("  --- pacer ON (fix), latency sweep ---");
       pacer_on = 1; errors = 0;
       foreach (div_of[s]) for (int l = 4; l <= 60; l += 4) run(s[2:0], l);
-      if (errors == 0) $display("tb_az80_ch2lat: PASS -- every speed survives every latency with the pacer");
-      else             $display("tb_az80_ch2lat: FAIL (%0d with the pacer on)", errors);
+      if (neg_failures != 4)  $display("tb_az80_ch2lat: FAIL -- negative control did not fail (%0d of 4): the bench no longer models the hazard", neg_failures);
+      else if (errors == 0)   $display("tb_az80_ch2lat: PASS -- negative control failed 4/4, pacer passes every speed and latency");
+      else                    $display("tb_az80_ch2lat: FAIL (%0d with the pacer on)", errors);
       $finish;
    end
 endmodule
