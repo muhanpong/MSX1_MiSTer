@@ -8,8 +8,11 @@
 //  storm every failed boot ends in -- it records POST more samples and stops
 //  for good, then writes one MARKER word at the stop position.  The parser
 //  finds the marker and unrolls the ring, so the dump reads oldest -> newest
-//  with the divergence roughly in the middle.  Resets do not re-arm it: the
-//  bit-46 az_reset flag in each sample shows where resets happened instead.
+//  with the divergence roughly in the middle.  Every az_reset assertion RE-ARMS
+//  the trigger (the ring keeps its contents): the power-up run before the ROM
+//  pack is uploaded storms immediately and used to stop the ring before the
+//  real boot ever happened.  Only the run after the LAST reset can stop it;
+//  the bit-46 az_reset flag marks the resets in the data.
 //
 //  Word layout (bit numbers):
 //    15:0  a        23:16 di        31:24 do_
@@ -39,7 +42,9 @@ module az80_trace
    always_ff @(posedge clk_sdram) begin
       az_q <= az80_clk;
       we   <= 1'b0;
-      if (stopped) begin
+      if (az_reset) begin
+         trig <= 1'b0; stopped <= 1'b0; marked <= 1'b0; post <= 10'd0;
+      end else if (stopped) begin
          if (!marked) begin
             marked <= 1'b1;
             we <= 1'b1; wa <= ptr;

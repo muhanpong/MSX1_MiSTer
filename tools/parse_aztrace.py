@@ -3,7 +3,7 @@
 import sys
 path = sys.argv[1] if len(sys.argv) > 1 else "/tmp/aztrace_dump.txt"
 raw = [int(l.strip(), 16) for l in open(path) if l.strip()]
-MARK = 0xFFFF00000000FFFF
+MARK = 0xFFFF0000FFFF
 mk = [i for i, w in enumerate(raw) if w == MARK]
 if mk:
     m = mk[0]; words = raw[m+1:] + raw[:m]; print(f"# marker at {m}: ring unrolled, {len(words)} samples oldest->newest (trigger = M1@0038, +512 after)")
