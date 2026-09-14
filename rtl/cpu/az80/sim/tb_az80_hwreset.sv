@@ -9,7 +9,7 @@ module tb_az80_hwreset;
    logic [1:0] div4 = 0;  logic clk21m = 0;
    always @(posedge clk_sdram) begin div4 <= div4 + 1'd1; if (div4[0]) clk21m <= ~clk21m; end
    logic reset = 1;  logic [2:0] cpu_speed = 3'd0;  wire az80_clk;  wire [2:0] speed_q;
-   az80_clkgen clkgen (.clk_sdram(clk_sdram), .clk21m(clk21m), .reset(reset), .cpu_speed(cpu_speed),
+   az80_clkgen clkgen (.clk_sdram(clk_sdram), .clk21m(clk21m), .reset(reset), .pause(1'b0), .cpu_speed(cpu_speed),
                        .cpu_bus_idle(1'b1), .az80_clk(az80_clk), .cpu_speed_q(speed_q));
    // ---- msx.sv reset synchroniser, selectable stretch ----
    int stretch = 2;

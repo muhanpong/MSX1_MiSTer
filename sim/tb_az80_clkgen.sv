@@ -13,7 +13,7 @@ module tb_az80_clkgen;
    logic       bus_idle  = 1'b1;
    wire        az80_clk;
    wire  [2:0] speed_q;
-   az80_clkgen dut (.clk_sdram(clk_sdram), .clk21m(clk21m), .reset(reset), .cpu_speed(cpu_speed),
+   az80_clkgen dut (.clk_sdram(clk_sdram), .clk21m(clk21m), .reset(reset), .pause(1'b0), .cpu_speed(cpu_speed),
                     .cpu_bus_idle(bus_idle), .az80_clk(az80_clk), .cpu_speed_q(speed_q));
 
    //  speed 4 now expects the /8 clamp -- 21.5 MHz is T80s, and az80_clkgen must

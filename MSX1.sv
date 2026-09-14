@@ -568,7 +568,8 @@ always @(posedge clk21m) begin
    if (use_t80_q != use_t80)      core_switch_cnt <= '1;
    else if (|core_switch_cnt)     core_switch_cnt <= core_switch_cnt - 1'd1;
 end
-wire core_switch_rst = |core_switch_cnt;
+reg  core_switch_rst = 1'b0;   // registered: the 18-bit OR was -0.4 ns of recovery into MoonSound's async reset
+always @(posedge clk21m) core_switch_rst <= |core_switch_cnt;
 wire        cpu_turbo;              // driven by clock.sv from the latched speed
 wire  [2:0] cpu_speed_q;            // latched speed, back out of clock.sv
 wire        cpu_bus_idle;           // from msx.sv, gates the speed latch
@@ -596,7 +597,8 @@ az80_clkgen az80_clkgen
 (
    .clk_sdram   (clk_sdram),
    .clk21m      (clk21m),
-   .reset       (reset | msx_pause),
+   .reset       (reset),
+   .pause       (msx_pause),
    //  While T80s owns the machine the divider is parked at /8; the A-Z80 sits
    //  in reset then, and the SDC declares az80_clk at /8, so nothing may ever
    //  clock it faster.

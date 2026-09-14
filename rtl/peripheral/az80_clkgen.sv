@@ -41,7 +41,8 @@ module az80_clkgen
 (
    input        clk_sdram,      // 85.909090 MHz
    input        clk21m,         // 21.477270 MHz, same PLL, 0 ps -- the phase reference
-   input        reset,
+   input        reset,          // speed to default; the clock KEEPS RUNNING (a Z80 in /RESET needs its clock)
+   input        pause,          // msx_pause: freeze the clock (the CPU is static)
    input  [2:0] cpu_speed,      // 0=3.58 1=5.37 2=7.16 3=10.7 (4=T80s: clamped to /8 here)
    input        cpu_bus_idle,   // safe point to change the divisor
    output logic az80_clk,
@@ -92,10 +93,9 @@ logic [1:0] cnt     = 2'd0;     // remaining clk21m periods in the current phase
 assign cpu_speed_q = speed_q;
 
 always @(posedge clk_sdram) begin
-   if (reset) begin
-      speed_q  <= 3'd0;
-      cnt      <= 2'd0;
-      az80_clk <= 1'b0;
+   if (pause) begin
+      //  Hold everything.  Resumes on the clk21m grid because on_rise is
+      //  tracked continuously and the phase counter is untouched.
    end else if (on_rise) begin
       if (cnt != 2'd0) cnt <= cnt - 2'd1;
       else begin
@@ -103,7 +103,10 @@ always @(posedge clk_sdram) begin
          if (~az80_clk) begin
             //  Rising now: a new period starts, the only point a divisor may
             //  change (and only with the bus idle).
-            if (cpu_bus_idle) begin
+            if (reset) begin
+               speed_q <= 3'd0;
+               cnt     <= hi_of(3'd0) - 2'd1;
+            end else if (cpu_bus_idle) begin
                speed_q <= cpu_speed;
                cnt     <= hi_of(cpu_speed) - 2'd1;
             end else

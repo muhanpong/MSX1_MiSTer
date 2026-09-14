@@ -24,5 +24,6 @@ run tb_az80_domain   $CORE rtl/cpu/az80/sim/tb_az80_domain.sv
 run tb_az80_m1wait   $CORE rtl/cpu/az80/sim/tb_az80_m1wait.sv
 run tb_az80_hwreset  $CORE rtl/cpu/az80/sim/tb_az80_hwreset.sv
 run tb_az80_ch2lat   $CORE rtl/cpu/az80/sim/tb_az80_ch2lat.sv
+run tb_az80_midreset $CORE rtl/cpu/az80/sim/tb_az80_midreset.sv
 [ $rc -eq 0 ] && echo "run_az80: ALL PASS" || echo "run_az80: FAILURES PRESENT"
 exit $rc

@@ -370,26 +370,4 @@ set_global_assignment -name ENABLE_SIGNALTAP OFF
 set_instance_assignment -name GLOBAL_SIGNAL GLOBAL_CLOCK -to "*az80_clkgen*|az80_clk" -entity sys_top
 
 
-# A-Z80 placement region -- the core's own half-cycle latch paths (ir|opcode ->
-# data_pins dout) are the az80_clk Fmax limiter once the boundary MCPs are in
-# (docs/az80_migration_20260913.md).  Standalone this core closes at 29.2 MHz on
-# this device; in-context it scatters to 19-21, so keep its 925 ALMs together.
-# This block was WRITTEN BY quartus_sh's logiclock package (set_logiclock +
-# set_logiclock_contents), not by hand: a hand-written subset (ENABLED/AUTO_SIZE/
-# STATE/MEMBER_OF alone) is silently ignored -- the fitter needs the full set
-# including LL_WIDTH/HEIGHT/ORIGIN even when AUTO_SIZE and FLOATING will
-# recompute them.  Verify in fit.rpt's LogicLock Region Summary, never by the
-# assignment's presence here.
-set_global_assignment -name LL_ENABLED ON -section_id az80_region
-set_global_assignment -name LL_AUTO_SIZE ON -section_id az80_region
-set_global_assignment -name LL_STATE FLOATING -section_id az80_region
-set_global_assignment -name LL_RESERVED OFF -section_id az80_region
-set_global_assignment -name LL_CORE_ONLY OFF -section_id az80_region
-set_global_assignment -name LL_SECURITY_ROUTING_INTERFACE OFF -section_id az80_region
-set_global_assignment -name LL_IGNORE_IO_BANK_SECURITY_CONSTRAINT OFF -section_id az80_region
-set_global_assignment -name LL_PR_REGION OFF -section_id az80_region
-set_global_assignment -name LL_ROUTING_REGION_EXPANSION_SIZE 2147483647 -section_id az80_region
-set_global_assignment -name LL_WIDTH 1 -section_id az80_region
-set_global_assignment -name LL_HEIGHT 1 -section_id az80_region
-set_global_assignment -name LL_ORIGIN X1_Y1 -section_id az80_region
-set_instance_assignment -name LL_MEMBER_OF az80_region -to "emu:emu|msx:MSX|az80_wrapper:CPU" -section_id az80_region
+# (LogicLock block removed 20260914: Quartus Lite has no LogicLock license -- fit.log Critical Warning 140003.)
