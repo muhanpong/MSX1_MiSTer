@@ -197,12 +197,25 @@ set_multicycle_path -setup -end 2 \
 set_multicycle_path -hold  -end 1 \
     -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}] \
     -to   [get_registers {*data_pins:data_pins_|dout*}]
+#  clk21m -> az80_clk, the whole pair (supersedes the earlier clk21m -> dout
+#  line).  Build b9g9xx16g showed the last class: PPI port A -- the 0xA8
+#  primary-slot register -- and mapper state (map_valid) feeding the slot
+#  decode -> sdram_ce -> bus_guard_n -> A-Z80's nWAIT sampler, -12.2 ns on the
+#  23.28 ns pairing.  Every clk21m register that reaches the CPU is one of:
+#    read data      consumed at T3 falling (the dout argument above);
+#    wait_n         slot/mapper/guard state is written by the CPU's OWN previous
+#                   bus cycle and sampled at the NEXT cycle's T2 falling edge,
+#                   >= 1.5 T-states (139.7 ns at /8) after it can last change;
+#    int_n          level held for many cycles, sampled at T_last; one cycle
+#                   of lateness is one clk21m of interrupt latency;
+#    reset          the synchroniser, false-pathed separately.
+#  -end 2 asks for 46.57 ns of each.
 set_multicycle_path -setup -end 2 \
     -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
-    -to   [get_registers {*data_pins:data_pins_|dout*}]
+    -to   [get_clocks {az80_clk}]
 set_multicycle_path -hold  -end 1 \
     -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
-    -to   [get_registers {*data_pins:data_pins_|dout*}]
+    -to   [get_clocks {az80_clk}]
 
 #  (The arithmetic below was derived at /4.  The clock is now declared /8 --
 #  T-states double, every contract lead doubles, the -end 2 budgets stay the
