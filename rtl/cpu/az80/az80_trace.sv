@@ -3,8 +3,9 @@
 //  vdp_regprobe's MPRB.  Diagnostic only.
 //
 //  One 48-bit sample is written on EVERY az80_clk edge (both polarities), so
-//  2048 words hold the first 1024 T-states after the CPU comes out of reset --
-//  roughly the first 250 instructions of the BIOS.  Sampling is done on
+//  1024 words hold the first 512 T-states after the CPU comes out of reset --
+//  roughly the first 120 instructions of the BIOS.  (2048 x 48 = 12 M10K
+//  next to the CPU pushed the router into congestion failure; 6 fit.)  Sampling is done on
 //  clk_sdram one cycle after the CPU edge (az80_clk edges sit on clk_sdram
 //  edges), so each word is the bus as the fabric sees it right after that
 //  edge.  Recording arms itself when az_reset falls and stops when the ring is
@@ -25,9 +26,10 @@ module az80_trace
    input  [47:0] sample        // everything but bit 39, which is filled in here
 );
    logic        az_q = 1'b0, rst_q = 1'b1;
-   logic [10:0] ptr = 11'd0;          // bit 10 = full/stopped
+   logic [9:0]  ptr = 10'd0;
+   logic        full = 1'b0;
    logic        we = 1'b0;
-   logic [10:0] wa = 11'd0;
+   logic [9:0]  wa = 10'd0;
    logic [47:0] wd = 48'd0;
 
    always_ff @(posedge clk_sdram) begin
@@ -35,23 +37,25 @@ module az80_trace
       rst_q <= az_reset;
       we    <= 1'b0;
       if (az_reset) begin
-         ptr <= 11'd0;                // re-arm: next release records from 0
-      end else if (az_q != az80_clk && !ptr[10]) begin
+         ptr  <= 10'd0;               // re-arm: next release records from 0
+         full <= 1'b0;
+      end else if (az_q != az80_clk && !full) begin
          we  <= 1'b1;
          wa  <= ptr;
          wd  <= {sample[47:40], az80_clk, sample[38:0]};
-         ptr <= ptr + 11'd1;
+         ptr <= ptr + 10'd1;
+         if (ptr == 10'd1023) full <= 1'b1;
       end
    end
 
    altsyncram #(
       .operation_mode("SINGLE_PORT"),
-      .width_a(48), .widthad_a(11), .numwords_a(2048),
+      .width_a(48), .widthad_a(10), .numwords_a(1024),
       .outdata_reg_a("UNREGISTERED"),
       .lpm_hint("ENABLE_RUNTIME_MOD=YES, INSTANCE_NAME=CPUT"),
       .lpm_type("altsyncram")
    ) u_cput (
-      .clock0(clk_sdram), .address_a(wa[10:0]), .data_a(wd), .wren_a(we), .q_a(),
+      .clock0(clk_sdram), .address_a(wa), .data_a(wd), .wren_a(we), .q_a(),
       .aclr0(1'b0), .aclr1(1'b0), .address_b(1'b1), .addressstall_a(1'b0),
       .addressstall_b(1'b0), .byteena_a(1'b1), .byteena_b(1'b1), .clock1(1'b1),
       .clocken0(1'b1), .clocken1(1'b1), .clocken2(1'b1), .clocken3(1'b1),

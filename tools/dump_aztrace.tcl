@@ -1,5 +1,5 @@
 # Read the A-Z80 bus trace ring (rtl/cpu/az80/az80_trace.sv, ISM instance "CPUT",
-# 2048 x 48) over JTAG.  usage: quartus_stp -t tools/dump_aztrace.tcl
+# 1024 x 48) over JTAG.  usage: quartus_stp -t tools/dump_aztrace.tcl
 # then: python3 tools/parse_aztrace.py /tmp/aztrace_dump.txt
 set hw [lindex [get_hardware_names] 0]
 puts "HW: $hw"
@@ -18,7 +18,7 @@ if {$target < 0} { puts "NO-CPUT-INSTANCE: is the aztrace core loaded?"; exit 2 
 puts "CPUT = instance_index $target"
 if {[catch {
     begin_memory_edit -hardware_name $hw -device_name $dev
-    set data [read_content_from_memory -instance_index $target -start_address 0 -word_count 2048 -content_in_hex]
+    set data [read_content_from_memory -instance_index $target -start_address 0 -word_count 1024 -content_in_hex]
     end_memory_edit
 } err]} { catch { end_memory_edit }; puts "READ-ERROR: $err"; exit 1 }
 set fp [open "/tmp/aztrace_dump.txt" w]

@@ -233,3 +233,10 @@ set_multicycle_path -setup -end 2 \
 set_multicycle_path -hold  -end 1 \
     -from [get_registers {*az80_wrapper:CPU|*address_pins:address_pins_|*}] \
     -to   [get_registers {*IKASCC_player_memory_s*}]
+
+#  A-Z80 bus trace ring (diagnostic).  Its 48 sample flops are on clk_sdram
+#  and take az80_clk / clk21m domain nets a cycle after the CPU edge; timing
+#  them against coincident edges made the router insert hold-fix delay on all
+#  of them and fail on congestion (build a80495e).  It is a sampler: a
+#  metastable bit in a trace word is acceptable, so nothing into it is timed.
+set_false_path -to [get_registers {*az80_trace:u_aztrace|*}]
