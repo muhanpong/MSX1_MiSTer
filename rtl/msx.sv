@@ -845,6 +845,17 @@ wire az_rd_pace_n = ~(az_rd_win & ~(az_done | az_hit | (az_wd == 6'd63)));
 
 wire wait_n      = wait_m1_n & bus_guard_n & vdp_pace_n & opll_pace_n & sd_pace_n & az_rd_pace_n;
 
+//  Diagnostic bus trace of the A-Z80 (see rtl/cpu/az80/az80_trace.sv).
+az80_trace u_aztrace (
+   .clk_sdram (clk_sdram),
+   .az80_clk  (az80_clk),
+   .az_reset  (az_reset),
+   .sample    ({use_t80, az_reset, sdram_rdtog, sdram_hit, wait_m1_n, az_rd_pace_n, ram_rnw, sdram_ce,
+                1'b0, wait_n, az_rfsh_n, az_m1_n, az_wr_n, az_rd_n, az_iorq_n, az_mreq_n,
+                az_do, az_di, az_a})
+);
+
+
 logic map_valid = 0;
 wire ppi_en = ~ppi_n;
 wire [1:0] slot;
