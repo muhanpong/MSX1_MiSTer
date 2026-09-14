@@ -563,7 +563,13 @@ reg  use_t80 = 1'b0;
 reg  use_t80_q = 1'b0;
 reg  [17:0] core_switch_cnt = '0;              // ~12 ms at 21.477 MHz
 always @(posedge clk21m) begin
-   use_t80   <= cpu_speed == 3'd4;
+   //  Commit the core choice only with the OSD menu CLOSED.  MiSTer option
+   //  lines only step forward, so going 10.7 -> 3.58 means passing 21.5; taking
+   //  the choice live made that a core swap (and a reset) on the way through
+   //  (user report 20260915).  While the menu is open A-Z80 keeps running --
+   //  az80_clkgen clamps a transient speed 4 to /8 -- and on close only a real
+   //  change of core family resets, once.  A-Z80 <-> A-Z80 speed steps never do.
+   if (~OSD_STATUS) use_t80 <= cpu_speed == 3'd4;
    use_t80_q <= use_t80;
    if (use_t80_q != use_t80)      core_switch_cnt <= '1;
    else if (|core_switch_cnt)     core_switch_cnt <= core_switch_cnt - 1'd1;
