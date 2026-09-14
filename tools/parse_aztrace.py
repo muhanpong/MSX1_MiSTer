@@ -3,6 +3,10 @@
 import sys
 path = sys.argv[1] if len(sys.argv) > 1 else "/tmp/aztrace_dump.txt"
 raw = [int(l.strip(), 16) for l in open(path) if l.strip()]
+# read_content_from_memory returns the HIGHEST address first (same as MPRB --
+# tools/parse_mprobe.py:21).  Put word i at address i before anything else;
+# forgetting this made two traces read time-reversed (PC "running backwards").
+raw = raw[::-1]
 MARK = 0xFFFF0000FFFF
 mk = [i for i, w in enumerate(raw) if w == MARK]
 if mk:
