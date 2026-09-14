@@ -231,6 +231,19 @@ Quartus Prime Lite 17.1의 이 흐름에서 LogicLock은 조용히 미지원으�
 - 검증: run_az80.sh 3종(클램프 포함) + run_turbo.sh 4종 ALL PASS.
   ★가드·하류 로직은 실기검증본과 **바이트 동일**(diff 0) — 리스크면은 mux 블록뿐
 
+### 후보 발견: RZ80 (rejunity/z80-from-schematics, 20260914 조사)
+Renaldas Zioma 님(z80-open-silicon 저자)의 2026-06 신작. **A-Z80의 FPGA 세금이 구조적으로 없음**:
+단일 posedge 클럭·래치 0·트라이스테이트 0·데이터핀 분리·순차블록 1개(CE 한 줄 삽입 가능).
+T-state당 2위상(phi) — clk21m에 CE로 물리면 위상율 21.477 = **CPU 10.74MHz 정확히 일치**, 같은 도메인.
+- 정확도: ZEXALL 67/67, FUSE 100%, **Rak z80test 160/160(SCF/CCF Q까지 통과 — T80·A-Z80 둘 다 실패 항목)**,
+  perfectz80(Visual Z80 넷리스트) 게이트레벨 12/12, 실 KC85 실리콘 캡처 대조. 잔여 차이는 오라클 하네스
+  정렬(WAIT prog11/14)·HALT핀 sub-T·리셋값 0x5555 — 기능 결함 0. 베이스는 `perfect` 브랜치(06-20).
+- **Cyclone V 단독 합성(5CSEBA6U23I7, 본 세션 실측): Fmax 59.11MHz** → Z80 환산 29.5MHz.
+  10.74용 21.477 위상클럭엔 2.75× 마진, 21.5용 42.95 위상클럭도 단독 1.38× (in-context 미측정).
+- ⛔ **LICENSE 파일 없음**(API spdx null, 클론 확인) — 저자 허락 전 반입 불가. 사용자 결정 사항.
+- 권고: A-Z80 슬롯(≤10.74)의 정답. 21.5는 당분간 T80s, 추후 43MHz 위상클럭 실험.
+클론: 스크래치 `$CLAUDE_JOB_DIR/tmp/rz80` (main+perfect+fpga 브랜치), 합성 프로젝트 `rz80_fmax/`.
+
 ## 4. 검증 자산
 
 - `sim/run_az80.sh` — ①clkgen 주파수/듀티/전환퍼징 ②bringup(DJNZ 루프+2스토어,
