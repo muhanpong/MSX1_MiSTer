@@ -203,3 +203,33 @@ set_false_path -from [get_registers {*sdram:sdram|ch2_hit_r}] \
 #  wrapped in the 12 ms core-switch reset.
 set_false_path -from [get_registers {*|use_t80}]
 set_false_path -from [get_registers {*hps_io|status[56] *hps_io|status[57] *hps_io|status[58]}]
+
+#  clk21m -> az80_clk: the requirement is exactly one clk21m period.
+#  The emu PLL makes clk_sdram with C counter 5 and clk21m with C counter 20
+#  off the same VCO at 0 degrees (fit.rpt PLL summary), so their edges coincide
+#  exactly, and az80_clkgen puts every az80_clk edge on one of those edges.
+#  TimeQuest rounds each period to the picosecond on its own -- clk_sdram 11.641,
+#  clk21m 46.566, 4 x 11.641 = 46.564 -- sees a coincident capture edge as a
+#  hair after the launch, and reports a 0.000 ns setup relationship (build
+#  2f5ff24: -14.8 ns on all 2000 paths).  Physically that edge is the HOLD edge.
+#  The tightest real capture is one clk21m period later (launch on an az80_clk
+#  rise, capture at the next fall -- at every speed, 7.16's 2+1 included).
+#  An edge-count multicycle is WRONG here: "-end 2" was tried and measured a
+#  93.133 ns relationship, a full extra CPU period for the falling-edge flops.
+#  A fixed max delay states the real requirement for every flop polarity.
+#  Hold stays on the default (coincident) edge.
+set_max_delay -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+              -to   [get_clocks {az80_clk}] 46.566
+
+#  CPU address -> SCC wavetable RAM.  IKASCC's wave RAMs register their address
+#  on the clk21m FALLING edge, a genuine half-period (23.28 ns) after an az80_clk
+#  edge.  A write lands only when the write strobe is active, and A-Z80 drives
+#  the address at T1 rise and WR at T2 fall -- 1.5 T-states, >= 1.5 clk21m
+#  periods, later -- so the falling edge that commits a write has seen that
+#  address stable for at least one full clk21m period.  Address bits only.
+set_multicycle_path -setup -end 2 \
+    -from [get_registers {*az80_wrapper:CPU|*address_pins:address_pins_|*}] \
+    -to   [get_registers {*IKASCC_player_memory_s*}]
+set_multicycle_path -hold  -end 1 \
+    -from [get_registers {*az80_wrapper:CPU|*address_pins:address_pins_|*}] \
+    -to   [get_registers {*IKASCC_player_memory_s*}]
