@@ -296,3 +296,23 @@ set_multicycle_path -hold  -end 1 \
 #  T80s IR/MCycle -> these flops.)
 set_false_path -from [get_registers {*msx:MSX|T80s:T80|*}] \
                -to   [get_registers {*msx:MSX|az_win_s1 *sdram_ce_sr*}]
+
+#  clk21m slot/mapper state -> the same two synchroniser first stages.  PPI port A
+#  (primary slot), map_valid and mapper registers change only during the CPU's
+#  own I/O or memory write, which ends at least one T-state (8 clk_sdram at
+#  10.7 MHz) before the next read strobe; ioctl_size changes only while an upload
+#  holds the machine.  So they are at least as quiet as the CPU address the
+#  az80_clk rules above already relax, and get the same budgets.  (f891721:
+#  -5.13 ns, porta_dout / ioctl_size / map_valid -> these flops.)
+set_multicycle_path -setup -end 3 \
+    -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+    -to   [get_registers {*msx:MSX|az_win_s1}]
+set_multicycle_path -hold  -end 2 \
+    -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+    -to   [get_registers {*msx:MSX|az_win_s1}]
+set_multicycle_path -setup -end 2 \
+    -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+    -to   [get_registers {*sdram_ce_sr[0]}]
+set_multicycle_path -hold  -end 1 \
+    -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+    -to   [get_registers {*sdram_ce_sr[0]}]
