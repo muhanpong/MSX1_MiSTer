@@ -287,3 +287,12 @@ set_multicycle_path -setup -end 2 \
 set_multicycle_path -hold  -end 1 \
     -from [get_clocks {az80_clk}] \
     -to   [get_registers {*sdram_ce_sr[0]}]
+
+#  T80s -> the A-Z80-only synchronisers (az_win_s1, sdram_ce_sr).  Mutually
+#  exclusive by construction, like the core-to-core false paths above: while T80s
+#  runs, az_rd_win carries ~use_t80 (constant 0) and ch2_req_cpu selects the raw
+#  sdram_ce, so neither synchroniser is used; while A-Z80 runs, T80s is held in
+#  reset and its IR/MCycle are static.  (Build 9e9e8f2: -8.98 ns, 508 paths, all
+#  T80s IR/MCycle -> these flops.)
+set_false_path -from [get_registers {*msx:MSX|T80s:T80|*}] \
+               -to   [get_registers {*msx:MSX|az_win_s1 *sdram_ce_sr*}]
