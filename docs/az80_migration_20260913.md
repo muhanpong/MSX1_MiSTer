@@ -384,6 +384,17 @@ A-Z80 실기 부팅까지 필요했던 것(전부): data_pins 단방향화+풀�
    샘플 8/12). `relations.tcl` 경로 클래스별 단언으로 재작성.
 3. 벤치 결함 1: `tb_az80_ch2lat` 정착모델 인덱스가 "3"이라 하면서 4주기를 요구 → 올바른 설계를 실패시킴. 인덱스 수정(-2).
 
+### `d_azturbo` 사인오프까지 — buildgate가 막은 3층 (20260915)
+배포 가드가 실제로 세 번 막음(전부 실위반 또는 거짓 단언). 층별:
+1. strobes→`az_rd_win`→클럭SDRAM 페이서 플롭 **−11.7**(17레벨): MCP만 걸면 armed/tog0이 서로 다른 값을 캡처해 조기 해제 위험 →
+   **2-플롭 동기화기**(`az_win_s1` -end 3, 나머지는 s2 하나만 봄).
+2. 주소→`sdram_ce`→요청지연 1단 `sdram_ce_sr[0]` **−10.9**: -end 2(최조 캡처 3 / 최지 캡처 4·해제 7 < 10.7 샘플 8 둘 다 성립).
+3. **T80s IR/MCycle** → 위 두 동기화기 **−9.0**(상호배제 FP) → **clk21m 슬롯/매퍼 상태**(PPI A·map_valid·ioctl_size) → 동기화기
+   **−5.1**(CPU 주소와 같은 예산, 쓰기사이클 후 ≥1T 조용).
+또 relations 단언 12개로 확장, `--expect`는 fit.rpt에 안 나오는 레지스터 이름에 쓰지 말 것(거짓 FAIL).
+최종: slow setup **+0.231** / hold +0.242, fast 전부 양수, 단언 12/12, SDC 무시 u_pcm만 → **BUILDGATE PASS** →
+`MSX1_20260915d_azturbo.rbf`(md5 718fb264889a) 가드 통과 배포·로드. az80_clk Fmax 13.91MHz(요구 10.74).
+
 ### ⚠ 오라벨 RBF 기록 (삭제 금지 규칙으로 보존)
 **`MSX1_20260915c_osdcore.rbf`는 OSD 수정이 들어있지 않음** — `b_azm1w`와 md5 동일(192ab48d327f). 빌드를 fit 중 중단했는데
 체인의 배포 단계가 이전 비트스트림을 새 이름으로 올렸음. 재발 방지 = `tools/buildgate/deploy.sh`(buildgate PASS 확인 +
