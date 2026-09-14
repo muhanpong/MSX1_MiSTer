@@ -1195,6 +1195,29 @@ wire [26:0] nvbak_sdram_addr;
 wire        nvbak_sdram_req, nvbak_sdram_rnw;
 wire  [7:0] nvbak_sdram_din;
 wire        upload_active = upload_ram_ce & upload_sdram_rq;
+
+//  A-Z80: hold the SDRAM ch2 request back two clk21m periods.
+//
+//  sdram.sv captures ch2_addr on the RISING edge of ch2_req (one clk_sdram to
+//  see it, then the capture), and ch2_addr is a long combinational function of
+//  the CPU address: slot (PPI port A, a[15:14]) -> slot_layout -> lookup_RAM
+//  base -> 27-bit add with the mapper offset.  The MSX1.sdc multicycle on
+//  *sdram*ch2_* (-end 6) is only true because T80 puts the address out half a
+//  T-state BEFORE MREQ/RD.  A-Z80 latches its address pins on the same edge
+//  MREQ/RD fall (JTAG trace, build 20260914e: address and MREQ change together),
+//  so the capture took a half-settled address.  Short paths (low address bits)
+//  survived; the first PAGE change of the boot did not -- OUT (AB),82 has A=82,
+//  page 2, and the next fetch at 042A came back FF instead of AF, then RST 38h.
+//  Two clk21m = 8 clk_sdram of address stability before the request edge, >=
+//  the 6 the SDC assumes.  The read still completes correctly: az_rd_pace_n in
+//  msx.sv opens its window on the undelayed sdram_ce and waits for this
+//  request's own completion.  T80s is untouched.
+logic sdram_ce_q1 = 1'b0, sdram_ce_q2 = 1'b0;
+always @(posedge clk21m) begin
+   sdram_ce_q1 <= sdram_ce;
+   sdram_ce_q2 <= sdram_ce_q1;
+end
+wire ch2_req_cpu = use_t80 ? sdram_ce : (sdram_ce & sdram_ce_q1 & sdram_ce_q2);
 // log_clear: pulse on new ROM staging start -> reset change-log journal per game
 reg         upload_active_q;
 always @(posedge clk21m) upload_active_q <= upload_active;
@@ -1228,7 +1251,7 @@ sdram sdram
    .ch2_dout(sdram_dout),
    .ch2_din(ram_din),
    .ch2_addr(ram_addr),
-   .ch2_req(sdram_ce),
+   .ch2_req(ch2_req_cpu),
    .ch2_rnw(ram_rnw),
    .ch2_ready(sdram_ready),
    .ch2_rdtog(sdram_rdtog),

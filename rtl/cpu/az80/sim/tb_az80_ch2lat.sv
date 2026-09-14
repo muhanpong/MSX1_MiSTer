@@ -22,13 +22,25 @@ module tb_az80_ch2lat;
    // ---- ch2 behavioural model on clk_sdram ----
    int LAT = 24;
    logic [7:0] mem [0:255];
-   wire  req = ~mreq_n & (~rd_n | ~wr_n);
+   //  The address the SDRAM actually captures has been through slot/layout/base
+   //  decode: model it as the CPU address SETTLE clk_sdram cycles late.  The
+   //  hardware trace showed A-Z80 changing its address on the same edge as
+   //  MREQ/RD, so a request edge taken immediately reads a stale address.
+   int SETTLE = 3;
+   logic [15:0] a_hist [0:7];
+   always @(posedge clk_sdram) begin a_hist[0] <= a; for (int k = 1; k < 8; k++) a_hist[k] <= a_hist[k-1]; end
+   wire [15:0] a_dec = (SETTLE == 0) ? a : a_hist[SETTLE-1];
+   bit   req_delay = 1;     // 1 = MSX1.sv ch2_req_cpu (two clk21m); 0 = raw strobe (20260914e hardware)
+   logic ce_q1 = 0, ce_q2 = 0;
+   wire  req_raw = ~mreq_n & (~rd_n | ~wr_n);
+   always @(posedge clk21m) begin ce_q1 <= req_raw; ce_q2 <= ce_q1; end
+   wire  req = req_delay ? (req_raw & ce_q1 & ce_q2) : req_raw;
    logic req_1 = 0;  logic [7:0] saved = 8'h00;  logic [7:0] pend_a;  logic pend_rnw;
    logic rdtog = 0;
    int   cnt = -1;
    always @(posedge clk_sdram) begin
       req_1 <= req;
-      if (req & ~req_1) begin pend_a <= a[7:0]; pend_rnw <= rd_n ? 1'b0 : 1'b1; cnt <= LAT; end
+      if (req & ~req_1) begin pend_a <= a_dec[7:0]; pend_rnw <= rd_n ? 1'b0 : 1'b1; cnt <= LAT; end
       else if (cnt > 0) cnt <= cnt - 1;
       else if (cnt == 0) begin
          if (pend_rnw) begin saved <= mem[pend_a]; rdtog <= ~rdtog; end
@@ -67,7 +79,7 @@ module tb_az80_ch2lat;
    wire az_rd_pace_n = ~(az_rd_win & ~(az_done | (az_wd == 6'd63)));
    assign wait_n = wait_m1_n & az_rd_pace_n;
 
-   int errors = 0, n, neg_failures = 0;
+   int errors = 0, n, neg_failures = 0, neg2_failures = 0;
    task automatic run(input [2:0] spd, input int lat);
       begin
          reset = 1; cpu_speed = spd; LAT = lat;
@@ -92,10 +104,16 @@ module tb_az80_ch2lat;
       pacer_on = 0; errors = 0;
       foreach (div_of[s]) run(s[2:0], 24);
       neg_failures = errors;
+      $display("  --- pacer ON, request NOT delayed, address settles 3 clk_sdram late (20260914e hardware): NEGATIVE CONTROL 2 ---");
+      pacer_on = 1; req_delay = 0; errors = 0;
+      foreach (div_of[s]) run(s[2:0], 24);
+      neg2_failures = errors;
+      req_delay = 1;
       $display("  --- pacer ON (fix), latency sweep ---");
       pacer_on = 1; errors = 0;
       foreach (div_of[s]) for (int l = 4; l <= 60; l += 4) run(s[2:0], l);
-      if (neg_failures != 4)  $display("tb_az80_ch2lat: FAIL -- negative control did not fail (%0d of 4): the bench no longer models the hazard", neg_failures);
+      if (neg2_failures != 4) $display("tb_az80_ch2lat: FAIL -- negative control 2 (undelayed request) did not fail (%0d of 4)", neg2_failures);
+      else if (neg_failures != 4)  $display("tb_az80_ch2lat: FAIL -- negative control did not fail (%0d of 4): the bench no longer models the hazard", neg_failures);
       else if (errors == 0)   $display("tb_az80_ch2lat: PASS -- negative control failed 4/4, pacer passes every speed and latency");
       else                    $display("tb_az80_ch2lat: FAIL (%0d with the pacer on)", errors);
       $finish;
