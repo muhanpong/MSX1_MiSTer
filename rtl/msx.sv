@@ -803,7 +803,47 @@ end
 wire sd_pace_n = ~(cpu_turbo & sd_rd_window & ~(sd_xfer_seen & sd_ready)
                              & (sd_pace_cnt != 6'd32));
 
-wire wait_n      = wait_m1_n & bus_guard_n & vdp_pace_n & opll_pace_n & sd_pace_n;
+//  A-Z80 SDRAM read pacer -- every A-Z80 speed, stock included.
+//
+//  First hardware boot of the dual build (20260914a) never reached the BIOS on
+//  A-Z80 at 3.58 or 10.7 while T80s booted.  tb_az80_ch2lat.sv reproduced it:
+//  A-Z80 latches the data pins exactly ONE T-state after MREQ/RD fall (measured
+//  23 clk_sdram at /24, 15 at /16, 11 at /12, 7 at /8), while an SDRAM ch2 miss
+//  answers ~24 clk_sdram after the request edge -- one cycle late at stock, and
+//  hopeless at turbo.  T80s samples later, which is the only reason the open
+//  loop ever worked.  So A-Z80 never gets an open-loop SDRAM read: WAIT is held
+//  from the moment the read is strobed until THIS read's data is home -- the
+//  rdtog completion for a miss, sdram_hit for a cache hit -- and A-Z80 inserts
+//  Tw until then (its data latch moves with Tw; measured 23 -> 47 with one Tw).
+//
+//  Both completions are REGISTERED here on clk21m before they reach WAIT.
+//  az80_clk edges sit on clk21m rises (az80_clkgen), so a clk21m-launched WAIT
+//  release is a plain full-period path; sdram_hit straight off clk_sdram would
+//  have been an 11.6 ns one.  The data itself was valid >= 1 clk_sdram before
+//  either registered completion, and is consumed >= one clk21m after it.
+//  The watchdog only exists so a lost completion degrades, never hangs.
+wire  az_rd_win = ~use_t80 & bus_xfer & sdram_ce & ram_rnw;
+logic az_armed = 1'b0, az_done = 1'b0, az_tog0 = 1'b0, az_hit = 1'b0;
+logic [5:0] az_wd = 6'd0;
+always @(posedge clk21m) begin
+   if (reset | ~az_rd_win) begin
+      az_armed <= 1'b0;
+      az_done  <= 1'b0;
+      az_hit   <= 1'b0;
+      az_wd    <= 6'd0;
+   end else begin
+      if (~az_armed) begin
+         az_armed <= 1'b1;
+         az_tog0  <= sdram_rdtog;       // a miss completes >= 2 clk21m later
+      end else if (sdram_rdtog != az_tog0)
+         az_done  <= 1'b1;
+      if (sdram_hit)          az_hit <= 1'b1;
+      if (az_wd != 6'd63)     az_wd  <= az_wd + 6'd1;
+   end
+end
+wire az_rd_pace_n = ~(az_rd_win & ~(az_done | az_hit | (az_wd == 6'd63)));
+
+wire wait_n      = wait_m1_n & bus_guard_n & vdp_pace_n & opll_pace_n & sd_pace_n & az_rd_pace_n;
 
 logic map_valid = 0;
 wire ppi_en = ~ppi_n;

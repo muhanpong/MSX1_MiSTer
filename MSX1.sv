@@ -595,6 +595,7 @@ clock clock
 az80_clkgen az80_clkgen
 (
    .clk_sdram   (clk_sdram),
+   .clk21m      (clk21m),
    .reset       (reset | msx_pause),
    //  While T80s owns the machine the divider is parked at /8; the A-Z80 sits
    //  in reset then, and the SDC declares az80_clk at /8, so nothing may ever

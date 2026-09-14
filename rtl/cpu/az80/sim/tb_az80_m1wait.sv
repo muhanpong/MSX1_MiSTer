@@ -15,7 +15,7 @@ module tb_az80_m1wait;
    logic reset = 1;
    logic [2:0] cpu_speed = 3'd0;
    wire  az80_clk;  wire [2:0] speed_q;
-   az80_clkgen clkgen (.clk_sdram(clk_sdram), .reset(reset), .cpu_speed(cpu_speed),
+   az80_clkgen clkgen (.clk_sdram(clk_sdram), .clk21m(clk21m), .reset(reset), .cpu_speed(cpu_speed),
                        .cpu_bus_idle(1'b1), .az80_clk(az80_clk), .cpu_speed_q(speed_q));
 
    wire halt_n, busak_n, m1_n, mreq_n, iorq_n, rd_n, wr_n, rfsh_n;
