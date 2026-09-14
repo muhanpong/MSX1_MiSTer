@@ -164,7 +164,13 @@ create_generated_clock -name az80_clk \
 #  for a negative setup time -- unsatisfiable by construction.  The synchroniser
 #  in msx.sv (async assert, sync deassert) is what makes the crossing safe; the
 #  path into its first stage is what must not be timed.
-set_false_path -to [get_registers {*msx:MSX|az_rst_sync[0]}]
+#  Both stages share the async assert (reset | use_t80), so both async pins
+#  are recovery-timed against FPGA_CLK2_50 / the HPS reset -- unsatisfiable by
+#  construction (-13.1 ns on az_rst_sync[1], build 3194311).  The assert is
+#  asynchronous on purpose (az80_clk may be stopped); only the deassert is
+#  timed, and that is the synchronous shift between the two stages, which
+#  stays a normal az80_clk -> az80_clk path.
+set_false_path -to [get_registers {*msx:MSX|az_rst_sync[*]}]
 
 #  SDRAM read data into A-Z80's input register (data_pins' dout).  ch2_saved_*
 #  are the read-cache registers on clk_sdram; dout is the CPU's one and only
