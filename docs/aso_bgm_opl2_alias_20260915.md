@@ -71,4 +71,5 @@ openMSX `YMF262.cc` 전수 대조 → 차이 후보를 **양쪽 실측**(RTL=ver
 
 ## 실기 (20260916)
 `MSX1_20260916a_opl2alias.rbf` (dedaa2a, md5 7b9684bfdc51, buildgate PASS setup +0.402 / hold +0.089, ALM 32,327 · M10K 396):
-**ASO BGM 출력 확인**(사용자). 회귀(MoonSound 곡·MBWave 검출·GoFigure·vgmplay OPL4·Z80BENCH) 미확인.
+**ASO BGM 출력 확인**(사용자). 회귀 확인(사용자): GoFigure 3.58 정상 · Neon Horizon 고클럭 OPL4 FM/PCM 정상 · Z80BENCH 터보 정상 · vgmplay OPL4 정상.
+별건(회귀 아님, 기존 터보 코어에서도 동일): **GoFigure 고클럭에서 OPL4 음이 듬성듬성**, 피치는 정상.
