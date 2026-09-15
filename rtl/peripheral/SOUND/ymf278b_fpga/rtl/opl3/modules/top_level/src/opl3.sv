@@ -86,7 +86,9 @@ module opl3
 
     // pulse once per sample period
     clk_div #(
-        .CLK_DIV_COUNT(CLK_DIV_COUNT)
+        .CLK_DIV_COUNT(CLK_DIV_COUNT),
+        .NUM(SAMPLE_DIV_NUM),
+        .DEN(SAMPLE_DIV_DEN)
     ) sample_clk_gen (
         .clk_en(sample_clk_en),
         .*

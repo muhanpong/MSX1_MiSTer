@@ -44,21 +44,40 @@
 `default_nettype none
 
 module clk_div #(
-    parameter CLK_DIV_COUNT = 0
+    parameter CLK_DIV_COUNT = 0,
+    // MSX1_MiSTer: fractional mode.  NUM != 0 gives one clk_en per NUM/DEN clk
+    // cycles on average (accumulate DEN, wrap at NUM); CLK_DIV_COUNT is then unused.
+    parameter NUM = 0,
+    parameter DEN = 1
 )(
     input wire clk,
     output logic clk_en = 0
 );
-    logic [$clog2(CLK_DIV_COUNT)-1:0] counter = 0;
+    generate
+    if (NUM == 0) begin : int_div
+        logic [$clog2(CLK_DIV_COUNT)-1:0] counter = 0;
 
-    always_ff @(posedge clk)
-        if (counter == CLK_DIV_COUNT - 1)
-            counter <= 0;
-        else
-            counter <= counter + 1;
+        always_ff @(posedge clk)
+            if (counter == CLK_DIV_COUNT - 1)
+                counter <= 0;
+            else
+                counter <= counter + 1;
 
-    always_ff @(posedge clk)
-        clk_en <= (counter == CLK_DIV_COUNT - 1);
+        always_ff @(posedge clk)
+            clk_en <= (counter == CLK_DIV_COUNT - 1);
+    end else begin : frac_div
+        localparam W = $clog2(NUM + DEN);
+        logic [W-1:0] acc = 0;
 
+        always_ff @(posedge clk)
+            if (acc + W'(DEN) >= W'(NUM)) begin
+                acc    <= acc + W'(DEN) - W'(NUM);
+                clk_en <= 1'b1;
+            end else begin
+                acc    <= acc + W'(DEN);
+                clk_en <= 1'b0;
+            end
+    end
+    endgenerate
 endmodule
 `default_nettype wire

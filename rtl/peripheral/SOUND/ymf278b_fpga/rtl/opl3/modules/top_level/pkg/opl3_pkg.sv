@@ -66,6 +66,14 @@ package opl3_pkg;
     // CLK_DIV_COUNT = ceil(14318182 / 49715.9) = 288 → actual = 49715.9 Hz
     // $ceil is unsupported by Quartus 17.1, hardcoded manually
     localparam CLK_DIV_COUNT = 288;
+    // MSX1_MiSTer (20260916): the MoonSound FM part is a YMF278B, whose FM runs at
+    // 33.8688 MHz / 684 = 49515.8 Hz, not the YMF262's 14.31818 MHz / 288 = 49715.9 Hz
+    // (openMSX YMF262.cc: isYMF278 ? 33868800 / (19*36)).  The 0.4 % difference was
+    // +7 cents of FM pitch against openMSX (ASO capture, research/aso_bgm/wavecmp).
+    // clk_opl3 = clk_sdram / 6, so one sample every 1735/6 = 289.17 clk_opl3 cycles
+    // = 85909090 / 1735 = 49515.3 Hz (-0.017 cent).  Never fewer than 289 cycles.
+    localparam SAMPLE_DIV_NUM = 1735;
+    localparam SAMPLE_DIV_DEN = 6;
     localparam ACTUAL_SAMPLE_FREQ = CLK_FREQ/CLK_DIV_COUNT;
 
     localparam NUM_REG_PER_BANK = 'hF6;
