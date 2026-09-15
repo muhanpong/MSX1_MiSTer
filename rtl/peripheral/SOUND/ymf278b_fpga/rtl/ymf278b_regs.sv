@@ -86,6 +86,13 @@ logic [7:0] fm_shadow [0:511];
 
 logic [7:0] opl4latch;   // PCM register latch
 logic [8:0] opl3latch;   // OPL3 register latch (includes bank bit)
+// OPL2 mode (105h bit0 NEW=0): an array-1 write lands in array 0, except 105h
+// itself.  MAME/vgmplay ymf262.c OPL3Write: "verified on real YMF262 ... registers
+// from set#2: 0x01, 0x04, 0x20-0xef. The only exception is register 0x05"; openMSX same.
+// Reads keep the raw latch, as openMSX does.
+logic       opl3_new;
+wire  [8:0] fm_wr_addr = (opl3latch[8] && !opl3_new && opl3latch[7:0] != 8'h05)
+                       ? {1'b0, opl3latch[7:0]} : opl3latch;
 
 // YMF278B device-ID one-shot per datasheet page 10:
 //   When status is read after NEW2 was set to 1, 02H is output.  After
@@ -139,6 +146,7 @@ always_ff @(posedge clk) begin
         load_cnt    <= '0;
         opl4latch   <= 8'd0;
         opl3latch   <= 9'd0;
+        opl3_new    <= 1'b0;
         pcm_rd_wait <= 1'b0;
         pcm_wr_wait <= 1'b0;
         wait_guard  <= '0;
@@ -242,10 +250,11 @@ always_ff @(posedge clk) begin
                 end
                 2'd1, 2'd3: begin   // FM write
                     busy_cnt       <= DELAY_W'(FM_REG_WRITE_DELAY);
-                    opl3_reg_addr  <= opl3latch;
+                    opl3_reg_addr  <= fm_wr_addr;
                     opl3_reg_data  <= io_data_in;
                     opl3_reg_wr    <= 1'b1;
-                    fm_shadow[opl3latch] <= io_data_in;  // for readback (chip detect)
+                    fm_shadow[fm_wr_addr] <= io_data_in;  // for readback (chip detect)
+                    if (fm_wr_addr == 9'h105) opl3_new <= io_data_in[0];
                 end
             endcase
             io_ack <= 1'b1;
