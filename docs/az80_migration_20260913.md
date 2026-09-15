@@ -411,7 +411,10 @@ RBF가 빌드 시작보다 새로운지 확인 + 이름 중복 거부). OSD 코�
 - [x] 실기 부팅 전 속도 — `20260915a_azreq` (3.58/5.37/7.16/10.7 A-Z80, 21.5 T80s)
 - [x] Z80BENCH 전 속도 공칭 — `20260915d_azturbo` (3.57/5.36/7.16/10.74)
 - [x] OSD 통과 전환(10.7→21.5→3.58, 한 번의 메뉴) 무리셋 — 사용자 확인 20260915 (`d_azturbo`)
-- [ ] 게임·음원 회귀: 3.58 SCC/OPLL 곡, MFRSD/Nextor, GoFigure, 10.7 게임
+- [x] 기능 회귀(사용자 실기, `d_azturbo`, 20260915): **MoonSound 재생 / SRAM 세이브·로드 / FDC 부팅 / GoFigure·Zanac /
+      SCC·OPLL 곡 전부 정상**. BASIC 항목은 "931" 보고 — 측정 내용 확인 필요
+- [ ] BRAM·IO 주소선행 점검 1·2층(STA 예외 감사 `report_exceptions -from_clock az80_clk`, 1회성 에지캡처·clk_sdram 소비자 grep) —
+      실기 3층은 위 회귀로 증상 없음 확인, 코드/STA 층은 미실시
 - [ ] 진단 트레이스 링(`az80_trace`, M10K +2)을 출하본에서 뺄지 결정 (지금은 유지 — 회귀 추적용)
 - [ ] 다른 경로의 같은 병: BRAM(systemRAM/SRAM)·IO 읽기도 A-Z80 주소 선행 부재의 영향권 — 페이서/지연 적용 여부 점검
 - [ ] M1 wait pair가 위상 절반에서 Tw 누락(tb_az80_m1wait) — az80_clk 도메인에서 생성하도록 이전
