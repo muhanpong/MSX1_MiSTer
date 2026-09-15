@@ -68,3 +68,7 @@ openMSX `YMF262.cc` 전수 대조 → 차이 후보를 **양쪽 실측**(RTL=ver
 - OPL4 고유 부분은 vgmplay가 openMSX보다 덜 정확: NEW2=0에서도 웨이브 선택 래치 기록(openMSX "Verified on real YMF278":
   선택·쓰기 모두 무시 — 우리 RTL은 openMSX 쪽과 같음), BUSY/LOAD 항상 0, NEW2 서명 없음, FM에 플레이어 임의 −3dB.
   → OPL4 기준 모델로는 openMSX 유지.
+
+## 실기 (20260916)
+`MSX1_20260916a_opl2alias.rbf` (dedaa2a, md5 7b9684bfdc51, buildgate PASS setup +0.402 / hold +0.089, ALM 32,327 · M10K 396):
+**ASO BGM 출력 확인**(사용자). 회귀(MoonSound 곡·MBWave 검출·GoFigure·vgmplay OPL4·Z80BENCH) 미확인.
