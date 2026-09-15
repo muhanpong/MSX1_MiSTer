@@ -62,7 +62,8 @@ module msx_slots
    output                   sd_rx,
    //DEBUG
    output                   debug_FDC_req,
-   output                   debug_sd_card,
+   output                   sd_hold,
+   input                    sd_ready,
    output                   debug_erase,
    output                   debug_scc_wr,
    // ASCII16X flash info (for SDRAM-based save/load)
@@ -134,7 +135,6 @@ wire signed [18:0] snd_sum     = 19'($signed(opll_scaled) >>> 7)
                                + 19'(sound_psg);
 assign sound = (snd_sum > 19'sd32767)  ? 16'sh7FFF :
                (snd_sum < -19'sd32768) ? 16'sh8000 : 16'(snd_sum);
-assign d_to_sd = cpu_dout;
 assign debug_FDC_req = FDC_req;
 
 logic [7:0] mapper_slot[4];
@@ -397,7 +397,8 @@ mapper_mfrsd3 mfrsd3
    .configReg(mfrsd_configReg),
    .mapper_dout(mapper_mfrsd3_dout),
    .flash_rq(mapper_mfrsd3_flash_rq),
-   .debug_sd_card(debug_sd_card),
+   .sd_hold(sd_hold),
+   .sd_txdata(d_to_sd),
    .*
 );
 

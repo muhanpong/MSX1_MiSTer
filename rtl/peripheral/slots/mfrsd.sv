@@ -224,11 +224,12 @@ module mapper_mfrsd3
    output       logic sd_rx,
    output       logic sd_tx,
    input        [7:0] d_from_sd,
+   input              sd_ready,      // spi_divmmc idle (counter[4])
+   output logic [7:0] sd_txdata,     // byte for spi_divmmc.din, latched at the write strobe
    output             flash_rq,
-   output             debug_sd_card
+   output             sd_hold        // this SD-window access has not completed its SPI byte yet
 );
 /*verilator tracing_off*/
-assign debug_sd_card = sd_card_data_en;
 
 logic [7:0] bank[4];
 
@@ -257,17 +258,75 @@ assign mem_unmaped     = cs & (~mem_valid | sd_card_data_en);
 assign mapper_dout = sd_card_data_en & ~cpu_addr[12] ? d_from_sd  : 8'hFF;
 assign flash_rq    =  cs & mem_valid & configReg[0];
 
+//  SPI requests wait for spi_divmmc to be idle.
+//
+//  spi_divmmc takes 16 clk21m per byte and IGNORES a tx/rx that arrives while a
+//  byte is in flight.  At 21.5 MHz the Nextor MFRSD driver outruns it: MMCCMD
+//  sends the six command bytes as `ld (hl),x / nop` (13 T = 13 clk21m apart) and
+//  reads the response 11 clk21m after the CRC write -- both dropped, so a
+//  command reached the card incomplete (hardware: VHD unreadable at 21.5, fine
+//  at 10.7).  The earlier cure paced only reads, and only AFTER the rx had
+//  already been issued, which cannot bring a dropped request back.
+//
+//  Now a request is recorded at the strobe edge and fired only while the SPI is
+//  idle; msx.sv holds WAIT (sd_hold) from the start of the access until this
+//  access's byte has fired and finished.  When the SPI is already idle -- always
+//  at 3.58 MHz -- the request fires on the same edge as before, and sd_txdata
+//  equals the live bus value then, so stock timing is unchanged.
+wire  sd_win  = sd_card_en & cpu_mreq & (cpu_rd | cpu_wr);
+logic rx_pend = 1'b0, tx_pend = 1'b0;
+logic [1:0] fire_blk = 2'd0;           // spi_divmmc shows busy two edges after a fire
+logic acc_req = 1'b0, acc_fired = 1'b0, acc_done = 1'b0;
+assign sd_hold = sd_win & ~acc_done;
+
 always @(posedge clk) begin
    logic old_wr, old_rd, select_sd;
+   logic rxp, txp, rd_edge, wr_edge;
+   rxp = rx_pend;
+   txp = tx_pend;
+   rd_edge = ~old_rd & cs & cpu_mreq & cpu_rd & sd_card_en;
+   wr_edge = ~old_wr & cs & cpu_mreq & cpu_wr & sd_card_en;
    sd_rx <= 1'b0;
    sd_tx <= 1'b0;
-   if (~old_rd & cs & cpu_mreq & cpu_rd & sd_card_en) sd_rx <= ~select_sd & ~cpu_addr[12];
-   if (~old_wr & cs & cpu_mreq & cpu_wr & sd_card_en) begin
-      if (cpu_addr[15:11] == 5'b01011) // >= 5800
-         select_sd <= din[0];
-      else
-         sd_tx <= ~select_sd & ~cpu_addr[12];
+   if (fire_blk != 2'd0) fire_blk <= fire_blk - 2'd1;
+
+   if (rd_edge) begin
+      if (~select_sd & ~cpu_addr[12]) begin rxp = 1'b1; acc_req <= 1'b1; end
+      else acc_done <= 1'b1;
    end
+   if (wr_edge) begin
+      if (cpu_addr[15:11] == 5'b01011) begin          // >= 5800
+         select_sd <= din[0];
+         acc_done  <= 1'b1;
+      end else if (~select_sd & ~cpu_addr[12]) begin
+         txp = 1'b1;
+         sd_txdata <= din;
+         acc_req <= 1'b1;
+      end else
+         acc_done <= 1'b1;
+   end
+
+   if ((rxp | txp) & sd_ready & (fire_blk == 2'd0)) begin
+      sd_rx <= rxp;
+      sd_tx <= txp & ~rxp;
+      rxp = 1'b0;
+      txp = 1'b0;
+      fire_blk <= 2'd2;
+      if (acc_req | rd_edge | wr_edge) acc_fired <= 1'b1;
+   end
+   if (acc_fired & (fire_blk == 2'd0) & sd_ready) acc_done <= 1'b1;
+
+   if (~sd_win) begin
+      acc_req   <= 1'b0;
+      acc_fired <= 1'b0;
+      acc_done  <= 1'b0;
+   end
+   if (reset) begin
+      rxp = 1'b0;
+      txp = 1'b0;
+   end
+   rx_pend <= rxp;
+   tx_pend <= txp;
    old_rd <= cpu_rd & cpu_mreq;
    old_wr <= cpu_wr & cpu_mreq;
 end

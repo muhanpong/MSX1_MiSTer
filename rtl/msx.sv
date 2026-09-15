@@ -831,7 +831,7 @@ wire vdp_pace_n = ~(cpu_paced & vdp_bus & (~vdp_grant_d | (vdp18 & (vdp_hcnt < 3
 
 wire opll_pace_n;   // turbo OPLL write pacer, from msx_slots (spec inter-write gaps)
 
-//  ── MFRSD SD-card read pacer ────────────────────────────────────────────────
+//  ── MFRSD SD-card pacer ───────────────────────────────────────────────────
 //  spi_divmmc takes 16 clk21m per byte and, while a transfer is running,
 //  SILENTLY IGNORES a new request: rtl/peripheral/spi_divmmc.sv only looks at
 //  tx/rx inside `if (counter[4])`, its idle state.  It publishes a `ready`
@@ -848,44 +848,23 @@ wire opll_pace_n;   // turbo OPLL write pacer, from msx_slots (spec inter-write 
 //  10.7MHz, broken at 21.5MHz, and dropping the clock back restores it.  This is
 //  not a T80s defect -- it is a latent one that the speed exposed.
 //
-//  The cure already exists in this core for the same disease: the MoonSound
-//  handshake above holds WAIT_n while a register access is in flight so the VGM
-//  driver's back-to-back writes cannot outrun the chip (msx.sv:288-292).  Same
-//  shape, same fix.  Only reads are paced: a read is where a dropped request
-//  returns wrong data, and sd_ready is a level so this cannot hang -- the SPI
-//  always finishes in 16 clk21m.
-//  Hold from the START of the window, not from the moment sd_ready falls.
-//  spi_divmmc only reports busy on the cycle AFTER it accepts the request, and
-//  mfrsd raises sd_rx a cycle after cpu_rd, so at clk21m/1 the CPU has already
-//  sampled WAIT_n and latched DI by the time ready drops.  Waiting on the level
-//  alone would be one cycle too late to help.
-//
-//  Release when a transfer has been seen to start AND finish -- that is the
-//  earliest point d_from_sd holds this read's byte.  The timeout is not
-//  decoration: mfrsd.sv:264 only fires sd_rx when `~select_sd & ~cpu_addr[12]`,
-//  so a read in this window can legitimately trigger no SPI activity at all
-//  (mfrsd.sv:257 returns 0xFF for those), and without the bound the CPU would
-//  hang on exactly those accesses.  32 clk21m is twice a byte's 16, so it never
-//  cuts a real transfer short.  Same belt-and-braces as ms_wait_cnt on the
-//  MoonSound handshake, and for the same reason.
-wire sd_rd_window;                       // from msx_slots/mfrsd
-logic       sd_xfer_seen = 1'b0;
-logic [5:0] sd_pace_cnt  = 6'd0;
+//  20260916: the request side moved into mfrsd.sv (requests now WAIT for an idle
+//  SPI instead of being dropped, reads AND writes); this only turns its
+//  per-access hold into WAIT.  The bound covers the worst legitimate case -- a
+//  byte still in flight when the access starts, then this access's own byte:
+//  2 x 16 clk21m -- twice over, so a lost ready degrades instead of hanging.
+wire sd_hold;                            // from msx_slots/mfrsd
+logic [6:0] sd_pace_cnt = 7'd0;
 always @(posedge clk21m) begin
-   if (reset | ~sd_rd_window) begin
-      sd_xfer_seen <= 1'b0;
-      sd_pace_cnt  <= 6'd0;
-   end else begin
-      if (~sd_ready)              sd_xfer_seen <= 1'b1;
-      if (sd_pace_cnt != 6'd32)   sd_pace_cnt  <= sd_pace_cnt + 6'd1;
-   end
+   if (reset | ~sd_hold)             sd_pace_cnt <= 7'd0;
+   else if (sd_pace_cnt != 7'd64)    sd_pace_cnt <= sd_pace_cnt + 7'd1;
 end
 //  cpu_turbo-gated like vdp_pace_n and bus_guard_n: at stock the CPU cannot
-//  outrun a 16 clk21m byte, and turbo off has to stay bit-identical to the
-//  original core -- that invariant is the reason speed 0 is still literally the
-//  ce_3m58_p decode.
-wire sd_pace_n = ~(cpu_paced & sd_rd_window & ~(sd_xfer_seen & sd_ready)
-                             & (sd_pace_cnt != 6'd32));
+//  outrun a 16 clk21m byte, and turbo off has to stay bit-identical.
+//  cpu_paced, not cpu_turbo: c49ad5f predates the T80s/NextZ80 hand-over, and the
+//  R800 outruns spi_divmmc exactly as a turbo Z80 does (hardware: MFRSD partitions
+//  lost at the 7.16 rung as well as at T80s 21.5).
+wire sd_pace_n = ~(cpu_paced & sd_hold & (sd_pace_cnt != 7'd64));
 
 //  NextZ80 reads from SDRAM go through the same closed loop as T80s at turbo
 //  (hs_win / sdram_hit above, via cpu_paced): nz_bus gives the address a full
@@ -1384,7 +1363,8 @@ msx_slots msx_slots
    //  mfrsd.sv:231 -- high for exactly the SD-card data read window
    //  (sd_card_en & cpu_mreq & cpu_rd).  Named "debug_" there but it is the
    //  only signal that identifies the cycle the SD pacer has to hold.
-   .debug_sd_card(sd_rd_window),
+   .sd_hold(sd_hold),
+   .sd_ready(sd_ready),
    .cpu_turbo(cpu_paced),
    .opll_pace_n(opll_pace_n),
    .opll_vol(opll_vol),
