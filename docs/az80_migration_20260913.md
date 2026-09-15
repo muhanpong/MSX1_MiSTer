@@ -412,7 +412,7 @@ RBF가 빌드 시작보다 새로운지 확인 + 이름 중복 거부). OSD 코�
 - [x] Z80BENCH 전 속도 공칭 — `20260915d_azturbo` (3.57/5.36/7.16/10.74)
 - [x] OSD 통과 전환(10.7→21.5→3.58, 한 번의 메뉴) 무리셋 — 사용자 확인 20260915 (`d_azturbo`)
 - [x] 기능 회귀(사용자 실기, `d_azturbo`, 20260915): **MoonSound 재생 / SRAM 세이브·로드 / FDC 부팅 / GoFigure·Zanac /
-      SCC·OPLL 곡 전부 정상**. BASIC 항목은 "931" 보고 — 측정 내용 확인 필요
+      SCC·OPLL 곡 전부 정상**. BASIC `TIME`(VDP 인터럽트 지피 카운터) 931 증가 정상, **RTC `GET TIME` 정상**(B4h/B5h 인덱스 레지스터 I/O 경로)
 - [ ] BRAM·IO 주소선행 점검 1·2층(STA 예외 감사 `report_exceptions -from_clock az80_clk`, 1회성 에지캡처·clk_sdram 소비자 grep) —
       실기 3층은 위 회귀로 증상 없음 확인, 코드/STA 층은 미실시
 - [ ] 진단 트레이스 링(`az80_trace`, M10K +2)을 출하본에서 뺄지 결정 (지금은 유지 — 회귀 추적용)
