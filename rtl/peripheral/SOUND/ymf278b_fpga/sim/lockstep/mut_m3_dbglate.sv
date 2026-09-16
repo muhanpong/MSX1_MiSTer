@@ -1327,14 +1327,15 @@ generate
         //  SL_ACC write and at reset, so updating these on the same edge
         //  reproduces the old combinational taps cycle for cycle without a
         //  24-way read of the MLAB.
-        logic act_q, live_q;
+        logic act_q, live_q; logic we_d; logic [4:0] ws_d; slot_dyn_t wd_d;
+        always_ff @(posedge clk) begin we_d <= dyn_we; ws_d <= w_slot; wd_d <= dyn_wd_c; end
         always_ff @(posedge clk or negedge rst_n) begin
             if (!rst_n) begin
                 act_q  <= 1'b0;
                 live_q <= 1'b0;
-            end else if (dyn_we && w_slot == gi) begin
-                act_q  <= (dyn_wd_c.env_state != EG_OFF);
-                live_q <= (dyn_wd_c.env_state != EG_OFF) && (dyn_wd_c.env_vol < MAX_ATT_INDEX);
+            end else if (we_d && ws_d == gi) begin
+                act_q  <= (wd_d.env_state != EG_OFF);
+                live_q <= (wd_d.env_state != EG_OFF) && (wd_d.env_vol < MAX_ATT_INDEX);
             end
         end
         assign dbg_slot_active[gi]  = act_q;

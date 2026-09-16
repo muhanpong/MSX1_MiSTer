@@ -1006,10 +1006,11 @@ always_comb begin
     hf_hdr_built.endAddr   = {hf_buf[5], hf_buf[6]};
 end
 
-always_ff @(posedge clk) if (hf_store_now) ram_header_m[hf_cur_slot] <= hf_hdr_built;
+logic m1_we=0; logic [4:0] m1_a; slot_header_t m1_d;
+always_ff @(posedge clk) begin m1_we <= hf_store_now; m1_a <= hf_cur_slot; m1_d <= hf_hdr_built; if (m1_we) ram_header_m[m1_a] <= m1_d; end
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n)            hdr_init <= '1;
-    else if (hf_store_now) hdr_init[hf_cur_slot] <= 1'b0;
+    else if (m1_we) hdr_init[m1_a] <= 1'b0;
 end
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -23,7 +23,7 @@
 import ymf278_pcm_alu_pkg::*;
 import ymf278_pcm_eg_pkg::*;
 
-module ymf278_pcm_engine2 #(
+module ymf278_pcm_engine2_ref #(
     parameter int CLK_HZ       = 85909090,
     parameter int SDRAM_RD_LAT = 6
 ) (
@@ -159,17 +159,8 @@ typedef struct packed {
 } slot_dyn_t;
 
 slot_regs_t   ram_regs   [0:23];
-// 20260917: header and dyn state live in MLAB with an ASYNCHRONOUS read, which
-// is exactly the combinational read the flop arrays had -- no read moves by a
-// cycle, and the one same-address write-then-read the header path relies on
-// (hf_store_now -> SL_STALL_HDR next cycle) still sees the new value.  What an
-// MLAB cannot do is the reset broadcast (ram_header <= 0, ram_dyn <= env off),
-// so a per-slot `*_init` bit, asynchronously set by reset and cleared by that
-// slot's first write, returns the reset value until then.
-logic [$bits(slot_header_t)-1:0] ram_header_m [0:23] /* synthesis syn_ramstyle = "MLAB, no_rw_check" */;
-logic [$bits(slot_dyn_t)-1:0]    ram_dyn_m    [0:23] /* synthesis syn_ramstyle = "MLAB, no_rw_check" */;
-logic [23:0]  hdr_init;              // 1 = header of this slot not stored since reset
-logic [23:0]  dyn_init;              // 1 = dyn of this slot not written since reset
+slot_header_t ram_header [0:23];
+slot_dyn_t    ram_dyn    [0:23];
 logic [7:0]   tl_cur     [0:23];     // ramped TL (volume stage input)
 logic [23:0]  tl_load;               // immediate-load request per slot
 logic [23:0]  key_on_prev;
@@ -369,37 +360,12 @@ wire dispatch_now = (sl_state == SL_IDLE) && (cur_slot < 5'd24) && !in_reserve
 wire [4:0]  ld_slot = cur_slot;
 // whole-struct intermediates (iverilog can't access .field on a variable-
 // indexed unpacked array element — same workaround as v2)
-slot_regs_t   ld_regs_c;
-slot_dyn_t    ld_dyn_c;
-slot_header_t ld_hdr_c;
-slot_dyn_t    dyn_rst_c;             // the reset broadcast's value
+slot_regs_t ld_regs_c;
+slot_dyn_t  ld_dyn_c;
 always_comb begin
-    dyn_rst_c.pos       = 16'd0;
-    dyn_rst_c.stepPtr   = 16'd0;
-    dyn_rst_c.env_vol   = MAX_ATT_INDEX;
-    dyn_rst_c.env_state = EG_OFF;
-    dyn_rst_c.lfo_cnt   = 18'd0;
     ld_regs_c = ram_regs[ld_slot];
-    ld_dyn_c  = dyn_init[ld_slot] ? dyn_rst_c : ram_dyn_m[ld_slot];
-    ld_hdr_c  = hdr_init[ld_slot] ? '0        : ram_header_m[ld_slot];
+    ld_dyn_c  = ram_dyn[ld_slot];
 end
-
-// dyn writeback, taken out of the async-reset FSM block so the MLAB write is a
-// plain synchronous one.  Same condition the FSM's SL_ACC branch writes on:
-// that branch runs on every non-reset edge in SL_ACC, sample_start and the
-// frame-end reserve included (both only redirect sl_state).
-wire          dyn_we = (sl_state == SL_ACC);
-slot_dyn_t    dyn_wd_c;
-always_comb begin
-    dyn_wd_c.pos       = w_pos2;
-    dyn_wd_c.stepPtr   = w_ptr2;
-    dyn_wd_c.env_vol   = w_new_vol;
-    dyn_wd_c.env_state = w_new_state;
-    dyn_wd_c.lfo_cnt   = w_regs.lfo_active
-                       ? ((w_dyn.lfo_cnt + {12'd0, lfo_period_rom(w_regs.lfo_speed)}) & 18'h3FFFF)
-                       : 18'd0;
-end
-always_ff @(posedge clk) if (dyn_we) ram_dyn_m[w_slot] <= dyn_wd_c;
 wire        ld_edge_w = (ld_regs_c.keyon & ~key_on_prev[ld_slot])
                       | key_retrig[ld_slot];
 wire        ld_run    = ((ld_dyn_c.env_state != EG_OFF) | ld_edge_w)
@@ -445,7 +411,12 @@ always_ff @(posedge clk or negedge rst_n) begin
         pcm_left  <= '0;
         pcm_right <= '0;
         pcm_valid <= 1'b0;
-        dyn_init  <= '1;
+        dyn_wb.pos       = 16'd0;
+        dyn_wb.stepPtr   = 16'd0;
+        dyn_wb.env_vol   = MAX_ATT_INDEX;
+        dyn_wb.env_state = EG_OFF;
+        dyn_wb.lfo_cnt   = 18'd0;
+        for (int i = 0; i < 24; i++) ram_dyn[i] <= dyn_wb;
     end else begin
         sl_rd_req <= 1'b0;
         pcm_valid <= 1'b0;
@@ -525,8 +496,8 @@ always_ff @(posedge clk or negedge rst_n) begin
                         cur_slot <= cur_slot + 5'd1; // consume this slot's turn
                         w_slot <= ld_slot;
                         w_regs <= ram_regs[ld_slot];
-                        w_hdr  <= ld_hdr_c;
-                        w_dyn  <= ld_dyn_c;
+                        w_hdr  <= ram_header[ld_slot];
+                        w_dyn  <= ram_dyn[ld_slot];
                         w_edge <= ld_edge_w;
                         w_posrst <= pos_rst[ld_slot];
                         sl_state <= SL_VIB;
@@ -549,8 +520,8 @@ always_ff @(posedge clk or negedge rst_n) begin
                     cur_slot <= cur_slot + 5'd1;
                     w_slot <= ld_slot;
                     w_regs <= ram_regs[ld_slot];
-                    w_hdr  <= ld_hdr_c;
-                    w_dyn  <= ld_dyn_c;
+                    w_hdr  <= ram_header[ld_slot];
+                    w_dyn  <= ram_dyn[ld_slot];
                     w_edge <= ld_edge_w;
                     w_posrst <= pos_rst[ld_slot];
                     sl_state <= SL_VIB;
@@ -809,8 +780,17 @@ always_ff @(posedge clk or negedge rst_n) begin
             SL_ACC: begin
                 accum_l <= accum_l + w_l;
                 accum_r <= accum_r + w_r;
-                // dyn writeback: the MLAB write is dyn_we/dyn_wd_c above
-                dyn_init[w_slot]    <= 1'b0;
+                // dyn writeback
+                dyn_wb.pos       = w_pos2;
+                dyn_wb.stepPtr   = w_ptr2;
+                dyn_wb.env_vol   = w_new_vol;
+                dyn_wb.env_state = w_new_state;
+                dyn_wb.lfo_cnt   = w_regs.lfo_active
+                                 ? ((w_dyn.lfo_cnt
+                                     + {12'd0, lfo_period_rom(w_regs.lfo_speed)})
+                                    & 18'h3FFFF)
+                                 : 18'd0;
+                ram_dyn[w_slot]     <= dyn_wb;
                 key_on_prev[w_slot] <= w_regs.keyon;
                 sl_state <= SL_DONE;
             end
@@ -1006,10 +986,12 @@ always_comb begin
     hf_hdr_built.endAddr   = {hf_buf[5], hf_buf[6]};
 end
 
-always_ff @(posedge clk) if (hf_store_now) ram_header_m[hf_cur_slot] <= hf_hdr_built;
 always_ff @(posedge clk or negedge rst_n) begin
-    if (!rst_n)            hdr_init <= '1;
-    else if (hf_store_now) hdr_init[hf_cur_slot] <= 1'b0;
+    if (!rst_n) begin
+        for (int i = 0; i < 24; i++) ram_header[i] <= '0;
+    end else if (hf_store_now) begin
+        ram_header[hf_cur_slot] <= hf_hdr_built;
+    end
 end
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1268,8 +1250,8 @@ always_comb begin
     dbg_s0  = ram_regs[0];
     dbg_s5  = ram_regs[5];
     dbg_s23 = ram_regs[23];
-    dbg_h0  = hdr_init[0] ? '0        : ram_header_m[0];
-    dbg_d0  = dyn_init[0] ? dyn_rst_c : ram_dyn_m[0];
+    dbg_h0  = ram_header[0];
+    dbg_d0  = ram_dyn[0];
 end
 assign fm_mix_l_o = fm_mix_l;
 assign fm_mix_r_o = fm_mix_r;
@@ -1321,24 +1303,15 @@ genvar gi;
 generate
     for (gi = 0; gi < 24; gi++) begin : g_dbg
         slot_regs_t r_g;
-        always_comb r_g = ram_regs[gi];
-        assign dbg_slot_keyon[gi]   = r_g.keyon;
-        //  Shadows of the two dyn-derived taps: ram_dyn changes only at the
-        //  SL_ACC write and at reset, so updating these on the same edge
-        //  reproduces the old combinational taps cycle for cycle without a
-        //  24-way read of the MLAB.
-        logic act_q, live_q;
-        always_ff @(posedge clk or negedge rst_n) begin
-            if (!rst_n) begin
-                act_q  <= 1'b0;
-                live_q <= 1'b0;
-            end else if (dyn_we && w_slot == gi) begin
-                act_q  <= (dyn_wd_c.env_state != EG_OFF);
-                live_q <= (dyn_wd_c.env_state != EG_OFF) && (dyn_wd_c.env_vol < MAX_ATT_INDEX);
-            end
+        slot_dyn_t  d_g;
+        always_comb begin
+            r_g = ram_regs[gi];
+            d_g = ram_dyn[gi];
         end
-        assign dbg_slot_active[gi]  = act_q;
-        assign dbg_slot_envlive[gi] = live_q;
+        assign dbg_slot_keyon[gi]   = r_g.keyon;
+        assign dbg_slot_active[gi]  = (d_g.env_state != EG_OFF);
+        assign dbg_slot_envlive[gi] = (d_g.env_state != EG_OFF)
+                                    && (d_g.env_vol < MAX_ATT_INDEX);
     end
 endgenerate
 

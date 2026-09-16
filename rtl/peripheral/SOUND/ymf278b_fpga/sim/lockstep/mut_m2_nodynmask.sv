@@ -445,7 +445,7 @@ always_ff @(posedge clk or negedge rst_n) begin
         pcm_left  <= '0;
         pcm_right <= '0;
         pcm_valid <= 1'b0;
-        dyn_init  <= '1;
+        if (dyn_init === 'x) dyn_init <= '1;
     end else begin
         sl_rd_req <= 1'b0;
         pcm_valid <= 1'b0;
