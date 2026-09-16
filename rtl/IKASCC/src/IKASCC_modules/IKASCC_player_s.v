@@ -791,6 +791,7 @@ wire            mclkpcen_n = i_MCLK_PCEN_n;
 ////
 
 //declare wavetable RAM
+(* ramstyle = "MLAB" *)  // MSX1_MiSTer 20260917: 32x8 x2 copies took 2 M10K each (20 total, 2.5% used)
 reg     [7:0]   wavetable_ram[0:31];
 initial if(INITFILE != "") $readmemh(INITFILE, wavetable_ram);
 
