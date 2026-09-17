@@ -122,7 +122,8 @@ entity T80 is
 		REG        : out std_logic_vector(211 downto 0); -- IFF2, IFF1, IM, IY, HL', DE', BC', IX, HL, DE, BC, PC, SP, R, I, F', A', F, A
 
 		DIRSet     : in  std_logic := '0';
-		DIR        : in  std_logic_vector(211 downto 0) := (others => '0') -- IFF2, IFF1, IM, IY, HL', DE', BC', IX, HL, DE, BC, PC, SP, R, I, F', A', F, A
+		DIR        : in  std_logic_vector(211 downto 0) := (others => '0'); -- IFF2, IFF1, IM, IY, HL', DE', BC', IX, HL, DE, BC, PC, SP, R, I, F', A', F, A
+		SwapPt     : out std_logic   -- cpuswap: REG is a clean instruction boundary, see "Swap point" below
 	);
 end T80;
 
@@ -148,6 +149,8 @@ architecture rtl of T80 is
 	signal RegWEH               : std_logic;
 	signal RegWEL               : std_logic;
 	signal Alternate            : std_logic;
+	signal InstEnd_ok           : std_logic;   -- cpuswap
+	signal SwapPt_i             : std_logic;   -- cpuswap
 
 	-- Help Registers
 	signal WZ                   : std_logic_vector(15 downto 0);        -- MEMPTR register
@@ -413,6 +416,9 @@ begin
 				PC  <= unsigned(DIR(79 downto 64));
 				ABus <= DIR(79 downto 64);
 				IStatus <= DIR(209 downto 208);
+				--  cpuswap: DIR carries BC..HL' in logical order (REG de-aliases
+				--  Alternate the same way), so the register file must be unswapped.
+				Alternate <= '0';
 
 			elsif ClkEn = '1' then
 				ALU_Op_r <= "0000";
@@ -1084,6 +1090,10 @@ begin
 			if DIRSet = '1' then
 				IntE_FF2 <= DIR(211);
 				IntE_FF1 <= DIR(210);
+				--  cpuswap: NMI edges are latched even while CEN is withheld; one that
+				--  arrived while the other core owned the bus was that core's to take.
+				NMI_s <= '0';
+				OldNMI_n := NMI_n;
 			else
 				if NMI_n = '0' and OldNMI_n = '1' then
 					NMI_s <= '1';
@@ -1177,4 +1187,54 @@ begin
 	end process;
 
 	Auto_Wait <= '1' when (IntCycle = '1' or NMICycle = '1') and MCycle = "001" else '0';
+
+-------------------------------------------------------------------------
+--
+-- Swap point (cpuswap)
+--
+-------------------------------------------------------------------------
+--  SwapPt = '1' while the core sits in T2 of an opcode fetch whose preceding
+--  instruction ended cleanly.  At that point REG is the complete architectural
+--  state between two instructions: the previous instruction's deferred writes
+--  (Save_ALU_r / Read_To_Reg_r, committed on the T1 edge of the NEXT M1) have
+--  landed, while R and PC have not yet counted the new opcode (T2 edge).  A core
+--  loaded through DIRSet while frozen in this same state resumes identically.
+--
+--  "Cleanly" repeats the end-of-instruction branch of the state machine above and
+--  excludes every case where the next instruction is not independent of how we
+--  got here: a prefix byte (Prefix /= "00", NextIs_XY_Fetch), EI (the one-
+--  instruction interrupt delay), HALT, and an NMI or INT being accepted now.
+--  WZ (MEMPTR) and the undocumented Q latch are not in REG and are not carried.
+	process (RESET_n, CLK_n)
+		variable inst_end : boolean;
+	begin
+		if RESET_n = '0' then
+			InstEnd_ok <= '0';
+			SwapPt_i <= '0';
+		elsif rising_edge(CLK_n) then
+			if DIRSet = '1' then
+				InstEnd_ok <= '0';
+				SwapPt_i <= '0';
+			elsif CEN = '1' then
+				inst_end := not (BusReq_s = '1' and BusAck = '1') and not (TState = 2 and Wait_n = '0') and
+					T_Res = '1' and BusReq_s = '0' and NextIs_XY_Fetch = '0' and
+					not ((MCycle = "111") or (MCycle = "110" and Mode = 1 and ISet /= "01")) and
+					((MCycle = MCycles) or No_BTR = '1' or (MCycle = "010" and I_DJNZ = '1' and IncDecZ = '1'));
+				if inst_end and Prefix = "00" and SetEI = '0' and Halt = '0' and Halt_FF = '0' and
+					NMI_s = '0' and not (IntE_FF1 = '1' and INT_n = '0') then
+					InstEnd_ok <= '1';
+				else
+					InstEnd_ok <= '0';
+				end if;
+				if MCycle = "001" and TState = 2 and Wait_n = '0' then
+					null;   -- still in T2 of the fetch: keep
+				elsif InstEnd_ok = '1' and MCycle = "001" and TState = 1 then
+					SwapPt_i <= '1';
+				else
+					SwapPt_i <= '0';
+				end if;
+			end if;
+		end if;
+	end process;
+	SwapPt <= SwapPt_i;
 end;

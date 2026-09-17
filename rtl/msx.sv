@@ -20,6 +20,8 @@ module msx
    input              [2:0] cpu_speed_q,         // LATCHED speed, selects the guard limit
    output                   cpu_bus_idle,        // -> clock.sv: safe point to change speed
    output                   msx_turbo_req,       // Panasonic 40H/41H: software asked for 5.37MHz
+   input                    turbor_en,           // OSD: turbo R features (rtl/peripheral/turbor)
+   output                   turbor_pause,        // -> MSX1.sv msx_pause: turbo R hardware pause
    input                    ce_5m39_n,
    input                    ce_10hz,
    input                    probe_freeze,        // diagnostic: freeze vdp_regprobe ring (msx_pause)
@@ -230,17 +232,28 @@ wire signed [15:0] mono_audio =
     mono_mix[16] ? 16'sh8000 : 16'sh7FFF;
 // MoonSound stereo mix wires — driven by the MoonSound block below
 wire signed [15:0] ms_audio_l, ms_audio_r;
-wire signed [16:0] mix_l = $signed({mono_audio[15], mono_audio}) + $signed({ms_audio_l[15], ms_audio_l});
-wire signed [16:0] mix_r = $signed({mono_audio[15], mono_audio}) + $signed({ms_audio_r[15], ms_audio_r});
-// Saturate 17-bit signed → 16-bit signed: clip only on real overflow (sign mismatch)
-assign audio_l = (mix_l[16] == mix_l[15]) ? mix_l[15:0] : (mix_l[16] ? 16'sh8000 : 16'sh7FFF);
-assign audio_r = (mix_r[16] == mix_r[15]) ? mix_r[15:0] : (mix_r[16] ? 16'sh8000 : 16'sh7FFF);
+//  turbo R PCM: 8-bit unsigned D/A, 80h = silence, at 2^6 per step (full swing
+//  +-8192, a little below the PSG's).  tr_mute_all is the PCM chip's MUTE bit,
+//  which silences every sound source on a turbo R.
+wire        [7:0] tr_pcm_dac;
+wire              tr_mute_all;
+wire signed [7:0] tr_pcm_s = tr_pcm_dac ^ 8'h80;
+wire signed [17:0] tr_pcm18 = {{4{tr_pcm_s[7]}}, tr_pcm_s, 6'b000000};
+wire signed [17:0] mix_l = $signed({{2{mono_audio[15]}}, mono_audio}) + $signed({{2{ms_audio_l[15]}}, ms_audio_l}) + tr_pcm18;
+wire signed [17:0] mix_r = $signed({{2{mono_audio[15]}}, mono_audio}) + $signed({{2{ms_audio_r[15]}}, ms_audio_r}) + tr_pcm18;
+// Saturate 18-bit signed → 16-bit signed: clip only on real overflow
+wire signed [15:0] sat_l = (mix_l[17:15] == 3'b000 || mix_l[17:15] == 3'b111) ? mix_l[15:0] : (mix_l[17] ? 16'sh8000 : 16'sh7FFF);
+wire signed [15:0] sat_r = (mix_r[17:15] == 3'b000 || mix_r[17:15] == 3'b111) ? mix_r[15:0] : (mix_r[17] ? 16'sh8000 : 16'sh7FFF);
+assign audio_l = tr_mute_all ? 16'sd0 : sat_l;
+assign audio_r = tr_mute_all ? 16'sd0 : sat_r;
 
 //  -----------------------------------------------------------------------------
 //  -- T80 CPU
 //  -----------------------------------------------------------------------------
 wire [15:0] a;
 wire [7:0] d_to_cpu, d_from_cpu;
+wire [7:0] tr_dout;                                  // turbo R block (declared here: used by the read mux)
+wire       tr_mem_ov, tr_io_sel, tr_main_rom0;
 wire mreq_n, wr_n, m1_n, iorq_n, rd_n, rfrsh_n;
 //  A-Z80, on its own clock, bridged onto clk21m.
 //
@@ -1028,6 +1041,7 @@ always @(posedge clk21m) begin
 end
 
 assign d_to_cpu = rd_n              ? 8'hFF           :
+                  tr_mem_ov | tr_io_sel ? tr_dout     :   // turbo R ports / BIOS overlay (off unless turbor_en)
                   vdp_en            ? d_to_cpu_vdp    :
                   rtc_en            ? d_from_rtc      :
                   ~psg_n            ? d_from_psg      :
@@ -1409,7 +1423,47 @@ msx_slots msx_slots
    .flash16x_prog_we(flash16x_prog_we),
    .flash16x_prog_addr(flash16x_prog_addr),
    .flash16x_prog_data(flash16x_prog_data),
-   .msx_turbo_req(msx_turbo_req)
+   .msx_turbo_req(msx_turbo_req),
+   .main_rom0(tr_main_rom0)
+);
+
+//  -----------------------------------------------------------------------------
+//  -- MSX turbo R features (OSD): S1990 CPU switch + BIOS CHGCPU/GETCPU overlay,
+//  -- E6h timer, A4h/A5h PCM, A7h pause key.  See rtl/peripheral/turbor/turbor.sv.
+//  -----------------------------------------------------------------------------
+//  The CPU selection (tr_r800 / tr_dram) is stored and read back; nothing acts on it
+//  until the T80s <-> NextZ80 hand-over (rtl/cpu/cpuswap) is wired in.
+logic tr_iow_q = 1'b0;
+always @(posedge clk21m) tr_iow_q <= ~iorq_n & ~wr_n & m1_n;
+wire  tr_iowr_stb = ~iorq_n & ~wr_n & m1_n & ~tr_iow_q;
+wire  tr_r800, tr_dram, tr_pause_led, tr_turbo_led;
+turbor turbor
+(
+   .clk(clk21m),
+   .reset(reset),
+   .en(turbor_en),
+   .ce_3m58(ce_3m58_p),
+   .a(a),
+   .din(d_from_cpu),
+   .mreq_n(mreq_n),
+   .iorq_n(iorq_n),
+   .rd_n(rd_n),
+   .m1_n(m1_n),
+   .iowr_stb(tr_iowr_stb),
+   .main_rom0(tr_main_rom0),
+   .mem_ov(tr_mem_ov),
+   .io_sel(tr_io_sel),
+   .dout(tr_dout),
+   .set_stb(1'b0),
+   .set_r800(1'b0),
+   .r800(tr_r800),
+   .dram(tr_dram),
+   .pcm_dac(tr_pcm_dac),
+   .mute_all(tr_mute_all),
+   .ps2_key(ps2_key),
+   .hw_pause(turbor_pause),
+   .pause_led(tr_pause_led),
+   .turbo_led(tr_turbo_led)
 );
 
 

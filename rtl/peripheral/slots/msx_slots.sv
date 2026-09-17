@@ -80,6 +80,10 @@ module msx_slots
    input                    cpu_turbo,
    output                   msx_turbo_req,       // Panasonic 40H/41H asked for 5.37MHz
    output                   opll_pace_n,
+   //  The current address decodes to slot 0-0 page 0, where every MSX keeps its main
+   //  BIOS (turbo R BIOS overlay, rtl/peripheral/turbor).  Slot 0 unexpanded reads
+   //  subslot 0.
+   output                   main_rom0,
    output            [22:0] flash16x_prog_addr,
    output             [7:0] flash16x_prog_data
 );
@@ -160,6 +164,7 @@ device_typ_t        device;
 wire          [1:0] block      = cpu_addr[15:14];
 wire          [1:0] subslot    = mapper_slot[active_slot][(3'd2 * block) +:2];
 wire          [5:0] layout_id  = {active_slot, subslot, block};
+assign              main_rom0  = (layout_id == 6'd0);
 wire          [3:0] ref_ram    = slot_layout[layout_id].ref_ram;
 wire          [1:0] ref_sram   = slot_layout[layout_id].ref_sram;
 wire          [1:0] offset_ram = slot_layout[layout_id].offset_ram;

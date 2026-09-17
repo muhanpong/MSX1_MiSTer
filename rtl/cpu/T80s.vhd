@@ -105,7 +105,9 @@ entity T80s is
 		--  register set, and a CPU swap at runtime needs them.
 		REG     : out std_logic_vector(211 downto 0);
 		DIRSet  : in  std_logic := '0';
-		DIR     : in  std_logic_vector(211 downto 0) := (others => '0')
+		DIR     : in  std_logic_vector(211 downto 0) := (others => '0');
+		--  cpuswap: '1' while REG is a clean instruction boundary (T80.vhd "Swap point").
+		SWAPPT  : out std_logic
 	);
 end T80s;
 
@@ -150,7 +152,8 @@ begin
 		IntCycle_n => IntCycle_n,
 		REG => REG,
 		DIRSet => DIRSet,
-		DIR => DIR
+		DIR => DIR,
+		SwapPt => SWAPPT
 	);
 
 	process (RESET_n, CLK)
