@@ -12,8 +12,10 @@ module msx
    input                    ce_3m58_p,
    input                    ce_3m58_n,
    input                    ce_cpu,            // turbo rate enable: PSG bus strobe, M1 wait pair, FDC
-   input                    az80_clk,          // the CPU's own clock, from az80_clkgen
-   input                    use_t80,           // speed 4 (21.5MHz): T80s owns the bus, A-Z80 held in reset
+   input                    msx_pause,         // machine pause: freezes NextZ80 (T80s stops through ce_cpu)
+   input                    r800_set_stb,      // OSD "CPU (turbo R)" changed: select through the S1990
+   input                    r800_set,
+   output                   use_nz,            // NextZ80 owns the bus (-> MSX1.sv: ce_cpu at full rate)
    input                    cpu_turbo,           // 1 while ce_cpu_* runs faster than ce_3m58_*
    input                    sdram_rdtog,         // flips once per completed SDRAM ch2 READ (P3 closed loop)
    input                    sdram_hit,           // level: this ch2 READ was answered from sdram.sv's word latch
@@ -255,105 +257,26 @@ wire [7:0] d_to_cpu, d_from_cpu;
 wire [7:0] tr_dout;                                  // turbo R block (declared here: used by the read mux)
 wire       tr_mem_ov, tr_io_sel, tr_main_rom0;
 wire mreq_n, wr_n, m1_n, iorq_n, rd_n, rfrsh_n;
-//  A-Z80, on its own clock, bridged onto clk21m.
-//
-//  T80/T80pa/T80s are documentation-derived: twenty years of community fixes on
-//  top of a 2001 core, with SCF/CCF's XF/YF still open in the header and WAIT
-//  broken badly enough that T80pa hardwires the core's WAIT_n to '1' and stops
-//  the clock instead (T80pa.vhd:51,123,170).  A-Z80 was reconstructed from die
-//  images and patents with a per-opcode M/T timing matrix, and on this part it
-//  is also FASTER: 29.2 MHz standalone Fmax against the 21.5 the enable-driven
-//  T80s reached, in 925 ALMs.  Accuracy is not costing speed here.
-//
-//  It has no clock enable -- parts of it latch on ~clk by construction -- so it
-//  runs from a real clock, and its strobes are wired straight to the fabric --
-//  see the note below on why no retiming layer is needed.
-//  See rtl/cpu/az80/README.md for the measurements behind all of that.
-wire        az_m1_n, az_mreq_n, az_iorq_n, az_rd_n, az_wr_n, az_rfsh_n;
-wire [15:0] az_a;
-wire  [7:0] az_do, az_di;
-wire        az_wait_n;
-
-//  Reset synchroniser for the CPU's own clock domain.
-//
-//  reset_req is framework logic in the FPGA_CLK2_50 domain (sys_top.v:554-570 --
-//  the OSD's Reset, a core load, the physical button, all arriving through
-//  gp_out[31:30] from the HPS), and until A-Z80 it was consumed inside clk21m,
-//  so the crossing was handled once and stayed handled.  Giving the CPU its own
-//  clock created a second boundary, 50 MHz to az80_clk, with nothing on it: the
-//  first build reported -13.599 ns on reset_req -> resets_|x1, a 16.3 ns routing
-//  path latched on az80_clk INVERTED between two unrelated clocks whose
-//  requirement comes out NEGATIVE (-1.005 ns).  Not a speed problem; an
-//  unconstrained crossing.
-//
-//  Assert asynchronously, deassert synchronously.  The assert must not wait for
-//  a clock edge because az80_clkgen holds az80_clk still while reset or
-//  msx_pause is high -- a synchronous assert would be waiting for a clock that
-//  has stopped.  The deassert must be synchronous so the CPU's internal flops,
-//  which include five on the inverted edge (control/resets.v), all come out of
-//  reset on the same edge.
-//  While T80s owns the machine (use_t80), the A-Z80 is held in reset the same
-//  way -- use_t80 only ever changes inside the stretched core-switch machine
-//  reset (MSX1.sv), so the async assert cannot glitch mid-run.
-wire az_arst = reset | use_t80;
-logic [1:0] az_rst_sync = 2'b11;
-always @(posedge az80_clk, posedge az_arst) begin
-   if (az_arst) az_rst_sync <= 2'b11;
-   else         az_rst_sync <= {az_rst_sync[0], 1'b0};
-end
-wire az_reset = az_rst_sync[1];
-
-az80_wrapper CPU
-(
-   .clk     (az80_clk),
-   .reset   (az_reset),
-   .wait_n  (az_wait_n),
-   //  Z80 /INT is shared (wired-AND, active-low) between the VDP and the
-   //  MoonSound (YMF278B/OPL4) Timer-1 IRQ.  MoonSound music players drive
-   //  their playback tick from the OPL Timer-1 overflow interrupt, so its irq
-   //  line must reach the CPU.
-   .int_n   (vdp_int_n & ms_int_n),
-   .nmi_n   (1'b1),
-   .busrq_n (1'b1),
-   .m1_n    (az_m1_n),
-   .mreq_n  (az_mreq_n),
-   .iorq_n  (az_iorq_n),
-   .rd_n    (az_rd_n),
-   .wr_n    (az_wr_n),
-   .rfsh_n  (az_rfsh_n),
-   .halt_n  (),
-   .busak_n (),
-   .a       (az_a),
-   .di      (az_di),
-   .do_     (az_do)
-);
-
-//  No bridge.  One was built on the belief that at clk21m/1 a one-T-state
-//  strobe could fall entirely between two clk21m edges and be seen by nothing.
-//  That came from a testbench whose clk21m divider was wrong by 2x
-//  (`div4 == 2'd1` toggles once per four clk_sdram, giving 10.74 MHz, not
-//  21.477).  With the divider fixed the strobes are 6/4/3/2/1 clk21m wide at
-//  /24 /16 /12 /8 /4 and none is ever invisible at any phase: a window of
-//  exactly one clk21m period contains exactly one clk21m posedge no matter
-//  where it starts.  At /4 that is one sample of margin and no more, which is
-//  worth knowing, but it is a guarantee rather than luck.  See
-//  rtl/cpu/az80/sim/tb_az80_nobridge.sv, which is the same bench with the CPU
-//  wired straight to the fabric.
-//  The 21.5 MHz core.  T80s on clk21m with a single clock enable reached /1 and
-//  was verified on hardware (20260913b); A-Z80's half-cycle latch paths cannot
-//  close /4 on this device (best 20.99 of 21.477 MHz over 7 fits), so the top
-//  speed keeps T80s and every accuracy-relevant speed below it runs A-Z80.
-//  Held in reset whenever A-Z80 owns the bus; ce_cpu keeps ticking either way,
-//  which is harmless in reset and keeps the FDC/M1-wait cadence logic common.
+//  Two CPUs on one bus, handed over at run time without a reset (rtl/cpu/cpuswap):
+//  T80s on clk21m/ce_cpu at every speed 3.58-21.5, and NextZ80 on clk21m through
+//  nz_bus, standing in for the turbo R's R800.  The owner follows the S1990 CPU
+//  bit (turbor.r800: OUT E4h/E5h, BIOS CHGCPU, or the OSD).  cpuswap_ctl waits for
+//  the owner's swap point (between two instructions), freezes both cores, copies
+//  the register file across (T80 REG layout) and flips the bus.  WZ/MEMPTR and Q
+//  are not carried: flag bits 3/5 of the first instruction after a swap may differ.
+//  Bench: rtl/cpu/cpuswap/sim (lockstep against a T80s-only reference, shared bus,
+//  registered and SDRAM-like reads, WAIT, ~111k swaps per run).
 wire        t_m1_n, t_mreq_n, t_iorq_n, t_rd_n, t_wr_n, t_rfsh_n;
 wire [15:0] t_a;
 wire  [7:0] t_do;
-wire [211:0] t80_reg_t80;
+wire [211:0] t80_reg_t80, nz_xreg;
+wire        t80_swappt, nz_swappt, t80_hold, nz_hold, t80_dirset, nz_load, swap_busy;
+wire        tr_r800;                                 // S1990 CPU select (turbor, below)
 T80s #(.Mode(0), .T2Write(1), .IOWait(1)) T80
 (
-   .RESET_n(~reset & use_t80),
+   .RESET_n(~reset),
    .CLK(clk21m),
-   .CEN(ce_cpu),
+   .CEN(ce_cpu & ~t80_hold),
    .WAIT_n(wait_n),
    .INT_n(vdp_int_n & ms_int_n),
    .NMI_n(1),
@@ -364,33 +287,124 @@ T80s #(.Mode(0), .T2Write(1), .IOWait(1)) T80
    .RD_n(t_rd_n),
    .WR_n(t_wr_n),
    .RFSH_n(t_rfsh_n),
-   .HALT_n(1),
+   .HALT_n(),
    .BUSAK_n(),
    .A(t_a),
    .DI(d_to_cpu),
    .DO(t_do),
-   .REG(t80_reg_t80)
+   .REG(t80_reg_t80),
+   .DIRSet(t80_dirset),
+   .DIR(nz_xreg),
+   .SWAPPT(t80_swappt)
 );
 
-//  The bus belongs to exactly one core; use_t80 is stable outside the stretched
-//  core-switch reset, so these muxes never switch under a live cycle.
-assign mreq_n  = use_t80 ? t_mreq_n : az_mreq_n;
-assign iorq_n  = use_t80 ? t_iorq_n : az_iorq_n;
-assign rd_n    = use_t80 ? t_rd_n   : az_rd_n;
-assign wr_n    = use_t80 ? t_wr_n   : az_wr_n;
-assign m1_n    = use_t80 ? t_m1_n   : az_m1_n;
-assign rfrsh_n = use_t80 ? t_rfsh_n : az_rfsh_n;
-assign a          = use_t80 ? t_a  : az_a;
-assign d_from_cpu = use_t80 ? t_do : az_do;
-assign az_di      = d_to_cpu;
-assign az_wait_n  = wait_n;
+//  NextZ80 does one bus access per enabled clk21m edge; nz_bus paces it to a
+//  Z80-shaped bus: one masked clock after every advance (strobes fall between
+//  M-cycles, so `req`, iowr one-shots and the SDRAM request edge re-arm, and the
+//  address leads MREQ/RD by a full clk21m), at least one clock of visible strobe,
+//  extended by WAIT.  RESET is tied off: the only way in is LOAD from T80s, and a
+//  reset sample taken while frozen would otherwise survive the LOAD and restart
+//  the core at 0000h on its first edge.
+wire        nz_wr, nz_mreq, nz_iorq, nz_m1, nz_wait;
+wire [15:0] nz_a;
+wire  [7:0] nz_do;
+wire        nzb_mreq_n, nzb_iorq_n, nzb_rd_n, nzb_wr_n, nzb_m1_n, nzb_rfsh_n;
+NextZ80 NZ
+(
+   .DI(d_to_cpu),
+   .DO(nz_do),
+   .ADDR(nz_a),
+   .WR(nz_wr),
+   .MREQ(nz_mreq),
+   .IORQ(nz_iorq),
+   .HALT(),
+   .M1(nz_m1),
+   .CLK(clk21m),
+   .RESET(1'b0),
+   .INT(~(vdp_int_n & ms_int_n)),
+   .NMI(1'b0),
+   .WAIT(nz_wait),
+   .LOAD(nz_load),
+   .LDIR(t80_reg_t80),
+   .XREG(nz_xreg),
+   .SWAPPT(nz_swappt)
+);
 
-//  A-Z80 has no REG(211:0) to forward (its registers live in individual
-//  reg_latch instances on an internal tri-state bus), so the twenty dbg_*
-//  readers of t80_reg see the real register file at 21.5 MHz and zeros on the
-//  accuracy cores -- checked one by one (including `booted` and `im2_tbl_hi`)
-//  that every reader is forensics, not machine logic.
-wire [211:0] t80_reg = use_t80 ? t80_reg_t80 : 212'd0;
+nz_bus NZB
+(
+   .clk(clk21m),
+   .reset(reset),
+   .en(use_nz),
+   .hold(nz_hold | reset),
+   .pause(msx_pause),
+   .load(nz_load),
+   .wait_n(wait_n),
+   .n_mreq(nz_mreq),
+   .n_iorq(nz_iorq),
+   .n_wr(nz_wr),
+   .n_m1(nz_m1),
+   .nz_wait(nz_wait),
+   .vis(),
+   .mreq_n(nzb_mreq_n),
+   .iorq_n(nzb_iorq_n),
+   .rd_n(nzb_rd_n),
+   .wr_n(nzb_wr_n),
+   .m1_n(nzb_m1_n),
+   .rfsh_n(nzb_rfsh_n)
+);
+
+cpuswap_ctl CPUSWAP
+(
+   .clk(clk21m),
+   .reset(reset),
+   .want_nz(tr_r800),
+   .t80_swappt(t80_swappt),
+   .nz_swappt(nz_swappt),
+   .use_nz(use_nz),
+   .t80_hold(t80_hold),
+   .nz_hold(nz_hold),
+   .t80_dirset(t80_dirset),
+   .nz_load(nz_load),
+   .busy(swap_busy)
+);
+
+//  The owner's strobes, forced idle while a hand-over is in progress: the frozen
+//  T80s would otherwise hold the strobes of its interrupted fetch through the swap,
+//  so `req` and the SDRAM request would not re-edge for the core that resumes.
+assign mreq_n  = swap_busy | (use_nz ? nzb_mreq_n : t_mreq_n);
+assign iorq_n  = swap_busy | (use_nz ? nzb_iorq_n : t_iorq_n);
+assign rd_n    = swap_busy | (use_nz ? nzb_rd_n   : t_rd_n);
+assign wr_n    = swap_busy | (use_nz ? nzb_wr_n   : t_wr_n);
+assign m1_n    = swap_busy | (use_nz ? nzb_m1_n   : t_m1_n);
+assign rfrsh_n = swap_busy | (use_nz ? nzb_rfsh_n : t_rfsh_n);
+assign a          = use_nz ? nz_a  : t_a;
+assign d_from_cpu = use_nz ? nz_do : t_do;
+
+//  Resume guard.  A T80s handed the bus resumes in T2 of the fetch it was frozen in
+//  and latches DI on its next CEN -- at stock speed that can be one clk21m after the
+//  bus reappears, long before a fresh SDRAM read is home.  So the pacers treat the
+//  first bus cycle after any hand-over as a turbo cycle (bench: without this, a
+//  stock-speed swap executes junk; `no resume grd` in sim/run.sh).
+logic resume_guard = 1'b0, rg_seen = 1'b0;
+always @(posedge clk21m) begin
+   if (reset) begin
+      resume_guard <= 1'b0;
+      rg_seen      <= 1'b0;
+   end else if (swap_busy) begin
+      resume_guard <= 1'b1;
+      rg_seen      <= 1'b0;
+   end else if (resume_guard) begin
+      if (~mreq_n | ~iorq_n) rg_seen      <= 1'b1;
+      else if (rg_seen)      resume_guard <= 1'b0;
+   end
+end
+//  Everything that used to key on cpu_turbo (bus guard, SDRAM closed loop, VDP / SD /
+//  OPLL pacers) keys on this: NextZ80 always needs them, like T80s at turbo.
+wire cpu_paced = cpu_turbo | use_nz | resume_guard;
+
+//  Forensics only (the dbg_* readers below): T80s' register file.  While NextZ80
+//  owns the bus it is the state T80s was frozen with.
+wire [211:0] t80_reg = t80_reg_t80;
 
 //  -----------------------------------------------------------------------------
 //  -- WAIT CPU
@@ -556,7 +570,7 @@ end
 // the guard would release immediately.  Measured: minimum write window back to
 // 2 clk21m with 1010 of 13131 write windows containing no ce_3m58_p at all.
 //
-// cpu_turbo == 0 short-circuits the whole guard, so wait_n === wait_m1_n and
+// cpu_paced == 0 (stock speed, T80s, no hand-over just done) short-circuits the whole guard, so wait_n === wait_m1_n and
 // the stock core is reproduced exactly.
 wire slow_dev;   // from msx_slots: this memory access hits a ce_3m58-latched device
 wire guard_slow  = ~iorq_n | slow_dev;
@@ -599,7 +613,7 @@ wire [4:0] guard_min  = guard_slow
 // sampler.  guard_cnt saturation (15 clk21m = 64 clk_sdram, far beyond any
 // legitimate latency) is a hang-proof watchdog only; if it ever fires the
 // behavior degrades to the old open-loop timing, never to a stall.
-wire hs_win = bus_xfer & sdram_ce & ram_rnw & ~guard_slow & cpu_turbo;
+wire hs_win = bus_xfer & sdram_ce & ram_rnw & ~guard_slow & cpu_paced;
 logic hs_armed = 1'b0, hs_done = 1'b0, hs_tog0 = 1'b0;
 always @(posedge clk21m) begin
    if (reset | ~hs_win) begin
@@ -631,7 +645,7 @@ wire guard_open  = guard_slow           ? (guard_ce & (guard_cnt >= guard_min)) 
                    ~wr_n                ? (guard_cnt >= guard_min)              :  // fast write
                    (sdram_ce & ram_rnw) ? (hs_done | sdram_hit | (&guard_cnt)) :  // fast SDRAM read: closed loop / latch hit
                                           (guard_cnt >= guard_min);                // fast BRAM/unmapped read
-wire bus_guard_n = ~cpu_turbo | ~bus_cycle | (mreq_n & rd_n & wr_n) | guard_open;
+wire bus_guard_n = ~cpu_paced | ~bus_cycle | (mreq_n & rd_n & wr_n) | guard_open;
 
 //  -----------------------------------------------------------------------------
 //  -- P5: STALL / WORD-LATCH HIT RATIO (debug overlay)
@@ -736,7 +750,7 @@ always @(posedge clk21m) begin
       else if (|vdp_gap) vdp_gap <= vdp_gap - 1'd1;
    end
 end
-wire vdp_hold  = cpu_turbo & vdp_bus & ~vdp_grant;
+wire vdp_hold  = cpu_paced & vdp_bus & ~vdp_grant;
 
 //  Release the pacer one clk21m AFTER the grant, not on it.
 //
@@ -756,7 +770,7 @@ wire vdp_hold  = cpu_turbo & vdp_bus & ~vdp_grant;
 logic vdp_grant_d = 1'b0;
 always @(posedge clk21m) vdp_grant_d <= vdp_grant & vdp_bus;
 
-wire vdp_pace_n = ~(cpu_turbo & vdp_bus & (~vdp_grant_d | (vdp18 & (vdp_hcnt < 3'd4))));
+wire vdp_pace_n = ~(cpu_paced & vdp_bus & (~vdp_grant_d | (vdp18 & (vdp_hcnt < 3'd4))));
 
 wire opll_pace_n;   // turbo OPLL write pacer, from msx_slots (spec inter-write gaps)
 
@@ -813,95 +827,18 @@ end
 //  outrun a 16 clk21m byte, and turbo off has to stay bit-identical to the
 //  original core -- that invariant is the reason speed 0 is still literally the
 //  ce_3m58_p decode.
-wire sd_pace_n = ~(cpu_turbo & sd_rd_window & ~(sd_xfer_seen & sd_ready)
+wire sd_pace_n = ~(cpu_paced & sd_rd_window & ~(sd_xfer_seen & sd_ready)
                              & (sd_pace_cnt != 6'd32));
 
-//  A-Z80 SDRAM read pacer -- every A-Z80 speed, stock included.
-//
-//  First hardware boot of the dual build (20260914a) never reached the BIOS on
-//  A-Z80 at 3.58 or 10.7 while T80s booted.  tb_az80_ch2lat.sv reproduced it:
-//  A-Z80 latches the data pins exactly ONE T-state after MREQ/RD fall (measured
-//  23 clk_sdram at /24, 15 at /16, 11 at /12, 7 at /8), while an SDRAM ch2 miss
-//  answers ~24 clk_sdram after the request edge -- one cycle late at stock, and
-//  hopeless at turbo.  T80s samples later, which is the only reason the open
-//  loop ever worked.  So A-Z80 never gets an open-loop SDRAM read: WAIT is held
-//  from the moment the read is strobed until THIS read's data is home -- the
-//  rdtog completion for a miss, sdram_hit for a cache hit -- and A-Z80 inserts
-//  Tw until then (its data latch moves with Tw; measured 23 -> 47 with one Tw).
-//
-//  Both completions are REGISTERED on clk_sdram before they reach WAIT (moved
-//  from clk21m on 20260915: the clk21m register quantised a cache hit to 3
-//  clk21m after MREQ -- on the 7.16 sample edge and past the 10.7 one, one extra
-//  T-state per read, Z80BENCH 6.58 / 9.88).  Timeline from the CPU edge that
-//  drops MREQ/RD (clk_sdram edge 0): request captured at 3 (MSX1.sv), sdram.sv
-//  hit at 5, az_hit here at 6 -> WAIT released 2 clk_sdram before the 10.7
-//  sample (8) and 6 before 7.16's (12).  The release is a clk_sdram -> az80_clk
-//  path with an honest 11.64 ns single-cycle requirement.  The data was valid
-//  on the edge that set the completion, >= 1 clk_sdram before the release.
-//  The watchdog only exists so a lost completion degrades, never hangs.
-wire  az_rd_win = ~use_t80 & bus_xfer & sdram_ce & ram_rnw;
-//  The window reaches clk_sdram through a two-flop synchroniser, never straight
-//  into the pacer flops.  az_rd_win is the slot/mapper decode of the CPU address
-//  (17 logic levels, ~23 ns) and changes on an az80_clk edge; build 04b6210 had
-//  it timed single-cycle into every pacer flop (-11.7 ns).  A multicycle alone
-//  would have been unsafe: on the violated edges az_armed and az_tog0 could
-//  capture different values, and a stale tog0 against a toggled rdtog releases
-//  WAIT before this read's data.  Only az_win_s1 is multicycled (MSX1.sdc,
-//  -end 3); every pacer flop then sees ONE registered copy, s2, valid by edge 4
-//  -- before the request completes (capture 3, hit 5) and before the next
-//  window can open (>= 8 clk_sdram after this one closes, at 10.7).
-logic az_win_s1 = 1'b0, az_win_s2 = 1'b0;
-always @(posedge clk_sdram) begin
-   az_win_s1 <= az_rd_win;
-   az_win_s2 <= az_win_s1;
-end
-logic az_armed = 1'b0, az_done = 1'b0, az_tog0 = 1'b0, az_hit = 1'b0;
-logic [7:0] az_wd = 8'd0;
-always @(posedge clk_sdram) begin
-   if (reset | ~az_win_s2) begin
-      az_armed <= 1'b0;
-      az_done  <= 1'b0;
-      az_hit   <= 1'b0;
-      az_wd    <= 8'd0;
-   end else begin
-      if (~az_armed) begin
-         az_armed <= 1'b1;
-         az_tog0  <= sdram_rdtog;       // a miss completes >= 8 clk_sdram later
-      end else if (sdram_rdtog != az_tog0)
-         az_done  <= 1'b1;
-      if (sdram_hit)          az_hit <= 1'b1;
-      if (az_wd != 8'd255)    az_wd  <= az_wd + 8'd1;
-   end
-end
-wire az_rd_pace_n = ~(az_rd_win & ~(az_done | az_hit | (az_wd == 8'd255)));
+//  NextZ80 reads from SDRAM go through the same closed loop as T80s at turbo
+//  (hs_win / sdram_hit above, via cpu_paced): nz_bus gives the address a full
+//  clk21m of lead over MREQ/RD, which is what the generic ch2 request timing needs,
+//  so the A-Z80 request delay and clk_sdram pacer are not used.
+//  M1 wait: the MSX2 74LS74 pair belongs to the Z80 T-state grid; the R800 has no
+//  such wait and NextZ80 has no T-states, so it only sees the MoonSound hold.
+wire wait_m1_eff_n = use_nz ? exwait_n : wait_m1_n;
 
-//  A-Z80's M1 wait -- the MSX2 one-Tw-per-opcode-fetch, generated on the CPU's
-//  own clock.  The 74LS74 pair above runs on ce_cpu, T80's clock-enable grid;
-//  A-Z80 samples nWAIT on ITS falling edges, which that grid does not line up
-//  with, so the single low pulse was missed at half the phases
-//  (tb_az80_m1wait: 225 clocks instead of 253 on the test program) and
-//  Z80BENCH read 4.11 at 3.58 and 6.17 at 5.37 on 20260915a -- +15%, one T-state
-//  missing from every M1.  Here: low from T1's falling edge to T2's, so the CPU's
-//  own T2 falling-edge sample sees it and the Tw sample does not -- exactly one
-//  Tw, every M1, any speed.  exwait_n (MoonSound) keeps its old meaning.
-logic az_m1_q = 1'b1, az_m1w_n = 1'b1;
-always @(negedge az80_clk) begin
-   az_m1_q  <= az_m1_n;
-   az_m1w_n <= ~(~az_m1_n & az_m1_q);
-end
-wire wait_m1_eff_n = use_t80 ? wait_m1_n : (az_m1w_n & exwait_n);
-
-wire wait_n      = wait_m1_eff_n & bus_guard_n & vdp_pace_n & opll_pace_n & sd_pace_n & az_rd_pace_n;
-
-//  Diagnostic bus trace of the A-Z80 (see rtl/cpu/az80/az80_trace.sv).
-az80_trace u_aztrace (
-   .clk_sdram (clk_sdram),
-   .az80_clk  (az80_clk),
-   .az_reset  (az_reset),
-   .sample    ({use_t80, az_reset, sdram_rdtog, sdram_hit, wait_m1_n, az_rd_pace_n, ram_rnw, sdram_ce,
-                1'b0, wait_n, az_rfsh_n, az_m1_n, az_wr_n, az_rd_n, az_iorq_n, az_mreq_n,
-                az_do, az_di, az_a})
-);
+wire wait_n      = wait_m1_eff_n & bus_guard_n & vdp_pace_n & opll_pace_n & sd_pace_n;
 
 
 logic map_valid = 0;
@@ -1374,7 +1311,7 @@ msx_slots msx_slots
    //  (sd_card_en & cpu_mreq & cpu_rd).  Named "debug_" there but it is the
    //  only signal that identifies the cycle the SD pacer has to hold.
    .debug_sd_card(sd_rd_window),
-   .cpu_turbo(cpu_turbo),
+   .cpu_turbo(cpu_paced),
    .opll_pace_n(opll_pace_n),
    .opll_vol(opll_vol),
    .scc_vol(scc_vol),
@@ -1431,12 +1368,12 @@ msx_slots msx_slots
 //  -- MSX turbo R features (OSD): S1990 CPU switch + BIOS CHGCPU/GETCPU overlay,
 //  -- E6h timer, A4h/A5h PCM, A7h pause key.  See rtl/peripheral/turbor/turbor.sv.
 //  -----------------------------------------------------------------------------
-//  The CPU selection (tr_r800 / tr_dram) is stored and read back; nothing acts on it
-//  until the T80s <-> NextZ80 hand-over (rtl/cpu/cpuswap) is wired in.
+//  tr_r800 selects the CPU (cpuswap_ctl above); the OSD sets it through set_stb,
+//  which works with the turbo R features Off too (only the ports need them On).
 logic tr_iow_q = 1'b0;
 always @(posedge clk21m) tr_iow_q <= ~iorq_n & ~wr_n & m1_n;
 wire  tr_iowr_stb = ~iorq_n & ~wr_n & m1_n & ~tr_iow_q;
-wire  tr_r800, tr_dram, tr_pause_led, tr_turbo_led;
+wire  tr_dram, tr_pause_led, tr_turbo_led;
 turbor turbor
 (
    .clk(clk21m),
@@ -1454,8 +1391,8 @@ turbor turbor
    .mem_ov(tr_mem_ov),
    .io_sel(tr_io_sel),
    .dout(tr_dout),
-   .set_stb(1'b0),
-   .set_r800(1'b0),
+   .set_stb(r800_set_stb),
+   .set_r800(r800_set),
    .r800(tr_r800),
    .dram(tr_dram),
    .pcm_dac(tr_pcm_dac),

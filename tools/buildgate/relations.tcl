@@ -1,7 +1,8 @@
 # Clock-pair relationship assertions.  A multicycle or a rounding artefact can
 # move the analysed capture edge away from the one the flops use; this prints
 # latch-minus-launch for the worst path of each pair and FAILS if it is not the
-# value the design was argued for (docs/az80_migration_20260913.md, "진범 2").
+# value the design was argued for (docs/az80_migration_20260913.md, "진범 2";
+# the NextZ80 rules are argued in MSX1.sdc and rtl/cpu/cpuswap/README.md).
 # Edit EXPECT when the clocking changes -- deliberately, with the reason.
 project_open MSX1 -revision MSX1
 create_timing_netlist -model slow
@@ -9,26 +10,24 @@ read_sdc
 update_timing_netlist
 set c21 {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}
 set csd {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}
-#            label        from      to        expected relationship (ns)   why
-#   label           from      to-clock  to-register filter ("" = all)     expected  why
+#   label           from      to-clock  to-register filter ("" = all)     expected  why  [from-register filter]
+#  The last field is optional: a source register filter, for rules that have -from.
 set EXPECT [list \
-  [list C21_to_AZ      $c21     az80_clk ""                                  46.566 "clk21m rise -> next az80 edge (set_max_delay 46.566)"] \
-  [list AZ_to_C21      az80_clk $c21     ""                                  23.283 "az80 edge -> clk21m fall (falling-edge fabric flops)"] \
-  [list AZ_intra       az80_clk az80_clk ""                                  46.566 "half of the declared /8 period"] \
-  [list SD_to_AZ_dout  $csd     az80_clk "*data_pins:data_pins_|dout*"      40.000 "SDRAM read data, set_max_delay 40"] \
-  [list SD_to_AZ_wait  $csd     az80_clk "*az80_wrapper:CPU*clk_delay*"     11.641 "clk_sdram pacer release -> nWAIT sampler, single cycle"] \
-  [list AZ_to_SD_ch2   az80_clk $csd     "*sdram*ch2_*"                     34.923 "A-Z80 address -> ch2 capture on the 3rd clk_sdram edge"] \
-  [list AZ_to_SD_div   az80_clk $csd     "*az80_clkgen*|speed_q*"           23.282 "bus-idle -> divisor latch, -end 2"] \
-  [list AZ_to_SD_tgl   az80_clk $csd     "*az80_clkgen*|az80_clk"           11.641 "the clock's own toggle flop, single cycle"] \
-  [list AZ_to_SD_sync  az80_clk $csd     "*msx:MSX|az_win_s1"               34.923 "read window -> pacer synchroniser, -end 3"] \
-  [list AZ_to_SD_rqd   az80_clk $csd     "*sdram_ce_sr[0]"                  23.282 "request-delay first stage, -end 2"] \
-  [list C21_to_SD_sync $c21     $csd     "*msx:MSX|az_win_s1"               34.923 "slot/mapper state -> pacer synchroniser, -end 3"] \
-  [list C21_to_SD_rqd  $c21     $csd     "*sdram_ce_sr[0]"                  23.282 "slot/mapper state -> request-delay first stage, -end 2"] ]
+  [list NZ_intra       $c21     $c21     "*msx:MSX|NextZ80:NZ|*"            93.132 "NextZ80 -> NextZ80, -end 2 (writes >= 2 clk21m apart, nz_bus)" "*msx:MSX|NextZ80:NZ|*"] \
+  [list NZ_to_SD_ch2   $c21     $csd     "*sdram*ch2_*"                     69.846 "NextZ80 address -> ch2 capture, generic -end 6" "*msx:MSX|NextZ80:NZ|*"] \
+  [list NZ_to_fabric   $c21     $c21     "*systemRAM*"                      93.132 "NextZ80 -> clk21m fabric, clock-based -end 2" "*msx:MSX|NextZ80:NZ|*"] \
+  [list NZ_to_SCC_fall $c21     $c21     "*IKASCC_player_memory_s*"         69.849 "NextZ80 -> SCC wave RAM falling edge, -end 2" "*msx:MSX|NextZ80:NZ|*"] \
+  [list NZ_to_ctl_exc  $c21     $c21     "*msx:MSX|cpuswap_ctl:CPUSWAP|*"   46.566 "exception: SWAPPT -> controller single-cycle" "*msx:MSX|NextZ80:NZ|*"] \
+  [list NZ_to_cheat_exc $c21    $c21     "*msx:MSX|a_q[*]"                  46.566 "exception: cheat address register single-cycle" "*msx:MSX|NextZ80:NZ|*"] \
+  [list T80_to_NZ      $c21     $c21     "*msx:MSX|NextZ80:NZ|*"            93.132 "T80s REG -> NextZ80 LOAD, -end 2" "*msx:MSX|T80s:T80|*"] ]
 set fail 0
 foreach e $EXPECT {
-  lassign $e lbl f t filt want why
-  if {$filt eq ""} { set p [get_timing_paths -from_clock $f -to_clock $t -npaths 1 -setup] } \
-  else { set p [get_timing_paths -from_clock $f -to_clock $t -to [get_registers $filt] -npaths 1 -setup] }
+  lassign $e lbl f t filt want why ffilt
+  set args [list -from_clock $f -to_clock $t -npaths 1 -setup]
+  if {$filt ne ""}                           { lappend args -to   [get_registers $filt] }
+  if {[info exists ffilt] && $ffilt ne ""}   { lappend args -from [get_registers $ffilt] }
+  set p [get_timing_paths {*}$args]
+  unset -nocomplain ffilt
   set got ""; set sl ""
   foreach_in_collection x $p { set got [expr {[get_path_info $x -latch_time] - [get_path_info $x -launch_time]}]; set sl [get_path_info $x -slack] }
   if {$got eq ""} { puts "GATE-FAIL $lbl: no paths (filter '$filt' matched nothing?)"; set fail 1; continue }
