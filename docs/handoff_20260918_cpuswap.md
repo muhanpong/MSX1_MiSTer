@@ -192,3 +192,48 @@ instead is the part a game test cannot cover:
    all hang off it -- the one thing the bench could not cover.  **Akumajou Dracula
    was played through in R800 mode**, so a PSG title and the FDD both survive the
    full-rate `ce_cpu`.  Nothing left open here.
+
+## 8. What "Turbo R features: On" actually changes (review, 20260918)
+
+`en = status[117]`.  With it Off the block is inert -- no ports decoded, no BIOS
+overlay, no mute -- so everything below applies only when the row is On.
+
+**1. Four new I/O port groups appear**: E4h/E5h (S1990), E6h/E7h (timer),
+A4h/A5h (PCM), A7h (pause/LEDs).  These are unused on MSX2+, so the collision
+risk is low, but they are decoded from then on.
+
+**2. `002Dh` reads back 03h on every machine**, MSX1 packs included.  That byte is
+how software picks its generation.  An MSX1 or MSX2 pack claiming to be a turbo R
+will be offered turbo-R code paths it cannot serve -- including BIOS entries that
+do not exist in that ROM.  This is the widest-reaching effect of the option and it
+is not gated by machine type.
+
+**3. The `0180h-018Bh` overlay is NOT free space on every machine.**  Checked all
+main BIOS ROMs in `releases/CreateMSXpack/ROM`:
+
+| region at 0180h | ROMs |
+|---|---|
+| `FF`/`00` padding -- overlay is harmless | Panasonic FS-A1/mk2/F/FM/FX/WX/WSX, Sony, Sanyo, Mitsubishi, Philips, Canon V-20, all C-BIOS |
+| **real jump entries** `00 00 00 / C3 69 14 / C3 06 10 / C3 12 10` | Daewoo `cpc-300_basic-bios2`, `330kbios`, `400sbios` |
+| **real code** `01 C2 E1 01 D1 E5 CD 99 01 ...` | Canon `v-8_basic-bios1`, Sanyo `cf-2700_basic-bios1_german` |
+
+On those five the overlay replaces live BIOS at 0183h/0186h/0189h (the Korean
+machines' Hangul entries) or lands in the middle of code.  Packs affected:
+**Daewoo CPC-300 / CPC-300E / CPC-400S** (400S is already marked `_notwork_`),
+**Canon V-8**, **Sanyo CF-2700 (German)**.  Nothing breaks while the option is
+Off, and none of these are turbo R machines, so the fix is to refuse the option
+rather than to move the stubs: gate the overlay (and ideally the whole block) on
+the loaded BIOS actually having `FF`/`00` there, or simply on the machine being
+MSX2+.
+
+**4. `A5h` bit 1 = 0 mutes the entire machine.**  `mute_all = en & muted_w &
+~pcm_st[1]` zeroes `audio_l/r` outright (msx.sv:249).  It is openMSX-accurate and
+needs a deliberate write, but with features On a stray write to A5h silences all
+sound with no other symptom -- a silent-failure surface that does not exist with
+the option Off.
+
+**5. The Pause key becomes hardware pause** (A7h bit 1 + key state), on top of the
+existing OSD pause.
+
+Nothing here contradicts the hardware tests: those ran on a Panasonic-class pack,
+which is in the harmless row of the table above.
