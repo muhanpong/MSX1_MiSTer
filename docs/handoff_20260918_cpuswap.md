@@ -118,3 +118,50 @@ existed in the fitted 564901c.  quartus_sta segfaults at exit after "successful"
 
 **Step 4 (running).**  `BUILDGATE_LOG=<scratchpad>/buildgate tools/buildgate/build.sh
 --expect NextZ80 --expect cpuswap_ctl --expect nz_bus`.  Then hardware as in §4.
+
+---
+
+## 7. Independent review on the user's machine (2026-09-18, rz80 session)
+
+Patches imported onto branch `cpuswap` (from `nextz80` 0e04047, blob-verified);
+all five applied clean.  `MSX1_20260918b_cpuswap.rbf` md5
+`f2d13c7aa3d3f80269d8265e9a998866` received; its RTL is `74e90be` here.
+No build was run on this machine -- the peer's fit and game test are the result,
+and repeating them would only spend 60-70 min of a slower Quartus.  What was done
+instead is the part a game test cannot cover:
+
+**Confirmed independently**
+
+1. *`nz_bus` really does advance at most every second clk21m.*  `adv = run & ph &
+   wait_n`, and `ph` is cleared by `adv` itself, so `adv` cannot be true on two
+   consecutive clocks.  This is the sole justification for the broad `-end 2`, and
+   it holds.
+2. *The address-sampling audit is complete.*  `grep '<= a;'` over synthesised RTL
+   finds exactly three: `a_q` (msx.sv:927, the cheat lookup -- already a
+   single-cycle exception), `fadr_p1` (:1990) and `addr_d` (:2119).  The latter two
+   are forensics latches feeding `dbg_*` only; they are synthesised (no `ifdef`)
+   but a late capture there is cosmetic, and they sample an address that is stable
+   for two clk21m anyway.
+3. *Every multicycle has its hold counterpart* (`-setup -end 2` / `-hold -end 1`,
+   `-end 1` / `-end 0`), and the node-to-node exceptions are written after the
+   clock-based rule, so they outrank it.  No `set_max_delay` anywhere near the CPU
+   -- which is what cost three non-converging fits on the rz80 branch.
+
+**Open, and only hardware can answer it**
+
+4. **OSD bits 117 and 118.**  `status` is `[127:0]` so they are wired, but the
+   highest bit in use before this change was 116, and on 2026-09-04 a `status[118]`
+   row silently did nothing on this board (cause never isolated -- it was reverted
+   in the same commit as an 11-entry ladder, so 118's innocence is unproven).  The
+   proven-good free bits are 65-70.  A game test passes whether or not those two
+   rows render.  **Needed from the peer: did "Turbo R features" and "CPU (turbo R)"
+   actually appear in the OSD and toggle?**  If not, move them to 65-70 (check the
+   board's saved `MSX1.CFG` with `xxd` first -- 65-70 read 0 there).
+
+**Worth watching, not a defect**
+
+5. `ce_cpu` runs at full rate while NextZ80 owns the bus (`MSX1.sv`: clock.sv speed
+   `use_nz ? 4 : OSD speed`).  The PSG bus strobe, the M1-wait pair and the FDC all
+   hang off `ce_cpu`.  The bench covers the hand-over itself; a disk access or a
+   PSG-heavy title *while in R800 mode*, and the first instructions after switching
+   back at stock speed, are the cases to try on hardware.
