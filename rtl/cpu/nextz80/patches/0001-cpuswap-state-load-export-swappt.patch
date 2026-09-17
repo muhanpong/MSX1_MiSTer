@@ -1,0 +1,211 @@
+--- a/nextz80cpu.v
++++ b/nextz80cpu.v
+@@ -78,7 +78,12 @@
+       input wire RESET,
+       input wire INT,
+       input wire NMI,
+-      input wire WAIT
++      input wire WAIT,
++      // cpuswap (see rtl/cpu/nextz80/patches/README.md)
++      input wire LOAD,           // load LDIR (T80 REG layout) and resume with a fetch at its PC
++      input wire [211:0]LDIR,
++      output wire [211:0]XREG,   // architectural state in T80 REG layout, valid while SWAPPT
++      output reg SWAPPT = 0      // the last edge ended an instruction cleanly and fetched the next opcode
+ );
+ 
+ // connections and registers
+@@ -119,6 +124,11 @@
+    wire  [2:0]intop = FETCH[1] ? 3'd4 : (FETCH[0] ? 3'd5 : 3'd6);
+    reg   xmask;
+ 
++// cpuswap
++   wire  [127:0]slot_lo, slot_hi;
++   wire  [15:0]pc_q, sp_q, flg_q;
++   wire  [7:0]r_q;
++
+    Z80Reg CPU_REGS (
+        .rstatus(CPUStatus[7:0]),
+        .M1(M1),
+@@ -142,7 +152,15 @@
+        .DINW_SEL(DINW_SEL),
+        .XMASK(xmask),
+        .ALU16OP(ALU16OP),        // used for post increment for ADDR, SP mux re-direct
+-       .WAIT(WAIT)
++       .WAIT(WAIT),
++       .LOAD(LOAD),
++       .LDIR(LDIR),
++       .SLOT_LO(slot_lo),
++       .SLOT_HI(slot_hi),
++       .PC_Q(pc_q),
++       .SP_Q(sp_q),
++       .R_Q(r_q),
++       .FLG_Q(flg_q)
+        );
+ 
+    ALU8 CPU_ALU8 (
+@@ -165,7 +183,25 @@
+        );
+ 
+    always @(posedge CLK)
++      if(LOAD) begin            // cpuswap: resume as a fetch at the loaded PC (block 00 NOP, stage 0)
++         FETCH <= 10'b0000000000;
++         STAGE <= 3'b000;
++         CPUStatus <= {LDIR[209] | LDIR[208], LDIR[209], LDIR[211], LDIR[210], 6'b000000};
++         SWAPPT <= 1'b0;
++         // The interrupt samples are only refreshed on enabled edges, so while this
++         // core was frozen they went stale: a stale SINT takes an interrupt that is
++         // no longer pending.  Resample now; an NMI level already present was seen
++         // (and acted on) by the other core.
++         SINT <= INT;
++         SNMI <= NMI;
++         FNMI <= NMI;
++      end else
+       if(!WAIT) begin
++         // cpuswap: this edge ends an instruction cleanly when it is the fetch stage
++         // (M1, memory) that also samples interrupts, nothing is accepted on it, and
++         // it does not change IFF (EI's one-instruction delay).
++         SWAPPT <= !SRESET && M1 && MREQ && !(next_stage | fetch98[1] | fetch98[0] | status[4]) && !status[11]
++                   && !(SNMI & !FNMI) && !(SINT & CPUStatus[6]);
+          SRESET <= RESET;
+          SNMI <= NMI;
+          SINT <= INT;
+@@ -196,6 +232,31 @@
+          tzf <= ALU8FLAGS[6];
+       end
+ 
++// cpuswap: architectural state in T80 REG layout.  The swap edge already fetched the
++// next opcode, so PC and R are wound back by that fetch.
++// EXX / EX DE,HL / EX AF,AF' are bank-select bits here (CPUStatus[3:0]), not copies.
++   function [15:0] slot(input [3:0] n);
++      slot = {slot_hi[n*8 +: 8], slot_lo[n*8 +: 8]};
++   endfunction
++   wire  xb1 = CPUStatus[1];                                   // EXX: main set in slots 8..10
++   wire  sw0 = CPUStatus[2], sw1 = CPUStatus[3];               // DE<->HL, per physical bank
++   wire  [15:0]bc0 = slot(0), de0 = sw0 ? slot(2) : slot(1), hl0 = sw0 ? slot(1) : slot(2);
++   wire  [15:0]bc1 = slot(8), de1 = sw1 ? slot(10) : slot(9), hl1 = sw1 ? slot(9) : slot(10);
++   wire  [7:0]a0 = slot_hi[3*8 +: 8], a1 = slot_hi[11*8 +: 8];
++   assign XREG = {CPUStatus[7], CPUStatus[6],                  // IFF2, IFF1
++                  CPUStatus[9] & CPUStatus[8], CPUStatus[9] & ~CPUStatus[8], // IM (T80 encoding)
++                  slot(6),                                     // IY
++                  xb1 ? hl0 : hl1, xb1 ? de0 : de1, xb1 ? bc0 : bc1, // HL', DE', BC'
++                  slot(5),                                     // IX
++                  xb1 ? hl1 : hl0, xb1 ? de1 : de0, xb1 ? bc1 : bc0, // HL, DE, BC
++                  pc_q - 16'd1, sp_q,
++                  {r_q[7], r_q[6:0] - 7'd1},                  // R
++                  slot_hi[4*8 +: 8],                           // I
++                  CPUStatus[0] ? flg_q[7:0] : flg_q[15:8],     // F'
++                  CPUStatus[0] ? a0 : a1,                      // A'
++                  CPUStatus[0] ? flg_q[15:8] : flg_q[7:0],     // F
++                  CPUStatus[0] ? a1 : a0};                     // A
++
+    assign opd[0] = FETCH[0] ^ &FETCH[2:1];
+    assign opd[2:1] = FETCH[2:1];
+    assign opd[3] = FETCH[3] ^ &FETCH[5:4];
+--- a/nextz80reg.v
++++ b/nextz80reg.v
+@@ -66,7 +66,16 @@
+    input wire DINW_SEL,       // select RAM write data between (0)ALU8OUT, and 1(DI)
+    input wire XMASK,          // 0 if REG_WSEL should not use IX, IY, even if rstatus[4] == 1
+    input wire [2:0]ALU16OP,   // ALU16OP
+-   input wire WAIT            // wait
++   input wire WAIT,           // wait
++   // cpuswap: parallel state load (T80 REG layout) and raw state for export
++   input wire LOAD,
++   input wire [211:0]LDIR,
++   output wire [127:0]SLOT_LO,
++   output wire [127:0]SLOT_HI,
++   output wire [15:0]PC_Q,
++   output wire [15:0]SP_Q,
++   output wire [7:0]R_Q,
++   output wire [15:0]FLG_Q
+    );
+ 
+ // latch registers
+@@ -86,6 +95,15 @@
+ 
+ //------------------------------------ RAM block registers ----------------------------------
+ // 0:BC, 1:DE, 2:HL, 3:A-x, 4:I-x, 5:IX, 6:IY, 7:x-x, 8:BC', 9:DE', 10:HL', 11:A'-x, 12: tmpSP, 13:zero
++// cpuswap: logical register values into their unswapped slots (CPUStatus[5:0] is
++// cleared on the same LOAD).  Slots 3/4/11 only take the high byte (A, I, A'): the
++// low byte is scratch (TL, Itmp).  Slot 13 must stay zero and is never loaded.
++   wire [255:0]ld_slots = {16'h0, 16'h0, 16'h0, 16'h0,                    // 15..12
++                           LDIR[23:16], 8'h0, LDIR[191:176], LDIR[175:160], LDIR[159:144], // 11 A', 10 HL', 9 DE', 8 BC'
++                           16'h0, LDIR[207:192], LDIR[143:128],             // 7, 6 IY, 5 IX
++                           LDIR[39:32], 8'h0, LDIR[7:0], 8'h0,              // 4 I, 3 A
++                           LDIR[127:112], LDIR[111:96], LDIR[95:80]};       // 2 HL, 1 DE, 0 BC
++
+    RAM16X8D_regs regs_lo (
+       .DPO(rdor[7:0]),   // Read-only data output
+       .SPO(rdow[7:0]),   // R/W data output
+@@ -93,7 +111,11 @@
+       .D(DIN[7:0]),      // Write data input
+       .DPRA(SELR),       // Read-only address
+       .WCLK(CLK),        // Write clock input
+-      .WE(WE[0] & !WAIT) // Write enable input
++      .WE(WE[0] & !WAIT), // Write enable input
++      .LOAD(LOAD),
++      .LMASK(16'b0000_0111_0110_0111),
++      .LD({ld_slots[247:240],ld_slots[231:224],ld_slots[215:208],ld_slots[199:192],ld_slots[183:176],ld_slots[167:160],ld_slots[151:144],ld_slots[135:128],ld_slots[119:112],ld_slots[103:96],ld_slots[87:80],ld_slots[71:64],ld_slots[55:48],ld_slots[39:32],ld_slots[23:16],ld_slots[7:0]}),
++      .ALL(SLOT_LO)
+    );
+ 
+    RAM16X8D_regs regs_hi (
+@@ -103,12 +125,27 @@
+       .D(DIN[15:8]),     // Write data input
+       .DPRA(SELR),       // Read-only address
+       .WCLK(CLK),        // Write clock input
+-      .WE(WE[1] & !WAIT) // Write enable input
++      .WE(WE[1] & !WAIT), // Write enable input
++      .LOAD(LOAD),
++      .LMASK(16'b0000_1111_0111_1111),
++      .LD({ld_slots[255:248],ld_slots[239:232],ld_slots[223:216],ld_slots[207:200],ld_slots[191:184],ld_slots[175:168],ld_slots[159:152],ld_slots[143:136],ld_slots[127:120],ld_slots[111:104],ld_slots[95:88],ld_slots[79:72],ld_slots[63:56],ld_slots[47:40],ld_slots[31:24],ld_slots[15:8]}),
++      .ALL(SLOT_HI)
+    );
+ 
++   assign PC_Q = pc;
++   assign SP_Q = sp;
++   assign R_Q = r;
++   assign FLG_Q = flg;
++
+    wire [15:0]ADDR1 = ADDR + !ALU16OP[2]; // address post increment
+    wire [7:0]flgmux = {ALU8FLAGS[7:3], SELR[3:0] == 4'b0100 ? rstatus[7] : ALU8FLAGS[2], ALU8FLAGS[1:0]}; // LD A, I/R IFF2 flag on parity
+    always @(posedge CLK)
++      if(LOAD) begin             // cpuswap
++         pc <= LDIR[79:64];
++         sp <= LDIR[63:48];
++         r <= LDIR[47:40];
++         flg <= {LDIR[31:24], LDIR[15:8]};   // F' , F
++      end else
+       if(!WAIT) begin
+          if(WE[2]) th <= DI;
+          if(WE[3]) sp <= ADDR1;
+@@ -189,14 +226,28 @@
+       input [7:0]D,        // Write data input
+       input [3:0]DPRA,     // Read-only address
+       input WCLK,          // Write clock
+-      input WE             // Write enable
++      input WE,            // Write enable
++      input LOAD,          // cpuswap: parallel load of the slots selected by LMASK
++      input [15:0]LMASK,
++      input [127:0]LD,
++      output [127:0]ALL
+    );
+ 
+    reg [7:0]data[15:0];
+    assign DPO = data[DPRA];
+    assign SPO = data[A];
+ 
++   genvar gi;
++   generate for(gi = 0; gi < 16; gi = gi + 1) begin : g_all
++      assign ALL[gi*8 +: 8] = data[gi];
++   end endgenerate
++
++   integer i;
+    always @(posedge WCLK)
++      if(LOAD) begin
++         for(i = 0; i < 16; i = i + 1)
++            if(LMASK[i]) data[i] <= LD[i*8 +: 8];
++      end else
+       if(WE) data[A] <= D;
+ 
+ endmodule

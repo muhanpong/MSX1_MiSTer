@@ -274,6 +274,8 @@ wire      [64:0] rtc;
 //[72]    SLOT B sub-slots On/Off
 //[84:73] SLOT A sub-slot 0..3 device, 3 bits each (None,ROM,SCC,SCC+,FM-PAC,GameMaster2)
 //[96:85] SLOT B sub-slot 0..3 device, 3 bits each (GameMaster2 never on B)
+//[117]   Turbo R features: S1990 E4h/E5h + BIOS CHGCPU/GETCPU overlay, E6h timer,
+//        A4h/A5h PCM, A7h pause (rtl/peripheral/turbor)
 `include "build_id.v" 
 localparam CONF_STR = {
    "MSX1;",
@@ -337,6 +339,8 @@ localparam CONF_STR = {
    "T[44],Pause;",
    "-;",
    "O[58:56],CPU Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz,21.5MHz;",
+   // Bit 117 has never been assigned, so every saved .CFG reads it as 0 = Off.
+   "O[117],Turbo R features,Off,On;",
    "-;",
    "P2,Audio settings;",
    "P2O[45],MoonSound,Off,On;",
@@ -771,7 +775,8 @@ wire  [7:0] flash16x_prog_data;
 wire        log_clear;
 wire [23:0] probe_r2, probe_r23, probe_r0, probe_r1, probe_r9, probe_r19;
 wire [15:0] probe_frame;
-wire msx_pause = nvbak_dma_active | dump_active | (status[43] & OSD_STATUS) | pause_toggle | upload_hold;
+wire turbor_pause;   // turbo R hardware pause: A7h bit 1 + the Pause key (rtl/peripheral/turbor)
+wire msx_pause = nvbak_dma_active | dump_active | (status[43] & OSD_STATUS) | pause_toggle | upload_hold | turbor_pause;
 
 msx MSX
 (
@@ -798,6 +803,8 @@ msx MSX
    .cpu_speed_q(cpu_speed_q),
    .cpu_bus_idle(cpu_bus_idle),
    .msx_turbo_req(msx_turbo_req),
+   .turbor_en(status[117]),
+   .turbor_pause(turbor_pause),
    .sdram_rdtog(sdram_rdtog),
    .sdram_hit(sdram_hit),
    .ce_5m39_n(ce_5m39_n),

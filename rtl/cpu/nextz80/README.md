@@ -6,7 +6,9 @@ LGPL 2.1 or later.  Copied verbatim from the OCM-PLD Pack v3.9.2
 the OPL3 add-on -- not as a system CPU.  The v3.8.1, v3.9.1 and v3.9.2 copies
 in that pack are byte-identical to each other, i.e. the 2011 original with no
 downstream fixes.  Do not edit these three files in place; keep local changes
-as separate patches so the provenance stays checkable.
+as separate patches so the provenance stays checkable.  The patches live in
+`patches/` (see its README), the result that gets built in `patched/`, and
+`patches/check.sh` proves the two agree.
 
 | file | lines | md5 |
 |---|---|---|

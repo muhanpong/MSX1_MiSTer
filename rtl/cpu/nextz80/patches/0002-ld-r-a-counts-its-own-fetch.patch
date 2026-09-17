@@ -1,0 +1,13 @@
+--- a/nextz80reg.v
++++ b/nextz80reg.v
+@@ -150,7 +150,9 @@
+          if(WE[2]) th <= DI;
+          if(WE[3]) sp <= ADDR1;
+          if(WE[4]) pc <= ADDR1;
+-         if({REG_WSEL, WE[0]} == 5'b10011) r <= ALU8OUT[7:0];
++         // LD R,A is a single stage that also fetches the next opcode: count that
++         // fetch (M1), as for every other opcode.  M1 is 0 in the RESET stage.
++         if({REG_WSEL, WE[0]} == 5'b10011) r <= {ALU8OUT[7], ALU8OUT[6:0] + {6'd0, M1}};
+          else if(M1) r[6:0] <= r[6:0] + 1'd1;
+          if(WE[5])
+             if(rstatus[0]) flg[15:8] <= flgmux;
