@@ -341,6 +341,7 @@ localparam CONF_STR = {
    "O[58:56],CPU Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz,21.5MHz;",
    // Bit 117 has never been assigned, so every saved .CFG reads it as 0 = Off.
    "O[117],Turbo R features,Off,On;",
+   "O[118],CPU (turbo R),Z80 (T80s),R800 (NextZ80);",
    "-;",
    "P2,Audio settings;",
    "P2O[45],MoonSound,Off,On;",
@@ -548,43 +549,20 @@ wire        msx_turbo_req;          // from msx.sv <- msx_slots <- dev_matsushit
 //  0x...  bits 49,50,55,59 = 1).  56/57/58 are 0 there, so an un-updated CFG
 //  lands on speed 0 = 3.58 MHz, which is the safe default.
 wire  [2:0] cpu_speed_sel = (status[58:56] > 3'd4) ? 3'd4 : status[58:56];
-wire  [2:0] cpu_speed     = (msx_turbo_req & cpu_speed_sel == 3'd0) ? 3'd1 : cpu_speed_sel;
+wire  [2:0] cpu_speed_osd = (msx_turbo_req & cpu_speed_sel == 3'd0) ? 3'd1 : cpu_speed_sel;
 
-//  Two CPUs, split by speed.  A-Z80 (die-derived, T-state exact) takes 3.58 to
-//  10.74 -- the speeds where cycle accuracy means anything.  21.5 MHz is T80s
-//  on clk21m/CEN: measured over 7 full fits, A-Z80's /4 half-cycle paths top
-//  out at 18.6-21.0 MHz against the 21.477 required (docs/
-//  az80_migration_20260913.md), so the turbo step keeps the core that closes
-//  with margin.  Switching cores mid-run would hand a live machine to a CPU
-//  whose registers are reset garbage, so a boundary crossing forces a machine
-//  reset, stretched well past the az80_clk/T80s reset synchronisers.
-//  Registered, not a wire: raw status[58:56] would otherwise reach the bus
-//  strobe muxes, the guard and A-Z80's nWAIT as one combinational cone from
-//  hps_io (-13.0 ns, build byjwm5mcl).  One flop cuts that at the source, and
-//  since the value only ever changes inside the stretched reset below, the
-//  flop's output is quasi-static and false-pathed in MSX1.sdc.
-reg  use_t80 = 1'b0;
-reg  use_t80_q = 1'b0;
-reg  [17:0] core_switch_cnt = '0;              // ~12 ms at 21.477 MHz
-always @(posedge clk21m) begin
-   //  Commit the core choice only with the OSD menu CLOSED.  MiSTer option
-   //  lines only step forward, so going 10.7 -> 3.58 means passing 21.5; taking
-   //  the choice live made that a core swap (and a reset) on the way through
-   //  (user report 20260915).  While the menu is open A-Z80 keeps running --
-   //  az80_clkgen clamps a transient speed 4 to /8 -- and on close only a real
-   //  change of core family resets, once.  A-Z80 <-> A-Z80 speed steps never do.
-   if (~OSD_STATUS) use_t80 <= cpu_speed == 3'd4;
-   use_t80_q <= use_t80;
-   if (use_t80_q != use_t80)      core_switch_cnt <= '1;
-   else if (|core_switch_cnt)     core_switch_cnt <= core_switch_cnt - 1'd1;
-end
-reg  core_switch_rst = 1'b0;   // registered: the 18-bit OR was -0.4 ns of recovery into MoonSound's async reset
-always @(posedge clk21m) core_switch_rst <= |core_switch_cnt;
+//  Two CPUs, one bus, no reset between them (rtl/cpu/cpuswap, msx.sv): T80s at
+//  every speed, NextZ80 as the turbo R's R800.  While NextZ80 owns the bus the
+//  CPU-rate enable runs at full rate: ce_cpu still clocks the PSG bus strobe, the
+//  M1 wait pair and the FDC, and NextZ80's I/O cycles are only as long as the bus
+//  guard makes them.  clock.sv changes rate at a bus-idle point, as for any speed
+//  step.  Back on T80s the OSD speed returns the same way.
+wire        use_nz;                 // from msx.sv: NextZ80 owns the bus
+wire  [2:0] cpu_speed = use_nz ? 3'd4 : cpu_speed_osd;
 wire        cpu_turbo;              // driven by clock.sv from the latched speed
 wire  [2:0] cpu_speed_q;            // latched speed, back out of clock.sv
 wire        cpu_bus_idle;           // from msx.sv, gates the speed latch
 wire        ce_cpu;
-wire        az80_clk;   // the CPU's own clock (az80_clkgen)
 pll pll
 (
    .refclk(CLK_50M),
@@ -599,24 +577,6 @@ clock clock
 	.*
 );
 
-//  A-Z80 needs a real clock, not an enable.  From clk_sdram rather than clk21m
-//  because 85.909090 divides evenly by 24/16/12/8/4 for all five speeds, so each
-//  is 50% duty -- and A-Z80's pin latches sit on a half-cycle path, so a skewed
-//  duty would eat the margin of exactly the paths that cap it.
-az80_clkgen az80_clkgen
-(
-   .clk_sdram   (clk_sdram),
-   .clk21m      (clk21m),
-   .reset       (reset),
-   .pause       (msx_pause),
-   //  While T80s owns the machine the divider is parked at /8; the A-Z80 sits
-   //  in reset then, and the SDC declares az80_clk at /8, so nothing may ever
-   //  clock it faster.
-   .cpu_speed   (use_t80 ? 3'd3 : cpu_speed),
-   .cpu_bus_idle(cpu_bus_idle),
-   .az80_clk    (az80_clk),
-   .cpu_speed_q ()
-);
 
 /////////////////    RESET   /////////////////
 // "Reset on ROM change" (O[64], default Yes) -- when set to No the machine is held
@@ -663,7 +623,21 @@ save_guard u_save_guard
    .hold_load (hold_load)
 );
 
-wire reset = RESET | reset_now | (reset_rq & ~status[64]) | core_switch_rst;
+wire reset = RESET | reset_now | (reset_rq & ~status[64]);
+
+//  OSD "CPU (turbo R)": applied through the S1990 (turbor set_stb) when the menu is
+//  closed and the choice differs from the last one applied, so software (OUT E5h,
+//  CHGCPU) can still switch between OSD visits.  Re-applied after every reset: the
+//  S1990 comes out of reset on the Z80.
+reg r800_applied = 1'b0, r800_set_stb = 1'b0;
+always @(posedge clk21m) begin
+   r800_set_stb <= 1'b0;
+   if (reset) r800_applied <= 1'b0;
+   else if (~OSD_STATUS && status[118] != r800_applied) begin
+      r800_applied <= status[118];
+      r800_set_stb <= 1'b1;
+   end
+end
 
 ///////////////// Computer /////////////////
 wire  [7:0] R, G, B, cpu_din, cpu_dout;
@@ -790,15 +764,13 @@ msx MSX
    .ce_10m7_p(ce_10m7_p),
    .ce_3m58_p(ce_3m58_p & ~msx_pause),
    .ce_3m58_n(ce_3m58_n & ~msx_pause),
-   // ce_cpu is no longer the CPU's clock -- A-Z80 has its own -- but it is
-   // still the turbo-rate enable the PSG bus strobe, the M1 wait pair and the
-   // FDC scale from, so it keeps its pause gate.
+   // T80s' clock enable and the CPU-rate enable of the PSG bus strobe, the M1
+   // wait pair and the FDC; NextZ80 is frozen by msx_pause through nz_bus.
    .ce_cpu   (ce_cpu    & ~msx_pause),
-   // The CPU's real clock.  Pause stops it the same way, by holding the
-   // divider in reset, so a paused machine is a stopped CPU and not a CPU
-   // running against a frozen bus.
-   .az80_clk (az80_clk),
-   .use_t80  (use_t80),
+   .msx_pause(msx_pause),
+   .r800_set_stb(r800_set_stb),
+   .r800_set (status[118]),
+   .use_nz   (use_nz),
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),
    .cpu_bus_idle(cpu_bus_idle),
@@ -1209,29 +1181,9 @@ wire        nvbak_sdram_req, nvbak_sdram_rnw;
 wire  [7:0] nvbak_sdram_din;
 wire        upload_active = upload_ram_ce & upload_sdram_rq;
 
-//  A-Z80: hold the SDRAM ch2 request back two clk_sdram cycles.
-//
-//  sdram.sv captures ch2_addr on the RISING edge of ch2_req, and ch2_addr is a
-//  long combinational function of the CPU address (slot -> slot_layout ->
-//  lookup_RAM base -> 27-bit add).  T80 puts its address out half a T-state
-//  before MREQ/RD, which is what the generic -end 6 on *sdram*ch2_* leans on.
-//  A-Z80 latches its address pins on the SAME edge MREQ/RD fall (JTAG trace,
-//  20260914e), so an undelayed request captured a half-settled address: the
-//  boot's first page change (OUT (AB),82 -> fetch 042A) read FF instead of AF.
-//
-//  Delay: sdram_ce settles after an az80_clk edge (edge 0); two clk_sdram stages
-//  put the capture on edge 3 at the earliest (first stage catches sdram_ce on
-//  edge 1) and edge 4 at the latest the SDC allows (-end 2 on that stage).
-//  Earliest still gives the 3 clk_sdram (34.9 ns) of address stability that
-//  MSX1.sdc's az80_clk -> *sdram*ch2_* -end 3 checks; latest still releases a
-//  cache hit (edge 7) before the 10.7 MHz WAIT sample (edge 8).
-//  (20260915a used 2 clk21m = 8 clk_sdram.  Correct but slow: a cache hit then
-//  released WAIT 3 clk21m after MREQ, exactly on the 7.16 sample edge and after
-//  the 10.7 one -- Z80BENCH 6.58 and 9.88, one extra T-state per memory read.)
-//  T80s is untouched.
-logic [1:0] sdram_ce_sr = 2'b00;
-always @(posedge clk_sdram) sdram_ce_sr <= {sdram_ce_sr[0], sdram_ce};
-wire ch2_req_cpu = use_t80 ? sdram_ce : (sdram_ce & (&sdram_ce_sr));
+//  The CPU's SDRAM ch2 request is the raw decode for both cores: T80s leads MREQ
+//  with its address, and nz_bus gives NextZ80 a full clk21m of address lead.
+wire ch2_req_cpu = sdram_ce;
 // log_clear: pulse on new ROM staging start -> reset change-log journal per game
 reg         upload_active_q;
 always @(posedge clk21m) upload_active_q <= upload_active;

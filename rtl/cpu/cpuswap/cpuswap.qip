@@ -1,0 +1,7 @@
+# T80s <-> NextZ80 run-time hand-over.  See README.md.
+# NextZ80 (Nicolae Dumitrache, 2011) is built from patched/ (originals + patches/, proven by patches/check.sh).
+set_global_assignment -name VERILOG_FILE       [file join $::quartus(qip_path) ../nextz80/patched/nextz80cpu.v ]
+set_global_assignment -name VERILOG_FILE       [file join $::quartus(qip_path) ../nextz80/patched/nextz80reg.v ]
+set_global_assignment -name VERILOG_FILE       [file join $::quartus(qip_path) ../nextz80/patched/nextz80alu.v ]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) cpuswap_ctl.sv ]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) nz_bus.sv ]

@@ -7,15 +7,18 @@ are not carried, NextZ80 stays on clk21m for now (2026-09-17); the branch carrie
 T80s + NextZ80 only (A-Z80 dropped), and the software switch mimics the turbo R
 Z80/R800 switch, NextZ80 standing in for the R800 (2026-09-18).
 
-Status: **simulation only** — cores patched, controller written, lockstep bench
-passing with mutation checks.  Not wired into `msx.sv` yet (see "Next").
+Status (branch `cpuswap-cores`, 2026-09-18): **wired into `msx.sv`**, A-Z80
+removed from the build; lockstep bench passing on the shared, msx.sv-shaped bus
+with mutation checks.  Hardware untested.
 
 ## Pieces
 
 | file | |
 |---|---|
-| `cpuswap_ctl.sv` | RUN → XFER → FLIP hand-over state machine |
-| `s1990.sv` | turbo R S1990 CPU switch: E4h register select, E5h data, reg 6 bit 5 = Z80/R800, bit 6 = ROM/DRAM (read back only) |
+| `cpuswap_ctl.sv` | RUN → XFER → FLIP → SETTLE hand-over state machine |
+| `nz_bus.sv` | NextZ80 on a Z80-shaped bus: one masked clock after every advance, ≥1 visible clock, WAIT extends |
+| `cpuswap.qip` | NextZ80 (`../nextz80/patched`), `cpuswap_ctl.sv`, `nz_bus.sv` |
+| `../../peripheral/turbor/turbor.sv` | turbo R S1990 (E4h/E5h, reg 6 bit 5 = Z80/R800), BIOS overlay, E6h timer, PCM, pause |
 | `../T80.vhd`, `../T80_Pack.vhd`, `../T80s.vhd` | `SwapPt` output; `DIRSet` also clears `Alternate` and the NMI latch |
 | `../nextz80/patches/` → `../nextz80/patched/` | `LOAD`/`LDIR`, `XREG`, `SWAPPT`; LD R,A fix (see its README) |
 | `sim/` | lockstep bench (`run.sh`, `tb_swap.sv`, `swaptest.asm`) |
@@ -110,18 +113,66 @@ Core differences that are masked, not transferred: flag bits 3/5 (both cores),
 N after INIR/OTIR/INI/IND/OUTI/OUTD (T80 derives it from the byte, NextZ80 sets
 the documented value) — the program logs only Z after block I/O.
 
-## Next (integration, not started)
+## Integration (`rtl/msx.sv`, `MSX1.sv`)
 
-1. Which cores the branch carries: `nextz80` runs A-Z80 at 3.58–10.7 and T80s at
-   21.5.  Seamless switching pairs T80s with NextZ80, so T80s must own the stock
-   speeds again (A-Z80 dropped or kept as a third, non-swappable core).
-2. NextZ80 bus contract in `msx.sv` (review `docs/nextz80_review_20260912.html` §4):
-   one clock per bus cycle, registered-read latency via the half-rate enable, no
-   RD/RFSH (`rd = MREQ & ~WR`), SDRAM ch2 and pacers re-derived.
-3. Bus quiescence during XFER: a frozen T80s holds MREQ/RD of the interrupted fetch;
-   the incoming T80s presents them again at T2 and must get a fresh read (and WAIT).
-4. S1990 into the I/O decode and `d_to_cpu`; OSD and port interplay (`set_stb`).
-   Turbo R software only switches after checking the MSX version (002Dh = 3) and
-   calling BIOS CHGCPU/GETCPU (0180h/0183h), which this MSX2+ BIOS does not have:
-   without those, only software that writes E4h/E5h directly uses the R800 path.
-5. OSD speed menu, SDC for NextZ80, and the ~20 diagnostics that read `t80_reg`.
+- **Owner.** `cpuswap_ctl.want_nz` = `turbor.r800`.  Software: `OUT (E4h),6 /
+  OUT (E5h),0` or BIOS `CHGCPU` (Turbo R features On).  OSD `O[118]` "CPU (turbo
+  R)" drives `turbor.set_stb/set_r800` when the menu closes and the choice changed,
+  and again after every reset (the S1990 resets to Z80).
+- **Bus.** Owner's strobes, forced idle while `busy`; address/data muxed by
+  `use_nz`.  NextZ80 through `nz_bus` (`RESET` tied 0: LOAD is the only entry; a
+  reset sample taken while frozen would survive LOAD).
+- **Pacing.** Everything that keyed on `cpu_turbo` (bus guard, SDRAM closed loop
+  `hs_win`, VDP/SD/OPLL pacers) keys on `cpu_paced = cpu_turbo | use_nz |
+  resume_guard`.  `resume_guard` covers the first bus cycle after a hand-over: a
+  resumed T80s sits in T2 and latches DI on its next CEN, at stock speed before a
+  fresh SDRAM read is home.
+- **SDRAM.** No NextZ80-specific request delay or pacer: the slot decode gates
+  `sdram_ce` on MREQ/RD, and `nz_bus` gives the address a full clk21m of lead, the
+  same head window the generic `-end 6` on `*sdram*ch2_*` was argued for (T80 at
+  10.74).  Reads use the T80s-turbo closed loop.
+- **M1 wait.** T80s: the 74LS74 pair.  NextZ80: MoonSound `exwait_n` only.
+- **ce_cpu.** `MSX1.sv` feeds `clock.sv` speed 4 while NextZ80 owns the bus (PSG
+  bus strobe, M1 wait pair and FDC run at full rate); the OSD speed returns with
+  T80s.  `clock.sv` changes rate at a bus-idle point.
+- **SDC.** NextZ80 → every clk21m register `-end 2` (clock-based rule): nz_bus
+  masks all strobes for the clock after an advance, so no strobe-qualified capture
+  can act on the first edge and reads are sampled on the second at the earliest.
+  Needed: NextZ80's address is combinational out of its stage state, ~9 ns deeper
+  than T80s' post-map.  Single-cycle exceptions (node rules outrank the clock
+  rule): the cheat lookup (`a_q`, cheat RAM address registers, feeds `d_to_cpu`
+  on a first-clock SDRAM cache hit) and `cpuswap_ctl` (SWAPPT → state).  T80s →
+  NextZ80 and → `nz_bus.ph` `-end 2` (each core frozen while the other owns the
+  bus).  An audit of registers sampling the bare address every clock found only
+  debug latches besides the cheat lookup; re-audit when adding such a register.
+  `tools/buildgate/relations.tcl` asserts all of these.
+- **Triage.** `tools/sta/cpuswap_postmap_triage.tcl` (post-map, no fit).
+
+## Bench additions for the integration
+
+`tb_swap.sv` now drives both cores through the msx.sv mux: a registered memory
+read, writes / OUTs / the IN 99h acknowledge taken on the `req` one-shot, one
+`iowr_stb` per I/O write, a WAIT source (I/O 12h, 60h–63h reads and 56h writes
+take 3 extra clocks and return junk until then).  `+sdlat=n` models SDRAM: data
+home n clocks after the request edge, junk before, WAIT until home when paced
+(NextZ80, `+turbo=1`, resume guard).  An unpaced T80s at CEN/6 tolerates n ≤ 4
+(at CEN/3 only 1), so `sdram stock` runs at CEN/6 with n = 4.
+
+| run | |
+|---|---|
+| `sdram stock`, `sdram st every` | random / every-point swaps at stock rate, SDRAM latency 4 |
+| `sdram turbo` | every-point swaps, T80s paced, latency 7 |
+| `sdram nz`, `sdram soft` | NextZ80 only (latency 6); S1990 switching (latency 4) |
+| `no resume grd` | `+norg=1`, must DIFF (T80s executes junk after a swap) |
+
+Further mutations, each turns the bench to FAIL: `nz_bus` without the masked
+clock (`vis = run`: NextZ80-only times out, every swap run diffs — back-to-back
+writes merge on `req`); `nz_bus` ignoring WAIT (junk I/O reads land in RAM).
+
+## Next
+
+1. `quartus_map`, post-map triage, then `tools/buildgate/build.sh --expect NextZ80`.
+2. Hardware: boot at every speed on T80s, Z80BENCH; OSD R800 mid-BASIC;
+   `OUT (E4h),6 / OUT (E5h),0` from BASIC; `CHGCPU` with Turbo R features On.
+3. Later: PCMPLY hardware player, OSD LEDs, MULUB/MULUW, whether `002Dh = 03h`
+   breaks anything (only with Turbo R features On).

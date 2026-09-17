@@ -132,187 +132,63 @@ set_multicycle_path -hold  -end 3 \
     -from [get_registers {*u_pcm|stage_c_reg*}] \
     -to   [get_registers {*u_pcm|d1a_pkt*}]
 
-# ─── A-Z80's clock ──────────────────────────────────────────────────────────
-#  A-Z80 has no clock enable -- parts of it latch on ~clk by construction -- so
-#  it runs from a real clock that az80_clkgen makes out of clk_sdram.  It must
-#  be DECLARED or the flops it drives get related to clk21m (first A-Z80 build:
-#  -6.9 ns / -1412 ns TNS of pure mis-analysis).
-#
-#  REWRITTEN 20260914 after the first hardware boot failed.  az80_clkgen now
-#  places every az80_clk edge on a clk_sdram edge that coincides with a clk21m
-#  rise (PLL outputs are 0 ps).  Declared /8 (1+1 clk21m periods, the fastest
-#  phase of every speed; 3.58/5.37/7.16 are 3+3, 2+2, 2+1), the default /8
-#  waveform -- rise on source edge 0, fall on edge 4 -- is exactly that grid.
-#  Consequence: every CPU <-> clk21m path is a genuine single-cycle 46.57 ns
-#  relationship, so NONE of the earlier boundary multicycles are needed.  They
-#  are removed, and they were not merely unneeded: with the old free-running
-#  divider an az80_clk edge could land half a clk21m before a fabric edge, and
-#  "-end 2" told the analyser to look one edge later than the flops actually
-#  capture -- the violations were real.  The history is in
-#  docs/az80_migration_20260913.md; do not reintroduce them.
-create_generated_clock -name az80_clk \
-    -source [get_pins {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}] \
-    -divide_by 8 \
-    [get_registers {*az80_clkgen*|az80_clk}]
-
-#  Reset synchroniser into az80_clk: both stages carry the asynchronous assert
-#  (reset | use_t80).  Assert is async on purpose (the clock is stopped in
-#  reset); only the synchronous deassert shift is a timed path.
-set_false_path -to [get_registers {*msx:MSX|az_rst_sync[*]}]
-
-#  SDRAM read data into A-Z80's data latch.  The one remaining clk_sdram ->
-#  az80_clk class: ch2_saved_* (and MoonSound's ms_io_dout_lat) change on
-#  clk_sdram edges, which can precede an az80_clk edge by a single 11.6 ns
-#  clk_sdram period.  They are not single-cycle by protocol: A-Z80 only ever
-#  consumes a ch2 read after msx.sv's az_rd_pace_n releases WAIT, and that
-#  release is REGISTERED on clk21m from a completion (rdtog / sdram_hit) that
-#  was set on or after the edge the data became valid.  Data valid >= 1
-#  clk_sdram before the clk21m release edge, WAIT reaches the CPU a full clk21m
-#  later -> >= 58 ns of stable data at consumption.  set_max_delay 40 checks
-#  the real requirement with margin instead of an edge-count guess.
-#  MoonSound reads are held by exwait_n (ms_io_pending) the same way.
-set_max_delay -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}] \
-              -to   [get_registers {*data_pins:data_pins_|dout*}] 40.000
-
-#  The divisor latch samples cpu_bus_idle (combinational from CPU strobes) on a
-#  clk_sdram edge right after an az80_clk edge.  It only matters on the edge
-#  that STARTS a period, where the bus has been idle for a whole T-state, and a
-#  one-period-late speed change is harmless.
-set_multicycle_path -setup -end 2 \
-    -from [get_clocks {az80_clk}] \
-    -to   [get_registers {*az80_clkgen*|speed_q* *az80_clkgen*|cnt*}]
-set_multicycle_path -hold  -end 1 \
-    -from [get_clocks {az80_clk}] \
-    -to   [get_registers {*az80_clkgen*|speed_q* *az80_clkgen*|cnt*}]
-
-#  Dual core: exactly one of T80s / A-Z80 is out of reset (use_t80 changes only
-#  inside the 12 ms core-switch machine reset, MSX1.sv), so core-to-core paths
-#  never carry a live transition.
-set_false_path -from [get_registers {*msx:MSX|T80s:T80|*}] \
-               -to   [get_registers {*msx:MSX|az80_wrapper:CPU|*}]
-set_false_path -from [get_registers {*msx:MSX|az80_wrapper:CPU|*}] \
-               -to   [get_registers {*msx:MSX|T80s:T80|*}]
-
-#  sdram_hit reaches bus_guard_n combinationally for T80s.  For A-Z80 that term
-#  is irrelevant -- az_rd_pace_n holds WAIT until its own REGISTERED copy of the
-#  hit -- but the analyser cannot see the use_t80 masking.
-set_false_path -from [get_registers {*sdram:sdram|ch2_hit_r}] \
-               -to   [get_registers {*msx:MSX|az80_wrapper:CPU|*}]
-
-#  Core select and its OSD source bits: quasi-static, and every change is
-#  wrapped in the 12 ms core-switch reset.
-set_false_path -from [get_registers {*|use_t80}]
+# ─── CPU select ─────────────────────────────────────────────────────────────
+#  OSD speed bits: quasi-static, registered through clock.sv's bus-idle latch.
 set_false_path -from [get_registers {*hps_io|status[56] *hps_io|status[57] *hps_io|status[58]}]
 
-#  clk21m -> az80_clk: the requirement is exactly one clk21m period.
-#  The emu PLL makes clk_sdram with C counter 5 and clk21m with C counter 20
-#  off the same VCO at 0 degrees (fit.rpt PLL summary), so their edges coincide
-#  exactly, and az80_clkgen puts every az80_clk edge on one of those edges.
-#  TimeQuest rounds each period to the picosecond on its own -- clk_sdram 11.641,
-#  clk21m 46.566, 4 x 11.641 = 46.564 -- sees a coincident capture edge as a
-#  hair after the launch, and reports a 0.000 ns setup relationship (build
-#  2f5ff24: -14.8 ns on all 2000 paths).  Physically that edge is the HOLD edge.
-#  The tightest real capture is one clk21m period later (launch on an az80_clk
-#  rise, capture at the next fall -- at every speed, 7.16's 2+1 included).
-#  An edge-count multicycle is WRONG here: "-end 2" was tried and measured a
-#  93.133 ns relationship, a full extra CPU period for the falling-edge flops.
-#  A fixed max delay states the real requirement for every flop polarity.
-#  Hold stays on the default (coincident) edge.
-set_max_delay -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
-              -to   [get_clocks {az80_clk}] 46.566
-
-#  CPU address -> SCC wavetable RAM.  IKASCC's wave RAMs register their address
-#  on the clk21m FALLING edge, a genuine half-period (23.28 ns) after an az80_clk
-#  edge.  A write lands only when the write strobe is active, and A-Z80 drives
-#  the address at T1 rise and WR at T2 fall -- 1.5 T-states, >= 1.5 clk21m
-#  periods, later -- so the falling edge that commits a write has seen that
-#  address stable for at least one full clk21m period.  Address bits only.
+# ─── NextZ80 (rtl/cpu/cpuswap) ──────────────────────────────────────────────
+#  Every register in NextZ80 is written only on an edge where its WAIT input is
+#  low (nz_bus `adv`) or by LOAD.  `adv` needs nz_bus's phase flop set, and that
+#  flop is cleared by every advance and by LOAD, so two NextZ80 writes are always
+#  at least two clk21m edges apart (LOAD is additionally followed by FLIP and
+#  SETTLE before the first advance).  NextZ80 -> NextZ80 is therefore a two-cycle
+#  path.  Everything INTO NextZ80 from outside (WAIT, DI, INT, LDIR from T80s REG)
+#  and NextZ80 XREG -> T80s DIR stays single-cycle.
+#
+#  NextZ80 -> everything on clk21m (both edges): two-cycle.  NextZ80's address, data
+#  and strobes change only on an advance, and nz_bus masks every strobe for the
+#  clock after it, so nothing qualified by a strobe (writes, `req`, the pacers and
+#  guard, wait_n, I/O decodes, the SCC wave RAM write) can act on the first edge;
+#  reads are sampled no earlier than the second.  NextZ80's address is combinational
+#  out of its stage state (post-map ~9 ns deeper than T80s' into the same fabric),
+#  so single-cycle would not close.  Core to core is two-cycle anyway: T80s
+#  registers change only on CEN (withheld while NextZ80 owns the bus) or DIRSet,
+#  which captures two edges after NextZ80's swap-point edge.
+#  Audit of registers that sample the bare address every clock (grep `<= a`,
+#  `[a]`): debug/forensics (fadr_p1, addr_d, dbg_*) and strobe-gated latches, except
+#  the two single-cycle exceptions below.
 set_multicycle_path -setup -end 2 \
-    -from [get_registers {*az80_wrapper:CPU|*address_pins:address_pins_|*}] \
-    -to   [get_registers {*IKASCC_player_memory_s*}]
+    -from [get_registers {*msx:MSX|NextZ80:NZ|*}] \
+    -to   [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}]
 set_multicycle_path -hold  -end 1 \
-    -from [get_registers {*az80_wrapper:CPU|*address_pins:address_pins_|*}] \
-    -to   [get_registers {*IKASCC_player_memory_s*}]
-
-#  A-Z80 bus trace ring (diagnostic).  Its 48 sample flops are on clk_sdram
-#  and take az80_clk / clk21m domain nets a cycle after the CPU edge; timing
-#  them against coincident edges made the router insert hold-fix delay on all
-#  of them and fail on congestion (build a80495e).  It is a sampler: a
-#  metastable bit in a trace word is acceptable, so nothing into it is timed.
-set_false_path -to [get_registers {*az80_trace:u_aztrace|*}]
-
-#  A-Z80 address -> SDRAM ch2 capture: exactly 3 clk_sdram.  The generic
-#  -end 6 above is a T80 argument (address half a T-state ahead of MREQ).  A-Z80
-#  changes its address on the MREQ edge, and MSX1.sv holds its request back two
-#  clk_sdram stages, so ch2_addr/ch2_caddr are captured on the 3rd clk_sdram edge
-#  after the az80_clk edge that changed the address.  This more specific
-#  exception (it has -from) overrides the generic one for az80_clk sources only.
-set_multicycle_path -setup -end 3 \
-    -from [get_clocks {az80_clk}] \
-    -to   [get_registers {*sdram*ch2_*}]
-set_multicycle_path -hold  -end 2 \
-    -from [get_clocks {az80_clk}] \
-    -to   [get_registers {*sdram*ch2_*}]
-
-#  A-Z80 read window -> the pacer's synchroniser (rtl/msx.sv az_win_s1).  Only
-#  this first flop is relaxed: the window has to be stable by the 3rd clk_sdram
-#  edge after the CPU edge, the second flop re-registers it for every pacer flop,
-#  so nothing downstream sees a torn sample.
-set_multicycle_path -setup -end 3 \
-    -from [get_clocks {az80_clk}] \
-    -to   [get_registers {*msx:MSX|az_win_s1}]
-set_multicycle_path -hold  -end 2 \
-    -from [get_clocks {az80_clk}] \
-    -to   [get_registers {*msx:MSX|az_win_s1}]
-
-#  Pacer release (clk_sdram) -> A-Z80's nWAIT sampler.  The analyser pairs the
-#  launch with a coincident az80_clk edge a picosecond later (per-clock period
-#  rounding, relationship 0.002 ns); physically that is the hold edge and the
-#  capture is the next clk_sdram-aligned edge, one clk_sdram period on.
-set_max_delay -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}] \
-              -to   [get_registers {*az80_wrapper:CPU*clk_delay*}] 11.641
-
-#  A-Z80 SDRAM request delay, first stage (MSX1.sv sdram_ce_sr[0]).  sdram_ce is
-#  the slot/mapper decode of the CPU address (~15.8 ns + ~6.6 ns clock skew) and
-#  was timed single-cycle into this flop (-10.9 ns, build a2e0b13).  Both bounds
-#  hold with -end 2: EARLIEST, the stage sees sdram_ce on edge 1 and the request
-#  is captured on edge 3 -- still the 3 clk_sdram of address stability the
-#  az80_clk -> *sdram*ch2_* -end 3 rule assumes; LATEST (what -end 2 allows),
-#  it sees it on edge 2, capture on 4, cache hit on 6, WAIT release on 7, which
-#  is still before the 10.7 MHz sample on edge 8.  The request is also ANDed
-#  with the live sdram_ce, so a late stage can only delay it, never extend it.
+    -from [get_registers {*msx:MSX|NextZ80:NZ|*}] \
+    -to   [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}]
+#  Exceptions (node-to-node, so they outrank the clock-based rule above):
+#   - the cheat lookup registers the bare address (a_q, the cheat RAMs' address
+#     registers) and its result reaches d_to_cpu on a fast SDRAM read, which the
+#     guard may release on the first visible clock (cache hit);
+#   - NextZ80 SWAPPT -> cpuswap_ctl state: a late capture could tear the state.
+set_multicycle_path -setup -end 1 \
+    -from [get_registers {*msx:MSX|NextZ80:NZ|*}] \
+    -to   [get_registers {*msx:MSX|a_q[*] *cheat_ram* *msx:MSX|cpuswap_ctl:CPUSWAP|*}]
+set_multicycle_path -hold  -end 0 \
+    -from [get_registers {*msx:MSX|NextZ80:NZ|*}] \
+    -to   [get_registers {*msx:MSX|a_q[*] *cheat_ram* *msx:MSX|cpuswap_ctl:CPUSWAP|*}]
+#  T80s -> NextZ80 and nz_bus's phase flop: NextZ80 captures only on an advance
+#  (T80s frozen) or on LOAD, two edges after T80s' swap-point edge; ph only moves
+#  while NextZ80 owns the bus (T80s' terms reach it through wait_n).
 set_multicycle_path -setup -end 2 \
-    -from [get_clocks {az80_clk}] \
-    -to   [get_registers {*sdram_ce_sr[0]}]
+    -from [get_registers {*msx:MSX|T80s:T80|*}] \
+    -to   [get_registers {*msx:MSX|NextZ80:NZ|* *msx:MSX|nz_bus:NZB|ph}]
 set_multicycle_path -hold  -end 1 \
-    -from [get_clocks {az80_clk}] \
-    -to   [get_registers {*sdram_ce_sr[0]}]
-
-#  T80s -> the A-Z80-only synchronisers (az_win_s1, sdram_ce_sr).  Mutually
-#  exclusive by construction, like the core-to-core false paths above: while T80s
-#  runs, az_rd_win carries ~use_t80 (constant 0) and ch2_req_cpu selects the raw
-#  sdram_ce, so neither synchroniser is used; while A-Z80 runs, T80s is held in
-#  reset and its IR/MCycle are static.  (Build 9e9e8f2: -8.98 ns, 508 paths, all
-#  T80s IR/MCycle -> these flops.)
-set_false_path -from [get_registers {*msx:MSX|T80s:T80|*}] \
-               -to   [get_registers {*msx:MSX|az_win_s1 *sdram_ce_sr*}]
-
-#  clk21m slot/mapper state -> the same two synchroniser first stages.  PPI port A
-#  (primary slot), map_valid and mapper registers change only during the CPU's
-#  own I/O or memory write, which ends at least one T-state (8 clk_sdram at
-#  10.7 MHz) before the next read strobe; ioctl_size changes only while an upload
-#  holds the machine.  So they are at least as quiet as the CPU address the
-#  az80_clk rules above already relax, and get the same budgets.  (f891721:
-#  -5.13 ns, porta_dout / ioctl_size / map_valid -> these flops.)
-set_multicycle_path -setup -end 3 \
-    -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
-    -to   [get_registers {*msx:MSX|az_win_s1}]
-set_multicycle_path -hold  -end 2 \
-    -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
-    -to   [get_registers {*msx:MSX|az_win_s1}]
+    -from [get_registers {*msx:MSX|T80s:T80|*}] \
+    -to   [get_registers {*msx:MSX|NextZ80:NZ|* *msx:MSX|nz_bus:NZB|ph}]
+#  NextZ80 -> SDRAM ch2 needs nothing of its own: the generic -end 6 above is the
+#  T80-at-10.74 head window (address one clk21m ahead of the strobe, + 2
+#  clk_sdram), and nz_bus gives exactly that lead.
 set_multicycle_path -setup -end 2 \
-    -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
-    -to   [get_registers {*sdram_ce_sr[0]}]
+    -from [get_registers {*msx:MSX|NextZ80:NZ|*}] \
+    -to   [get_registers {*msx:MSX|NextZ80:NZ|*}]
 set_multicycle_path -hold  -end 1 \
-    -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
-    -to   [get_registers {*sdram_ce_sr[0]}]
+    -from [get_registers {*msx:MSX|NextZ80:NZ|*}] \
+    -to   [get_registers {*msx:MSX|NextZ80:NZ|*}]
