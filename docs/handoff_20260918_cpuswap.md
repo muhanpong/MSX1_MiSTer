@@ -168,6 +168,12 @@ instead is the part a game test cannot cover:
    probes -- if it reads S1990 register 6 bit 5 instead, the bit is inverted
    somewhere and that IS a defect.
 
+**Also tested on hardware (user, 20260918)**
+
+- **FDD works**: Z80BENCH itself was loaded from floppy.
+- **Akumajou Dracula played through to the end** -- a PSG title, and a Konami one,
+  i.e. exactly the class that a changed cycle count would derail first.
+
 **Worth watching, not a defect**
 
 7. `ce_cpu` runs at full rate while NextZ80 owns the bus (`MSX1.sv`: clock.sv speed
