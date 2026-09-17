@@ -171,8 +171,14 @@ instead is the part a game test cannot cover:
 **Also tested on hardware (user, 20260918)**
 
 - **FDD works**: Z80BENCH itself was loaded from floppy.
-- **Akumajou Dracula played through to the end** -- a PSG title, and a Konami one,
-  i.e. exactly the class that a changed cycle count would derail first.
+- **Akumajou Dracula played through to the end, in R800 mode** -- a PSG title, and
+  a Konami one, i.e. exactly the class that a changed cycle count would derail first.
+- **Hi no Tori is playable in R800 mode.**  Worth more than it looks: its RST 38
+  runaway is a race between a long LDIR and the ISR being reinstalled, so it is the
+  title most likely to notice that instructions now retire ~2.3x faster.  It did not.
+- The OSD screenshot shows both new rows rendered and set: `TURBO R FEATURES: ON`
+  and `CPU (TURBO R): R800 (NEXTZ80)`, with `CPU SPEED: 21.5MHZ` -- direct visual
+  proof for point 4 rather than inference from the S1990 answering.
 
 **Closed by the same test**
 
