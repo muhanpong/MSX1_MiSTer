@@ -174,10 +174,10 @@ instead is the part a game test cannot cover:
 - **Akumajou Dracula played through to the end** -- a PSG title, and a Konami one,
   i.e. exactly the class that a changed cycle count would derail first.
 
-**Worth watching, not a defect**
+**Closed by the same test**
 
 7. `ce_cpu` runs at full rate while NextZ80 owns the bus (`MSX1.sv`: clock.sv speed
-   `use_nz ? 4 : OSD speed`).  The PSG bus strobe, the M1-wait pair and the FDC all
-   hang off `ce_cpu`.  The bench covers the hand-over itself; a disk access or a
-   PSG-heavy title *while in R800 mode*, and the first instructions after switching
-   back at stock speed, are the cases to try on hardware.
+   `use_nz ? 4 : OSD speed`), and the PSG bus strobe, the M1-wait pair and the FDC
+   all hang off it -- the one thing the bench could not cover.  **Akumajou Dracula
+   was played through in R800 mode**, so a PSG title and the FDD both survive the
+   full-rate `ce_cpu`.  Nothing left open here.
