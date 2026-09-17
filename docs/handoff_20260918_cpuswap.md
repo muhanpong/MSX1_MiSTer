@@ -66,3 +66,55 @@
 - `$value$plusargs` takes the first match: put per-run plusargs before the common ones.
 - NextZ80 `RAM16X8D_regs` starts X in simulation; the bench zeroes it through `LOAD`/reset only because the program never reads an uninitialised register — keep it that way or zero it in the tb.
 - Never two Quartus jobs on one project; the cpuswap fit must finish before any map in cpuswap-cores.
+
+
+---
+
+## 6. Update 2026-09-18 (later session): steps 1–3 done, build running
+
+Commits on `cpuswap-cores`: 4ab4f91 (nz_bus + this doc, committed by the user),
+e0f6574 (bench), 0593fd9 (RTL / SDC / qip / triage).
+
+**Step 1, bench (e0f6574).**  `tb_swap.sv` drives both cores through the msx.sv mux
+(busy-masked), NextZ80 via `nz_bus`, registered memory read, `req` one-shot for
+writes/OUT/IN 99h, `iowr_stb`, WAIT source with junk data until it ends, and
+`+sdlat` SDRAM-like latency with a pacer (NextZ80, `+turbo`, resume guard).
+RESULT PASS on the whole set plus `sdram stock/every/turbo/nz/soft`; `no resume
+grd` must DIFF and does.  Measured: an unpaced T80s at CEN/6 tolerates 4 clocks of
+read latency, at CEN/3 only 1.  nz_bus mutations (no masked clock; WAIT ignored)
+both FAIL.
+
+**Step 2, RTL (0593fd9) — deviations from §3, with reasons:**
+- **No A-Z80 SDRAM request delay or clk_sdram pacer for NextZ80.**  `sdram_ce` is
+  gated on MREQ & RD in msx_slots, and nz_bus masks the strobes for the clock after
+  every advance, so the address leads the request by a full clk21m — the head
+  window the generic `-end 6` was argued for.  NextZ80 reads use the T80s-turbo
+  closed loop (`hs_win`, `sdram_hit`) through `cpu_paced`.  `ch2_req_cpu = sdram_ce`.
+- **NextZ80 `RESET` tied 0**, and nz_bus hold includes reset: a reset sample taken
+  while frozen would survive LOAD and restart NextZ80 at 0000h.  Bench mirrors it.
+- **ce_cpu at full rate while NextZ80 owns the bus** (`MSX1.sv`: clock.sv speed =
+  `use_nz ? 4 : OSD speed`).  PSG bus strobe, M1 wait pair and FDC run on ce_cpu;
+  at stock rate a short NextZ80 I/O cycle could slip past the PSG strobe chain.
+- OSD `O[118]` "CPU (turbo R)": set_stb when closed and changed, and again after
+  every reset.  **Unverified:** whether the board's saved CFG has bit 118 set.
+- **SDC is broader than §3.**  Post-map, NextZ80 → fabric single-cycle was ~9 ns
+  deeper than T80s' (combinational ADDR) and would not close.  Rule: NextZ80 → all
+  clk21m registers `-end 2` (clock-based), justified by nz_bus's masked clock.
+  Single-cycle exceptions (node rules): cheat lookup (`a_q`, cheat RAM address
+  registers: feeds d_to_cpu on a first-clock SDRAM cache hit) and `cpuswap_ctl`.
+  T80s → NextZ80 and → `nz_bus.ph` `-end 2`.  Core↔core is two-cycle, not
+  single-cycle as §3 said (each core frozen while the other owns the bus).
+  Address-sampling audit: `grep '<= a;'`/`[a]` — only debug latches besides the
+  cheat lookup.  Re-audit if a register samples the bare address every clock.
+- relations.tcl: NZ_intra 93.132, NZ_to_SD_ch2 69.846, NZ_to_fabric 93.132,
+  NZ_to_SCC_fall 69.849, two exceptions 46.566, T80_to_NZ 93.132 (all measured
+  post-map; an optional source filter was added to the script).
+
+**Step 3, map + triage.**  quartus_map 17.0: 0 errors; NextZ80 346 registers.
+`tools/sta/cpuswap_postmap_triage.tcl`: every NextZ80-sourced family positive;
+remaining negatives are T80s-sourced (T80s → SCC falling edge -18.7 post-map) and
+existed in the fitted 564901c.  quartus_sta segfaults at exit after "successful"
+(rc 2): harmless.
+
+**Step 4 (running).**  `BUILDGATE_LOG=<scratchpad>/buildgate tools/buildgate/build.sh
+--expect NextZ80 --expect cpuswap_ctl --expect nz_bus`.  Then hardware as in §4.
