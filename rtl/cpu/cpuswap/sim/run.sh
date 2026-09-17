@@ -30,7 +30,7 @@ open('$obj/swaptest.hex','w').write('\n'.join('%02x'%b for b in d)+'\n')"
 
 nz=$cpu/nextz80/patched
 verilator --cc --exe --build -j 8 -O2 +1364-2005ext+v +1800-2012ext+sv -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN -Wno-COMBDLY -Wno-TIMESCALEMOD \
-  --top-module tb -Mdir "$obj/vl" "$here/tb_swap.sv" "$cpu/cpuswap/cpuswap_ctl.sv" "$cpu/../peripheral/turbor/turbor.sv" "$obj/t80/t80s.v" \
+  --top-module tb -Mdir "$obj/vl" "$here/tb_swap.sv" "$cpu/cpuswap/cpuswap_ctl.sv" "$cpu/cpuswap/nz_bus.sv" "$cpu/../peripheral/turbor/turbor.sv" "$obj/t80/t80s.v" \
   "$nz/nextz80cpu.v" "$nz/nextz80reg.v" "$nz/nextz80alu.v" "$here/sim_main.cpp" > "$out/build.log" 2>&1 \
   || { echo "verilator build failed, see $out/build.log"; exit 1; }
 
@@ -67,5 +67,13 @@ for v in "0 0 1" "0 12 5" "3 30 9" "0 8 13" "6 20 17"; do set -- $v
 done
 printf '%-14s ' "software S1990"; run soft +mode=3; check soft SAME
 n=$(grep -c '^X' "$out/soft.log"); [ "$n" = 24 ] && echo "    PASS (24 port-driven switches)" || { echo "    FAIL ($n port-driven switches, expected 24)"; fail=1; }
+#  SDRAM-like memory: data home 4 clocks after the request (the most an unpaced T80s at CEN/6
+#  tolerates), WAIT until home for NextZ80, turbo T80s and the resume guard after a hand-over.
+printf '%-14s ' "sdram stock";   run sdstock +mode=2 +seed=1 +t80div=6 +sdlat=4 +maxclk=8000000; check sdstock SAME
+printf '%-14s ' "sdram st every"; run sdstall +mode=2 +swapmin=0 +swapmax=0 +t80div=6 +sdlat=4 +maxclk=12000000; check sdstall SAME
+printf '%-14s ' "sdram turbo";   run sdturbo +mode=2 +swapmin=0 +swapmax=0 +sdlat=7 +turbo=1 +maxclk=12000000; check sdturbo SAME
+printf '%-14s ' "sdram nz";      run sdnz +mode=1 +sdlat=6 +maxclk=8000000; check sdnz SAME
+printf '%-14s ' "sdram soft";    run sdsoft +mode=3 +t80div=6 +sdlat=4 +maxclk=12000000; check sdsoft SAME
+printf '%-14s ' "no resume grd"; run sdnorg +mode=2 +seed=1 +t80div=6 +sdlat=4 +norg=1 +maxclk=8000000; check sdnorg DIFF
 printf '%-14s ' "negative";    run neg +mode=2 +seed=1 +corrupt=5; check neg DIFF
 [ $fail = 0 ] && echo "RESULT PASS" || echo "RESULT FAIL"
