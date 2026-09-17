@@ -147,20 +147,30 @@ instead is the part a game test cannot cover:
    clock-based rule, so they outrank it.  No `set_max_delay` anywhere near the CPU
    -- which is what cost three non-converging fits on the rz80 branch.
 
-**Open, and only hardware can answer it**
+**Answered by the user's hardware test (Z80BENCH v1.4.2 on 20260918b)**
 
-4. **OSD bits 117 and 118.**  `status` is `[127:0]` so they are wired, but the
-   highest bit in use before this change was 116, and on 2026-09-04 a `status[118]`
-   row silently did nothing on this board (cause never isolated -- it was reverted
-   in the same commit as an 11-entry ladder, so 118's innocence is unproven).  The
-   proven-good free bits are 65-70.  A game test passes whether or not those two
-   rows render.  **Needed from the peer: did "Turbo R features" and "CPU (turbo R)"
-   actually appear in the OSD and toggle?**  If not, move them to 65-70 (check the
-   board's saved `MSX1.CFG` with `xxd` first -- 65-70 read 0 there).
+4. **OSD bits 117 and 118 work on this board.**  This was the open risk: 116 was
+   the highest bit ever used, and a `status[118]` row silently did nothing here on
+   2026-09-04 (never isolated -- reverted together with an 11-entry ladder).  The
+   test settles it: Z80BENCH reports `Machine: MSX TurbR`, which requires the S1990
+   at E4h/E5h to answer, and that block only exists when `O[117]` is On; and the
+   core actually changed, which only `O[118]` can do.  **Both rows render and act.
+   Bits 117/118 are now proven, and the "116 is the ceiling" worry is retired.**
+
+5. **NextZ80 is really executing, and it is worth 2.3x.**  Z80BENCH: **49.46 MHz
+   equivalent, 1382 %** of a 3.58 MHz Z80.  The clock is unchanged at 21.477 MHz --
+   1382 / 600 (T80s at the same 21.5 MHz, measured 20260913b) = **2.30x more work
+   per clock**, which is the whole point of putting NextZ80 in as the R800.
+
+6. *Expected, not a defect:* the same screen still reports `CPU Type: Z80`.
+   R800 detection needs the R800-only opcodes (`MULUB`/`MULUW`), which are on the
+   peer's later-work list and are not in NextZ80.  Worth confirming how Z80BENCH
+   probes -- if it reads S1990 register 6 bit 5 instead, the bit is inverted
+   somewhere and that IS a defect.
 
 **Worth watching, not a defect**
 
-5. `ce_cpu` runs at full rate while NextZ80 owns the bus (`MSX1.sv`: clock.sv speed
+7. `ce_cpu` runs at full rate while NextZ80 owns the bus (`MSX1.sv`: clock.sv speed
    `use_nz ? 4 : OSD speed`).  The PSG bus strobe, the M1-wait pair and the FDC all
    hang off `ce_cpu`.  The bench covers the hand-over itself; a disk access or a
    PSG-heavy title *while in R800 mode*, and the first instructions after switching
