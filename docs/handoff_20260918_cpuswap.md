@@ -176,6 +176,11 @@ instead is the part a game test cannot cover:
 - **Hi no Tori is playable in R800 mode.**  Worth more than it looks: its RST 38
   runaway is a race between a long LDIR and the ISR being reinstalled, so it is the
   title most likely to notice that instructions now retire ~2.3x faster.  It did not.
+- **No SCC regression.**  This is the one the SDC work most wanted confirmed: the
+  SCC wave-RAM write is qualified by a NextZ80 strobe (covered by the broad `-end 2`
+  only because nz_bus masks the first clock), and the peer's post-map triage left
+  `T80s -> SCC falling edge` at -18.7 ns as a known negative carried over from the
+  fitted 564901c.  Hardware says that negative is post-map pessimism, as assumed.
 - The OSD screenshot shows both new rows rendered and set: `TURBO R FEATURES: ON`
   and `CPU (TURBO R): R800 (NEXTZ80)`, with `CPU SPEED: 21.5MHZ` -- direct visual
   proof for point 4 rather than inference from the S1990 answering.
