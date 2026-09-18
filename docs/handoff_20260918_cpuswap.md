@@ -124,3 +124,80 @@ games run across a swap; "few defect negligible" — the defects are not yet
 described, so they are not diagnosed.  Worth ruling out when they are: flag bits
 3/5 (WZ/Q deliberately not carried across a swap), the missing MSX2 M1 wait on
 NextZ80, and N after block I/O (the two cores differ).
+
+---
+
+## 7. Update 2026-09-18 (later session): R800 MULUB/MULUW, build 20260918c
+
+Commit `abec124` on `cpuswap-cores` (after the §6 work: 7f30099, adb8378).
+
+**MULUB / MULUW**, patch 0003 on `rtl/cpu/nextz80/patches` (`check.sh` still
+proves `patched/` = originals + all three patches):
+
+- `ED C1/C9/D1/D9` `MULUB A,B/C/D/E` — `HL = A * r`.
+- `ED C3` / `ED F3` `MULUW HL,BC` / `HL,SP` — `DE:HL = HL * ww`, **DE the high
+  word** (checked against MAME's hardware-derived `r800.cpp`; two web sources
+  disagreed on which pair holds the high word before that check).
+- Flags: S=0, Z=result is zero, H and N unchanged, P/V=0, X/Y=0, C=result did
+  not fit in the low half.
+- **Only NextZ80 has them.**  It is the R800 stand-in, and a Z80 executes these
+  opcodes as NOPs — which is what T80s keeps doing — so they cannot appear in
+  the lockstep comparison.  `sim/multest.asm` runs a fixed case table on NextZ80
+  alone (outside page 0, which the turbo R BIOS overlay owns in the bench) and
+  `sim/gen_mulref.py` states the expected OUT log independently of the RTL.
+  `run.sh` now runs it as a normal step ("R800 multiply", 84 OUTs).
+- MULUB is one stage: the register file reads A straight out of the flat
+  `SLOT_HI`/`SLOT_LO` slot array (the cpuswap export already exposes it), so the
+  write port is free to address HL in the same stage.  MULUW is two stages: DE
+  (high word, no bus cycle) then HL recomputed from the untouched operand (low
+  word, flags, next fetch) — R counts twice, as for any ED opcode.
+- **Bug the test caught before commit:** the decode was `FETCH[2:0]==3'b011`
+  without checking bit 3, so `ED CB` also matched MULUW.  A test case executing
+  a neighbouring `ED` opcode and asserting HL/flags unchanged failed immediately
+  and pinned it down; fixed to `FETCH[3:0]==4'b0011`.
+
+**Build 20260918c.**  quartus_map: 0 errors, NextZ80 gained 86 ALMs and 2 DSP
+blocks (was 0); post-map triage unchanged — every NextZ80 family still positive
+(multiplier not on NextZ80's critical path).  Full `buildgate.sh --stages
+fit,asm`: **BUILDGATE PASS**, slow setup +0.327 ns (was +0.168 on 20260918b),
+fast setup +3.739 ns, 7/7 relations ok, 78% ALM.  `output_files/
+MSX1_20260918c_mulubw.rbf`, md5 `bcc677d0e27f91483aa041ec877feb64`.  Delivered
+to the user through `SendUserFile` (see §8) — **not yet tested on hardware.**
+
+**Cross-check note.**  openMSX is installed (`/home/linuxbrew/.linuxbrew/bin/
+openmsx`) but its turbo R machines (`Panasonic_FS-A1ST` etc.) have no system
+ROMs on this box, so MULUB/MULUW could not be cross-checked against a second
+emulator, only against MAME's r800.cpp source read over the web.  Worth doing
+if the ROMs ever land here.
+
+## 8. Update 2026-09-18: SendUserFile availability
+
+`SendUserFile` was not in this session's tool list for most of the session
+(checked via ToolSearch, including fuzzy names — no match), so the 20260918b
+build was handed off as a path + md5 instead.  After the user ran
+`/remote-control`, `SendUserFile` (and `FetchInboxMessage`) appeared as
+deferred tools and worked normally for 20260918c.  **Conclusion: the tool is
+gated behind Remote Control being connected, not absent from the environment.**
+The build-delivery memory note was corrected accordingly (no more "never
+available" assumption) — check with ToolSearch first if a send fails, and
+prefer `SendUserFile` when it is there rather than defaulting to a path.
+
+## 9. Next steps (updated)
+
+1. **Hardware test of 20260918c** (multiply instructions).  No dedicated test
+   ROM exists yet on real hardware — `sim/multest.asm` is bench-only.  A small
+   BASIC or assembly program exercising `MULUB`/`MULUW` and checking HL/DE/F
+   would close the loop the way Z80BENCH did for the hand-over.
+2. Diagnose the "few negligible defects" from the 20260918b hardware run once
+   described — candidates in priority order: flag bits 3/5 (deliberately not
+   carried across a swap), NextZ80 missing the MSX2 M1 wait, N after block I/O
+   differing between cores (see §2/README "Core differences that are masked").
+3. Check whether the board's saved `.CFG` has OSD bit 118 set (would boot
+   straight to R800) — still unverified, no route to the board's filesystem
+   from this sandbox.
+4. PCMPLY/PCMREC hardware player (state export now exists via the hand-over).
+5. OSD overlay LEDs; whether `002Dh = 03h` breaks anything (Turbo R features On
+   only).
+6. Housekeeping, not yet done: A-Z80 sources (`rtl/cpu/az80`) are unused but
+   still in the tree; a stray `cr_ie_info.json` (Quartus-generated) sits
+   uncommitted in the cpuswap-cores worktree.
