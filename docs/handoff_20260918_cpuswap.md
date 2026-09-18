@@ -251,3 +251,64 @@ from the `20260918b` hardware run once described; check the board's saved
 whether `002Dh = 03h` breaks anything under Turbo R features; A-Z80 sources
 still in the tree unused; stray `cr_ie_info.json` (Quartus-generated,
 uncommitted) in the `cpuswap-cores` worktree.
+
+---
+
+## 11. Update 2026-09-18: PCMPLY hardware player (commit `e779196`, build 20260918d)
+
+The BIOS entry at 0186h is no longer a stub.  `rtl/peripheral/turbor/pcm_play.sv`
+takes A/HL/BC out of whichever core owns the bus (the register export the
+hand-over already uses), parks the CPU and reads the run itself: one paced memory
+read per sample into the D/A, on the PCM tick grid divided by q+1.  Full design
+notes in `rtl/peripheral/turbor/README.md`.
+
+**Deviation from §3's design note, and why it is simpler.**  The note proposed
+rewriting the stub as `IN A,(port) / RET`, parking on that I/O cycle and putting
+the abort flag back into F with a self-transfer through `DIRSet` / `LOAD`.  The
+park is instead the **opcode fetch itself**: WAIT is held from M1 going low at
+0186h until the run ends, so the opcode is never latched, and the byte handed back
+afterwards carries the result -- `37h` SCF (aborted) or `B7h` OR A (clean).  The
+caller's carry is then the documented abort flag with no register write-back, no
+new I/O port and no change to the stub bytes (0187h stays `C9`).  The arm is taken
+from M1 alone rather than the MREQ/RD pair, half a T-state earlier, because a
+fetch at 21.5 MHz is only one clk21m wide.
+
+**Bus.**  The player is a third master ahead of the swap mux in `msx.sv` (the eight
+assigns at §1's insertion point) and keeps the bus for the whole run, driving it
+idle between samples: handing it back per sample would re-edge the parked core's
+own strobes into the SDRAM request and the `req` one-shot.  Its reads honour the
+machine's own pacing through `pace_n` = `wait_core_n`, the wait_n term without the
+player's own.  CTRL+STOP is a new `keyboard.sv` output, so it does not depend on
+the row the PPI happens to be scanning.
+
+**Not implemented:** VRAM (A bit 7) and PCMREC.  Both return at once with carry
+clear, as BC = 0 does.  VRAM needs a second read port -- `vram_lo`/`vram_hi` are
+`spram`; `bram.vhd` already has a `dpram` with an independent port B on the same
+clock.  PCMREC has no audio input to record.
+
+**Bench.**  `rtl/cpu/cpuswap/sim/pcmtest.asm` and six steps in `sim/run.sh`: T80s
+(reference), NextZ80, random hand-overs, CEN/6, hand-overs with SDRAM latency, and
+a CTRL+STOP abort.  Checked: the sample stream byte for byte, 28 samples over 3
+runs (two of the five calls must not park the CPU at all), the rate divider from
+the sample spacing (q=0 -> 1368 clocks, q=1 -> 2736), the abort returning carry set
+at the right sample, and the parked core's address never moving while the player
+owns the bus.  RESULT PASS, existing suite unchanged.
+
+**Bug the bench caught before the build:** keying the re-entry lock on the arm
+condition replayed the whole buffer.  A hand-over inside the parked fetch takes the
+strobes off the bus and then makes the resumed core fetch 0186h a second time for
+the same, already-played call.  The lock now clears only on a fetch of some *other*
+address -- the only proof the parked fetch has retired.
+
+**Build 20260918d.**  `quartus_map` 0 errors, state machine inferred; then
+`build.sh --stages fit,asm --expect pcm_play --expect NextZ80`: **BUILDGATE PASS**,
+fit 21:19, slow setup **+0.308** ns (was +0.327 on 20260918c), fast setup +3.830,
+7/7 relations ok, 78 % ALM and M10K 391/553 -- both unchanged from 20260918c.
+`output_files/MSX1_20260918d_pcmply.rbf`, md5 `5a5617a2aa9d8a5d442c5414c2074746`.
+`SendUserFile` did not load in this session (Remote Control not connected, see §8),
+so the file was handed over as a path.  **Not tested on hardware.**
+
+**Hardware test needs a program first.**  Nothing calls PCMPLY yet: Turbo R
+features On, A = rate, HL = start, BC = length, `CALL &H0186`, carry = aborted.  A
+BASIC loader with a small machine-code block and a generated waveform would close
+the loop the way Z80BENCH did for the hand-over.
