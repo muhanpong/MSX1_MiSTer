@@ -5,6 +5,7 @@ module keyboard
    input  [10:0] ps2_key,
    input   [3:0] kb_row,
    output  [7:0] kb_data,
+   output        ctrl_stop,      // CTRL + STOP held, whatever row is being scanned
    input   [8:0] kbd_addr,
    input   [7:0] kbd_din,
    input         kbd_we,
@@ -19,6 +20,8 @@ logic down, change;
 logic [7:0] pos;
 
 assign kb_data    = row_state[kb_row];
+//  Matrix is active low: CTRL is row 6 bit 1, STOP is row 7 bit 4.
+assign ctrl_stop  = ~row_state[6][1] & ~row_state[7][4];
 assign key_decode = ps2_key[8:0];
 
 always @(posedge clk) begin

@@ -239,6 +239,10 @@ wire signed [15:0] ms_audio_l, ms_audio_r;
 //  which silences every sound source on a turbo R.
 wire        [7:0] tr_pcm_dac;
 wire              tr_mute_all;
+//  PCMPLY player: parks the CPU (tr_pcm_busy) and drives the bus (tr_pcm_bus).
+wire              tr_pcm_busy, tr_pcm_bus, tr_pcm_mreq_n, tr_pcm_rd_n;
+wire       [15:0] tr_pcm_a;
+wire              kb_ctrl_stop;
 wire signed [7:0] tr_pcm_s = tr_pcm_dac ^ 8'h80;
 wire signed [17:0] tr_pcm18 = {{4{tr_pcm_s[7]}}, tr_pcm_s, 6'b000000};
 wire signed [17:0] mix_l = $signed({{2{mono_audio[15]}}, mono_audio}) + $signed({{2{ms_audio_l[15]}}, ms_audio_l}) + tr_pcm18;
@@ -371,13 +375,16 @@ cpuswap_ctl CPUSWAP
 //  The owner's strobes, forced idle while a hand-over is in progress: the frozen
 //  T80s would otherwise hold the strobes of its interrupted fetch through the swap,
 //  so `req` and the SDRAM request would not re-edge for the core that resumes.
-assign mreq_n  = swap_busy | (use_nz ? nzb_mreq_n : t_mreq_n);
-assign iorq_n  = swap_busy | (use_nz ? nzb_iorq_n : t_iorq_n);
-assign rd_n    = swap_busy | (use_nz ? nzb_rd_n   : t_rd_n);
-assign wr_n    = swap_busy | (use_nz ? nzb_wr_n   : t_wr_n);
-assign m1_n    = swap_busy | (use_nz ? nzb_m1_n   : t_m1_n);
-assign rfrsh_n = swap_busy | (use_nz ? nzb_rfsh_n : t_rfsh_n);
-assign a          = use_nz ? nz_a  : t_a;
+//  Third master: the PCMPLY player (turbor) parks the CPU inside the 0186h fetch
+//  and reads one sample per tick itself.  It takes the whole bus for the run, not
+//  a read at a time, so the parked core's own strobes never re-edge underneath it.
+assign mreq_n  = tr_pcm_bus ? tr_pcm_mreq_n : swap_busy | (use_nz ? nzb_mreq_n : t_mreq_n);
+assign rd_n    = tr_pcm_bus ? tr_pcm_rd_n   : swap_busy | (use_nz ? nzb_rd_n   : t_rd_n);
+assign iorq_n  = tr_pcm_bus | swap_busy | (use_nz ? nzb_iorq_n : t_iorq_n);
+assign wr_n    = tr_pcm_bus | swap_busy | (use_nz ? nzb_wr_n   : t_wr_n);
+assign m1_n    = tr_pcm_bus | swap_busy | (use_nz ? nzb_m1_n   : t_m1_n);
+assign rfrsh_n = tr_pcm_bus | swap_busy | (use_nz ? nzb_rfsh_n : t_rfsh_n);
+assign a          = tr_pcm_bus ? tr_pcm_a : (use_nz ? nz_a  : t_a);
 assign d_from_cpu = use_nz ? nz_do : t_do;
 
 //  Resume guard.  A T80s handed the bus resumes in T2 of the fetch it was frozen in
@@ -838,7 +845,11 @@ wire sd_pace_n = ~(cpu_paced & sd_rd_window & ~(sd_xfer_seen & sd_ready)
 //  such wait and NextZ80 has no T-states, so it only sees the MoonSound hold.
 wire wait_m1_eff_n = use_nz ? exwait_n : wait_m1_n;
 
-wire wait_n      = wait_m1_eff_n & bus_guard_n & vdp_pace_n & opll_pace_n & sd_pace_n;
+//  `wait_core_n` is the machine's own pacing; the PCMPLY player both adds to it
+//  (parking the CPU for a whole run) and obeys it for its own reads, so it must
+//  see the pacing without its own term.
+wire wait_core_n = wait_m1_eff_n & bus_guard_n & vdp_pace_n & opll_pace_n & sd_pace_n;
+wire wait_n      = wait_core_n & ~tr_pcm_busy;
 
 
 logic map_valid = 0;
@@ -998,6 +1009,7 @@ keyboard msx_key
    .ps2_key(ps2_key),
    .kb_row(ppi_out_c[3:0]),
    .kb_data(d_from_kb_raw),
+   .ctrl_stop(kb_ctrl_stop),
    .kbd_addr(kbd_addr),
    .kbd_din(kbd_din),
    .kbd_we(kbd_we),
@@ -1374,6 +1386,8 @@ logic tr_iow_q = 1'b0;
 always @(posedge clk21m) tr_iow_q <= ~iorq_n & ~wr_n & m1_n;
 wire  tr_iowr_stb = ~iorq_n & ~wr_n & m1_n & ~tr_iow_q;
 wire  tr_dram, tr_pause_led, tr_turbo_led;
+//  The player reads the caller's A/HL/BC out of whichever core owns the bus.
+wire [211:0] cpu_reg_active = use_nz ? nz_xreg : t80_reg_t80;
 turbor turbor
 (
    .clk(clk21m),
@@ -1395,6 +1409,15 @@ turbor turbor
    .set_r800(r800_set),
    .r800(tr_r800),
    .dram(tr_dram),
+   .cpu_reg(cpu_reg_active),
+   .ctrl_stop(kb_ctrl_stop),
+   .pace_n(wait_core_n),
+   .d_to_cpu(d_to_cpu),
+   .pcm_busy(tr_pcm_busy),
+   .pcm_bus_own(tr_pcm_bus),
+   .pcm_a(tr_pcm_a),
+   .pcm_mreq_n(tr_pcm_mreq_n),
+   .pcm_rd_n(tr_pcm_rd_n),
    .pcm_dac(tr_pcm_dac),
    .mute_all(tr_mute_all),
    .ps2_key(ps2_key),

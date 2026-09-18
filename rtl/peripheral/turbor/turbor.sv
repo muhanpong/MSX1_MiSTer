@@ -57,6 +57,16 @@ module turbor
    //  PCM
    output logic  [7:0] pcm_dac,       // unsigned, 80h = silence
    output logic        mute_all,
+   //  PCMPLY hardware player (see pcm_play.sv)
+   input  logic [211:0] cpu_reg,      // active core's register export
+   input  logic        ctrl_stop,     // CTRL + STOP held
+   input  logic        pace_n,        // the machine's own wait_n, without the player's term
+   input  logic  [7:0] d_to_cpu,      // the bus read mux, for the player's own reads
+   output logic        pcm_busy,      // park the CPU (WAIT)
+   output logic        pcm_bus_own,   // the player drives the bus
+   output logic [15:0] pcm_a,
+   output logic        pcm_mreq_n,
+   output logic        pcm_rd_n,
    //  Pause key and LEDs
    input  logic [10:0] ps2_key,
    output logic        hw_pause,
@@ -81,7 +91,11 @@ always_comb begin
       16'h002D: ov_byte = 8'h03;
       16'h0180: ov_byte = 8'hD3;  16'h0181: ov_byte = 8'hE5;  16'h0182: ov_byte = 8'hC9;
       16'h0183: ov_byte = 8'hDB;  16'h0184: ov_byte = 8'hE5;  16'h0185: ov_byte = 8'hC9;
-      16'h0186: ov_byte = 8'hB7;  16'h0187: ov_byte = 8'hC9;  16'h0188: ov_byte = 8'h00;
+      //  PCMPLY: the fetch of 0186h is parked while pcm_play runs, and the
+      //  opcode handed back afterwards carries the abort flag in carry --
+      //  37h = SCF (aborted by CTRL+STOP), B7h = OR A (clean).
+      16'h0186: ov_byte = pcm_aborted ? 8'h37 : 8'hB7;
+      16'h0187: ov_byte = 8'hC9;  16'h0188: ov_byte = 8'h00;
       16'h0189: ov_byte = 8'hB7;  16'h018A: ov_byte = 8'hC9;  16'h018B: ov_byte = 8'h00;
       default: ;
    endcase
@@ -104,6 +118,27 @@ always_ff @(posedge clk) begin
       chg_arm <= 1'b0;
    end
 end
+
+//  ------------------------------------------------------------------ PCMPLY player
+//  Armed from M1 alone (not the MREQ/RD pair) so WAIT is asserted a half T-state
+//  earlier -- at 21.5 MHz the fetch is only one clk21m wide.  IACK also pulls M1
+//  low, hence the iorq_n term.
+wire pcm_arm_raw = en & main_rom0 & ~m1_n & iorq_n & (a == 16'h0186);
+//  The lock holds from the moment a run starts until the CPU fetches something
+//  else, which is the only proof the parked fetch has retired.  It must not key
+//  on the arm condition going away: the player itself takes the strobes off the
+//  bus, and so does a hand-over -- and a hand-over inside the parked fetch makes
+//  the resumed core fetch 0186h a second time for the same, already-played call.
+logic pcm_lock = 1'b0;
+always_ff @(posedge clk) begin
+   if (reset | ~en)              pcm_lock <= 1'b0;
+   else if (pcm_busy)            pcm_lock <= 1'b1;
+   else if (fetch & ~pcm_arm_raw) pcm_lock <= 1'b0;
+end
+
+//  The instance itself sits after the PCM section, where pcm_tick is declared.
+logic [7:0] pcm_val;
+logic       pcm_dac_we, pcm_aborted;
 
 //  ------------------------------------------------------------------ S1990
 logic [7:0] regsel = 8'h00;
@@ -194,9 +229,26 @@ always_ff @(posedge clk) begin
          end
          if (~pcm_st[4] & din[4]) hold <= PCM_IN;
       end
+      //  The player owns the D/A while it runs; the CPU is parked, so no A4h/A5h
+      //  write can be in flight at the same time.
+      if (pcm_dac_we) pcm_dac <= pcm_val;
    end
 end
 assign mute_all = en & muted_w & ~pcm_st[1];
+
+pcm_play PLAY
+(
+   .clk(clk), .reset(reset), .en(en),
+   .tick(pcm_tick),
+   .arm(pcm_arm_raw & ~pcm_lock),
+   .cpu_reg(cpu_reg),
+   .ctrl_stop(ctrl_stop),
+   .pace_n(pace_n),
+   .d_bus(d_to_cpu),
+   .busy(pcm_busy), .bus_own(pcm_bus_own),
+   .m_a(pcm_a), .m_mreq_n(pcm_mreq_n), .m_rd_n(pcm_rd_n),
+   .dac(pcm_val), .dac_we(pcm_dac_we), .aborted(pcm_aborted)
+);
 
 //  ------------------------------------------------------------------ pause (A7h)
 logic key_q = 1'b0, pause_key = 1'b0;

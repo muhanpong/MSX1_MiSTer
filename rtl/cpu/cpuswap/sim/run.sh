@@ -30,7 +30,7 @@ open('$obj/swaptest.hex','w').write('\n'.join('%02x'%b for b in d)+'\n')"
 
 nz=$cpu/nextz80/patched
 verilator --cc --exe --build -j 8 -O2 +1364-2005ext+v +1800-2012ext+sv -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN -Wno-COMBDLY -Wno-TIMESCALEMOD \
-  --top-module tb -Mdir "$obj/vl" "$here/tb_swap.sv" "$cpu/cpuswap/cpuswap_ctl.sv" "$cpu/cpuswap/nz_bus.sv" "$cpu/../peripheral/turbor/turbor.sv" "$obj/t80/t80s.v" \
+  --top-module tb -Mdir "$obj/vl" "$here/tb_swap.sv" "$cpu/cpuswap/cpuswap_ctl.sv" "$cpu/cpuswap/nz_bus.sv" "$cpu/../peripheral/turbor/turbor.sv" "$cpu/../peripheral/turbor/pcm_play.sv" "$obj/t80/t80s.v" \
   "$nz/nextz80cpu.v" "$nz/nextz80reg.v" "$nz/nextz80alu.v" "$here/sim_main.cpp" > "$out/build.log" 2>&1 \
   || { echo "verilator build failed, see $out/build.log"; exit 1; }
 
@@ -90,6 +90,42 @@ grep '^O ' "$out/mul.log" > "$out/mul.trace"
 printf '%s  ' "$(grep -E '^(END|TIMEOUT)' "$out/mul.log")"
 if cmp -s "$out/mulref.trace" "$out/mul.trace"; then echo "PASS ($(wc -l < "$out/mul.trace") OUTs match the R800 model)"
 else echo "FAIL $(diff "$out/mulref.trace" "$out/mul.trace" | head -4 | tr '\n' ' ')"; fail=1; fi
+
+#  PCMPLY hardware player: the CPU is parked inside the 0186h fetch while the player
+#  reads the samples itself, so the trace (D lines + the Z pcm summary) must be the
+#  same whichever core is parked and at whatever divisor.  Its own reference run is
+#  T80s, since the program is not swaptest.
+( cd "$obj" && "$SJASMPLUS" --nologo --lst=pcmtest.lst "$here/pcmtest.asm" ) > "$out/asm_pcm.log" 2>&1 \
+  || { echo "pcm assembly failed, see $out/asm_pcm.log"; fail=1; }
+python3 -c "
+import sys; d=open('$obj/pcmtest.bin','rb').read()
+open('$obj/pcmtest.hex','w').write('\n'.join('%02x'%b for b in d)+'\n')"
+pcmargs="+prog=$obj/pcmtest.hex +intper=0 +maxclk=4000000"
+checkp() { local name=$1 expect=$2; local res
+  if cmp -s "$out/pcmref.trace" "$out/$name.trace"; then res=SAME; else res=DIFF; fi
+  local first=$(diff "$out/pcmref.trace" "$out/$name.trace" | head -3 | tr '\n' ' ')
+  if [ "$res" = "$expect" ]; then echo "    PASS ($res) $first"; else echo "    FAIL ($res, expected $expect) $first"; fail=1; fi; }
+printf '%-14s ' "pcm t80";     run pcmt80 $pcmargs +mode=0
+cp "$out/pcmt80.trace" "$out/pcmref.trace"
+nsmp=$(grep -c '^D ' "$out/pcmt80.trace"); nrun=$(grep -c '^Z pcm' "$out/pcmt80.trace")
+[ "$nsmp" = 28 ] && [ "$nrun" = 3 ] && echo "    PASS (28 samples over 3 runs)" \
+  || { echo "    FAIL ($nsmp samples, $nrun runs; expected 28 over 3)"; fail=1; }
+#  Rate: the PCM grid here is 6 * 228 = 1368 clocks; runs 1 and 5 ask for q=0, run 2 for q=1.
+printf '%-14s ' "pcm rate"
+gaps=$(grep '^R ' "$out/pcmt80.log" | sort -u | awk '{printf "%s ", $2}')
+[ "$gaps" = "1368 2736 " ] && echo "PASS (q=0 -> 1368 clocks, q=1 -> 2736)" \
+  || { echo "FAIL (sample gaps: $gaps expected 1368 and 2736)"; fail=1; }
+printf '%-14s ' "pcm nz";      run pcmnz  $pcmargs +mode=1;                     checkp pcmnz SAME
+printf '%-14s ' "pcm swaps";   run pcmsw  $pcmargs +mode=2 +seed=3;             checkp pcmsw SAME
+printf '%-14s ' "pcm ce/6";    run pcmdiv $pcmargs +mode=0 +t80div=6;           checkp pcmdiv SAME
+printf '%-14s ' "pcm sdram";   run pcmsd  $pcmargs +mode=2 +seed=5 +t80div=6 +sdlat=4; checkp pcmsd SAME
+#  CTRL+STOP after 20 samples: the fifth run ends early and returns carry set, so the
+#  trace must differ from the reference -- and say so.
+printf '%-14s ' "pcm abort";   run pcmab  $pcmargs +mode=0 +pcmstop=20;         checkp pcmab DIFF
+if grep -q '^Z pcm 20 1' "$out/pcmab.trace" && grep -q '^O 20 01' "$out/pcmab.trace"; then
+  echo "    PASS (aborted at 20 samples, carry set)"
+else echo "    FAIL (no aborted run in the trace)"; fail=1; fi
+grep -q 'CPU MOVED' "$out"/pcm*.log && { echo "pcm: the parked CPU moved"; fail=1; } || true
 
 printf '%-14s ' "negative";    run neg +mode=2 +seed=1 +corrupt=5; check neg DIFF
 [ $fail = 0 ] && echo "RESULT PASS" || echo "RESULT FAIL"

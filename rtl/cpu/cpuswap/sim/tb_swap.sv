@@ -27,12 +27,13 @@
 //                    guard right after a hand-over (msx.sv resume_guard)
 //    +turbo=1        pace every T80s read too (cpu_turbo); 0 = stock, T80s relies on its own latency
 //    +norg=1         mutation: no resume guard
+//    +pcmstop=<n>    press CTRL+STOP once the PCMPLY player has put out n samples (0 = never)
 //    +maxclk=<n>     timeout
 module tb (input logic clk);
 
 logic [7:0] mem [0:65535];
 string prog;
-int mode, seed, swapmin, swapmax, t80div, intper, eipc, corrupt, nowait, sdlat, turbo, norg, maxclk;
+int mode, seed, swapmin, swapmax, t80div, intper, eipc, corrupt, nowait, sdlat, turbo, norg, pcmstop, maxclk;
 initial begin
    if (!$value$plusargs("prog=%s", prog)) prog = "prog.hex";
    if (!$value$plusargs("mode=%d", mode)) mode = 0;
@@ -47,6 +48,7 @@ initial begin
    if (!$value$plusargs("sdlat=%d", sdlat)) sdlat = 0;
    if (!$value$plusargs("turbo=%d", turbo)) turbo = 0;
    if (!$value$plusargs("norg=%d", norg)) norg = 0;
+   if (!$value$plusargs("pcmstop=%d", pcmstop)) pcmstop = 0;
    if (!$value$plusargs("maxclk=%d", maxclk)) maxclk = 50000000;
    for (int i = 0; i < 65536; i++) mem[i] = 8'h00;
    $readmemh(prog, mem);
@@ -148,15 +150,17 @@ assign n_ldir = t_reg  ^ (corrupt_now ? 212'd1 << 112 : 212'd0);
 //  ---------------------------------------------------------------- the bus (msx.sv mux)
 //  The owner's strobes, forced idle while the controller is busy so that `req`
 //  re-arms and a registered read is re-issued by the core that resumes.
+//  The PCMPLY player is the third master: while it owns the bus the parked core's
+//  strobes are off it entirely (msx.sv).
 wire        idle       = busy;
-wire [15:0] a          = use_nz ? n_a  : t_a;
+wire [15:0] a          = pcm_bus ? pcm_a : (use_nz ? n_a  : t_a);
 wire  [7:0] d_from_cpu = use_nz ? n_do : t_do;
-wire        mreq_n     = idle | (use_nz ? n_mreq_n : t_mreq_n);
-wire        iorq_n     = idle | (use_nz ? n_iorq_n : t_iorq_n);
-wire        rd_n       = idle | (use_nz ? n_rd_n   : t_rd_n);
-wire        wr_n       = idle | (use_nz ? n_wr_n   : t_wr_n);
-wire        m1_n       = idle | (use_nz ? n_m1_n   : t_m1_n);
-wire        rfsh_n     = idle | (use_nz ? n_rfsh_n : t_rfsh_n);
+wire        mreq_n     = pcm_bus ? pcm_mreq_n : idle | (use_nz ? n_mreq_n : t_mreq_n);
+wire        rd_n       = pcm_bus ? pcm_rd_n   : idle | (use_nz ? n_rd_n   : t_rd_n);
+wire        iorq_n     = pcm_bus | idle | (use_nz ? n_iorq_n : t_iorq_n);
+wire        wr_n       = pcm_bus | idle | (use_nz ? n_wr_n   : t_wr_n);
+wire        m1_n       = pcm_bus | idle | (use_nz ? n_m1_n   : t_m1_n);
+wire        rfsh_n     = pcm_bus | idle | (use_nz ? n_rfsh_n : t_rfsh_n);
 
 //  msx.sv one-shot: one `req` per bus cycle, re-armed when both strobes are up.
 logic iack_q = 1'b0;
@@ -210,7 +214,8 @@ end
 wire  home    = sd_home | (sdlat == 0);
 wire  paced   = use_nz | turbo[0] | rg;
 wire  sd_wait_n = ~(paced & mem_rd & ~home);
-assign wait_n = io_wait_n & sd_wait_n;
+wire  wait_core_n = io_wait_n & sd_wait_n;      // the machine's own pacing (msx.sv)
+assign wait_n = wait_core_n & ~pcm_busy;        // the player parks the CPU on top of it
 
 //  ---------------------------------------------------------------- turbo R block
 logic       s_sel, s_dram, tr_ov, tr_mute, tr_pled, tr_tled;
@@ -219,14 +224,62 @@ logic [10:0] ps2_key = 11'd0;
 int unsigned ce3_div = 0;
 always_ff @(posedge clk) ce3_div <= (ce3_div == 5) ? 0 : ce3_div + 1;
 wire ce_3m58 = (ce3_div == 0) & ~tr_pause;
+//  CTRL+STOP: pressed once the player has put out +pcmstop samples.
+logic        pcm_busy, pcm_bus, pcm_mreq_n, pcm_rd_n;
+logic [15:0] pcm_a;
+logic        ctrl_stop = 1'b0;
+int unsigned pcm_samples = 0;
+always_ff @(posedge clk) begin
+   if (TR.pcm_dac_we) pcm_samples <= pcm_samples + 1;
+   ctrl_stop <= (pcmstop != 0) && (pcm_samples >= pcmstop);
+end
+
 turbor TR (
    .clk(clk), .reset(reset), .en(1'b1), .ce_3m58(ce_3m58),
    .a(a), .din(d_from_cpu), .mreq_n(mreq_n), .iorq_n(iorq_n), .rd_n(rd_n), .m1_n(m1_n),
    .iowr_stb(iowr_stb), .main_rom0(a[15:14] == 2'b00), .mem_ov(tr_ov), .io_sel(s_sel), .dout(s_dout),
    .set_stb(1'b0), .set_r800(1'b0), .r800(s1990_r800), .dram(s_dram),
+   .cpu_reg(use_nz ? n_xreg : t_reg), .ctrl_stop(ctrl_stop),
+   .pace_n(wait_core_n), .d_to_cpu(d_to_cpu),
+   .pcm_busy(pcm_busy), .pcm_bus_own(pcm_bus),
+   .pcm_a(pcm_a), .pcm_mreq_n(pcm_mreq_n), .pcm_rd_n(pcm_rd_n),
    .pcm_dac(tr_dac), .mute_all(tr_mute), .ps2_key(ps2_key),
    .hw_pause(tr_pause), .pause_led(tr_pled), .turbo_led(tr_tled)
 );
+
+//  Clocks between consecutive samples of one run: the rate divider, q+1 ticks of the
+//  PCM grid.  Left out of `filt`, so it is checked on the reference run only -- the
+//  spacing is grid-locked but the clock a run starts on depends on the core.
+int unsigned last_smp = 0;
+always_ff @(posedge clk) begin
+   if (pcm_busy && !pcm_busy_q) last_smp <= 0;
+   else if (TR.pcm_dac_we) begin
+      if (last_smp != 0) $display("R %0d", clk_n - last_smp);
+      last_smp <= clk_n;
+   end
+end
+
+//  One line per PCMPLY run: sample count and the abort flag, both core-independent.
+//  The parked core must not move while the player owns the bus -- its own address
+//  is the fetch of 0186h for the whole run.  (Not in mode 2: a hand-over inside a
+//  run legitimately changes which core's address is being watched.)
+logic pcm_busy_q = 1'b0;
+logic [15:0] park_a = 16'd0;
+logic park_chk = 1'b0;
+wire  [15:0] own_a = use_nz ? n_a : t_a;
+always_ff @(posedge clk) begin
+   pcm_busy_q <= pcm_busy;
+   if (pcm_busy && !pcm_busy_q) begin
+      park_a   <= own_a;
+      park_chk <= (mode != 2);
+   end else if (!pcm_busy) begin
+      park_chk <= 1'b0;
+      if (pcm_busy_q) $display("Z pcm %0d %0d", pcm_samples, TR.pcm_aborted);
+   end else if (park_chk && own_a != park_a) begin
+      $display("Z pcm CPU MOVED %04x -> %04x", park_a, own_a);
+      park_chk <= 1'b0;
+   end
+end
 
 //  Hardware pause: the first time the program enables it (A7h bit 1), press Pause,
 //  hold for 3000 clocks checking that nothing moves on the bus, press it again.

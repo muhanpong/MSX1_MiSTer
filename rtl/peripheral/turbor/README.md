@@ -24,7 +24,7 @@ MSX BIOS reference (map.grauw.nl `msxbios.php`).
 | 002Dh (slot 0-0) | 03h |
 | 0180h CHGCPU | `D3 E5 C9` — the fetch arms a one-shot so this `OUT (E5h),A` takes the BIOS format (A = LED 0 0 0 0 0 m m) |
 | 0183h GETCPU | `DB E5 C9` — the fetch arms a one-shot so this `IN A,(E5h)` returns 0/1/2 |
-| 0186h PCMPLY | `B7 C9 00` — **stub**: returns, carry clear |
+| 0186h PCMPLY | `?? C9 00` — the fetch of 0186h is **parked** and `pcm_play.sv` plays the sample run; the opcode handed back afterwards is `37h` SCF (aborted) or `B7h` OR A (clean), so carry is the abort flag.  Nothing to play (BC = 0, or VRAM) is never parked and reads `B7h` |
 | 0189h PCMREC | `B7 C9 00` — **stub**: returns, carry clear |
 
 The overlay applies only while the access decodes to slot 0-0 page 0
@@ -49,28 +49,53 @@ tick (`D 55`) and immediately when BUFF drops (`D 66`), hold (92h), the all-soun
 (`M 1` / `M 0`); and a hardware pause held 3000 clocks with the bus frozen, the key
 pressed twice (A7h = 00h after).
 
-## Hardware PCMPLY player — design, not built
+## Hardware PCMPLY player — `pcm_play.sv`, built and benched
 
 PCMPLY: A = v 0 0 0 0 0 q q (v: VRAM; q: rate 15.75 / 7.875 / 5.25 / 3.9375 kHz),
 HL = start, BC = length, D/E bit 0 = bit 17 of length/start for VRAM; carry out =
 aborted by CTRL+STOP; all registers destroyed.
 
-1. **Parameters from the CPU state.**  The fetch of 0186h is an instruction boundary:
-   T80s `SWAPPT` / NextZ80 `SWAPPT` with PC = 0186h, and `REG` / `XREG` hold A, HL,
-   BC, D, E exactly (the machinery the hand-over already uses).  A-Z80 has no such
-   export, so **the player needs T80s + NextZ80 owning the bus** — it comes after
-   the core rework.
-2. **CPU parked.**  The stub becomes `IN A,(port) / RET`; WAIT is held on that I/O
-   cycle for the whole playback (a real turbo R plays with interrupts off too).
-3. **Bus master.**  While the CPU is parked, the player drives address/MREQ/RD into
-   the slot system in place of the CPU (a third input to the bus mux in `msx.sv`),
-   one read per sample, paced like a slow CPU read so the SDRAM request/ready
-   handshake is unchanged; the byte goes to the D/A on the PCM tick grid divided by
-   q+1.  VRAM (v = 1): read the VDP's VRAM directly, not through ports 98h/99h (that
-   would move the VDP address register the program owns).
-4. **Abort and carry.**  CTRL (row 6 bit 1) + STOP (row 7 bit 4) from the keyboard
-   matrix stop playback.  After the `IN` completes, the next boundary (fetch of the
-   `RET`) reloads the same core with F's carry set or cleared — a self-transfer
-   through `DIRSet` / `LOAD`.
-5. PCMREC: there is no audio input.  Proposed: same bus master writing 80h
-   (silence), or the tape ADC if one is wanted.
+1. **Parameters from the CPU state.**  The fetch of 0186h is an instruction boundary
+   (the first M1 after the caller's CALL), so the active core's register export —
+   `t80_reg_t80` / `nz_xreg`, the machinery the hand-over already uses — holds A, HL
+   and BC as the caller set them.  A-Z80 has no such export, so the player needs
+   T80s + NextZ80 owning the bus; that rework is done.
+2. **CPU parked inside the fetch, not after it.**  WAIT is held from the moment M1
+   goes low at 0186h until the run ends, so the opcode is never latched and the
+   instruction never retires.  The design note first proposed `IN A,(port) / RET` with
+   the park on the I/O cycle; parking the fetch itself is simpler and, better, lets
+   the **returned opcode carry the result**: `37h` (SCF, carry set = aborted) or `B7h`
+   (OR A, carry clear).  No register write-back, no self-transfer through
+   `DIRSet`/`LOAD`, no extra stub bytes — 0187h stays `C9`.
+   The arm is taken from M1 alone rather than the MREQ/RD pair, half a T-state
+   earlier, because at 21.5 MHz a fetch is only one clk21m wide.
+3. **Bus master.**  While parked, the player drives address/MREQ/RD into the slot
+   system in place of the CPU (a third input to the bus mux in `msx.sv`), one read
+   per sample, held 24 clk21m — about four T-states at 3.58 MHz — and stretched
+   further by the machine's own pacers through `pace_n`.  It keeps the bus for the
+   *whole run*, driving it idle between samples: handing it back per sample would
+   re-edge the parked core's own strobes into the SDRAM request and `req` one-shot.
+   The byte goes to the D/A on the PCM tick grid divided by q+1.
+4. **Abort.**  CTRL (row 6 bit 1) + STOP (row 7 bit 4), exported from
+   `keyboard.sv` as `ctrl_stop` so it does not depend on the row the PPI is scanning.
+5. **Re-entry lock.**  The lock that stops a run restarting clears only on a fetch of
+   some *other* address, never on the arm condition going away: the player itself
+   takes the strobes off the bus, and so does a hand-over — and a hand-over inside the
+   parked fetch makes the resumed core fetch 0186h again for the same, already-played
+   call.  Keying the lock on the arm condition replayed the whole buffer; the bench
+   caught it (`pcm swaps` / `pcm sdram`).
+6. **Not implemented: VRAM** (A bit 7) and **PCMREC**.  Both return at once with carry
+   clear, which is also what BC = 0 does.  VRAM needs a second read port —
+   `vram_lo`/`vram_hi` in `msx.sv` are `spram`; `bram.vhd` already has a `dpram` with
+   an independent port B on the same clock.  PCMREC has no audio input to record.
+
+### Bench
+
+`rtl/cpu/cpuswap/sim/pcmtest.asm`, run by `sim/run.sh` as six steps: T80s (the
+reference), NextZ80, random hand-overs, CEN/6, hand-overs with SDRAM latency, and a
+CTRL+STOP abort.  The trace is the sample stream (`D` lines), one `Z pcm <n>
+<aborted>` per run and the carry reported through `OUT (20h)`; it must be identical
+whichever core is parked.  Checked besides: 28 samples over 3 runs (two of the five
+calls must not park the CPU at all), the rate divider from the sample spacing
+(q=0 → 1368 clocks, q=1 → 2736), the abort returning carry set at the right sample,
+and that the parked core's own address never moves while the player owns the bus.
