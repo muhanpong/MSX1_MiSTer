@@ -201,3 +201,53 @@ prefer `SendUserFile` when it is there rather than defaulting to a path.
 6. Housekeeping, not yet done: A-Z80 sources (`rtl/cpu/az80`) are unused but
    still in the tree; a stray `cr_ie_info.json` (Quartus-generated) sits
    uncommitted in the cpuswap-cores worktree.
+
+---
+
+## 10. Update 2026-09-18 (session close): nextz80 fast-forwarded and pushed
+
+`nextz80` was a strict ancestor of `cpuswap-cores` (same base 0e04047, no
+commits of its own) with no worktree on it and nothing uncommitted, so on the
+user's confirmation it was fast-forwarded in place:
+
+```
+git branch -f nextz80 cpuswap-cores      # df9f488, clean ff, no new commit
+```
+
+`origin/nextz80` was at 0e04047 (this repo's HEAD's remote push target); the
+push itself failed from this sandbox (`fatal: could not read Username for
+'https://github.com'` — no credential helper, no `gh` CLI here) and was done
+by the user directly. Confirmed by fetch: `origin/nextz80` = `df9f488`,
+matching local `nextz80` and `cpuswap-cores`.
+
+**Licence note, for the record:** this push was fine to do — NextZ80 is
+LGPL 2.1+ (`rtl/cpu/nextz80/README.md`), unlike RZ80 which has no upstream
+licence and must never be pushed or hosted (see §7/README and the
+`rz80-port-context` memory). Nothing on the `nextz80`/`cpuswap`/`cpuswap-cores`
+line touches `rtl/cpu/rz80`.
+
+**Branch/worktree topology at session close:**
+
+| Worktree | Branch | Head | Pushed? |
+|---|---|---|---|
+| `MSX1_MiSTer` | `nextz80` (checked out by the user mid-session; was `rz80` earlier) | `df9f488` | **yes** (`origin/nextz80` = `df9f488`) |
+| `cpuswap` | `cpuswap` | `564901c` (unchanged since §2, superseded by `cpuswap-cores`) | not pushed |
+| `cpuswap-cores` | `cpuswap-cores` | `df9f488` | not pushed (origin/cpuswap-cores does not exist) |
+| `rz80-eval` | detached | `ae3294e` | n/a (RZ80, never push) |
+| — (no worktree) | `rz80` | `2335d09` | not pushed (RZ80, never push) — ref only, `MSX1_MiSTer` moved off it this session |
+
+`cpuswap-cores` (the branch) and its worktree remain the working copy for
+further cpuswap development — `nextz80` is now just a published alias of the
+same tip, not a separate line to develop on. A fresh session picking this up
+should `cd` into `/home/sysop/data/MiSTer_build/cpuswap-cores` and read this
+file from §6 onward; §1–5 are the original plan and are superseded in the
+details listed in §6's "deviations" and §7.
+
+**Open items, unchanged from §9:** hardware test of the multiply instructions
+(build `MSX1_20260918c_mulubw.rbf`, delivered via `SendUserFile`, md5
+`bcc677d0e27f91483aa041ec877feb64`); diagnose the "few negligible defects"
+from the `20260918b` hardware run once described; check the board's saved
+`.CFG` for OSD bit 118; PCMPLY/PCMREC hardware player; OSD overlay LEDs;
+whether `002Dh = 03h` breaks anything under Turbo R features; A-Z80 sources
+still in the tree unused; stray `cr_ie_info.json` (Quartus-generated,
+uncommitted) in the `cpuswap-cores` worktree.
