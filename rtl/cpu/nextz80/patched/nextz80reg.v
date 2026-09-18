@@ -67,6 +67,7 @@ module Z80Reg(
    input wire XMASK,          // 0 if REG_WSEL should not use IX, IY, even if rstatus[4] == 1
    input wire [2:0]ALU16OP,   // ALU16OP
    input wire WAIT,           // wait
+   input wire [1:0]MULOP,     // R800 multiply: 0 none, 1 MULUB, 2 MULUW hi (DE), 3 MULUW lo (HL)
    // cpuswap: parallel state load (T80 REG layout) and raw state for export
    input wire LOAD,
    input wire [211:0]LDIR,
@@ -155,15 +156,38 @@ module Z80Reg(
          if({REG_WSEL, WE[0]} == 5'b10011) r <= {ALU8OUT[7], ALU8OUT[6:0] + {6'd0, M1}};
          else if(M1) r[6:0] <= r[6:0] + 1'd1;
          if(WE[5])
-            if(rstatus[0]) flg[15:8] <= flgmux;
-            else flg[7:0] <= flgmux;
+            if(rstatus[0]) flg[15:8] <= |MULOP ? mulflg : flgmux;
+            else flg[7:0] <= |MULOP ? mulflg : flgmux;
       end
 
    assign ALU161 = th;
    assign FLAGS = rstatus[0] ? flg[15:8] : flg[7:0];
 
+//------------------------------------ R800 MULUB / MULUW ------------------------------------
+//  The operands that are not on a RAM port are read straight out of the slot array
+//  (SLOT_HI/SLOT_LO, which the cpuswap export already exposes), so the write port is
+//  free to address the destination in the same stage: MULUB reads A there and writes
+//  HL; MULUW reads HL there, takes ww from the read port, and writes DE then HL.
+//  RegSelect resolves the bank and the EX DE,HL / EXX mapping, exactly as the ports do.
+   wire [3:0]SELA, SELHL;
+   RegSelect WSelectA (.SEL(3'b011), .RAMSEL(SELA),  .rstatus(rstatus[5:0]));   // A
+   RegSelect WSelectHL(.SEL(3'b010), .RAMSEL(SELHL), .rstatus(rstatus[5:0]));   // HL
+   wire  [7:0]mul_a  = SLOT_HI[SELA*8 +: 8];
+   wire [15:0]mul_hl = {SLOT_HI[SELHL*8 +: 8], SLOT_LO[SELHL*8 +: 8]};
+   wire [15:0]mulb   = mul_a * ALU81;              // MULUB: A * r
+   wire [31:0]mulw   = mul_hl * mux_rdor;          // MULUW: HL * ww
+   wire mul_z = MULOP[1] ? (mulw == 32'd0) : (mulb == 16'd0);
+   wire mul_c = MULOP[1] ? (mulw[31:16] != 16'd0) : (mulb[15:8] != 8'd0);
+   //  S 0, Z result, Y 0, H kept, X 0, P/V 0, N kept, C overflow
+   wire [7:0]mulflg = {1'b0, mul_z, 1'b0, FLAGS[4], 1'b0, 1'b0, FLAGS[1], mul_c};
+
    always @* begin
-      DIN = DINW_SEL ? {DI, DI} : ALU8OUT;
+      case(MULOP)
+         2'b01:   DIN = mulb;              // MULUB -> HL
+         2'b10:   DIN = mulw[31:16];       // MULUW -> DE (high word)
+         2'b11:   DIN = mulw[15:0];        // MULUW -> HL (low word)
+         default: DIN = DINW_SEL ? {DI, DI} : ALU8OUT;
+      endcase
       ALU80 = REG_WSEL[0] ? rdow[7:0] : rdow[15:8];
       ALU81 = REG_RSEL[0] ? mux_rdor[7:0] : mux_rdor[15:8];
       ALU160 = ALU160_sel ? pc : mux_rdor;

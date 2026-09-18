@@ -1,0 +1,147 @@
+R800 MULUB / MULUW.
+
+The R800 adds two unsigned multiplies to the Z80 set, and NextZ80 stands in for
+the R800 in this core (rtl/cpu/cpuswap), so they belong here and nowhere else --
+a Z80 executes these opcodes as NOPs, which is what T80s keeps doing.
+
+  ED C1/C9/D1/D9   MULUB A,B/C/D/E   HL    = A  * r
+  ED C3 / ED F3    MULUW HL,BC / SP  DE:HL = HL * ww   (DE = high word)
+
+Flags follow MAME's hardware-derived r800.cpp: S = 0, Z = result is zero, H and N
+unchanged, P/V = 0, X/Y = 0, C = the result did not fit in the low half.
+
+MULUB is one stage: the register file reads A out of the slot array (the flat
+SLOT_HI/SLOT_LO buses the cpuswap export already provides) while the write port
+addresses HL, so one stage reads both operands and writes the 16-bit result.
+MULUW takes two: stage 0 writes DE with the high word and makes no bus cycle,
+stage 1 recomputes from the untouched HL and writes the low word, the flags and
+the next fetch.  R therefore counts twice per instruction, as for any ED opcode.
+
+Decode note: MULUW is 11 ss 0011, so bit 3 must be zero -- otherwise ED CB also
+matches (the bench's NOP case caught exactly that).
+--- a/nextz80cpu.v	2026-09-18 12:11:23.233599956 +0900
++++ b/nextz80cpu.v	2026-09-18 12:11:23.237599974 +0900
+@@ -112,6 +112,7 @@
+    reg   [4:0] ALU8OP;
+    reg   [2:0] ALU16OP;
+    reg   next_stage;
++   reg   [1:0]MULOP;             // R800 multiply: 0 none, 1 MULUB, 2 MULUW hi (DE), 3 MULUW lo (HL)
+    reg   [3:0]REG_WSEL;
+    reg   [3:0]REG_RSEL;
+    reg   [11:0]status;        // 0=AF-AF', 1=HL-HL', 2=DE-HL, 3=DE'-HL', 4=HL-X, 5=IX-IY, 7:6=IFFVAL, 9:8=imode, 10=setIMODE, 11=set IFFVAL
+@@ -153,6 +154,7 @@
+        .XMASK(xmask),
+        .ALU16OP(ALU16OP),        // used for post increment for ADDR, SP mux re-direct
+        .WAIT(WAIT),
++       .MULOP(MULOP),
+        .LOAD(LOAD),
+        .LDIR(LDIR),
+        .SLOT_LO(slot_lo),
+@@ -271,6 +273,7 @@
+       ALU8OP   = 5'bxxxxx;
+       ALU16OP  = 3'b000;               // NOP, post inc
+       next_stage = 0;
++      MULOP    = 2'b00;
+       REG_WSEL = 4'bxxxx;
+       REG_RSEL = 4'bx0xx;           // prevents default 4'b0100 which leads to incorrect P flag value in some cases (like RLA)
+       M1       = 1;
+@@ -1066,10 +1069,46 @@
+             endcase
+ 
+ // ------------------------------------------- ED + opcode ----------------------------------------------------
+-         4'b0100, 4'b0111: begin    // ED + 2'b00, ED + 2'b11     = NOP
++         4'b0100: begin          // ED + 2'b00     = NOP
+             ALU160_SEL = 1;         // PC
+             WE       = 6'b010x00;   // PC
+          end
++//          -----------------------    R800 MULUB / MULUW  --------------------
++//  ED C1/C9/D1/D9  MULUB A,B/C/D/E   HL = A * r
++//  ED C3 / ED F3   MULUW HL,BC / SP  DE:HL = HL * ww   (DE = high word)
++//  Flags (MAME r800.cpp, hardware-derived): S = 0, Z = result is zero, H and N
++//  unchanged, P/V = 0, X/Y = 0, C = the result did not fit (high half non-zero).
++//  Everything else in ED + 2'b11 stays a NOP, as on the R800.
++//  The products are formed in the register file (nextz80reg.v), which can read A
++//  and HL from the slot array while the write port addresses the destination.
++         4'b0111: begin          // ED + 2'b11     = MULUB / MULUW / NOP
++            ALU160_SEL = 1;         // PC
++            WE       = 6'b010x00;   // PC
++            if(FETCH[2:0] == 3'b001 && !FETCH[5]) begin          // MULUB A,r
++               DINW_SEL = 0;
++               WE       = 6'b110x11;   // flags, PC, HL hi+lo
++               REG_WSEL = 4'b010x;     // HL
++               REG_RSEL = {1'b0, FETCH[5:3]};   // B, C, D, E
++               MULOP    = 2'b01;
++            end else if(FETCH[3:0] == 4'b0011 && (FETCH[5:4] == 2'b00 || FETCH[5:4] == 2'b11)) begin
++               //  11 ss 0011: only C3 (BC) and F3 (SP).  Bit 3 must be 0 -- without
++               //  that, ED CB would decode as MULUW (caught by the NOP case in multest.asm).
++               DINW_SEL = 0;
++               REG_RSEL = {op16[2:0], 1'b0};    // BC / SP
++               if(!STAGE[0]) begin                 // stage 0: DE <- high word, no bus cycle
++                  WE       = 6'b000x11;            // DE hi+lo
++                  REG_WSEL = 4'b001x;              // DE
++                  MULOP    = 2'b10;
++                  next_stage = 1;
++                  M1       = 0;
++                  MREQ     = 0;
++               end else begin                      // stage 1: HL <- low word, flags, fetch next
++                  WE       = 6'b110x11;            // flags, PC, HL hi+lo
++                  REG_WSEL = 4'b010x;              // HL
++                  MULOP    = 2'b11;
++               end
++            end
++         end
+          4'b0101:
+             case(FETCH[2:0])
+ //          -----------------------    in r (C)  --------------------
+--- a/nextz80reg.v	2026-09-18 12:11:23.233599956 +0900
++++ b/nextz80reg.v	2026-09-18 12:11:23.237599974 +0900
+@@ -67,6 +67,7 @@
+    input wire XMASK,          // 0 if REG_WSEL should not use IX, IY, even if rstatus[4] == 1
+    input wire [2:0]ALU16OP,   // ALU16OP
+    input wire WAIT,           // wait
++   input wire [1:0]MULOP,     // R800 multiply: 0 none, 1 MULUB, 2 MULUW hi (DE), 3 MULUW lo (HL)
+    // cpuswap: parallel state load (T80 REG layout) and raw state for export
+    input wire LOAD,
+    input wire [211:0]LDIR,
+@@ -155,15 +156,38 @@
+          if({REG_WSEL, WE[0]} == 5'b10011) r <= {ALU8OUT[7], ALU8OUT[6:0] + {6'd0, M1}};
+          else if(M1) r[6:0] <= r[6:0] + 1'd1;
+          if(WE[5])
+-            if(rstatus[0]) flg[15:8] <= flgmux;
+-            else flg[7:0] <= flgmux;
++            if(rstatus[0]) flg[15:8] <= |MULOP ? mulflg : flgmux;
++            else flg[7:0] <= |MULOP ? mulflg : flgmux;
+       end
+ 
+    assign ALU161 = th;
+    assign FLAGS = rstatus[0] ? flg[15:8] : flg[7:0];
+ 
++//------------------------------------ R800 MULUB / MULUW ------------------------------------
++//  The operands that are not on a RAM port are read straight out of the slot array
++//  (SLOT_HI/SLOT_LO, which the cpuswap export already exposes), so the write port is
++//  free to address the destination in the same stage: MULUB reads A there and writes
++//  HL; MULUW reads HL there, takes ww from the read port, and writes DE then HL.
++//  RegSelect resolves the bank and the EX DE,HL / EXX mapping, exactly as the ports do.
++   wire [3:0]SELA, SELHL;
++   RegSelect WSelectA (.SEL(3'b011), .RAMSEL(SELA),  .rstatus(rstatus[5:0]));   // A
++   RegSelect WSelectHL(.SEL(3'b010), .RAMSEL(SELHL), .rstatus(rstatus[5:0]));   // HL
++   wire  [7:0]mul_a  = SLOT_HI[SELA*8 +: 8];
++   wire [15:0]mul_hl = {SLOT_HI[SELHL*8 +: 8], SLOT_LO[SELHL*8 +: 8]};
++   wire [15:0]mulb   = mul_a * ALU81;              // MULUB: A * r
++   wire [31:0]mulw   = mul_hl * mux_rdor;          // MULUW: HL * ww
++   wire mul_z = MULOP[1] ? (mulw == 32'd0) : (mulb == 16'd0);
++   wire mul_c = MULOP[1] ? (mulw[31:16] != 16'd0) : (mulb[15:8] != 8'd0);
++   //  S 0, Z result, Y 0, H kept, X 0, P/V 0, N kept, C overflow
++   wire [7:0]mulflg = {1'b0, mul_z, 1'b0, FLAGS[4], 1'b0, 1'b0, FLAGS[1], mul_c};
++
+    always @* begin
+-      DIN = DINW_SEL ? {DI, DI} : ALU8OUT;
++      case(MULOP)
++         2'b01:   DIN = mulb;              // MULUB -> HL
++         2'b10:   DIN = mulw[31:16];       // MULUW -> DE (high word)
++         2'b11:   DIN = mulw[15:0];        // MULUW -> HL (low word)
++         default: DIN = DINW_SEL ? {DI, DI} : ALU8OUT;
++      endcase
+       ALU80 = REG_WSEL[0] ? rdow[7:0] : rdow[15:8];
+       ALU81 = REG_RSEL[0] ? mux_rdor[7:0] : mux_rdor[15:8];
+       ALU160 = ALU160_sel ? pc : mux_rdor;

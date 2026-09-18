@@ -112,6 +112,7 @@ module NextZ80
    reg   [4:0] ALU8OP;
    reg   [2:0] ALU16OP;
    reg   next_stage;
+   reg   [1:0]MULOP;             // R800 multiply: 0 none, 1 MULUB, 2 MULUW hi (DE), 3 MULUW lo (HL)
    reg   [3:0]REG_WSEL;
    reg   [3:0]REG_RSEL;
    reg   [11:0]status;        // 0=AF-AF', 1=HL-HL', 2=DE-HL, 3=DE'-HL', 4=HL-X, 5=IX-IY, 7:6=IFFVAL, 9:8=imode, 10=setIMODE, 11=set IFFVAL
@@ -153,6 +154,7 @@ module NextZ80
        .XMASK(xmask),
        .ALU16OP(ALU16OP),        // used for post increment for ADDR, SP mux re-direct
        .WAIT(WAIT),
+       .MULOP(MULOP),
        .LOAD(LOAD),
        .LDIR(LDIR),
        .SLOT_LO(slot_lo),
@@ -271,6 +273,7 @@ module NextZ80
       ALU8OP   = 5'bxxxxx;
       ALU16OP  = 3'b000;               // NOP, post inc
       next_stage = 0;
+      MULOP    = 2'b00;
       REG_WSEL = 4'bxxxx;
       REG_RSEL = 4'bx0xx;           // prevents default 4'b0100 which leads to incorrect P flag value in some cases (like RLA)
       M1       = 1;
@@ -1066,9 +1069,45 @@ module NextZ80
             endcase
 
 // ------------------------------------------- ED + opcode ----------------------------------------------------
-         4'b0100, 4'b0111: begin    // ED + 2'b00, ED + 2'b11     = NOP
+         4'b0100: begin          // ED + 2'b00     = NOP
             ALU160_SEL = 1;         // PC
             WE       = 6'b010x00;   // PC
+         end
+//          -----------------------    R800 MULUB / MULUW  --------------------
+//  ED C1/C9/D1/D9  MULUB A,B/C/D/E   HL = A * r
+//  ED C3 / ED F3   MULUW HL,BC / SP  DE:HL = HL * ww   (DE = high word)
+//  Flags (MAME r800.cpp, hardware-derived): S = 0, Z = result is zero, H and N
+//  unchanged, P/V = 0, X/Y = 0, C = the result did not fit (high half non-zero).
+//  Everything else in ED + 2'b11 stays a NOP, as on the R800.
+//  The products are formed in the register file (nextz80reg.v), which can read A
+//  and HL from the slot array while the write port addresses the destination.
+         4'b0111: begin          // ED + 2'b11     = MULUB / MULUW / NOP
+            ALU160_SEL = 1;         // PC
+            WE       = 6'b010x00;   // PC
+            if(FETCH[2:0] == 3'b001 && !FETCH[5]) begin          // MULUB A,r
+               DINW_SEL = 0;
+               WE       = 6'b110x11;   // flags, PC, HL hi+lo
+               REG_WSEL = 4'b010x;     // HL
+               REG_RSEL = {1'b0, FETCH[5:3]};   // B, C, D, E
+               MULOP    = 2'b01;
+            end else if(FETCH[3:0] == 4'b0011 && (FETCH[5:4] == 2'b00 || FETCH[5:4] == 2'b11)) begin
+               //  11 ss 0011: only C3 (BC) and F3 (SP).  Bit 3 must be 0 -- without
+               //  that, ED CB would decode as MULUW (caught by the NOP case in multest.asm).
+               DINW_SEL = 0;
+               REG_RSEL = {op16[2:0], 1'b0};    // BC / SP
+               if(!STAGE[0]) begin                 // stage 0: DE <- high word, no bus cycle
+                  WE       = 6'b000x11;            // DE hi+lo
+                  REG_WSEL = 4'b001x;              // DE
+                  MULOP    = 2'b10;
+                  next_stage = 1;
+                  M1       = 0;
+                  MREQ     = 0;
+               end else begin                      // stage 1: HL <- low word, flags, fetch next
+                  WE       = 6'b110x11;            // flags, PC, HL hi+lo
+                  REG_WSEL = 4'b010x;              // HL
+                  MULOP    = 2'b11;
+               end
+            end
          end
          4'b0101:
             case(FETCH[2:0])

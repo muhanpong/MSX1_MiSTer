@@ -75,5 +75,21 @@ printf '%-14s ' "sdram turbo";   run sdturbo +mode=2 +swapmin=0 +swapmax=0 +sdla
 printf '%-14s ' "sdram nz";      run sdnz +mode=1 +sdlat=6 +maxclk=8000000; check sdnz SAME
 printf '%-14s ' "sdram soft";    run sdsoft +mode=3 +t80div=6 +sdlat=4 +maxclk=12000000; check sdsoft SAME
 printf '%-14s ' "no resume grd"; run sdnorg +mode=2 +seed=1 +t80div=6 +sdlat=4 +norg=1 +maxclk=8000000; check sdnorg DIFF
+#  R800 MULUB / MULUW: NextZ80 only -- a Z80 executes these as NOPs, so this is not a
+#  lockstep run.  The OUT log is compared with gen_mulref.py, which encodes the R800
+#  rules independently of the RTL.
+( cd "$obj" && "$SJASMPLUS" --nologo --lst=multest.lst "$here/multest.asm" ) > "$out/asm_mul.log" 2>&1 \
+  || { echo "mul assembly failed, see $out/asm_mul.log"; fail=1; }
+python3 -c "
+import sys; d=open('$obj/multest.bin','rb').read()
+open('$obj/multest.hex','w').write('\n'.join('%02x'%b for b in d)+'\n')"
+python3 "$here/gen_mulref.py" > "$out/mulref.trace"
+printf '%-14s ' "R800 multiply"
+"$obj/vl/Vtb" +mode=1 +intper=0 +prog=$obj/multest.hex +maxclk=2000000 > "$out/mul.log" 2>&1
+grep '^O ' "$out/mul.log" > "$out/mul.trace"
+printf '%s  ' "$(grep -E '^(END|TIMEOUT)' "$out/mul.log")"
+if cmp -s "$out/mulref.trace" "$out/mul.trace"; then echo "PASS ($(wc -l < "$out/mul.trace") OUTs match the R800 model)"
+else echo "FAIL $(diff "$out/mulref.trace" "$out/mul.trace" | head -4 | tr '\n' ' ')"; fail=1; fi
+
 printf '%-14s ' "negative";    run neg +mode=2 +seed=1 +corrupt=5; check neg DIFF
 [ $fail = 0 ] && echo "RESULT PASS" || echo "RESULT FAIL"

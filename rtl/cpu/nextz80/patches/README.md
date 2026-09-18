@@ -8,6 +8,7 @@ the originals plus these patches, in order.
 |---|---|
 | `0001-cpuswap-state-load-export-swappt.patch` | runtime hand-over with T80s (`rtl/cpu/cpuswap/`) |
 | `0002-ld-r-a-counts-its-own-fetch.patch` | accuracy fix: R lagged by one after `LD R,A` |
+| `0003-r800-mulub-muluw.patch` | the R800 multiplies, which NextZ80 stands in for |
 
 ## 0001 — state load, state export, swap point
 
@@ -63,3 +64,22 @@ anyway (ZEXALL, `../README.md`).
 fetch's R increment was lost and R stayed one behind a real Z80 from then on
 (`LD R,A; NOP; LD B,3; DJNZ $; LD A,R` read 06 instead of 07; T80s gives 07).
 The write now adds the fetch (`M1`, which is 0 in the RESET stage that also writes R).
+
+## 0003 — MULUB / MULUW
+
+`ED C1/C9/D1/D9` `MULUB A,B/C/D/E` (HL = A * r) and `ED C3` / `ED F3`
+`MULUW HL,BC` / `HL,SP` (DE:HL = HL * ww, DE the high word).  Flags per MAME's
+hardware-derived `r800.cpp`: S = 0, Z = result is zero, H and N unchanged,
+P/V = 0, X/Y = 0, C = the result did not fit in the low half.
+
+Only NextZ80 has them: it is the R800 stand-in, and a Z80 runs these opcodes as
+NOPs, which is what T80s keeps doing.  So they cannot appear in the lockstep
+bench; `sim/multest.asm` runs them on NextZ80 alone and `sim/gen_mulref.py`
+states the expected results independently of the RTL.
+
+MULUB is a single stage: the register file reads A from the flat slot array that
+the cpuswap export already exposes, so the write port is free to address HL in the
+same stage.  MULUW takes two stages, writing DE first and recomputing from the
+untouched HL for the low word, which also keeps R counting twice per instruction.
+`MULUW` is `11 ss 0011`, so bit 3 must be zero; without that check `ED CB` also
+decodes as MULUW (the bench's NOP case caught it).
