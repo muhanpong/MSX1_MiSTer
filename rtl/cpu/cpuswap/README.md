@@ -9,7 +9,9 @@ Z80/R800 switch, NextZ80 standing in for the R800 (2026-09-18).
 
 Status (branch `cpuswap-cores`, 2026-09-18): **wired into `msx.sv`**, A-Z80
 removed from the build; lockstep bench passing on the shared, msx.sv-shaped bus
-with mutation checks.  Hardware untested.
+with mutation checks.  **Confirmed on hardware 2026-09-18** (build 20260918b):
+switching works and games run across a swap; a few minor defects reported, not yet
+characterised.
 
 ## Pieces
 

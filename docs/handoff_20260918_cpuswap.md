@@ -118,3 +118,9 @@ existed in the fitted 564901c.  quartus_sta segfaults at exit after "successful"
 
 **Step 4 (running).**  `BUILDGATE_LOG=<scratchpad>/buildgate tools/buildgate/build.sh
 --expect NextZ80 --expect cpuswap_ctl --expect nz_bus`.  Then hardware as in §4.
+
+**Hardware result (user, 2026-09-18, build 20260918b).**  CPU switching works and
+games run across a swap; "few defect negligible" — the defects are not yet
+described, so they are not diagnosed.  Worth ruling out when they are: flag bits
+3/5 (WZ/Q deliberately not carried across a swap), the missing MSX2 M1 wait on
+NextZ80, and N after block I/O (the two cores differ).
