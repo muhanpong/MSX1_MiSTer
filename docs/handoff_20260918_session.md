@@ -268,3 +268,61 @@ not a clock.
 
 **Still unverified:** PCMPLY itself.  `20260918d_pcmply` showed no regression,
 but nothing calls PCMPLY yet — a test program still has to be written.
+
+---
+
+## 8. 2026-09-19 — ASO's band and the character loss were one bug: VDP write spacing
+
+**What was wrong.**  While NextZ80 owns the bus, a VDP port access cost 0.56 us
+here against **8.66 us on a real turbo R** (measured on openMSX's Panasonic
+FS-A1GT with the same test program, `R800TIME.COM`).  Two symptoms that had been
+chased separately both came from it:
+
+- **ASO's top/bottom bands did not render.**  The split-screen return block
+  (`ASO.OVL` bank 7, 6D30) is 24 VDP register writes.  On a real R800 they spread
+  over 214 us = 3.4 raster lines; here they took ~13 us = 0.2 lines, so the
+  registers all changed at one point instead of across the raster.
+- **Z80BENCH lost 2-3% of its characters** in R800 mode (`computer` -> `coputr`,
+  `V9958` -> `V958`), none on T80s.  A request arriving before the previous VRAM
+  slot finished is dropped silently — `.ACK()` is not connected (msx.sv:709).
+
+**How it was proven, off this core.**  In openMSX, with the machine, build, scene
+and CPU all held fixed, only the spacing inside the two register blocks was
+changed (by dropping the clock for those blocks alone, so the surrounding code
+kept its speed).  At a 10.74 MHz Z80 base the screen flips from broken to correct
+between **4 us and 6 us** of spacing; the landing line moves only 3 lines across
+that range, so the spacing is the cause and not the arrival time.  The threshold
+rises with the speed of the surrounding code: at a 21.48 MHz base, 8 us still
+fails and 10.1 us passes.
+
+**The fix.**  `VDP_GAP_R800` in msx.sv, gated on `use_nz`.  Build
+`20260919b_r800vdp` used a fixed 10.1 us (217 clk21m) and on hardware: ASO's bands
+returned (top and bottom blank lines 0/0), the character loss disappeared, SCMD
+stayed correct at both R800 rungs, and the non-VDP paths were untouched
+(`OUT (A0h)` to the PSG moved +0.1%).  Two residual artifacts remained — the top
+field lost its enemy sprites and the bottom 2-3 lines flashed — which is a block
+running long (24 x 10.1 us = 3.8 lines against the real 3.4).  So the value became
+an OSD dial, `Video settings -> R800 VDP wait`, `O[77:75]`, eight steps from
+4.7 to 11.8 us with the real machine's **8.66 us as entry 0**.
+
+**Open:** the band wants "the block spread over ~3.4 lines" and the write loss
+wants "never inside the previous VRAM slot".  Those are different requirements and
+it is not yet known whether one spacing satisfies both, or whether the register
+port (99h) and the data port (98h) will need different values.  The dial is what
+measures that.
+
+### 8.1 Decision: the T80s path keeps real Z80 behaviour (parked)
+
+ASO's bands are also wrong on the Z80 path, at **every** clock from 3.58 to
+21.48 MHz, and that is not this core's doing: openMSX reproduces it on two
+different MSX2+ machines (FS-A1WX, FS-A1WSX) and on our board identically
+(board 10.7 MHz = top 25 / bottom 50 blank; openMSX 10.74 = 24 / 44).  A real
+MSX2+ cannot display this game correctly.
+
+It *could* be forced: the same off-core experiment showed a 21.48 MHz Z80 with
+10.1 us spacing renders 0/0.  **Decided on 2026-09-19 not to do it.**  A Z80 with
+R800-style VDP waits is not a machine that exists, and the wait would slow every
+VDP-heavy Z80 title for the sake of one.  Noted here because it is cheap to
+revisit: the dial already exists, and applying it to `cpu_turbo` as well as
+`use_nz` is a one-line gate — reasonable only as an explicit opt-in, and only on
+turbo steps, never at 3.58 MHz where the broken screen is the accurate one.
