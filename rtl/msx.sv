@@ -13,6 +13,7 @@ module msx
    input                    ce_3m58_n,
    input                    ce_cpu,            // turbo rate enable: PSG bus strobe, M1 wait pair, FDC
    input                    msx_pause,         // machine pause: freezes NextZ80 (T80s stops through ce_cpu)
+   input                    r800_fast,         // OSD R800 ladder: 0 = 7.16 MHz (clk21m/3), 1 = unpaced
    input                    r800_set_stb,      // OSD "CPU (turbo R)" changed: select through the S1990
    input                    r800_set,
    output                   use_nz,            // NextZ80 owns the bus (-> MSX1.sv: ce_cpu at full rate)
@@ -334,9 +335,19 @@ NextZ80 NZ
    .SWAPPT(nz_swappt)
 );
 
+//  R800 stage pacing.  A real R800 is clocked at 7.159 MHz, which is clk21m/3
+//  exactly, so the slow rung is a /3 enable on nz_bus's advance and the fast rung
+//  is no enable at all (every build up to 20260918d).  Gating `adv` rather than
+//  the clock also WIDENS the strobes: nz_bus holds them visible until the advance,
+//  so a bus cycle is 2-3 clk21m at 7.16 MHz where it was 1.
+logic [1:0] nz_div = 2'd0;
+always_ff @(posedge clk21m) nz_div <= (nz_div == 2'd2) ? 2'd0 : nz_div + 2'd1;
+wire nz_ce = r800_fast | (nz_div == 2'd0);
+
 nz_bus NZB
 (
    .clk(clk21m),
+   .ce(nz_ce),
    .reset(reset),
    .en(use_nz),
    .hold(nz_hold | reset),

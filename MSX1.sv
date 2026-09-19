@@ -338,10 +338,21 @@ localparam CONF_STR = {
    "O[43],Pause on OSD,No,Yes;",
    "T[44],Pause;",
    "-;",
-   "O[58:56],CPU Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz,21.5MHz;",
+   // Two speed ladders, one shown at a time: the Z80 ladder ('D' = menumask[13])
+   // and the R800 ladder ('E' = [14]).  H goes FIRST in the prefix -- menu.cpp's
+   // mask loop runs before anything else and there is no second pass (see the
+   // note by the OPL4 rows).
+   "HDO[58:56],CPU Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz,21.5MHz;",
    // Bit 117 has never been assigned, so every saved .CFG reads it as 0 = Off.
    "O[117],Turbo R features,Off,On;",
    "O[118],CPU (turbo R),Z80 (T80s),R800 (NextZ80);",
+   // The R800's own clock is 7.159 MHz, which is clk21m/3 exactly, so entry 0 is
+   // the real thing and entry 1 is NextZ80 let loose (what every build before this
+   // one did).  Entry 0 is the default: bit 70 has never been assigned, so a saved
+   // .CFG reads it as 0.  NOTE: at 7.16 MHz the CLOCK matches an R800, the
+   // THROUGHPUT does not -- NextZ80 does more per cycle, so it benches ~920% where
+   // a real turbo R benches 575% (openMSX FS-A1ST, Z80BENCH 1.4.2).
+   "HEO[70],R800 Speed,7.16MHz,21.5MHz;",
    "-;",
    "P2,Audio settings;",
    "P2O[45],MoonSound,Off,On;",
@@ -437,7 +448,7 @@ localparam CONF_STR = {
 //  hps_io takes 16 and all sixteen are live (menu.cpp reads hdmask through
 //  spi_uio_cmd16), so 13/14/15 are free -- see the note on the OPL4 rows for why
 //  the one attempt at 13 failed.  [12:7] = expanded-slot menu masks (H7..HC).
-wire [12:0] status_menumask;
+wire [14:0] status_menumask;
 wire [1:0] sdram_size;
 assign status_menumask[0] = msxConfig.cas_audio_src == CAS_AUDIO_ADC;
 assign status_menumask[1] = fdc_enabled;
@@ -456,6 +467,8 @@ assign status_menumask[9]  = subA_page_hide;       // slot A not expanded -> hid
 assign status_menumask[10] = subB_page_hide;       // 'A' in CONF_STR
 assign status_menumask[11] = mapper_A_hide;        // 'B': no ROM sub-slot -> Mapper/SRAM entries hidden
 assign status_menumask[12] = mapper_B_hide;        // 'C'
+assign status_menumask[13] = status[118];          // 'D': R800 picked -> hide the Z80 ladder
+assign status_menumask[14] = ~status[118];         // 'E': Z80 picked  -> hide the R800 ladder
 assign status_menumask[6] = (lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0)
                           & (cart_conf[0].selected_mapper != MAPPER_ASCII16X)
                           & (cart_conf[0].selected_mapper != MAPPER_YAMANOOTO)
@@ -770,6 +783,7 @@ msx MSX
    .msx_pause(msx_pause),
    .r800_set_stb(r800_set_stb),
    .r800_set (status[118]),
+   .r800_fast(status[70]),
    .use_nz   (use_nz),
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),

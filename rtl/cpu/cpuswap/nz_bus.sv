@@ -21,6 +21,7 @@
 module nz_bus
 (
    input  logic clk,
+   input  logic ce,        // stage-advance enable (R800 speed ladder; 1 = unpaced)
    input  logic reset,
    input  logic en,        // NextZ80 owns the bus
    input  logic hold,      // hand-over freeze (cpuswap_ctl nz_hold)
@@ -35,7 +36,7 @@ module nz_bus
 
 logic ph = 1'b0;                       // 0 = masked clock, 1 = strobes visible
 wire  run = en & ~hold & ~pause;
-wire  adv = run & ph & wait_n;
+wire  adv = run & ph & wait_n & ce;
 assign nz_wait = ~adv;
 
 always_ff @(posedge clk) begin

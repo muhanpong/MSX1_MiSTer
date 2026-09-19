@@ -127,8 +127,15 @@ NextZ80 NZ (
    .LOAD(nz_load), .LDIR(n_ldir), .XREG(n_xreg), .SWAPPT(n_swappt)
 );
 
+//  R800 speed ladder: +nzdiv3 paces the advance the way msx.sv does at 7.16 MHz.
+logic [1:0] nz_div = 2'd0;
+logic       nzdiv3 = 1'b0;
+initial     nzdiv3 = $test$plusargs("nzdiv3") != 0;
+always_ff @(posedge clk) nz_div <= (nz_div == 2'd2) ? 2'd0 : nz_div + 2'd1;
+wire nz_ce = ~nzdiv3 | (nz_div == 2'd0);
+
 nz_bus NZB (
-   .clk(clk), .reset(reset), .en(use_nz), .hold(nz_hold | reset), .pause(tr_pause), .load(nz_load), .wait_n(wait_n),
+   .clk(clk), .ce(nz_ce), .reset(reset), .en(use_nz), .hold(nz_hold | reset), .pause(tr_pause), .load(nz_load), .wait_n(wait_n),
    .n_mreq(n_mreq), .n_iorq(n_iorq), .n_wr(n_wr), .n_m1(n_m1),
    .nz_wait(n_wait), .vis(n_vis),
    .mreq_n(n_mreq_n), .iorq_n(n_iorq_n), .rd_n(n_rd_n), .wr_n(n_wr_n), .m1_n(n_m1_n), .rfsh_n(n_rfsh_n)
