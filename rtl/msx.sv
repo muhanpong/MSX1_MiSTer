@@ -931,6 +931,16 @@ wire psg_n  = ~((a[7:3] == 5'b10100)   & ~iorq_n & m1_n);
 wire ppi_n  = ~((a[7:3] == 5'b10101)   & ~iorq_n & m1_n);
 wire vdp_en =   (a[7:3] == 5'b10011)   & ~iorq_n & m1_n ;
 wire rtc_en =   (a[7:1] == 7'b1011010) & ~iorq_n & m1_n & bios_config.MSX_typ == MSX2;
+//  Printer status, port 90h.  Every MSX has the port; this core never decoded it,
+//  so a read fell through to the AND bus and came back FFh -- bit 1 set, which the
+//  BIOS reads as BUSY.  LPTSTT (BIOS 00A8 -> 08E1) is `IN A,(90h) / RRCA / RRCA /
+//  CCF / SBC A,A`, so a permanently-busy port makes any caller spin there forever:
+//  Illusion City hangs on exactly that, at 08E4-08E7, with a black screen and no
+//  VDP access for as long as you leave it.  openMSX returns 00h (bit 1 clear =
+//  ready) with no printer attached, and so do we.  Writes (90h strobe, 91h data)
+//  stay undecoded -- nothing reads them back, and dropping them is what a machine
+//  with no printer on the cable does anyway.
+wire prn_en =   (a[7:0] == 8'h90)      & ~iorq_n & m1_n;
 
 // MoonSound: WAVE 0x7E/7F, FM 0xC4-0xC7
 wire ms_wave_cs = msxConfig.moonsound_en & ~iorq_n & m1_n &
@@ -1047,6 +1057,8 @@ assign d_to_cpu = rd_n              ? 8'hFF           :
                   tr_mem_ov | tr_io_sel ? tr_dout     :   // turbo R ports / BIOS overlay (off unless turbor_en)
                   vdp_en            ? d_to_cpu_vdp    :
                   rtc_en            ? d_from_rtc      :
+                  prn_en            ? 8'h00           :   // printer: always ready
+
                   ~psg_n            ? d_from_psg      :
                   ~ppi_n            ? d_from_8255     :
                   (ms_wave_cs | ms_fm_cs) ? ms_dout   :
