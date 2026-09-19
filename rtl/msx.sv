@@ -851,9 +851,14 @@ wire opll_pace_n;   // turbo OPLL write pacer, from msx_slots (spec inter-write 
 //  The cure already exists in this core for the same disease: the MoonSound
 //  handshake above holds WAIT_n while a register access is in flight so the VGM
 //  driver's back-to-back writes cannot outrun the chip (msx.sv:288-292).  Same
-//  shape, same fix.  Only reads are paced: a read is where a dropped request
-//  returns wrong data, and sd_ready is a level so this cannot hang -- the SPI
-//  always finishes in 16 clk21m.
+//  shape, same fix.  Reads AND writes are paced.  The first cut paced reads only,
+//  reasoning that a dropped read is what returns wrong data -- but spi_divmmc
+//  drops tx exactly as it drops rx (spi_divmmc.sv:27 `if(counter[4]) if(rx|tx)`),
+//  and an SD command is six bytes written back to back, so a dropped write
+//  malforms the command and the failure STILL surfaces as a read that cannot
+//  find the partitions.  Hardware said so: read-only pacing was still broken at
+//  T80s 21.5MHz and at the R800 7.16 rung.  sd_ready is a level, so this cannot
+//  hang -- the SPI always finishes in 16 clk21m.
 //  Hold from the START of the window, not from the moment sd_ready falls.
 //  spi_divmmc only reports busy on the cycle AFTER it accepts the request, and
 //  mfrsd raises sd_rx a cycle after cpu_rd, so at clk21m/1 the CPU has already
@@ -868,7 +873,7 @@ wire opll_pace_n;   // turbo OPLL write pacer, from msx_slots (spec inter-write 
 //  hang on exactly those accesses.  32 clk21m is twice a byte's 16, so it never
 //  cuts a real transfer short.  Same belt-and-braces as ms_wait_cnt on the
 //  MoonSound handshake, and for the same reason.
-wire sd_rd_window;                       // from msx_slots/mfrsd
+wire sd_rd_window;                       // from msx_slots/mfrsd: read OR write of the SPI byte port
 logic       sd_xfer_seen = 1'b0;
 logic [5:0] sd_pace_cnt  = 6'd0;
 always @(posedge clk21m) begin
@@ -1372,7 +1377,8 @@ msx_slots msx_slots
    //  mfrsd.sv:231 -- high for exactly the SD-card data read window
    //  (sd_card_en & cpu_mreq & cpu_rd).  Named "debug_" there but it is the
    //  only signal that identifies the cycle the SD pacer has to hold.
-   .debug_sd_card(sd_rd_window),
+   .debug_sd_card(),
+   .sd_io_window(sd_rd_window),
    .cpu_turbo(cpu_paced),
    .opll_pace_n(opll_pace_n),
    .opll_vol(opll_vol),
