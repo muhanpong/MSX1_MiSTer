@@ -13,7 +13,7 @@ set_global_assignment -name PARTITION_NETLIST_TYPE SOURCE -section_id Top
 set_global_assignment -name PARTITION_FITTER_PRESERVATION_LEVEL PLACEMENT_AND_ROUTING -section_id Top
 set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
 
-set_global_assignment -name LAST_QUARTUS_VERSION "17.0.2 Lite Edition"
+set_global_assignment -name LAST_QUARTUS_VERSION "17.1.0 Lite Edition"
 
 # MoonSound freeze-diagnosis infrastructure (detectors + T80 forensics + overlay
 # rows + IM2-table watchpoint).  Uncomment to re-enable; see rtl/msx.sv and
@@ -327,7 +327,15 @@ set_global_assignment -name SYSTEMVERILOG_FILE MSX1.sv
 # gave -0.207 on the fourth, all ten worst paths in ascal again; moved to 6.
 # There used to be a stale `SEED 1`
 # above this line as well -- Quartus takes the last, so it was inert, now removed.
-set_global_assignment -name SEED 6
+# 2026-09-20: SEED 6 gave -0.255 ns RECOVERY on the fourth build, and this one is
+# OURS, not ascal: hps_io|status[64] -> ymf278b u_pcm ram_regs[2].d1r[0].  MSX1.sv:659
+# builds the global reset combinationally out of an hps_io status bit
+# (`reset = RESET | reset_now | (reset_rq & ~status[64])`), so every reset-using
+# register in the design is timed for recovery all the way back from the HPS
+# register, and the path only passes on placement luck.  Moved to 7 to get a build
+# out; the real fix is to synchronise `reset` into clk21m, which touches a global
+# and needs its own review (handoff 20260920 §2).
+set_global_assignment -name SEED 7
 
 
 
