@@ -1,0 +1,147 @@
+<?xml version="1.0" ?>
+<!--
+  Panasonic FS-A1ST (1990, Japanese MSX turbo R) — the first turbo R.
+  Stock RAM is 256 KB; this variant only changes the 3-0 mapper size to 1MB
+  (block_count is in 16 KB units: 16=256KB, 32=512KB, 64=1MB, 128=2MB, 256=4MB).
+
+  Difference from the FS-A1GT pack: no MIDI interface and no PCM sampler on this
+  machine, MSX-MUSIC sits in slot 0-1 instead of 0-2, the firmware image is 2 MB
+  instead of 4 MB, and stock RAM is 256 KB.  Because the ST has no MIDI, its BIOS
+  never touches I/O E8h-EBh — which the GT BIOS does from boot (E9h, 2811 reads in
+  60 s, first at t=1.90 s before the game even loads).  That makes this pack the
+  control group when a core without MIDI has to be told apart from other causes.
+
+  Slot layout follows openMSX share/machines/Panasonic_FS-A1ST.xml.  On the real
+  machine every internal ROM lives in ONE image (fs-a1st_firmware.rom, 4 MB file
+  whose upper 2 MB is blank FFh; openMSX maps only blocks 0-255 = 2 MB),
+  sha1 c212b11f..., addressed in 8 KB blocks; the skip values below are that
+  file's byte offsets, taken from openMSX's firstblock numbers:
+
+      blocks 40-43  = 0x50000  MAIN BIOS + BASIC   (32 KB, starts F3 C3 = DI/JP)
+      blocks 48-55  = 0x60000  disk ROM + MSX-DOS2 (64 KB, TC8566AF driver)
+      blocks 56-57  = 0x70000  SUB ROM             (16 KB, "CD")
+      blocks 58-61  = 0x74000  Kanji driver+BASIC  (32 KB, "AB")
+      blocks 62-63  = 0x7C000  MSX-MUSIC           (16 KB, "AB")
+
+  Four things the real machine has that this core cannot represent:
+
+  1. The R800 CPU.  This pack ships the genuine turbo R MAIN BIOS, so MSXVER
+     (0002Dh) reads 3 and software concludes "turbo R".  turbo R-only titles will
+     therefore start and then execute R800-only opcodes (MULUB/MULUW), which a
+     plain Z80 swallows as NOPs.  Use this pack only on a build with R800 support;
+     on a stock build prefer an MSX2+ pack for MSX2+ software.
+
+  2. The 2 MB built-in software in slot 3-3.  It needs the
+     PANASONIC mapper plus 32 KB SRAM, neither of which exists in createMSXpack's
+     BLOCK_TYPES nor package.sv's mapper_typ_t.  Omitted; MSX-DOS 2 goes there
+     instead, which is what the built-in DOS 2 would otherwise provide.
+
+  3. The floppy controller.  The real FS-A1ST has a TC8566AF (uPD765 family) with
+     its driver inside the 0x60000 block above.  This core implements only a
+     WD2793 (rtl/peripheral/wd1793.sv), so that driver would hang before DOS.
+     Slot 3-2 carries a WD2793 disk ROM instead (sha1 12f2cc79..., the same bytes
+     the working Sony HB-F1XV pack loads) — proven on hardware in the FS-A1F pack.
+     The tradeoff: this is no longer an authentic FS-A1ST disk subsystem, and the
+     machine's own DOS 2 2.30 is replaced by the ASCII MSX-DOS 2.20 kernel in 3-3.
+
+  4. The PCM sampler.  No RTL exists for it; software that requires it will not
+     find it.  (This machine has no MIDI at all, so nothing is lost there.)
+
+  The Opening ROM (blocks 36-37) is blank (FFh) in this dump, so it is not carried.
+-->
+<msxConfig>
+  <type>MSX2</type>
+  <kbd_layout>/yX/cWdlZv//ZP//cHMh////YP9hRgH///9XUCZUAv//MFUxMgQD//+AUzNRRwX//0MnNTRWBv///0I3UgcQ//8iQDZEABH//yMkQRdFEv///yD/FRP//2Ngdxb/FP//////////df///////////////////3L/dv//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////Yv//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////hIH///+Cg4b/h4X///////90//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////8=</kbd_layout>
+  <device typ="KANJI" id="Kanji ROM">
+    <rom>
+      <filename>fs-a1st_kanjifont.rom</filename>
+      <!-- lowercase <sha1> here: createMSXpack reads block/SHA1 but device/rom/sha1
+           (createMSXpack.py:186 vs :238).  Getting it wrong is fail-quiet. -->
+      <sha1>5aff2d9b6efc723bc395b0f96f0adfa83cc54a49</sha1>
+    </rom>
+  </device>
+  <device typ="RESET_STATUS" id="Reset Status register"></device>
+  <!-- The ST does carry the Matsushita switched device on I/O 0x40/0x41 (firmware
+       switch, kanji).  On turbo R it is NOT the 5.37 MHz turbo — that machine
+       switches CPUs instead — but the port itself is present, so it is declared. -->
+  <device typ="MATSUSHITA" id="Matsushita switched I/O"></device>
+  <device typ="MOONSOUND" id="MoonSound PCM Wave ROM"></device>
+  <primary slot="0">
+    <secondary slot="0">
+      <block start="0" id="MSX BIOS with BASIC ROM">
+        <type>ROM</type>
+        <block_count>2</block_count>
+        <filename>fs-a1st_firmware.rom</filename>
+        <SHA1>c212b11fda13f83dafed688c54d098e7e47ab225</SHA1>
+        <skip>327680</skip>
+      </block>
+    </secondary>
+    <secondary slot="1">
+      <block start="1" id="MSX Music">
+        <type>MSX-MUSIC</type>
+        <block_count>1</block_count>
+        <filename>fs-a1st_firmware.rom</filename>
+        <SHA1>c212b11fda13f83dafed688c54d098e7e47ab225</SHA1>
+        <skip>507904</skip>
+      </block>
+    </secondary>
+  </primary>
+  <primary slot="1">
+    <secondary slot="0">
+      <block start="0">
+        <type>SLOT A</type>
+      </block>
+    </secondary>
+  </primary>
+  <primary slot="2">
+    <secondary slot="0">
+      <block start="0">
+        <type>SLOT B</type>
+      </block>
+    </secondary>
+  </primary>
+  <primary slot="3">
+    <secondary slot="0">
+      <block start="0" id="Main RAM">
+        <type>RAM MAPPER</type>
+        <block_count>64</block_count>
+        <pattern>4</pattern>
+      </block>
+    </secondary>
+    <secondary slot="1">
+      <block start="0" id="MSX Sub ROM">
+        <type>ROM</type>
+        <block_count>1</block_count>
+        <filename>fs-a1st_firmware.rom</filename>
+        <SHA1>c212b11fda13f83dafed688c54d098e7e47ab225</SHA1>
+        <skip>458752</skip>
+      </block>
+      <block start="1" id="MSX Kanji Driver with BASIC">
+        <type>ROM</type>
+        <block_count>2</block_count>
+        <filename>fs-a1st_firmware.rom</filename>
+        <SHA1>c212b11fda13f83dafed688c54d098e7e47ab225</SHA1>
+        <skip>475136</skip>
+      </block>
+    </secondary>
+    <secondary slot="2">
+      <block start="1" id="Memory Mapped FDC (WD2793 substitute)">
+        <type>FDC</type>
+        <block_count>1</block_count>
+        <filename>hb-f1xd_disk.rom</filename>
+        <SHA1>12f2cc79b3d09723840bae774be48c0d721ec1c6</SHA1>
+      </block>
+    </secondary>
+    <secondary slot="3">
+      <!-- MSX-DOS 2 kernel only; the driver comes from the disk ROM in 3-2.
+           Stands in for the GT's own DOS 2 2.31, which lives in the TC8566AF
+           block this core cannot use. -->
+      <block start="1" id="MSX-DOS2 ROM">
+        <type>MSXDOS2</type>
+        <block_count>4</block_count>
+        <filename>ascii_msxdos22.rom</filename>
+        <SHA1>42f4e3360eb134857b0efa82c1abedf342680124</SHA1>
+      </block>
+    </secondary>
+  </primary>
+</msxConfig>
