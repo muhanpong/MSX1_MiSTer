@@ -740,19 +740,44 @@ end
 // slots are one per 8 clk21m (vdp18_ctrl.vhd:368) but Graphics 1/2/Multicolor pattern
 // fetches claim three of every four (vdp18_ctrl.vhd:150-186), so a CPU slot arrives once
 // per 32 clk21m -- worse during the sprite phase.  12 did not cover it.
-localparam [5:0] VDP_GAP18 = 6'd32;
-localparam [5:0] VDP_GAP38 = 6'd32;   // MSX2: >= worst-case VRAM slot period (28)
-wire  [5:0] vdp_gap_rld = vdp18 ? VDP_GAP18 : VDP_GAP38;
+localparam [7:0] VDP_GAP18 = 8'd32;
+localparam [7:0] VDP_GAP38 = 8'd32;   // MSX2: >= worst-case VRAM slot period (28)
+//  R800 mode: a real turbo R does NOT let the R800 near the VDP at full speed --
+//  it inserts a hardware wait, measured on openMSX's Panasonic_FS-A1GT at
+//  8.66 us per `LD A,n / OUT (99h),A` pair (186 clk21m).  Two separate symptoms
+//  say we are missing it:
+//    - ASO's split-screen return block is 24 register writes.  On a real R800
+//      they spread over 214 us (3.4 raster lines); on this core they take ~13 us
+//      (0.2 lines), so the registers change at one point instead of across the
+//      raster and the panel/field boundary comes out wrong.  openMSX reproduces
+//      exactly our screen when a Z80 is run fast enough to compress the same
+//      block, and reproduces the correct screen on a real R800 -- the landing
+//      line is the same in both, so it is the SPACING that differs.
+//    - Z80BENCH loses 2-3% of its OUT (98h) writes in R800 mode here and none on
+//      T80s or on a real turbo R.  A request arriving before the previous VRAM
+//      slot finished is dropped silently (see the .ACK() note above).
+//  Both point at the same missing wait, so this is one change and two tests.
+//  Why 217 (10.1 us) and not the real machine's 186 (8.66 us): the spacing a
+//  given frame needs goes UP as the code around the block gets faster -- swept
+//  off-core, a Z80 base of 10.74 MHz needs >= 6 us while 21.48 MHz still fails at
+//  8 us and only passes at 10.1.  This core's R800 runs the surrounding code
+//  ~1.8x faster than a real R800 does, so it sits at or past that fast end.  10.1
+//  us passed at every base tested; drop it to 186 for fidelity once the effect is
+//  confirmed here.
+//  T80s keeps the old spacing: it loses nothing today, and slowing a Z80's VDP
+//  writes is not what any real MSX2+ does.
+localparam [7:0] VDP_GAP_R800 = 8'd217;
+wire  [7:0] vdp_gap_rld = use_nz ? VDP_GAP_R800 : (vdp18 ? VDP_GAP18 : VDP_GAP38);
 wire        vdp_bus     = ~iorq_n & m1_n & vdp_en & (~rd_n | ~wr_n);
 
-logic [5:0] vdp_gap   = 6'd0;
+logic [7:0] vdp_gap   = 8'd0;
 logic [2:0] vdp_hcnt  = 3'd0;         // ce_10m7_p ticks this strobe has spanned
 logic       vdp_grant = 1'b0;
 always @(posedge clk21m) begin
    if (reset) begin
       vdp_grant <= 1'b0;
       vdp_hcnt  <= 3'd0;
-      vdp_gap   <= 6'd0;
+      vdp_gap   <= 8'd0;
    end
    else if (!vdp_bus) begin
       vdp_grant <= 1'b0;

@@ -338,21 +338,27 @@ localparam CONF_STR = {
    "O[43],Pause on OSD,No,Yes;",
    "T[44],Pause;",
    "-;",
-   // Two speed ladders, one shown at a time: the Z80 ladder ('D' = menumask[13])
-   // and the R800 ladder ('E' = [14]).  H goes FIRST in the prefix -- menu.cpp's
-   // mask loop runs before anything else and there is no second pass (see the
-   // note by the OPL4 rows).
-   "HDO[58:56],CPU Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz,21.5MHz;",
-   // Bit 117 has never been assigned, so every saved .CFG reads it as 0 = Off.
-   "O[117],Turbo R features,Off,On;",
-   "O[118],CPU (turbo R),Z80 (T80s),R800 (NextZ80);",
+   // Two speed ladders in one slot, exclusive: the row for the CPU that is not
+   // driving the machine is hidden, so the menu never offers a speed that does
+   // nothing.  Prefix pairs are <action><index>, and
+   // the action loop runs before anything else with no second pass (see the note
+   // by the OPL4 rows), so the prefix comes FIRST: "HD" is hide(H) on mask index
+   // 'D' = 13, "HE" is hide on index 'E' = 14.
+   //   [13] = R800 selected -> hide the Z80 ladder
+   //   [14] = Z80 selected  -> hide the R800 ladder
+   // Hardware-confirmed on 20260919a.  Swapping H for D greys the row instead of
+   // hiding it (same decoder), but D has no precedent in this core.
+   "HDO[58:56],Z80 Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz,21.5MHz;",
    // The R800's own clock is 7.159 MHz, which is clk21m/3 exactly, so entry 0 is
    // the real thing and entry 1 is NextZ80 let loose (what every build before this
    // one did).  Entry 0 is the default: bit 70 has never been assigned, so a saved
    // .CFG reads it as 0.  NOTE: at 7.16 MHz the CLOCK matches an R800, the
    // THROUGHPUT does not -- NextZ80 does more per cycle, so it benches ~920% where
    // a real turbo R benches 575% (openMSX FS-A1ST, Z80BENCH 1.4.2).
-   "HEO[70],R800 Speed,7.16MHz,21.5MHz;",
+   "HEO[70],R800 Speed,7.16MHz,21.5MHz;",   // directly under the Z80 ladder
+   // Bit 117 has never been assigned, so every saved .CFG reads it as 0 = Off.
+   "O[117],Turbo R features (MSX2+),Off,On;",
+   "O[118],CPU (turbo R),Z80 (T80s),R800 (NextZ80);",
    "-;",
    "P2,Audio settings;",
    "P2O[45],MoonSound,Off,On;",
