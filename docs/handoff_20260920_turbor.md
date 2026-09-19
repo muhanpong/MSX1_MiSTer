@@ -67,9 +67,10 @@ frame, so normal frames are unchanged — checked: a sprites-on normal frame is
 pixel-identical before/after in GHDL (2 frames).  Bench: openMSX capture (VRAM +
 regs + cycle-stamped VDP port I/O) replayed on the VDP RTL, scripts in the job
 scratchpad (`tb/`), savestates `aso_tb_00..08` from the sony session (`tb_05` =
-sprite on an overscan line, `tb_06` = top band).  Possible residue: the first
-overscan line (YP -26) is prepared on YP 235, outside the window, so it may lose
-one sprite line.
+sprite on an overscan line, `tb_06` = top band).  The feared residue (first
+overscan line prepared outside the window) does NOT appear: in `tb_05` the sprite
+runs raw lines 32..47 after the fix -- all 16 rows of a 16x16 sprite, against 44..47
+before it.
 
 **OSD row shift (20260920d).**  The `I` token in the middle of CONF_STR shifted every
 row below it: menu.cpp draws rows with a loop that has no `I` branch but selects
