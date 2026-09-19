@@ -61,8 +61,19 @@ by the user).  The likely mechanism is in the peer's disassembly: the repoint
 block writes `R#8 = 2Ah` (bit 1 = SPD = sprites off) and the return block writes
 `R#8 = 28h` to turn them back on.  If the return's R#8 never takes effect, the
 whole frame runs with sprites disabled — which is exactly "all sprites missing".
-9-10 us was reported as also acceptable, so the dial has room; what is not yet
-known is whether any setting gets the bands AND the sprites at once.
+Board sweep so far: **7.5 us fails at the bottom**, 8.66 us gives bands 0/0 with
+0-1 bad lines at the bottom, 9-10 us also acceptable, 10.1 us gives 2-3 flashing
+lines.  So the bottom has an optimum near 8.66-9 and cannot go lower — but the
+**sprites are gone at every setting tried (7.5, 8.66, 10.1)**, which means the
+sprite loss is NOT a spacing effect and has to be a separate defect.
+
+Where to look: `vdp_sprite.vhd:363` samples `REG_R8_SP_OFF` once per line, at
+`DOTSTATE="01" AND DOTCOUNTERX = 256+8`, and that sample decides the next line.
+A late R#8 would cost some lines; losing every sprite in every frame looks more
+like R#8 never coming back to 28h at all.  The discriminator asked for: same
+build, **CPU = Z80**, does ASO show sprites?  Yes -> R800-path only (suspect the
+VDP wait's effect on the 99h byte-pair latch); no -> a pre-existing defect that
+the broken band was masking, and a different investigation.
 
 **Illusion City stops in a 4-byte loop at 08E4-08E7.**  Panel decode of the
 board: every freeze detector dark (so the CPU is fetching, not halted), live PC
