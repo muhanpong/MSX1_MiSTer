@@ -312,3 +312,120 @@ so the file was handed over as a path.  **Not tested on hardware.**
 features On, A = rate, HL = start, BC = length, `CALL &H0186`, carry = aborted.  A
 BASIC loader with a small machine-code block and a generated waveform would close
 the loop the way Z80BENCH did for the hand-over.
+
+## 12. Independent review on the user's machine (2026-09-18, rz80 session)
+
+Patches imported onto branch `cpuswap` (from `nextz80` 0e04047, blob-verified);
+all five applied clean.  `MSX1_20260918b_cpuswap.rbf` md5
+`f2d13c7aa3d3f80269d8265e9a998866` received; its RTL is `74e90be` here.
+No build was run on this machine -- the peer's fit and game test are the result,
+and repeating them would only spend 60-70 min of a slower Quartus.  What was done
+instead is the part a game test cannot cover:
+
+**Confirmed independently**
+
+1. *`nz_bus` really does advance at most every second clk21m.*  `adv = run & ph &
+   wait_n`, and `ph` is cleared by `adv` itself, so `adv` cannot be true on two
+   consecutive clocks.  This is the sole justification for the broad `-end 2`, and
+   it holds.
+2. *The address-sampling audit is complete.*  `grep '<= a;'` over synthesised RTL
+   finds exactly three: `a_q` (msx.sv:927, the cheat lookup -- already a
+   single-cycle exception), `fadr_p1` (:1990) and `addr_d` (:2119).  The latter two
+   are forensics latches feeding `dbg_*` only; they are synthesised (no `ifdef`)
+   but a late capture there is cosmetic, and they sample an address that is stable
+   for two clk21m anyway.
+3. *Every multicycle has its hold counterpart* (`-setup -end 2` / `-hold -end 1`,
+   `-end 1` / `-end 0`), and the node-to-node exceptions are written after the
+   clock-based rule, so they outrank it.  No `set_max_delay` anywhere near the CPU
+   -- which is what cost three non-converging fits on the rz80 branch.
+
+**Answered by the user's hardware test (Z80BENCH v1.4.2 on 20260918b)**
+
+4. **OSD bits 117 and 118 work on this board.**  This was the open risk: 116 was
+   the highest bit ever used, and a `status[118]` row silently did nothing here on
+   2026-09-04 (never isolated -- reverted together with an 11-entry ladder).  The
+   test settles it: Z80BENCH reports `Machine: MSX TurbR`, which requires the S1990
+   at E4h/E5h to answer, and that block only exists when `O[117]` is On; and the
+   core actually changed, which only `O[118]` can do.  **Both rows render and act.
+   Bits 117/118 are now proven, and the "116 is the ceiling" worry is retired.**
+
+5. **NextZ80 is really executing, and it is worth 2.3x.**  Z80BENCH: **49.46 MHz
+   equivalent, 1382 %** of a 3.58 MHz Z80.  The clock is unchanged at 21.477 MHz --
+   1382 / 600 (T80s at the same 21.5 MHz, measured 20260913b) = **2.30x more work
+   per clock**, which is the whole point of putting NextZ80 in as the R800.
+
+6. *Expected, not a defect:* the same screen still reports `CPU Type: Z80`.
+   R800 detection needs the R800-only opcodes (`MULUB`/`MULUW`), which are on the
+   peer's later-work list and are not in NextZ80.  Worth confirming how Z80BENCH
+   probes -- if it reads S1990 register 6 bit 5 instead, the bit is inverted
+   somewhere and that IS a defect.
+
+**Also tested on hardware (user, 20260918)**
+
+- **FDD works**: Z80BENCH itself was loaded from floppy.
+- **Akumajou Dracula played through to the end, in R800 mode** -- a PSG title, and
+  a Konami one, i.e. exactly the class that a changed cycle count would derail first.
+- **Hi no Tori is playable in R800 mode.**  Worth more than it looks: its RST 38
+  runaway is a race between a long LDIR and the ISR being reinstalled, so it is the
+  title most likely to notice that instructions now retire ~2.3x faster.  It did not.
+- **No SCC regression.**  This is the one the SDC work most wanted confirmed: the
+  SCC wave-RAM write is qualified by a NextZ80 strobe (covered by the broad `-end 2`
+  only because nz_bus masks the first clock), and the peer's post-map triage left
+  `T80s -> SCC falling edge` at -18.7 ns as a known negative carried over from the
+  fitted 564901c.  Hardware says that negative is post-map pessimism, as assumed.
+- The OSD screenshot shows both new rows rendered and set: `TURBO R FEATURES: ON`
+  and `CPU (TURBO R): R800 (NEXTZ80)`, with `CPU SPEED: 21.5MHZ` -- direct visual
+  proof for point 4 rather than inference from the S1990 answering.
+
+**Closed by the same test**
+
+7. `ce_cpu` runs at full rate while NextZ80 owns the bus (`MSX1.sv`: clock.sv speed
+   `use_nz ? 4 : OSD speed`), and the PSG bus strobe, the M1-wait pair and the FDC
+   all hang off it -- the one thing the bench could not cover.  **Akumajou Dracula
+   was played through in R800 mode**, so a PSG title and the FDD both survive the
+   full-rate `ce_cpu`.  Nothing left open here.
+
+## 13. What "Turbo R features: On" actually changes (review, 20260918)
+
+`en = status[117]`.  With it Off the block is inert -- no ports decoded, no BIOS
+overlay, no mute -- so everything below applies only when the row is On.
+
+**1. Four new I/O port groups appear**: E4h/E5h (S1990), E6h/E7h (timer),
+A4h/A5h (PCM), A7h (pause/LEDs).  These are unused on MSX2+, so the collision
+risk is low, but they are decoded from then on.
+
+**2. `002Dh` reads back 03h on every machine**, MSX1 packs included.  That byte is
+how software picks its generation.  An MSX1 or MSX2 pack claiming to be a turbo R
+will be offered turbo-R code paths it cannot serve -- including BIOS entries that
+do not exist in that ROM.  This is the widest-reaching effect of the option and it
+is not gated by machine type.
+
+**3. The `0180h-018Bh` overlay is NOT free space on every machine.**  Checked all
+main BIOS ROMs in `releases/CreateMSXpack/ROM`:
+
+| region at 0180h | ROMs |
+|---|---|
+| `FF`/`00` padding -- overlay is harmless | Panasonic FS-A1/mk2/F/FM/FX/WX/WSX, Sony, Sanyo, Mitsubishi, Philips, Canon V-20, all C-BIOS |
+| **real jump entries** `00 00 00 / C3 69 14 / C3 06 10 / C3 12 10` | Daewoo `cpc-300_basic-bios2`, `330kbios`, `400sbios` |
+| **real code** `01 C2 E1 01 D1 E5 CD 99 01 ...` | Canon `v-8_basic-bios1`, Sanyo `cf-2700_basic-bios1_german` |
+
+On those five the overlay replaces live BIOS at 0183h/0186h/0189h (the Korean
+machines' Hangul entries) or lands in the middle of code.  Packs affected:
+**Daewoo CPC-300 / CPC-300E / CPC-400S** (400S is already marked `_notwork_`),
+**Canon V-8**, **Sanyo CF-2700 (German)**.  Nothing breaks while the option is
+Off, and none of these are turbo R machines, so the fix is to refuse the option
+rather than to move the stubs: gate the overlay (and ideally the whole block) on
+the loaded BIOS actually having `FF`/`00` there, or simply on the machine being
+MSX2+.
+
+**4. `A5h` bit 1 = 0 mutes the entire machine.**  `mute_all = en & muted_w &
+~pcm_st[1]` zeroes `audio_l/r` outright (msx.sv:249).  It is openMSX-accurate and
+needs a deliberate write, but with features On a stray write to A5h silences all
+sound with no other symptom -- a silent-failure surface that does not exist with
+the option Off.
+
+**5. The Pause key becomes hardware pause** (A7h bit 1 + key state), on top of the
+existing OSD pause.
+
+Nothing here contradicts the hardware tests: those ran on a Panasonic-class pack,
+which is in the harmless row of the table above.
