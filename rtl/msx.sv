@@ -14,6 +14,7 @@ module msx
    input                    ce_cpu,            // turbo rate enable: PSG bus strobe, M1 wait pair, FDC
    input                    msx_pause,         // machine pause: freezes NextZ80 (T80s stops through ce_cpu)
    input                    r800_fast,         // OSD R800 ladder: 0 = 7.16 MHz (clk21m/3), 1 = unpaced
+   input              [2:0] r800_vdpw,         // OSD: VDP access spacing while NextZ80 owns the bus
    input                    r800_set_stb,      // OSD "CPU (turbo R)" changed: select through the S1990
    input                    r800_set,
    output                   use_nz,            // NextZ80 owns the bus (-> MSX1.sv: ce_cpu at full rate)
@@ -766,8 +767,21 @@ localparam [7:0] VDP_GAP38 = 8'd32;   // MSX2: >= worst-case VRAM slot period (2
 //  confirmed here.
 //  T80s keeps the old spacing: it loses nothing today, and slowing a Z80's VDP
 //  writes is not what any real MSX2+ does.
-localparam [7:0] VDP_GAP_R800 = 8'd217;
-wire  [7:0] vdp_gap_rld = use_nz ? VDP_GAP_R800 : (vdp18 ? VDP_GAP18 : VDP_GAP38);
+//  OSD-selectable, because the value that works moves with how fast the code
+//  around a register block runs and we cannot derive it -- entry 0 is the real
+//  machine's 8.66 us.
+logic [7:0] vdp_gap_r800;
+always_comb case (r800_vdpw)
+   3'd0: vdp_gap_r800 = 8'd186;   //  8.66 us -- a real turbo R
+   3'd1: vdp_gap_r800 = 8'd217;   // 10.1 us  -- restored ASO's band on 20260919b
+   3'd2: vdp_gap_r800 = 8'd200;   //  9.3 us
+   3'd3: vdp_gap_r800 = 8'd161;   //  7.5 us
+   3'd4: vdp_gap_r800 = 8'd129;   //  6.0 us  -- off-core floor at a 10.74 MHz base
+   3'd5: vdp_gap_r800 = 8'd232;   // 10.8 us
+   3'd6: vdp_gap_r800 = 8'd254;   // 11.8 us
+   3'd7: vdp_gap_r800 = 8'd100;   //  4.7 us
+endcase
+wire  [7:0] vdp_gap_rld = use_nz ? vdp_gap_r800 : (vdp18 ? VDP_GAP18 : VDP_GAP38);
 wire        vdp_bus     = ~iorq_n & m1_n & vdp_en & (~rd_n | ~wr_n);
 
 logic [7:0] vdp_gap   = 8'd0;

@@ -333,6 +333,20 @@ localparam CONF_STR = {
    "P1O[40],Vertical Crop,No,Yes;",
    "P1O[41],Border,No,Yes;",
    "P1O[42],V9958,No,Yes;",
+   //  How long the CPU is held between two VDP port accesses while NextZ80 owns
+   //  the bus.  A real turbo R waits 8.66 us; this core used to wait 1.49 us,
+   //  which compressed ASO's 24-write split-screen block from 3.4 raster lines
+   //  into 0.2 and cost 2-3% of Z80BENCH's characters outright.  10.1 us restored
+   //  both, so it is entry 0, but the needed value moves with how fast the code
+   //  around the block runs -- hence a dial rather than a constant.  Entry 0 is
+   //  the real machine's own 8.66 us: 10.1 restored the band but left the top
+   //  sprites clipped and the bottom 2-3 lines flashing, which is the signature
+   //  of a block that runs LONG (24 writes x 10.1 = 3.8 lines against the real
+   //  3.4), so the honest value is also the likely right one.  10.1 is entry 1,
+   //  one click away.  Bits 75-77 have never been assigned (board .CFG reads them
+   //  0, so entry 0 it is).
+   //  T80s is unaffected: it keeps the 32 clk21m spacing and loses nothing.
+   "P1O[77:75],R800 VDP wait,8.66us (real),10.1us,9.3us,7.5us,6.0us,10.8us,11.8us,4.7us;",
    "-;",
    "O[16:15],JoyMega Pad,Off,Port A,Port B,Both;",
    "O[43],Pause on OSD,No,Yes;",
@@ -790,6 +804,7 @@ msx MSX
    .r800_set_stb(r800_set_stb),
    .r800_set (status[118]),
    .r800_fast(status[70]),
+   .r800_vdpw(status[77:75]),
    .use_nz   (use_nz),
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),
