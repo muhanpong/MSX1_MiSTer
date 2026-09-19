@@ -379,6 +379,7 @@ ARCHITECTURE RTL OF VDP IS
             DOTCOUNTERX                 : IN    STD_LOGIC_VECTOR(  8 DOWNTO 0 );
             DOTCOUNTERYP                : IN    STD_LOGIC_VECTOR(  8 DOWNTO 0 );
             BWINDOW_Y                   : IN    STD_LOGIC;
+            PREWINDOW_Y                 : IN    STD_LOGIC;
 
             -- VDP STATUS REGISTERS OF SPRITE
             PVDPS0SPCOLLISIONINCIDENCE  : OUT   STD_LOGIC;
@@ -1791,6 +1792,7 @@ BEGIN
         -- running through the bottom border without VRAM grants, consuming
         -- stale PRAMDAT as attribute/pattern data -> ghost S#0 collisions.
         BWINDOW_Y                   => PREWINDOW_Y_SP,
+        PREWINDOW_Y                 => PREWINDOW_Y,
         PVDPS0SPCOLLISIONINCIDENCE  => VDPS0SPCOLLISIONINCIDENCE,
         PVDPS0SPOVERMAPPED          => VDPS0SPOVERMAPPED,
         PVDPS0SPOVERMAPPEDNUM       => VDPS0SPOVERMAPPEDNUM,

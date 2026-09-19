@@ -379,12 +379,6 @@ localparam CONF_STR = {
    //  BIOS runs that sequence itself.  Force Z80 / Force R800 stay for packs that
    //  are NOT turbo R, where nothing in software ever calls CHGCPU.
    "O[119:118],CPU (turbo R),Auto,Force Z80,Force R800;",
-   //  Event channel, not a menu row: user_io.cpp:2640 scans the CONF_STR from
-   //  index 2 for a token starting with I and prints its info_n-th field when the
-   //  core pulses info_req.  hps_io clears info_n on the read, so one pulse is one
-   //  message.  Used for "the CPU has settled in X", debounced -- CORER.SYS swaps
-   //  CPU per BDOS call and an undebounced popup would be unreadable.
-   "I,CPU: Z80,CPU: R800;",
    "-;",
    "P2,Audio settings;",
    "P2O[45],MoonSound,Off,On;",
@@ -474,6 +468,16 @@ localparam CONF_STR = {
    // means "no default".  A and B stay on the pad's A and B because that is the
    // plain-MSX two-trigger case, which is what most software uses.
    "jn,A,B,X,Start,L,Y,R,Select,,,,;",
+   //  Event channel, not a menu row: user_io.cpp:2640 scans the CONF_STR from
+   //  index 2 for a token starting with I and prints its info_n-th field when the
+   //  core pulses info_req.  hps_io clears info_n on the read, so one pulse is one
+   //  message.  Used for "the CPU has settled in X", debounced -- CORER.SYS swaps
+   //  CPU per BDOS call and an undebounced popup would be unreadable.
+   //  It MUST sit after the last menu row.  menu.cpp draws rows with a loop that has
+   //  no branch for I, but picks the selected one with a loop that counts every token
+   //  whose first letter is >= 'A' -- so an I in the middle shifts every row below it
+   //  by one (20260920d: Enter on "Reset" toggled "Debug overlay").
+   "I,CPU: Z80,CPU: R800;",
    "V,v",`BUILD_DATE 
 };
 

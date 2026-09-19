@@ -192,3 +192,10 @@ set_multicycle_path -setup -end 2 \
 set_multicycle_path -hold  -end 1 \
     -from [get_registers {*msx:MSX|NextZ80:NZ|*}] \
     -to   [get_registers {*msx:MSX|NextZ80:NZ|*}]
+
+# ─── Debug overlay CDC ──────────────────────────────────────────────────────
+#  rtl/debug_overlay.sv brings slow debug values into CLK_VIDEO through 2-FF
+#  synchronisers named *_s1 -> *_s2.  The *_s1 input is asynchronous by design;
+#  timing it only produces placement-luck hold misses (20260920e: -0.102 ns on
+#  u_pcm ram_regs[6].keyon -> u_overlay keyon_s1[6], general[0] -> general[1]).
+set_false_path -to [get_registers {*u_overlay|*_s1[*]}]

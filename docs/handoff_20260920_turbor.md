@@ -18,7 +18,8 @@ after a build, never commit that line.
 | `20260920a_sdwrvdp` | b300544613cc | spacing as an OSD dial (default 8.66 us), SD write pacing (first version) |
 | `20260920b_prn90` | 482c27b63322 | printer status port 90h; SEED 7 |
 | `20260920c_bramrecl` | 2c3ecf4879b6 | IKASCC wavetables to MLAB (**M10K 391 -> 371**), rz80's SD queue, FM 49515 Hz |
-| `20260920d` | — | **build was launched from `67a7e1d` and its result was NOT checked** (user's instruction at handoff).  Log: scratchpad `build8.out`; nothing deployed |
+| `20260920d_cpuauto` | b7e29a63cb4e | `67a7e1d`.  BUILDGATE PASS (setup +0.429, hold +0.079, recovery +2.80; ALM 32,664 / M10K 371), **deployed, not yet run on hardware**.  Log: previous session's scratchpad `bg8/` |
+| `20260920e_asospr` | ad97578ba234 | OSD row-shift fix (`I` token moved to the tail), ASO top-band sprites, overlay CDC false path.  PASS, setup +0.196 / hold +0.100.  **ASO top band confirmed on hardware** |
 
 `67a7e1d` contents (so whoever picks the build up knows what to verify): CPU Auto
 (O[119:118]), the `I`-token settled-CPU popup, forensics following the live core,
@@ -55,16 +56,29 @@ test machine).  Test disks go in `DSKS/` only — do not invent directories.
 
 ## 2. Open
 
-**ASO shows no sprites at all** — on every CPU, clock and spacing tried, so it is
-independent of everything fixed above; the broken band was masking it.  The real
-R800 does show them (peer: forcing SPD wiped 26,652 px of enemy craft).  Reference
-values at the end of the return block: **R#8 = 28h (2Ah only during the panel),
-R#5 alternating BFh / B7h per frame (double-buffered attribute table), R#11 = 0**.
-Our attribute-address masking and terminator logic check out in the RTL
-(vdp_sprite.vhd:486, :537); SP_OFF is sampled once per line at DOTCOUNTERX=264
-(:363).  `67a7e1d` puts R#5/R#8 on the debug panel (rows that used to be R#9/R#19)
-— one ASO screenshot with the overlay on decides whether the registers or the
-sprite engine is at fault.
+**ASO top-band sprites — FIXED, hardware-confirmed (20260920e).**  The game switches
+R#9 212 -> 192 while YP is between 192 and 212, so neither window-close compare
+(YP==192 / YP==212) fires and the display window stays open into the next frame:
+the top 26 lines (YP -26..-1, nominally top border) become real display
+(overscan).  afde2e4's sprite window allowed negative YP only at -2/-1, so sprites
+were blanked there.  Fix: `W_ACTIVE` also accepts `YP<0 AND PREWINDOW_Y='1'`
+(vdp_sprite.vhd, new PREWINDOW_Y port).  PREWINDOW_Y opens at YP 0 in every normal
+frame, so normal frames are unchanged — checked: a sprites-on normal frame is
+pixel-identical before/after in GHDL (2 frames).  Bench: openMSX capture (VRAM +
+regs + cycle-stamped VDP port I/O) replayed on the VDP RTL, scripts in the job
+scratchpad (`tb/`), savestates `aso_tb_00..08` from the sony session (`tb_05` =
+sprite on an overscan line, `tb_06` = top band).  Possible residue: the first
+overscan line (YP -26) is prepared on YP 235, outside the window, so it may lose
+one sprite line.
+
+**OSD row shift (20260920d).**  The `I` token in the middle of CONF_STR shifted every
+row below it: menu.cpp draws rows with a loop that has no `I` branch but selects
+with one that counts every token >= 'A' (Enter on "Reset" toggled the overlay).
+Moved to just before `V`.
+
+**Overlay CDC.**  20260920e's first fit failed hold by -0.102 ns on
+`u_pcm ram_regs[6].keyon -> u_overlay keyon_s1[6]` (general[0] -> general[1]), the
+first stage of a 2-FF synchroniser.  MSX1.sdc now false-paths `*u_overlay|*_s1[*]`.
 
 **Illusion City.**  Past the 90h gate it still does not start (black screen, no
 VDP write for 20 s).  The PC readings I reported after that (0039, spin FFFF) are
@@ -100,8 +114,13 @@ resource**, the reverse of the June study's premise (ALM 64% / M10K 95%).
 - Recovered: IKASCC wavetables, `(* ramstyle = "MLAB" *)`, 20 M10K for 200 ALM.
 - `4790c6b` (PCM header/dyn -> MLAB) did NOTHING in 20260920c: the attribute was
   `syn_ramstyle`, Synplify's spelling, which Quartus ignores without a warning
-  (u_pcm: 0 ALMs for memory, 7,505 registers).  Fixed in `67a7e1d`; judge it by the
-  u_pcm register count and "ALMs used for memory" in that build's fit.rpt.
+  (u_pcm: 0 ALMs for memory, 7,505 registers).  `67a7e1d` spelled it `ramstyle` and it
+  STILL did nothing in 20260920d (u_pcm: 0 ALMs for memory, 7,514 registers) — this
+  time with a warning, map.log 10999 "can't infer memory for variable
+  'ram_header_m' / 'ram_dyn_m'".  Cause: the debug tap `dbg_h0`/`dbg_d0`
+  (pcm_engine2.sv:1271-1272) is a second asynchronous read port at constant index 0.
+  Fix not applied: shadow slot 0 in flops at the two write sites (`hf_store_now &&
+  hf_cur_slot==0`, `dyn_we && w_slot==0`) and feed the tap from those.
 - Remaining clean candidates: `vdp_regprobe` 10 M10K (debug only), `systemRAM`
   64 -> 32 KB = 32 M10K (gives up the no-SDRAM fallback).  The small OPL3/IKAOPLL
   RAMs (32 M10K, all "Fits in MLABs = Yes") can move with two wildcard

@@ -192,6 +192,7 @@ ENTITY VDP_SPRITE IS
         DOTCOUNTERX                 : IN    STD_LOGIC_VECTOR(  8 DOWNTO 0 );
         DOTCOUNTERYP                : IN    STD_LOGIC_VECTOR(  8 DOWNTO 0 );
         BWINDOW_Y                   : IN    STD_LOGIC;
+        PREWINDOW_Y                 : IN    STD_LOGIC;     -- display window (bitmap on)
 
         -- VDP STATUS REGISTERS OF SPRITE
         PVDPS0SPCOLLISIONINCIDENCE  : OUT   STD_LOGIC;
@@ -547,8 +548,15 @@ BEGIN
     -- A border-wide window is wrong: FF_CUR_Y's 8-bit alias makes sprites
     -- parked at Y=209 match again on border lines (top: YP -48..-17, bottom:
     -- YP 208..239) -> ghost S#0 collisions the real chip never produces.
+    -- Overscan: switching R#9 LN between the 192 and 212 end lines means the
+    -- display window never closes, so the next frame shows bitmap on lines
+    -- with a NEGATIVE YP (ASO's top band, YP -26..-1).  Those lines are real
+    -- display and the real chip draws sprites on them; the YP range above
+    -- blanked them.  PREWINDOW_Y is only ever 1 at negative YP in that case
+    -- (it opens at YP 0 otherwise), so normal frames are unchanged.
     W_ACTIVE        <=  BWINDOW_Y WHEN(
                             (DOTCOUNTERYP(8) = '1' AND DOTCOUNTERYP(7 DOWNTO 0) >= 254) OR
+                            (DOTCOUNTERYP(8) = '1' AND PREWINDOW_Y = '1') OR
                             (DOTCOUNTERYP(8) = '0' AND REG_R9_Y_DOTS = '0' AND DOTCOUNTERYP(7 DOWNTO 0) <= 190) OR
                             (DOTCOUNTERYP(8) = '0' AND REG_R9_Y_DOTS = '1' AND DOTCOUNTERYP(7 DOWNTO 0) <= 210) )ELSE
                         '0';
