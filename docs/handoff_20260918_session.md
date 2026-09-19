@@ -127,7 +127,9 @@ SP anyway.
    core whose MULUB sets Z on a zero result reaches `INC L`.  Reporting `Z80`
    before MULUB existed was correct behaviour, not an inverted bit.
 3. ~~SCMD's wrong sound is R800 cycle counts, no patch fixes that.~~
-   **WRONG — retracted (§7).**  It was `MULUB`, and a patch did fix it.
+   **Partly retracted, and still open (§7).**  The cycle-timing explanation was
+   wrong and `MULUB` was a real cause, but SCMD did not stay fixed: with the
+   feature block On it fails INTERMITTENTLY, on 20260918c too.
 4. ~~`MULUB`/`MULUW`: recommended to hold off.~~  **Superseded (§7):** real
    software already on our NextZ80 was executing them and silently getting
    garbage, which outranks the detection argument.  Implemented in `abec124`.
@@ -159,7 +161,7 @@ SP anyway.
 
 ---
 
-## 7. 2026-09-19 — SCMD closed: it was MULUB, and three decisions
+## 7. 2026-09-19 — SCMD: MULUB was one of the causes, NOT all of them
 
 **Symptom.**  With Turbo R features On, `sc` printed its banner as far as
 `Master SCC CARTRIDGE SLOT1` and the machine stopped dead, not even the CRLF.
@@ -190,11 +192,38 @@ Read out of one screenshot, so the method is worth keeping:
    "ED + 2'b11 = NOP"), so MULUB was swallowed: HL kept its previous value and
    the caller used the result as a pointer.
 
-**Fixed by `abec124`** (MULUB/MULUW).  Hardware, build `20260918c_mulubw`:
-`sc` runs to completion **and the music plays correctly**.  So the §5.3 claim
-that the wrong sound was R800 cycle timing and unfixable is retracted — it was
-a missing instruction all along.  Lesson, the same one as the SCC ch4 episode:
-do not close a divergence with a theory about why it cannot be fixed.
+**`abec124` (MULUB/MULUW) fixed the MULUB half.**  On build `20260918c_mulubw`
+`sc` was seen running to completion with the music playing correctly, and the
+§5.3 claim that the wrong sound was R800 cycle timing and unfixable is retracted
+— that part was a missing instruction, not timing.
+
+**But SCMD is NOT closed (corrected 2026-09-19, same day).**  Re-tested, it fails
+with the feature block On **intermittently** — sometimes it runs, sometimes it
+does not — and that includes 20260918c, so the first "it works" reading was a
+lucky run, not a fix.  PCMPLY and the R800 speed ladder are both ruled out: the
+failure predates them and happens at 7.16 MHz and 21.5 MHz alike.
+
+What that intermittency means for the diagnosis above: the freeze in the
+screenshot stopped at an ARBITRARY point in the banner, which a deterministic
+missing instruction cannot do — that is a race, and the MULUB routine at 1538h
+may not even have run by then (flagged as unverified when it was written, and it
+is still unverified).  So MULUB was a real defect found along the way, not the
+whole story.
+
+**Prime suspect, not yet tested:** NextZ80 losing the odd bus cycle.  On the same
+hardware Z80BENCH drops 2-3% of its characters in R800 mode with no CPU swap
+anywhere near it (§7.1), so the loss is in the NextZ80 bus path itself; the same
+thing happening to a memory write during CORER.SYS's load would produce exactly
+this "works some runs, not others".  The cheap decisive test is an MSX-side
+integrity program (OTIR a pattern to VRAM and read it back; LDIR one through RAM
+and verify; report counts through a port, not the screen) run at Z80 21.5 MHz,
+R800 7.16 and R800 21.5.  VRAM only -> the VDP interface; RAM too -> nz_bus in
+general, which would put every R800 run in doubt.  Parked at the user's request
+on 2026-09-19.
+
+Lesson, the same one as the SCC ch4 episode, and this time it caught me from the
+other side: an intermittent fault will hand you a passing run and let you close
+it.  One good run is not a fix.
 
 **Three decisions taken with the user (2026-09-19).**
 
@@ -210,6 +239,32 @@ do not close a divergence with a theory about why it cannot be fixed.
    contains it **`dbg_wait_stuck` latches whenever PCMPLY is used**.  The
    diagnostic that cleared the bus in this very investigation is therefore no
    longer trustworthy on those builds unless it is gated on the player's busy.
+
+### 7.1 R800 VDP write loss (open)
+
+Z80BENCH 1.4.2, same board, same disk, three runs: stock T80s 3.57 MHz and turbo
+T80s 21.48 MHz (600%) render every character correctly; NextZ80 drops ~2-3% of
+them (`computer` -> `coputr`, `V9958` -> `V958`, `50MHz` -> `0MHz`).  The dropped
+unit is a whole `OUT (98h)`: VRAM auto-increment does not advance, so the rest of
+the string shifts left.  `rtl/msx.sv:709-726` already documents the mechanism —
+the V9938 is driven by `.REQ(req & vdp_en & vdp)` with `.ACK()` unconnected, so a
+request arriving before the previous VRAM slot finished is silently lost.
+
+It is NOT simply "the CPU is faster": `vdp_gap` enforces 32 clk21m between VDP
+accesses regardless of CPU rate, and T80s at 21.48 MHz issues them closer than
+that and loses none.  Pacing NextZ80 down to the R800's real 7.159 MHz clock
+(build 20260919a) did not fix it either.  So the pacer is not taking effect on
+the NextZ80 path.  Two candidates: the strobe/`req` pulse is too short for the
+V9938 to sample (the minimum-width term in `vdp_pace_n` covers only the vdp18
+path), or a bus cycle is lost before it reaches the fabric.  NextZ80 honouring
+WAIT was checked and is not the fault: `nextz80cpu.v:201` gates the entire state
+update on `!WAIT`, block instructions included.
+
+Reference numbers for what R800 mode should look like, from openMSX
+`Panasonic_FS-A1ST` (system ROMs present on the user's machine, boots in R800
+DRAM mode): **575%, "20.59 MHz", no dropped characters.**  Ours: 1382% unpaced,
+921% at the 7.16 MHz rung.  Z80BENCH's "CPU Speed" is Z80-equivalent throughput,
+not a clock.
 
 **Still unverified:** PCMPLY itself.  `20260918d_pcmply` showed no regression,
 but nothing calls PCMPLY yet — a test program still has to be written.
