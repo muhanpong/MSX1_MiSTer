@@ -30,8 +30,8 @@ module vdp_regprobe (
     output logic [23:0] p_r23,       // {val8, frame16} of last R#23 commit
     output logic [23:0] p_r0,        // {val8, frame16} of last R#0 commit
     output logic [23:0] p_r1,        // {val8, frame16} of last R#1 commit -- bit6 is DISPLAY ON
-    output logic [23:0] p_r9,        // {val8, frame16} of last R#9 commit -- bit7 is 212 LINES
-    output logic [23:0] p_r19,       // {val8, frame16} of last R#19 commit -- line-interrupt line
+    output logic [23:0] p_r9,        // {val8, frame16} of last R#5 commit -- sprite attribute table (BF/B7 double buffer)
+    output logic [23:0] p_r19,       // {val8, frame16} of last R#8 commit -- bit1 SPD: 2A = sprites off, 28 = on
     output logic [15:0] p_frame      // current frame counter
 );
 
@@ -107,8 +107,8 @@ always_ff @(posedge clk) begin
     if (commit && creg == 6'd23) p_r23 <= {byte1, frame_cnt};
     if (commit && creg == 6'd0)  p_r0  <= {byte1, frame_cnt};
     if (commit && creg == 6'd1)  p_r1  <= {byte1, frame_cnt};
-    if (commit && creg == 6'd9)  p_r9  <= {byte1, frame_cnt};
-    if (commit && creg == 6'd19) p_r19 <= {byte1, frame_cnt};
+    if (commit && creg == 6'd5)  p_r9  <= {byte1, frame_cnt};   // R#5, was R#9
+    if (commit && creg == 6'd8)  p_r19 <= {byte1, frame_cnt};   // R#8, was R#19
     p_frame <= frame_cnt;
 end
 

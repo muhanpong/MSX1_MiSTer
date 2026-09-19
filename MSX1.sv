@@ -372,7 +372,19 @@ localparam CONF_STR = {
    "HEO[70],R800 Speed,7.16MHz,21.5MHz;",   // directly under the Z80 ladder
    // Bit 117 has never been assigned, so every saved .CFG reads it as 0 = Off.
    "O[117],Turbo R features (MSX2+),Off,On;",
-   "O[118],CPU (turbo R),Z80 (T80s),R800 (NextZ80);",
+   //  Auto is what a real turbo R does: it powers up as a Z80 and the firmware or
+   //  the game moves it with CHGCPU.  We used to force the CPU from the OSD bit at
+   //  every boot (the saved .CFG has 118 set), which pushes a machine into R800
+   //  before its own BIOS has decided to -- wrong for the FS-A1GT/ST packs, whose
+   //  BIOS runs that sequence itself.  Force Z80 / Force R800 stay for packs that
+   //  are NOT turbo R, where nothing in software ever calls CHGCPU.
+   "O[119:118],CPU (turbo R),Auto,Force Z80,Force R800;",
+   //  Event channel, not a menu row: user_io.cpp:2640 scans the CONF_STR from
+   //  index 2 for a token starting with I and prints its info_n-th field when the
+   //  core pulses info_req.  hps_io clears info_n on the read, so one pulse is one
+   //  message.  Used for "the CPU has settled in X", debounced -- CORER.SYS swaps
+   //  CPU per BDOS call and an undebounced popup would be unreadable.
+   "I,CPU: Z80,CPU: R800;",
    "-;",
    "P2,Audio settings;",
    "P2O[45],MoonSound,Off,On;",
@@ -487,8 +499,10 @@ assign status_menumask[9]  = subA_page_hide;       // slot A not expanded -> hid
 assign status_menumask[10] = subB_page_hide;       // 'A' in CONF_STR
 assign status_menumask[11] = mapper_A_hide;        // 'B': no ROM sub-slot -> Mapper/SRAM entries hidden
 assign status_menumask[12] = mapper_B_hide;        // 'C'
-assign status_menumask[13] = status[118];          // 'D': R800 picked -> hide the Z80 ladder
-assign status_menumask[14] = ~status[118];         // 'E': Z80 picked  -> hide the R800 ladder
+assign status_menumask[13] = (status[119:118] == 2'd2);   // 'D': Force R800 -> hide the Z80 ladder
+assign status_menumask[14] = (status[119:118] == 2'd1);   // 'E': Force Z80  -> hide the R800 ladder
+//  Auto shows BOTH: the two ladders are independent knobs and in Auto both are live,
+//  each applying while its own core has the bus.
 assign status_menumask[6] = (lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0)
                           & (cart_conf[0].selected_mapper != MAPPER_ASCII16X)
                           & (cart_conf[0].selected_mapper != MAPPER_YAMANOOTO)
@@ -506,6 +520,8 @@ hps_io #(.CONF_STR(CONF_STR),.VDNUM(VDNUM)) hps_io
    .buttons(buttons),
    .status(status),
    .status_menumask(status_menumask),
+   .info_req(info_req),
+   .info(info),
    .ps2_key(ps2_key),
    .ps2_mouse(ps2_mouse),
    .joystick_0(joy0_all),
@@ -662,13 +678,37 @@ wire reset = RESET | reset_now | (reset_rq & ~status[64]);
 //  closed and the choice differs from the last one applied, so software (OUT E5h,
 //  CHGCPU) can still switch between OSD visits.  Re-applied after every reset: the
 //  S1990 comes out of reset on the Z80.
-reg r800_applied = 1'b0, r800_set_stb = 1'b0;
+//  CPU-settled notifier.  use_nz flips hundreds of times a second under software
+//  that wraps its BDOS calls in CHGCPU, so the popup only fires once the CPU has
+//  stayed put for ~1.5 s -- which is exactly the moment worth seeing (Illusion City
+//  settles into R800 about 12 s in; CORER.SYS's per-call flutter never qualifies).
+logic        info_req = 1'b0;
+logic  [7:0] info;
+logic        cpu_seen = 1'b0;
+logic [24:0] cpu_hold = 25'd0;
+always @(posedge clk21m) begin
+   info_req <= 1'b0;
+   if (use_nz != cpu_seen) begin            // still moving: restart the timer
+      cpu_seen <= use_nz;
+      cpu_hold <= 25'd0;
+   end else if (~&cpu_hold) begin
+      cpu_hold <= cpu_hold + 25'd1;
+      if (&cpu_hold[24:1] & ~cpu_hold[0]) begin   // one pulse, ~1.5 s after settling
+         info     <= use_nz ? 8'd2 : 8'd1;        // "I," field 2 = R800, 1 = Z80
+         info_req <= 1'b1;
+      end
+   end
+end
+
+wire [1:0] cpu_sel = status[119:118];        // 0 Auto, 1 Force Z80, 2 Force R800
+reg  [1:0] cpu_applied = 2'd0;
+reg        r800_set_stb = 1'b0;
 always @(posedge clk21m) begin
    r800_set_stb <= 1'b0;
-   if (reset) r800_applied <= 1'b0;
-   else if (~OSD_STATUS && status[118] != r800_applied) begin
-      r800_applied <= status[118];
-      r800_set_stb <= 1'b1;
+   if (reset) cpu_applied <= 2'd0;
+   else if (~OSD_STATUS && cpu_sel != cpu_applied) begin
+      cpu_applied <= cpu_sel;
+      if (cpu_sel != 2'd0) r800_set_stb <= 1'b1;   // Auto never forces
    end
 end
 
@@ -802,7 +842,7 @@ msx MSX
    .ce_cpu   (ce_cpu    & ~msx_pause),
    .msx_pause(msx_pause),
    .r800_set_stb(r800_set_stb),
-   .r800_set (status[118]),
+   .r800_set (cpu_sel == 2'd2),
    .r800_fast(status[70]),
    .r800_vdpw(status[77:75]),
    .use_nz   (use_nz),

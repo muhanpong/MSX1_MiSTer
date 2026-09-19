@@ -166,8 +166,8 @@ slot_regs_t   ram_regs   [0:23];
 // MLAB cannot do is the reset broadcast (ram_header <= 0, ram_dyn <= env off),
 // so a per-slot `*_init` bit, asynchronously set by reset and cleared by that
 // slot's first write, returns the reset value until then.
-logic [$bits(slot_header_t)-1:0] ram_header_m [0:23] /* synthesis syn_ramstyle = "MLAB, no_rw_check" */;
-logic [$bits(slot_dyn_t)-1:0]    ram_dyn_m    [0:23] /* synthesis syn_ramstyle = "MLAB, no_rw_check" */;
+logic [$bits(slot_header_t)-1:0] ram_header_m [0:23] /* synthesis ramstyle = "MLAB, no_rw_check" */;
+logic [$bits(slot_dyn_t)-1:0]    ram_dyn_m    [0:23] /* synthesis ramstyle = "MLAB, no_rw_check" */;
 logic [23:0]  hdr_init;              // 1 = header of this slot not stored since reset
 logic [23:0]  dyn_init;              // 1 = dyn of this slot not written since reset
 logic [7:0]   tl_cur     [0:23];     // ramped TL (volume stage input)

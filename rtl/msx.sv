@@ -421,9 +421,15 @@ end
 //  OPLL pacers) keys on this: NextZ80 always needs them, like T80s at turbo.
 wire cpu_paced = cpu_turbo | use_nz | resume_guard;
 
-//  Forensics only (the dbg_* readers below): T80s' register file.  While NextZ80
-//  owns the bus it is the state T80s was frozen with.
-wire [211:0] t80_reg = t80_reg_t80;
+//  Forensics (the dbg_* readers below): the register file of whichever core is
+//  actually running.  It used to be t80_reg_t80 unconditionally, which made every
+//  PC, SP and spin reading a FROZEN T80s snapshot the moment software switched to
+//  R800 -- and turbo R software switches constantly (CORER.SYS does it per BDOS
+//  call; Illusion City settles in R800 about 12 s in).  Two captures were read as
+//  live PCs before that was noticed.  NextZ80 exports the same T80 REG layout
+//  through XREG, which is what the hand-over already copies, so selecting on
+//  use_nz is all it takes.
+wire [211:0] t80_reg = use_nz ? nz_xreg : t80_reg_t80;
 
 //  -----------------------------------------------------------------------------
 //  -- WAIT CPU
@@ -1922,7 +1928,7 @@ logic        iff1_d = 1'b0, ghost_arm = 1'b0, intack_seen = 1'b0;
 logic        mreq_n_d = 1'b1, wr_n_d = 1'b1;
 logic [15:0] addr_d;
 logic [7:0]  data_d;
-wire  [7:0]  im2_tbl_hi = t80_reg[39:32] + 8'd1;   // I+1 = page of table byte 257
+logic [7:0] dbg_m38 = 8'h00, dbg_m39 = 8'h00, dbg_m3a = 8'h00;   // IM1 vector bytes
 always_ff @(posedge clk21m) begin
     if (reset) begin
         wait_cnt <= 0; irq_cnt <= 0; nom1_cnt <= 0; intack_cnt <= 0;
@@ -1999,6 +2005,9 @@ always_ff @(posedge clk21m) begin
             dbg_im_i   <= {t80_reg[209:208], 6'd0, t80_reg[39:32]};  // IM + I at dispatch
         end
         dbg_pc_now <= t80_reg[79:64];
+        //  {use_nz, r800, dram, 5'b0, byte@0038} and {byte@0039, byte@003A}
+        dbg_watch_pc <= {use_nz, tr_r800, tr_dram, 5'd0, dbg_m38};
+        dbg_watch_dc <= {dbg_m39, dbg_m3a};
 
         // ── PC TRAP ──────────────────────────────────────────────────────────
         // A Konami-mapper game executes in 4000-BFFF and calls BIOS in page 0
@@ -2173,11 +2182,16 @@ always_ff @(posedge clk21m) begin
         // WHO writes it: PC + data + count.  The legitimate init value is the
         // entry byte (I+1); only captures of OTHER values are interesting, but
         // count all writes so the init shows up as count=1.
+        //  Repurposed 2026-09-20 (the IM2-table hunt it was built for is closed):
+        //  the two watch rows now answer "which CPU is running, and how far has the
+        //  boot got".  A turbo R game rewrites the IM1 vector at 0038h from the BIOS
+        //  handler to its own, so those three bytes date the machine:
+        //     08 D9 F5  early boot     C3 3C 0C  BIOS ISR     C3 CD E6  game ISR
+        //  (values measured on openMSX FS-A1ST/GT running Illusion City).
         if (~mreq_n_d & mreq_n & ~wr_n_d) begin   // end of a memory write cycle
-            if (addr_d == {im2_tbl_hi, 8'h00}) begin
-                dbg_watch_pc <= t80_reg[79:64];
-                dbg_watch_dc <= {data_d, dbg_watch_dc[7:0] + 8'd1};
-            end
+            if (addr_d == 16'h0038) dbg_m38 <= data_d;
+            if (addr_d == 16'h0039) dbg_m39 <= data_d;
+            if (addr_d == 16'h003A) dbg_m3a <= data_d;
         end
         mreq_n_d <= mreq_n;
         wr_n_d   <= wr_n;
