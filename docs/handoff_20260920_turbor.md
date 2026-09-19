@@ -1,146 +1,155 @@
-# Handoff 20260920 — turbo R: three hardware fixes, two open
+# Handoff 20260920 — turbo R: four hardware fixes, BRAM reclaimed, three open
 
-Branch `nextz80` in `.claude/worktrees/readcache`, **12 commits ahead of
-origin/nextz80, not pushed**.  Predecessors: `handoff_20260918_cpuswap.md` (the
-peer's, the fuller narrative) and `handoff_20260918_session.md` (this machine's;
-its §7/§8 cover MULUB and the VDP spacing).
+Branch `nextz80` in `.claude/worktrees/readcache`, **well ahead of origin/nextz80,
+not pushed**.  Predecessors: `handoff_20260918_cpuswap.md` (the peer's narrative)
+and `handoff_20260918_session.md` (§7 MULUB, §8 VDP spacing and the T80s decision).
+Uncommitted files in this worktree that are NOT this session's:
+`docs/aso_bgm_opl2_alias_20260915.md`, `holdfast.txt`, `rec.txt`, `research/` —
+leave them, and `git add` by path.  Quartus rewrites `LAST_QUARTUS_VERSION` in
+MSX1.qsf on every build here (17.1 vs the peer's 17.0): `git checkout -- MSX1.qsf`
+after a build, never commit that line.
 
-## 0. What shipped today
+## 0. RBFs (all on the board, md5 verified by deploy.sh)
 
-| RBF | md5 | Contains |
+| RBF | md5 | Adds |
 |---|---|---|
-| `MSX1_20260919a_r800clk` | `f…`/see output_files | R800 speed ladder 7.16 / 21.5, OSD rows swap on the CPU selection |
-| `MSX1_20260919b_r800vdp` | `2c3934f5344d` | + VDP write spacing, fixed 10.1 us |
-| **`MSX1_20260920a_sdwrvdp`** | **`b300544613cc`** | + SD **write** pacing, spacing became an OSD dial (default 8.66 us) |
+| `20260919a_r800clk` | baaabdc3fc59 | R800 speed ladder 7.16 / 21.5 |
+| `20260919b_r800vdp` | 2c3934f5344d | VDP write spacing, fixed 10.1 us |
+| `20260920a_sdwrvdp` | b300544613cc | spacing as an OSD dial (default 8.66 us), SD write pacing (first version) |
+| `20260920b_prn90` | 482c27b63322 | printer status port 90h; SEED 7 |
+| `20260920c_bramrecl` | 2c3ecf4879b6 | IKASCC wavetables to MLAB (**M10K 391 -> 371**), rz80's SD queue, FM 49515 Hz |
+| `20260920d` | — | **build was launched from `67a7e1d` and its result was NOT checked** (user's instruction at handoff).  Log: scratchpad `build8.out`; nothing deployed |
 
-BUILDGATE PASS on all three.  20260920a: slow setup +0.165, fast hold +0.004,
-7/7 clock relations, ALM 77%, M10K 71%.
+`67a7e1d` contents (so whoever picks the build up knows what to verify): CPU Auto
+(O[119:118]), the `I`-token settled-CPU popup, forensics following the live core,
+the 0038h/CPU-mode watch rows, R#5/R#8 probes, and `syn_ramstyle` -> `ramstyle`.
 
-Board test assets, all under `games/MSX1/`:
-
-- `DSKS/PCMTEST.dsk` (md5 `c87930b69b3b`) — PCMPLY: four rates timed with the
-  E6h counter plus the BC=0 / VRAM / CTRL+STOP cases
-- `DSKS/MULUTEST.dsk` (`5050964194…`) — MULUB/MULUW conformance, self-checking
-- `DSKS/R800TIME.dsk` (`53d0db36…`) — per-path instruction cost
-- `MSX/Panasonic/Panasonic FS-A1GT.MSX` and `FS-A1ST.MSX` (+ RAM variants) —
-  from the peer: **real turbo R BIOS, so 002Dh really is 03** and the overlay's
-  forced version byte is no longer the only way to get a turbo R
+Board assets: `games/MSX1/DSKS/{PCMTEST,MULUTEST,R800TIME}.dsk`;
+`games/MSX1/MSX/Panasonic/Panasonic FS-A1GT*.MSX` and `FS-A1ST*.MSX` (peer's, real
+turbo R BIOS so 002Dh really is 03; ST has no MIDI, which makes it the cleaner
+test machine).  Test disks go in `DSKS/` only — do not invent directories.
 
 ## 1. Fixed and confirmed on hardware
 
-**MFRSD partition loss at speed.**  `cf405fa` paced SD *reads* against
-spi_divmmc; hardware still lost the partitions at T80s 21.5 MHz and the R800
-7.16 rung.  spi_divmmc ignores `tx` exactly as it ignores `rx`
-(`spi_divmmc.sv:27`), and an SD command is six bytes written back to back, so a
-dropped write malforms the command — which still surfaces as a read that cannot
-find the partitions, which is why reads had looked like the whole story.  Fixed
-by pacing writes too, through a new `sd_io_window` out of mfrsd (kept separate
-from `sd_card_data_en`, which `mem_unmaped` keys on).  Partitions now read at
-both speeds.
-
-**ASO's missing bands, and Z80BENCH's missing characters, were one bug.**
-A VDP port access cost 0.56 us here against 8.66 us on a real turbo R, so ASO's
-24-write split-screen return block took 0.2 raster lines instead of 3.4, and
-requests arrived inside the previous VRAM slot and were dropped.  Off-core proof
-(openMSX, everything held fixed but the spacing): the screen flips broken →
-correct between 4 and 6 us at a 10.74 MHz base, and the threshold rises with the
-speed of the surrounding code.  Now `Video settings → R800 VDP wait`,
-`O[77:75]`, eight steps, default 8.66 us, `use_nz` only.  On hardware: bands 0/0,
-characters clean, SCMD fine at both rungs, non-VDP paths untouched.
-
-**R800 speed ladder.**  NextZ80 ran straight off clk21m and the OSD speed steps
-never reached it.  `nz_bus` now takes a stage-advance enable: `O[70]` picks
-7.16 MHz (clk21m/3, the R800's own clock) or unpaced.  The Z80 and R800 ladders
-share one menu slot, swapped by menumask 13/14 on the CPU selection.
+1. **ASO's bands + Z80BENCH's lost characters = one bug, VDP write spacing.**
+   Detail in the 0918 session handoff §8.  Board sweep of the dial: 7.5 us fails at
+   the bottom, 8.66 us (default, the real machine's value) gives 0-1 bad lines,
+   9-10 us also fine, 10.1 us gives 2-3 flashing lines.  Z80BENCH is clean at 8.66.
+2. **MFRSD partition loss at speed.**  spi_divmmc drops `tx` exactly as it drops
+   `rx`; SD commands are six back-to-back writes (Nextor MMCCMD: 13 clk21m apart
+   at 21.5 MHz).  My WAIT-only fix (b34ab34) was hardware-confirmed and then
+   REPLACED by rz80's `c49ad5f` (queue in mfrsd + hold for reads and writes; bench
+   `sim/sdpace/run.sh`: old design 60 drops, new 0, stock fire train identical —
+   reproduced here).  One integration change: `cpu_turbo` -> `cpu_paced`, because
+   that commit predates the hand-over and would have left the R800 unpaced.
+   **The queue version has not been re-tested on hardware** (it is in 20260920c).
+3. **Printer status port 90h.**  Never decoded, so it read FFh = BUSY forever and
+   BIOS LPTSTT (08E1: `IN A,(90h) / RRCA / RRCA / CCF / SBC A,A`) callers spun.
+   Illusion City hung exactly there (board PC 08E4-08E7).  Now reads 00h, as
+   openMSX does.  Rule that came out of the peer's port census: an undecoded port
+   is only WRONG when the hardware is on the motherboard (90h, F3h-F7h); optional
+   cartridges (C0h MSX-AUDIO, 80h RS-232C, B8h lightpen, E8h MIDI) read FFh on a
+   real machine too and must stay that way.  F7h is read once by the turbo R BIOS
+   and its real value is unknown (openMSX does not model it).
+4. **R800 speed ladder + menumask 13/14** — hide (`H`) confirmed on hardware.
 
 ## 2. Open
 
-**ASO: no sprites at all, and 0-1 bad lines at the bottom.**  At 8.66 us the
-bands are right but **every sprite is gone** (not just the top field, corrected
-by the user).  The likely mechanism is in the peer's disassembly: the repoint
-block writes `R#8 = 2Ah` (bit 1 = SPD = sprites off) and the return block writes
-`R#8 = 28h` to turn them back on.  If the return's R#8 never takes effect, the
-whole frame runs with sprites disabled — which is exactly "all sprites missing".
-Board sweep so far: **7.5 us fails at the bottom**, 8.66 us gives bands 0/0 with
-0-1 bad lines at the bottom, 9-10 us also acceptable, 10.1 us gives 2-3 flashing
-lines.  So the bottom has an optimum near 8.66-9 and cannot go lower — but the
-**sprites are gone at every setting tried (7.5, 8.66, 10.1)**, which means the
-sprite loss is NOT a spacing effect and has to be a separate defect.
+**ASO shows no sprites at all** — on every CPU, clock and spacing tried, so it is
+independent of everything fixed above; the broken band was masking it.  The real
+R800 does show them (peer: forcing SPD wiped 26,652 px of enemy craft).  Reference
+values at the end of the return block: **R#8 = 28h (2Ah only during the panel),
+R#5 alternating BFh / B7h per frame (double-buffered attribute table), R#11 = 0**.
+Our attribute-address masking and terminator logic check out in the RTL
+(vdp_sprite.vhd:486, :537); SP_OFF is sampled once per line at DOTCOUNTERX=264
+(:363).  `67a7e1d` puts R#5/R#8 on the debug panel (rows that used to be R#9/R#19)
+— one ASO screenshot with the overlay on decides whether the registers or the
+sprite engine is at fault.
 
-Where to look: `vdp_sprite.vhd:363` samples `REG_R8_SP_OFF` once per line, at
-`DOTSTATE="01" AND DOTCOUNTERX = 256+8`, and that sample decides the next line.
-A late R#8 would cost some lines; losing every sprite in every frame looks more
-like R#8 never coming back to 28h at all.  The discriminator asked for: same
-build, **CPU = Z80**, does ASO show sprites?  Yes -> R800-path only (suspect the
-VDP wait's effect on the 99h byte-pair latch); no -> a pre-existing defect that
-the broken band was masking, and a different investigation.
+**Illusion City.**  Past the 90h gate it still does not start (black screen, no
+VDP write for 20 s).  The PC readings I reported after that (0039, spin FFFF) are
+NOT trustworthy: every dbg_* PC/SP/spin tap read T80s' register file, which is a
+frozen snapshot whenever NextZ80 has the bus, and this game settles in R800-ROM
+mode about 12 s in (peer's measured timeline: CHGCPU 01/00/.../81, game ISR
+`C3 CD E6` written to 0038h at t~7-12 s).  `67a7e1d` fixes the taps and adds the
+0038h bytes + CPU mode to the panel (rows 11/12: `{use_nz,r800,dram,00000,m38}` and
+`{m39,m3A}`; 3C0C = BIOS ISR, CDE6 = game ISR).  Also relevant: until `67a7e1d`
+the OSD **forced R800 at every boot** because the saved .CFG has bit 118 set;
+with a GT/ST pack that pre-empts the BIOS' own sequence.  First test on the new
+build: ST pack, CPU = Auto.
 
-**Illusion City stops in a 4-byte loop at 08E4-08E7.**  Panel decode of the
-board: every freeze detector dark (so the CPU is fetching, not halted), live PC
-08E7, IM 1 with I=00, R#0/R#1/R#2 = 06/62/1F (display on), and **no VDP register
-write for ~870 frames = 14.5 s** while the screen stays black.  Page 0 RAM, so a
-routine the game copied there.  Sent to the peer for a breakpoint on
-`illu_st`: what the loop reads, and what would let it out.  Note the pack used
-was not yet confirmed (ST pack vs the older MSX2+ pack + forced 002Dh).
+**Global reset is combinational out of an hps_io status bit** (MSX1.sv:
+`reset = RESET | reset_now | (reset_rq & ~status[64])`), so recovery is timed from
+the HPS register through the whole reset tree.  SEED 6 missed by -0.255 ns on
+`status[64] -> u_pcm ram_regs[2].d1r[0]`; SEED 7 passes (+1.24 / +2.84).  The real
+fix is a synchroniser on `reset`; it touches a global, so it needs the consumer
+survey the timing-change protocol asks for.  Not started.
 
-**002Dh and the 0180h overlay.**  Both still forced whenever the feature block is
-on.  The GT/ST packs change the context: with a real turbo R BIOS the forced
-version byte is unnecessary.  §2 of `handoff_20260918_session.md` has the detail;
-the 0180h overlay decision (do not use the five affected packs with the option
-on) stands.
+**Not done / parked:** PCMPLY still never called on hardware (PCMTEST.dsk is the
+program); `002Dh` gating (GT/ST packs make the forced byte unnecessary — decide
+whether to gate or drop); MOONSOUND_DIAG off (`301a68e` on rz80 — wait until the
+two investigations above stop needing the overlay); T80s VDP tuning (decided
+against, 0918 session §8.1); R800 throughput rung ~575% (superseded — the band
+needed spacing, not throughput).
 
-**PCMPLY** is built and benched but nothing has ever called it; `PCMTEST.dsk` is
-the program that would, with real-turbo-R reference numbers in §3 below.
+## 3. Block RAM / ALM
 
-## 3. Reference numbers worth keeping
+M10K 371/553 (67%), ALM 32,688 (78%) on 20260920c — **ALM is now the binding
+resource**, the reverse of the June study's premise (ALM 64% / M10K 95%).
 
-Per-instruction cost, `R800TIME.COM`, us/op (openMSX Panasonic_FS-A1GT is the
-real R800; ours is NextZ80 at the two rungs):
+- Recovered: IKASCC wavetables, `(* ramstyle = "MLAB" *)`, 20 M10K for 200 ALM.
+- `4790c6b` (PCM header/dyn -> MLAB) did NOTHING in 20260920c: the attribute was
+  `syn_ramstyle`, Synplify's spelling, which Quartus ignores without a warning
+  (u_pcm: 0 ALMs for memory, 7,505 registers).  Fixed in `67a7e1d`; judge it by the
+  u_pcm register count and "ALMs used for memory" in that build's fit.rpt.
+- Remaining clean candidates: `vdp_regprobe` 10 M10K (debug only), `systemRAM`
+  64 -> 32 KB = 32 M10K (gives up the no-SDRAM fallback).  The small OPL3/IKAOPLL
+  RAMs (32 M10K, all "Fits in MLABs = Yes") can move with two wildcard
+  `RAM_BLOCK_TYPE MLAB` qsf assignments for ~0.8 %p ALM — not applied.
+- VRAM (128 M10K) stays in BRAM: the VDP assumes single-cycle VRAM and this year's
+  timing work stands on that.
+- PCM ALM passes, re-ranked for today's resources (June study §1): 1a header/dyn
+  MLAB (in flight), **2** dead `calc_vol` + `byte_addr` x6 -> x2 + `eg_rate_shift_rom`
+  x3 CSE (all verified still unapplied; bit-exact, no risk), **1b** cache tags +
+  vld/hasb into the existing cache RAM (rated easy: one read site, one write site).
+  **1c `ram_regs` stays in flops** — checked in the RTL, not just taken from the
+  study: up to four independent read indices in one cycle (`ld_slot`, `hf_pick`,
+  `wr_snum`, `hf_cur_slot`), two same-cycle RMW writers with a combinational
+  forward between them (`wr_snum == hf_cur_slot`), field-wise partial updates from
+  an asynchronous CPU bus, a 24-way simultaneous `keyon` tap, and a broadcast clear.
 
-| | real R800 | ours 7.16 | ours 21.5 |
-|---|---|---|---|
-| NOP | 0.160 | 0.138 | 0.096 |
-| `LD A,(BC)` same DRAM page | 0.660 | 0.279 | 0.191 |
-| `LD A,(BC)` page cross / cache thrash | 1.167 | 0.838 | 0.612 |
-| `OUT (A0h),A` (PSG) | 1.649 | 0.564 | 0.555 |
-| `DJNZ $` | 0.441 | 0.240 | 0.163 |
+## 4. Reference numbers
 
-Two things fall out of that table.  We are faster on every path, but by 1.16x to
-2.93x depending on the path, so the *profile* is much flatter than a real R800's
-— and `OUT` barely moves with CPU speed (1.02x from 7.16 to 21.5), because I/O
-cost here is set by the bus guard, not the CPU.  That is why the VDP wait could
-be dialled without touching CPU speed.
+`R800TIME.COM`, us/op — real R800 (openMSX FS-A1GT) / ours 7.16 rung / ours 21.5:
+NOP 0.160 / 0.138 / 0.096; `LD A,(BC)` same page 0.660 / 0.279 / 0.191; page cross
+(cache thrash) 1.167 / 0.838 / 0.612; `OUT (A0h)` 1.649 / 0.564 / 0.555;
+`DJNZ $` 0.441 / 0.240 / 0.163.  Faster on every path but by 1.16x-2.93x, so the
+profile is flatter than a real R800's; `OUT` does not follow CPU speed (bus guard).
+A real turbo R spends 8.66 us per `LD A,n / OUT (99h),A` — the VDP wait.
 
-Z80BENCH 1.4.2: real R800 (FS-A1GT) = **575%, "20.59 MHz"**; ours = 921% at the
-7.16 rung, 1381% unpaced; T80s = 600% at 21.48 MHz, 100% stock.  Its "CPU Speed"
-line is Z80-equivalent throughput, not a clock.  Its R800 detection is purely
-`MULUB` flags at 1E26h — nothing reads the S1990 register.
+Z80BENCH 1.4.2: real R800 575% ("20.59 MHz" is Z80-equivalent throughput, not a
+clock); ours 921% / 1381%; T80s 600% at 21.48 MHz.  R800 detection = MULUB flags at
+1E26h only.  MULUTEST on the real R800: 9/9, F = 00/01/40/01/00 for the five MULUB
+cases (`01*00` must give Z), MULUW DE = high word.  PCMPLY rates 1 : 1.98 : 2.98 :
+3.97; the real BIOS plays the VRAM variant, ours returns at once.
 
-MULUB/MULUW on a real R800 (`MULUTEST.COM`, 9/9): `05*03`=000F F=00,
-`FF*FF`=FE01 F=01, `01*00`=0000 **F=40 (Z set — this one case is the whole of
-Z80BENCH's detection)**, `80*02`=0100 F=01, `11*0F`=00FF F=00, MULUW
-`1234*5678` = DE:HL 0626:0060, `FFFF*FFFF` = FFFE:0001, `HL,SP 0100*0234` =
-0002:3400, and `ED CB` must leave HL alone.
+MiSTer firmware source is at
+`/run/media/muhanpong/0eb4bebc-…/MiSTer_build/Main_MiSTer/` (READ ONLY).  Verified
+there: `I,msg1,msg2;` token at CONF_STR index >= 2, core pulses `info_req` with a
+1-based `info`, hps_io clears it on the read (`'h36`).
 
-PCMPLY on a real turbo R (`PCMTEST.COM`, 1000 samples): the four rates come out
-1 : 1.98 : 2.98 : 3.97 as they must; BC=0 returns at once; **the VRAM bit is
-implemented there and plays**, where ours returns immediately.
+## 5. Pitfalls from this session
 
-## 4. Pitfalls from this session
-
-- **BDOS destroys HL.**  `PCMTEST`'s `putc` did not preserve it, so `hex16`
-  printed a corrupted low byte after the high one — which read as "openMSX's E6h
-  low byte is stuck at 00" and sent me after an emulator bug that did not exist.
-  The peer's debugger dump cleared openMSX; the same program with an HL-preserving
-  `putc` (`R800TIME`) had been correct all along on both machines.  Fixed and
-  redeployed.  Any MSX-side measurement tool: save the value before you print it.
-- **The pause symbol in a screenshot proves nothing.**  Taking a screenshot
-  pauses the core, so every screenshot carries it.  Confirmed against a control
-  set from another day.
-- **The debug overlay panel is a serial port.**  Both stalls this session were
-  diagnosed from one PNG each: sample the centre of each cell, 39 rows, anchors
-  `ab_pc=042A` and `ppi_ctl=8102` to prove the decode is aligned.  `noM1` lit +
-  `WAIT` dark means the CPU stopped fetching; all detectors dark with a live PC
-  means it is spinning.
-- **An intermittent fault will hand you a passing run.**  SCMD was declared
-  closed on one good run; it was not.  See §7 of the 20260918 session handoff.
+- **Search the other branches before building anything.**  I rebuilt the SD write
+  pacing from scratch while `c49ad5f` — better, and benched — sat on `rz80`, and
+  memory had the pointer.  `rz80` also held the IKASCC and PCM MLAB commits.
+- **BDOS destroys HL.**  PCMTEST's `putc` did not save it, `hex16` printed a
+  corrupted low byte, and that read as "openMSX's E6h low byte is stuck".  It is
+  not; the peer's debugger dump cleared it.  R800TIME was always correct.
+- **Forensic taps must follow the running core** (see Illusion City above).
+- **`syn_ramstyle` is silently ignored by Quartus.**  Judge RAM inference by the
+  fit report, never by the attribute being present.
+- **The pause symbol in a screenshot proves nothing** (screenshots pause the core).
+- The debug panel decodes from a PNG: 39 rows, anchors `ab_pc=042A`, `ppi_ctl=8102`.
+  Run the decoder from a directory that has no `dis.py` in it.
+- An intermittent fault hands you a passing run (SCMD, 0918 session §7).
