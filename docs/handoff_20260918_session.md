@@ -34,7 +34,10 @@ just to confirm one the peer already ran.
   hang off it), and the peer's leftover post-map negative `T80s -> SCC falling edge
   -18.7 ns`, which hardware says was post-map pessimism.
 
-## 2. Two defects found here, neither fixed yet
+## 2. Two defects found here
+
+*(Resolution 2026-09-19 in §7: (b) is closed as "do not use those packs with
+the option On", no RTL change; (a) is still to be applied.)*
 
 **(a) `002Dh` = 03h is forced whenever the feature block is On, even with the Z80
 selected.**  This is the whole of the SCMD symptom, proven from the binary:
@@ -112,16 +115,22 @@ SP anyway.
 
 ## 5. Still open
 
-1. Apply the two fixes in §2.
-2. `CPU Type: Z80` — confirm how Z80BENCH probes.  If it reads S1990 register 6
-   bit 5 rather than needing `MULUB`, a bit is inverted and that IS a defect.
-3. SCMD's wrong sound is **not** explained by the E6h timer (§4) and not by PCM
-   (no core writes A4h/A5h).  What is left is that `CORER.SYS` is written for R800
-   cycle counts, and **NextZ80 is not cycle-compatible with the R800** — no patch
-   fixes that.  To confirm, record the same song on openMSX's real turbo R and on
-   our core and compare.
-4. `MULUB`/`MULUW`: **recommended to hold off.**  Making detection succeed only
-   routes more software onto R800 paths we cannot time correctly (see 3).
+*(Items 1-4 were closed or decided on 2026-09-19 — see §7.)*
+
+1. ~~Apply the two fixes in §2.~~  **Decided:** 2(a) `002Dh` gating still to do;
+   2(b) the `0180h` overlay will **not** be gated — the affected packs are simply
+   not to be used with Turbo R features On (§7).
+2. ~~`CPU Type: Z80`~~ — **answered, no defect.**  Z80BENCH 1.4.2 probes with
+   `MULUB`, not the S1990 register: at `1E26h` it does
+   `LD L,0 / XOR A / LD C,A / INC A / ED C9 (MULUB A,C) / RET NZ / INC L`.
+   `INC A` leaves NZ, so a Z80 (which runs `ED C9` as a NOP) returns L=0; only a
+   core whose MULUB sets Z on a zero result reaches `INC L`.  Reporting `Z80`
+   before MULUB existed was correct behaviour, not an inverted bit.
+3. ~~SCMD's wrong sound is R800 cycle counts, no patch fixes that.~~
+   **WRONG — retracted (§7).**  It was `MULUB`, and a patch did fix it.
+4. ~~`MULUB`/`MULUW`: recommended to hold off.~~  **Superseded (§7):** real
+   software already on our NextZ80 was executing them and silently getting
+   garbage, which outranks the detection argument.  Implemented in `abec124`.
 5. PCMPLY (0186h) is still a stub, but its prerequisite — CPU state export via
    `SWAPPT`/`REG`/`XREG` — now exists.  Design is in `rtl/peripheral/turbor/README.md`.
    PCMREC has no audio input and is not worth building.
@@ -147,3 +156,60 @@ SP anyway.
 - Post-map delays are 1.5-2x inflated, so post-map **slack** proves nothing.  Judge
   the **requirement**.
 - RBFs are never deleted, on the board or in the repo.
+
+---
+
+## 7. 2026-09-19 — SCMD closed: it was MULUB, and three decisions
+
+**Symptom.**  With Turbo R features On, `sc` printed its banner as far as
+`Master SCC CARTRIDGE SLOT1` and the machine stopped dead, not even the CRLF.
+Read out of one screenshot, so the method is worth keeping:
+
+- The coloured strip down the left is `debug_overlay.sv` under `MOONSOUND_DIAG`
+  (66 x 236 px, `status[48]`).  Sampling the centre of each cell in the PNG
+  recovers all 39 rows.  Anchors that prove the decode is aligned: `ab_pc=042A`
+  (BIOS init) and `ppi_ctl=8102` (MS=1, RV=0, ctrl=02h) — both the documented
+  healthy-boot values.
+- The signature was **noM1 latched, WAIT-stuck dim**: the CPU had stopped
+  fetching for >760 us without the bus ever holding WAIT.  That rules out a bus
+  or WAIT deadlock and rules out a runaway (which keeps M1 cycling).
+- The pause symbol top right is **not evidence**.  Taking a screenshot pauses
+  the core, so every screenshot the user has ever taken carries it at the same
+  coordinates; a control set from another day showed it on healthy gameplay.
+
+**Root cause, from the binaries.**
+1. The forced `002Dh = 03h` makes `SC.COM` (`0108h`: RDSLT 002Dh, `CP 3`,
+   `JP Z,0208h`) always load `CORER.SYS`, the R800 core.
+2. `CORER.SYS` alone — `CORE2.SYS`/`CORET.SYS` have neither — contains
+   `ED D9` (`MULUB A,E`) at 1538h, 1CFAh and 23D9h, inside a table-interpolation
+   routine (`SUB C / NEG / PUSH BC / MULUB A,E / LD C,H / LD B,0 / SBC HL,BC`).
+   It also wraps **every** BDOS call in CHGCPU: `2D1Dh` calls `0180h` through
+   CALSLT with A=80h (Z80) before `CALL 0005` and A=81h (R800) after — five
+   `LD IX,0180h` sites.
+3. NextZ80 decoded the whole `ED C0..FF` range as NOP (`nextz80cpu.v`
+   "ED + 2'b11 = NOP"), so MULUB was swallowed: HL kept its previous value and
+   the caller used the result as a pointer.
+
+**Fixed by `abec124`** (MULUB/MULUW).  Hardware, build `20260918c_mulubw`:
+`sc` runs to completion **and the music plays correctly**.  So the §5.3 claim
+that the wrong sound was R800 cycle timing and unfixable is retracted — it was
+a missing instruction all along.  Lesson, the same one as the SCC ch4 episode:
+do not close a divergence with a theory about why it cannot be fixed.
+
+**Three decisions taken with the user (2026-09-19).**
+
+1. **The `0180h-018Bh` overlay stays as it is.**  It does land on live BIOS code
+   in Daewoo CPC-300 / CPC-300E / CPC-400S, Canon V-8 and Sanyo CF-2700 (DE)
+   (§2b).  Rather than gate it, **those packs are not to be used with Turbo R
+   features On** — the option is an MSX2+/turbo R feature and none of them is
+   such a machine.  Nothing in the RTL changes; this note is the fix.
+2. `002Dh = 03h` gating (§2a) is still open and still wanted: in Z80 mode the
+   byte is a lie, the `CORET.SYS` (Panasonic) path is unreachable, and MSX1
+   packs get 03h where `SC.COM` would otherwise say "Do not operate in MSX1."
+3. PCMPLY parks the CPU with WAIT for the length of a run, so on any build that
+   contains it **`dbg_wait_stuck` latches whenever PCMPLY is used**.  The
+   diagnostic that cleared the bus in this very investigation is therefore no
+   longer trustworthy on those builds unless it is gated on the player's busy.
+
+**Still unverified:** PCMPLY itself.  `20260918d_pcmply` showed no regression,
+but nothing calls PCMPLY yet — a test program still has to be written.
