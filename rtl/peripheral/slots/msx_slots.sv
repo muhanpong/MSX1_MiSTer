@@ -63,7 +63,6 @@ module msx_slots
    //DEBUG
    output                   debug_FDC_req,
    output                   debug_sd_card,
-   output                   sd_io_window,
    output                   debug_erase,
    output                   debug_scc_wr,
    // ASCII16X flash info (for SDRAM-based save/load)
@@ -399,7 +398,6 @@ mapper_mfrsd3 mfrsd3
    .mapper_dout(mapper_mfrsd3_dout),
    .flash_rq(mapper_mfrsd3_flash_rq),
    .debug_sd_card(debug_sd_card),
-   .sd_io_window(sd_io_window),
    .*
 );
 

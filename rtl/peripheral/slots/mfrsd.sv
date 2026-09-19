@@ -225,18 +225,10 @@ module mapper_mfrsd3
    output       logic sd_tx,
    input        [7:0] d_from_sd,
    output             flash_rq,
-   output             debug_sd_card,
-   output             sd_io_window       // CPU read OR write of the SPI byte port -- the pacer's window
+   output             debug_sd_card
 );
 /*verilator tracing_off*/
 assign debug_sd_card = sd_card_data_en;
-//  spi_divmmc ignores BOTH rx and tx while a byte is in flight (spi_divmmc.sv:27
-//  `if(counter[4]) if(rx|tx)`), so writes need the same hold reads got: a command
-//  is six bytes written back to back, and a dropped one makes the command itself
-//  malformed -- which surfaces as "cannot read the partitions", not as a write
-//  fault, which is why the read-only pacer looked sufficient.  Kept separate from
-//  sd_card_data_en on purpose: mem_unmaped keys on that one.
-assign sd_io_window  = sd_card_en & cpu_mreq & (cpu_rd | cpu_wr);
 
 logic [7:0] bank[4];
 
