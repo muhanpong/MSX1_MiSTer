@@ -33,7 +33,12 @@
 //  A BLOCK instruction looks identical from the address bus -- LDIR re-fetches its
 //  own ED prefix once per byte -- and the first build of this trigger duly froze
 //  the ring on the BIOS clearing 3191 bytes of workspace at 7B78, throwing away
-//  the hang that came after it.  So the repeated opcode has to not be ED.
+//  the hang that came after it.  Telling them apart by the opcode BYTE failed on
+//  hardware: ED B0 is TWO M1 fetches, so at the repeat the last byte sampled is
+//  B0, not ED.  The addresses do tell them apart -- a two-byte opcode fetches
+//  addr+1 between repeats, while jr $ / jp $ / halt fetch the same address every
+//  time -- so that is the test.  HALT stays triggerable on purpose: with
+//  interrupts off it is a real wedge.
 //  TRIGGER: STORM RST 38h executions in a row with no interrupt acceptance
 //  between them -- a machine walking through FF-filled memory, which is how every
 //  hang captured on 2026-09-20 ends.  POST more events are then recorded, the ring
@@ -169,7 +174,7 @@ module evt_trace
          if (ev_kind == K_BR) begin
             br_last <= pc_bus;
             br_cnt  <= (pc_bus == br_last) ? br_cnt + 8'd1 : 8'd0;
-            if (!trig && (pc_bus == br_last) && (m1_op != 8'hED) && br_cnt == LOOPCNT - 8'd1) begin trig <= 1'b1; post <= POST; end
+            if (!trig && (pc_bus == br_last) && (m1_a != pc_bus + 16'd1) && br_cnt == LOOPCNT - 8'd1) begin trig <= 1'b1; post <= POST; end
          end
          if (ev_kind == K_INTA) depth <= 8'd0;              // a real interrupt: not a storm
          else if (ev_kind == K_R38) begin
