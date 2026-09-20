@@ -4,11 +4,20 @@
   Stock RAM is 256 KB (block_count is in 16 KB units: 16=256KB, 32=512KB, 64=1MB, 128=2MB, 256=4MB).
 
   Difference from the FS-A1GT pack: no MIDI interface and no PCM sampler on this
-  machine, MSX-MUSIC sits in slot 0-1 instead of 0-2, the firmware image is 2 MB
+  machine, the firmware image is 2 MB
   instead of 4 MB, and stock RAM is 256 KB.  Because the ST has no MIDI, its BIOS
   never touches I/O E8h-EBh — which the GT BIOS does from boot (E9h, 2811 reads in
   60 s, first at t=1.90 s before the game even loads).  That makes this pack the
   control group when a core without MIDI has to be told apart from other causes.
+
+
+  Slot 0-2 is MSX-MUSIC on BOTH machines, and on the ST that ROM is also what the
+  BIOS calls at 7900h during boot (blocks 62-63, +3900h = CD 0E 79 ...).  The GT
+  keeps that same routine in its Opening ROM in slot 0-3 instead (blocks 36-37,
+  +3900h).  The BIOS hard-codes the subslot: it writes 0FFFFh <- 08h on the ST
+  (page 1 -> subslot 2) and 0Ch on the GT (page 1 -> subslot 3), measured in
+  openMSX.  Put MSX-MUSIC anywhere else on the ST and that call fetches FFh =
+  RST 38 and the machine storms the interrupt vector.
 
   Slot layout follows openMSX share/machines/Panasonic_FS-A1ST.xml.  On the real
   machine every internal ROM lives in ONE image (fs-a1st_firmware.rom, 4 MB file
@@ -79,7 +88,7 @@
         <skip>327680</skip>
       </block>
     </secondary>
-    <secondary slot="1">
+    <secondary slot="2">
       <block start="1" id="MSX Music">
         <type>MSX-MUSIC</type>
         <block_count>1</block_count>
