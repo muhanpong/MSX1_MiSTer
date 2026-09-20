@@ -18,6 +18,7 @@ parameter DEV_OPL3           = dev_typ_t'(1 << 1);
 parameter DEV_RESET_STATUS   = dev_typ_t'(1 << 2);
 parameter DEV_MOONSOUND      = dev_typ_t'(1 << 3);
 parameter DEV_MATSUSHITA     = dev_typ_t'(1 << 4);   // Panasonic switched I/O 40H/41H (turbo)
+parameter DEV_MIDI           = dev_typ_t'(1 << 5);   // FS-A1GT built-in MSX-MIDI: E9h status only
 /*cart*/
 parameter DEV_SCC            = dev_typ_t'(1 << 8);
 parameter DEV_SCC2           = dev_typ_t'(1 << 9);

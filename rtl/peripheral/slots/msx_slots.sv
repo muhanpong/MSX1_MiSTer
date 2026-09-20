@@ -221,6 +221,7 @@ assign cpu_din          = mapper_ram_dout                        //IO
                         & psg_dout                               //IO (cart PSG read, port 12H)
                         & flash_dout
                         & d_to_cpu_reset_status                  //IO
+                        & d_to_cpu_midi                          //IO E9h (GT MSX-MIDI status)
                         & d_to_cpu_matsushita                    //IO 40H/41H
                         & (mem_unmaped  ? 8'hFF : ram_dout);
 
@@ -719,6 +720,15 @@ dev_reset_status dev_reset_status
    .cpu_addr(cpu_addr[7:0]),
    .cs(|(msx_device & DEV_RESET_STATUS)),
    .dout(d_to_cpu_reset_status),
+   .*
+);
+
+wire [7:0] d_to_cpu_midi;
+dev_midi dev_midi
+(
+   .cpu_addr(cpu_addr[7:0]),
+   .cs(|(msx_device & DEV_MIDI)),
+   .dout(d_to_cpu_midi),
    .*
 );
 

@@ -16,6 +16,10 @@
 //     IOW    OUT to  98h-9Bh, A8h, E4h/E5h, A5h/A7h, D0h-D7h  data = value written
 //     SWAP   use_nz changed                   data = new use_nz
 //     IFF    IFF1 changed                     data = new IFF1
+//     SUB    a write to FFFFh, the secondary slot register of whichever primary
+//            slot page 3 currently selects -- the other half of "which ROM is
+//            actually mapped", and the half an A8 log cannot show.  SUBR is a
+//            read of it (the BIOS reads it back complemented).
 //     RST38  an M1 fetch of the RST 38h vector, data+port = the PC of the
 //            instruction fetched just before it -- i.e. WHERE the runaway is
 //            executing.  A machine running off into FF-filled memory executes
@@ -23,6 +27,9 @@
 //            with IFF1 still set and no interrupt acceptance anywhere (board,
 //            2026-09-20: ISR body at 6.5 kHz, INTA 0, IFF1 1).
 //     RST    machine reset
+//  TRIGGER 2: the same opcode address fetched LOOPCNT times in a row -- a `jr $`
+//  style wedge, which is how SC.COM stops after its MAPPER SEGMENT scan (board,
+//  2026-09-20: 2D30 fetched every 1.5 us, interrupts off, the VDP IRQ pending).
 //  TRIGGER: STORM RST 38h executions in a row with no interrupt acceptance
 //  between them -- a machine walking through FF-filled memory, which is how every
 //  hang captured on 2026-09-20 ends.  POST more events are then recorded, the ring
@@ -54,8 +61,9 @@ module evt_trace
    input   [7:0] d_wr,          // data from the CPU
    input   [7:0] d_rd           // data to the CPU
 );
-   localparam [3:0]  K_INTA = 4'd1, K_IOR = 4'd2, K_IOW = 4'd3, K_SWAP = 4'd4, K_IFF = 4'd5, K_R38 = 4'd6, K_RST = 4'd7, K_BR = 4'd8;
+   localparam [3:0]  K_INTA = 4'd1, K_IOR = 4'd2, K_IOW = 4'd3, K_SWAP = 4'd4, K_IFF = 4'd5, K_R38 = 4'd6, K_RST = 4'd7, K_BR = 4'd8, K_SUB = 4'd9, K_SUBR = 4'd10;
    localparam [7:0]  STORM = 8'd8;
+   localparam [7:0]  LOOPCNT = 8'd64;
    localparam [10:0] POST = 11'd64;
 
    logic [27:0] tdiv = 28'd0;
@@ -74,8 +82,16 @@ module evt_trace
    //  the runaway's own PC, which names the FF-reading region.
    wire       m1_fetch = ~m1_n & ~mreq_n & ~rd_n;
    logic      m1f_q    = 1'b0;
-   logic [15:0] m1_a = 16'd0;
+   logic [15:0] m1_a = 16'd0, br_last = 16'd0;
+   logic  [7:0] br_cnt = 8'd0;
    wire       fetch_38 = m1_fetch & ~m1f_q & (pc_bus == 16'h0038);
+   //  Secondary slot register.  A memory cycle, so an I/O log never sees it, yet
+   //  it decides which subslot of an expanded primary answers a fetch: the board's
+   //  runaway began on a BIOS inter-slot call jumping to 7900h and reading FF
+   //  (2026-09-20), which is what an empty subslot looks like.
+   wire       sub_wr   = ~mreq_n & ~wr_n & (pc_bus == 16'hFFFF);
+   wire       sub_rd   = ~mreq_n & ~rd_n &  m1_n & (pc_bus == 16'hFFFF);
+   logic      subw_q = 1'b0, subr_q = 1'b0;
    //  Branch trace: an opcode fetch whose address is not 1..4 bytes past the
    //  previous one -- every jump, call, return and loop-back, and nothing else
    //  (no Z80 opcode is longer than four bytes).  A machine wedged in a loop that
@@ -103,6 +119,8 @@ module evt_trace
       if      (reset & ~rst_q)                  begin ev_kind = K_RST;  ev_data = 8'd0; end
       else if (fetch_38)                        begin ev_kind = K_R38;  ev_data = m1_a[7:0]; end
       else if (is_br)                           begin ev_kind = K_BR;   ev_data = pc_bus[7:0]; end
+      else if (sub_wr & ~subw_q)                begin ev_kind = K_SUB;  ev_data = d_wr; end
+      else if (sub_rd & ~subr_q)                begin ev_kind = K_SUBR; ev_data = d_rd; end
       else if (inta & ~inta_q)                  begin ev_kind = K_INTA; ev_data = {6'd0, ms_int_n, vdp_int_n}; end
       else if (iord_q & ~(io_rd & p_rd))        begin ev_kind = K_IOR;  ev_data = rd_val; end   // end of the read: value settled
       else if ((io_wr & p_wr) & ~iowr_q)        begin ev_kind = K_IOW;  ev_data = d_wr; end
@@ -120,6 +138,8 @@ module evt_trace
       iff_q  <= iff1;
       rst_q  <= reset;
       m1f_q  <= m1_fetch;
+      subw_q <= sub_wr;
+      subr_q <= sub_rd;
       if (m1_fetch & ~m1f_q) m1_a <= pc_bus;
       //  A read's address bus has often moved on by the time the cycle ends, which
       //  logged one S#0 read as "port 0D" (the low byte of the next fetch address).
@@ -140,6 +160,11 @@ module evt_trace
                  (ev_kind == K_BR)  ? pc_bus[15:8]  :
                  (ev_kind == K_IOR) ? rd_port       : a_lo, ev_data, sp, pc};
          ptr <= ptr + 11'd1;
+         if (ev_kind == K_BR) begin
+            br_last <= pc_bus;
+            br_cnt  <= (pc_bus == br_last) ? br_cnt + 8'd1 : 8'd0;
+            if (!trig && (pc_bus == br_last) && br_cnt == LOOPCNT - 8'd1) begin trig <= 1'b1; post <= POST; end
+         end
          if (ev_kind == K_INTA) depth <= 8'd0;              // a real interrupt: not a storm
          else if (ev_kind == K_R38) begin
             depth <= depth + 8'd1;

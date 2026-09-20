@@ -13,7 +13,7 @@ EXTENSIONS  =  ["NONE"          , "ROM"           , "RAM"          , "FDC"      
 
 MEM_DEVICE  =  ["NONE"          , "ROM"           , "RAM"          , "FDC"               ]
 
-DEVICE_TYPES = ["NONE"          , "KANJI"         , "OPL3"         , "RESET_STATUS"      , "MOONSOUND", "MATSUSHITA"    ]
+DEVICE_TYPES = ["NONE"          , "KANJI"         , "OPL3"         , "RESET_STATUS"      , "MOONSOUND", "MATSUSHITA"    , "MIDI"]
 
 CONFIG_TYPES = ["NONE"          , "FDC"           , "SLOT_A"       , "SLOT_B"           ,
                 "SLOT_INTERNAL" , "KBD_LAYOUT"    , "CONFIG"       , "DEVICE"            ]
