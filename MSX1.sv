@@ -676,7 +676,28 @@ save_guard u_save_guard
    .hold_load (hold_load)
 );
 
-wire reset = RESET | reset_now | (reset_rq & ~status[64]);
+//  `reset` used to be this expression straight out of hps_io: RESET and status[64]
+//  are HPS-written and asynchronous to clk21m, so both the WIDTH and the RELEASE
+//  EDGE of the machine reset depended on where the fitter happened to place a
+//  register three levels down (SEED 6 missed recovery by -0.255 ns on
+//  status[64] -> u_pcm).  Two consequences on hardware: a sub-clk21m glitch resets
+//  jt8255 (asynchronous) without the CPU (synchronous) noticing -- port A reverts
+//  to an input and every IN A,(A8) then reads 00, the self-erasing slot map
+//  (see the PPI witness in msx.sv) -- and different modules leave reset on
+//  different edges, which is what an intermittent boot looks like.
+//  So: two flops into clk21m, then a 63-cycle stretch (~3 us).  Every consumer
+//  (msx, msx_config, nvram_backup, flash_dirtysave, the PPI counter, cpu_applied)
+//  runs on clk21m, so all they see is a clean, wider pulse that ends on a clk21m
+//  edge; MoonSound's reset_ms is derived from this one and keeps its behaviour.
+wire reset_raw = RESET | reset_now | (reset_rq & ~status[64]);
+reg  [1:0] rst_meta = 2'b11;
+reg  [5:0] rst_hold = 6'h3F;
+always @(posedge clk21m) begin
+   rst_meta <= {rst_meta[0], reset_raw};
+   if (rst_meta[1])       rst_hold <= 6'h3F;
+   else if (|rst_hold)    rst_hold <= rst_hold - 6'd1;
+end
+wire reset = rst_meta[1] | (|rst_hold);
 
 //  OSD "CPU (turbo R)": applied through the S1990 (turbor set_stb) when the menu is
 //  closed and the choice differs from the last one applied, so software (OUT E5h,
