@@ -22,7 +22,9 @@ The machine packs are the **peer session's** work (`msx1-mister-sonydos2-55`, br
 | `20260920k_stormtrig` | d2d0dc9a2bbd | trigger on 8 RST 38 in a row |
 | `20260920l_a7fix` | 9d75effe9e43 | A7h decoded with the features off |
 | `20260920n_midi` | dae6123ef33d | **MSX-MIDI status stub** (dev_midi) |
-| `20260920o_blockfix` | 0b508b333255 | block-instruction exclusion, **first attempt — does not work**, see §4 |
+| `20260920o_blockfix` | 0b508b333255 | block-instruction exclusion by opcode byte, **does not work**, see §4 |
+| `20260920p_blkaddr` | 9b9587489183 | same by ADDRESS — works for LDIR, then froze on the RAM search |
+| `20260920q_loopfold` | (see §2) | loops folded to one word, wedge trigger by TIME |
 
 ## 1. Fixed and confirmed
 
@@ -81,9 +83,28 @@ Board now: GT stock b3d1e178…, ST stock 7c0be268….  A backup of the previous
 
 ## 2. Still open
 
-**Illusion City hangs on GT and ST**, reproducible.  Not yet located: every capture
-so far froze the ring on the BIOS workspace LDIR (§4), which is 0.3 ms after reset
-and long before the hang.
+**Illusion City hangs on GT and ST**, reproducible.  Not yet located.  Three
+captures, three false freezes, each one a lesson about the instrument rather than
+the bug:
+
+1. the BIOS workspace LDIR at 7B78 (opcode-byte exclusion, §4);
+2. the same LDIR again (the byte test does not work on hardware: ED B0 is two M1
+   fetches, so the byte sampled at the repeat is B0);
+3. (ST 1 MB pack, Illusion City disk 1) the turbo R BIOS **RAM-size search at
+   7D60** — `LD A,(HL)/CPL/LD (HL),A/CP (HL)/CPL/LD (HL),A/JR NZ/INC L/JR NZ`,
+   68 T-states = 19.0 us, matching the dump's 18.6/19.4 exactly, walking EF00
+   down to 8000: **one address fetched 28672 times over 545 ms while making
+   perfect progress**.  Everything before it in that ring was a healthy boot
+   (7B78 LDIR, the A8 = 00/40/80/C0/F0 slot scan with FFFF read back
+   complemented, a second LDIR at 7C84) and the screen showed the machine had
+   run on well past it.
+
+So a repeat count cannot find a wedge at all, and the ring was being spent on
+loops.  Both are fixed in `20260920q_loopfold`: loops are folded to one word with
+a count, and the wedge trigger is TIME — one branch target held unbroken for ~2 s
+(the 545 ms search is the longest legal run known; a 64 KB LDIR is 440 ms).
+Verified in `tools/evtrace/tb_evt.sv`, six cases including the RAM search, which
+must not trigger.
 
 **SC.COM stops after `MAPPER SEGMENT`** with a self-loop at 2D30 (1.5 us per fetch,
 interrupts off, VDP IRQ pending, SP 2762 fixed).  2D30 is in DOS RAM, so the opcode
@@ -115,23 +136,31 @@ interrupt lines:
 | `SWAP` | `use_nz` changed (Z80 <-> R800) |
 | `IFF` | IFF1 changed |
 | `RST` | machine reset (re-arms the triggers, keeps the ring) |
+| `LOOP` | a folded loop ending here: its address and its repeat count |
+
+Loops are folded: after 8 fetches of one branch target the recorder stops storing
+that loop — repeats and the port traffic inside it — and writes a single `LOOP`
+word with the count when something else breaks it.  2000 LDIR iterations cost 11
+ring words instead of 2000, so the ring spans seconds rather than milliseconds.
 
 Triggers freeze the ring and write a marker so the dump keeps the ~2000 events
-BEFORE the event: 8 RST 38 in a row (storm), or the same address fetched 64 times
-(wedge).  Without a trigger the ring holds only the last few ms — a VRAM fill or a
-runaway floods it.
+BEFORE the event: 8 RST 38 in a row (storm), or one branch target held unbroken
+for ~2 s (wedge).  The wedge unfolds on firing, so the last 64 words are the wedge
+itself.
 
 ## 4. Read this before trusting a capture
 
-- **A block instruction is not a wedge.**  `LDIR` re-fetches its own ED prefix once
-  per byte, so on the address bus it is indistinguishable from `jr $`.  The loop
-  trigger froze on the BIOS clearing 3191 bytes at 7B78 (20.6 ms; hardware 6.7 us
-  per iteration, openMSX 6.45 — the board was perfectly healthy) and threw away the
-  hang after it.  **Excluding by opcode byte does not work**: ED B0 is TWO M1
-  fetches, so at the repeat the last byte sampled is B0.  The fix in flight uses the
-  ADDRESSES: a two-byte opcode fetches addr+1 between repeats, `jr $`/`jp $`/`halt`
-  fetch the same address every time.  HALT must stay triggerable — with interrupts
-  off it is a real wedge.
+- **A repeat count cannot find a wedge — only time can.**  Three builds died on
+  this.  `LDIR` re-fetches its own ED prefix once per byte, so on the address bus it
+  is indistinguishable from `jr $`; the first trigger froze on the BIOS clearing
+  3191 bytes at 7B78 (20.6 ms; hardware 6.7 us per iteration, openMSX 6.45 — the
+  board was perfectly healthy).  **Excluding by opcode byte does not work**: ED B0
+  is TWO M1 fetches, so at the repeat the last byte sampled is B0.  Excluding by
+  ADDRESS (a two-byte opcode fetches addr+1 between repeats) does work for block
+  instructions — and then froze on the **RAM-size search at 7D60**, a single
+  address repeated 28672 times while making progress.  The test that survives is
+  TIME: no legal loop holds one branch target for seconds.  HALT with interrupts
+  off still trips it, which is right.
 - **The IOW/IOR event PC is the PC after the instruction**, one instruction ahead of
   a disassembly.  042B reads as 042D, 7B66 as 7B68.  Subtract before comparing.
 - **Count event kinds by token, not by column** — a `BR`/`INTA` line has a trailing

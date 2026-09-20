@@ -27,18 +27,28 @@
 //            with IFF1 still set and no interrupt acceptance anywhere (board,
 //            2026-09-20: ISR body at 6.5 kHz, INTA 0, IFF1 1).
 //     RST    machine reset
-//  TRIGGER 2: the same opcode address fetched LOOPCNT times in a row -- a `jr $`
-//  style wedge, which is how SC.COM stops after its MAPPER SEGMENT scan (board,
-//  2026-09-20: 2D30 fetched every 1.5 us, interrupts off, the VDP IRQ pending).
-//  A BLOCK instruction looks identical from the address bus -- LDIR re-fetches its
-//  own ED prefix once per byte -- and the first build of this trigger duly froze
-//  the ring on the BIOS clearing 3191 bytes of workspace at 7B78, throwing away
-//  the hang that came after it.  Telling them apart by the opcode BYTE failed on
-//  hardware: ED B0 is TWO M1 fetches, so at the repeat the last byte sampled is
-//  B0, not ED.  The addresses do tell them apart -- a two-byte opcode fetches
-//  addr+1 between repeats, while jr $ / jp $ / halt fetch the same address every
-//  time -- so that is the test.  HALT stays triggerable on purpose: with
-//  interrupts off it is a real wedge.
+//  LOOPS are folded, and that is what makes the ring long enough to be useful.
+//  After LOOPIN fetches of one branch target the recorder stops storing that loop
+//  -- its repeats AND the port traffic inside it -- and only counts; when some
+//  other branch target (or an interrupt) finally breaks it, ONE K_LOOP word goes
+//  in carrying the address and the repeat count.  Without this a single LDIR or a
+//  polling loop overwrites the whole 2048-word ring in milliseconds and the dump
+//  says nothing about how the CPU got there.
+//
+//  TRIGGER 2, the wedge: one branch target, unbroken, for WEDGE_T -- TIME, not a
+//  repeat count.  Counting cannot tell a wedge from a loop that is working:
+//    * LDIR re-fetches its own ED prefix once per byte, so on the address bus it
+//      is indistinguishable from `jr $` (a byte test fails too -- ED B0 is TWO M1
+//      fetches, so the last byte sampled at the repeat is B0, not ED).  The first
+//      build of this trigger froze on the BIOS clearing 3191 bytes at 7B78.
+//    * an ADDRESS test (a two-byte opcode fetches addr+1 between repeats) fixed
+//      that one and then froze, on the board, on the turbo R BIOS RAM-size search
+//      at 7D60 -- LD A,(HL)/CPL/LD (HL),A/CP (HL)/.../INC L/JR NZ, one address
+//      repeated 28672 times over 545 ms while making perfect progress.
+//  No legal loop holds one target for seconds: the longest measured are that
+//  search (545 ms) and a full 64 KB LDIR (440 ms at 3.58 MHz).  A wedge holds it
+//  forever, so ~2 s separates them with a 4x margin and costs 2 s of latency.
+//  HALT is still caught: with interrupts off it fetches its own address forever.
 //  TRIGGER: STORM RST 38h executions in a row with no interrupt acceptance
 //  between them -- a machine walking through FF-filled memory, which is how every
 //  hang captured on 2026-09-20 ends.  POST more events are then recorded, the ring
@@ -49,6 +59,7 @@
 //  Word layout:
 //     15:0 PC   31:16 SP   39:32 data   47:40 port (a[7:0])   51:48 kind
 //     52 use_nz  53 iff1  54 vdp_int_n  55 ms_int_n   79:56 time, 16 clk21m per tick
+//     K_LOOP: 15:0 the loop's address, 47:32 the repeat count, time = when it ended
 //     marker: all ones
 module evt_trace
 (
@@ -70,9 +81,10 @@ module evt_trace
    input   [7:0] d_wr,          // data from the CPU
    input   [7:0] d_rd           // data to the CPU
 );
-   localparam [3:0]  K_INTA = 4'd1, K_IOR = 4'd2, K_IOW = 4'd3, K_SWAP = 4'd4, K_IFF = 4'd5, K_R38 = 4'd6, K_RST = 4'd7, K_BR = 4'd8, K_SUB = 4'd9, K_SUBR = 4'd10;
+   localparam [3:0]  K_INTA = 4'd1, K_IOR = 4'd2, K_IOW = 4'd3, K_SWAP = 4'd4, K_IFF = 4'd5, K_R38 = 4'd6, K_RST = 4'd7, K_BR = 4'd8, K_SUB = 4'd9, K_SUBR = 4'd10, K_LOOP = 4'd11;
    localparam [7:0]  STORM = 8'd8;
-   localparam [7:0]  LOOPCNT = 8'd64;
+   localparam [15:0] LOOPIN = 16'd8;            // repeats stored before a loop is folded
+   localparam [25:0] WEDGE_T = 26'd43_000_000;  // ~2.0 s at 21.48 MHz: one target that long is a wedge
    localparam [10:0] POST = 11'd64;
 
    logic [27:0] tdiv = 28'd0;
@@ -93,7 +105,6 @@ module evt_trace
    logic      m1f_q    = 1'b0;
    logic [15:0] m1_a = 16'd0, br_last = 16'd0;
    logic  [7:0] m1_op = 8'd0;       // the byte of the fetch in progress
-   logic  [7:0] br_cnt = 8'd0;
    wire       fetch_38 = m1_fetch & ~m1f_q & (pc_bus == 16'h0038);
    //  Secondary slot register.  A memory cycle, so an I/O log never sees it, yet
    //  it decides which subslot of an expanded primary answers a fetch: the board's
@@ -118,6 +129,14 @@ module evt_trace
    logic [10:0] post = 11'd0, ptr = 11'd0, wa = 11'd0;
    logic        we = 1'b0;
    logic [79:0] wd = 80'd0;
+   //  Loop folding.  in_loop: the recorder is inside a loop it has stopped storing;
+   //  rep counts its repeats; run_t times it, and is cleared by a branch anywhere
+   //  else.  pend holds the event that broke a loop, written the clock after the
+   //  K_LOOP summary (events are never closer than a memory cycle, ~6 clk21m).
+   logic        in_loop = 1'b0, pend = 1'b0;
+   logic [15:0] rep     = 16'd0;
+   logic [25:0] run_t   = 26'd0;
+   logic [79:0] pend_wd = 80'd0;
 
    //  At most one event per clock is kept; the priorities only matter when two
    //  coincide, which the bus does not allow for the pairs that matter.
@@ -138,6 +157,20 @@ module evt_trace
       else if (iff1 != iff_q)                   begin ev_kind = K_IFF;  ev_data = {7'd0, iff1}; end
       else                                      ev = 1'b0;
    end
+
+   wire [79:0] norm_wd = {now, ms_int_n, vdp_int_n, iff1, use_nz, ev_kind,
+                          (ev_kind == K_R38) ? m1_a[15:8]  :
+                          (ev_kind == K_BR)  ? pc_bus[15:8] :
+                          (ev_kind == K_IOR) ? rd_port      : a_lo, ev_data, sp, pc};
+   wire [79:0] loop_wd = {now, ms_int_n, vdp_int_n, iff1, use_nz, K_LOOP, rep, sp, br_last};
+
+   wire br_ev   = ev & (ev_kind == K_BR);
+   wire br_same = br_ev & (pc_bus == br_last);
+   //  What belongs to a folded loop: its own repeats and the port traffic inside
+   //  it.  An interrupt, a slot switch or a branch anywhere else ends it.
+   wire quiet   = (ev_kind == K_IOR) | (ev_kind == K_IOW) | (ev_kind == K_SUB) | (ev_kind == K_SUBR);
+   wire hush    = in_loop & ev & (br_same | quiet);
+   wire lp_end  = in_loop & ev & ~hush & ~reset;
 
    always_ff @(posedge clk) begin
       we     <= 1'b0;
@@ -160,21 +193,50 @@ module evt_trace
       if (reset) begin                                  // re-arm, keep the ring
          trig <= 1'b0; stopped <= 1'b0; marked <= 1'b0; post <= 11'd0;
          depth <= 8'd0; sp_last <= 16'hFFFF;
+         in_loop <= 1'b0; rep <= 16'd0; pend <= 1'b0;
       end
+
+      //  The wedge timer runs only inside a folded loop and is cleared by a branch
+      //  to any other target.  It measures "one target, unbroken", which is the
+      //  only thing that separates a wedge from a loop doing its job.
+      if (reset | (br_ev & ~br_same)) run_t <= 26'd0;
+      else if (in_loop)               run_t <= run_t + 26'd1;
+
       if (stopped & ~reset) begin
          if (!marked) begin marked <= 1'b1; we <= 1'b1; wa <= ptr; wd <= {80{1'b1}}; end
+      end else if (pend) begin                           // the event that broke a loop
+         we <= 1'b1; wa <= ptr; wd <= pend_wd; ptr <= ptr + 11'd1; pend <= 1'b0;
+         if (trig) begin
+            if (post == 11'd1) stopped <= 1'b1;
+            post <= post - 11'd1;
+         end
+      end else if (lp_end) begin                         // one word for the whole loop
+         we <= 1'b1; wa <= ptr; wd <= loop_wd; ptr <= ptr + 11'd1;
+         in_loop <= 1'b0; rep <= 16'd0;
+         pend <= 1'b1; pend_wd <= norm_wd;
+         if (br_ev) br_last <= pc_bus;
+         if (ev_kind == K_INTA) depth <= 8'd0;
+         else if (ev_kind == K_R38) begin
+            depth <= depth + 8'd1;
+            if (!trig && depth == STORM - 8'd1) begin trig <= 1'b1; post <= POST; end
+         end
+         if (trig) begin
+            if (post == 11'd1) stopped <= 1'b1;
+            post <= post - 11'd1;
+         end
+      end else if (hush) begin                           // inside a folded loop: count only
+         if (br_same && rep != 16'hFFFF) rep <= rep + 16'd1;
       end else if (ev) begin
          we  <= 1'b1;
          wa  <= ptr;
-         wd  <= {now, ms_int_n, vdp_int_n, iff1, use_nz, ev_kind,
-                 (ev_kind == K_R38) ? m1_a[15:8]   :
-                 (ev_kind == K_BR)  ? pc_bus[15:8]  :
-                 (ev_kind == K_IOR) ? rd_port       : a_lo, ev_data, sp, pc};
+         wd  <= norm_wd;
          ptr <= ptr + 11'd1;
-         if (ev_kind == K_BR) begin
+         if (br_ev) begin
             br_last <= pc_bus;
-            br_cnt  <= (pc_bus == br_last) ? br_cnt + 8'd1 : 8'd0;
-            if (!trig && (pc_bus == br_last) && (m1_a != pc_bus + 16'd1) && br_cnt == LOOPCNT - 8'd1) begin trig <= 1'b1; post <= POST; end
+            if (br_same) begin
+               rep <= rep + 16'd1;
+               if (!trig && rep >= LOOPIN - 16'd1) in_loop <= 1'b1;
+            end else rep <= 16'd0;
          end
          if (ev_kind == K_INTA) depth <= 8'd0;              // a real interrupt: not a storm
          else if (ev_kind == K_R38) begin
@@ -185,6 +247,12 @@ module evt_trace
             if (post == 11'd1) stopped <= 1'b1;
             post <= post - 11'd1;
          end
+      end
+
+      //  Last word: once the wedge fires, unfold, so the POST events store the
+      //  wedge itself at the tail of the dump, and never fold again.
+      if (!trig && in_loop && run_t == WEDGE_T) begin
+         trig <= 1'b1; post <= POST; in_loop <= 1'b0; rep <= 16'd0;
       end
    end
 
