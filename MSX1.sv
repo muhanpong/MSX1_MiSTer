@@ -602,7 +602,15 @@ wire        msx_turbo_req;          // from msx.sv <- msx_slots <- dev_matsushit
 //  0x...  bits 49,50,55,59 = 1).  56/57/58 are 0 there, so an un-updated CFG
 //  lands on speed 0 = 3.58 MHz, which is the safe default.
 wire  [2:0] cpu_speed_sel = (status[58:56] > 3'd4) ? 3'd4 : status[58:56];
-wire  [2:0] cpu_speed_osd = (msx_turbo_req & cpu_speed_sel == 3'd0) ? 3'd1 : cpu_speed_sel;
+//  ...but NOT on a turbo R.  The GT/ST packs declare DEV_MATSUSHITA because the
+//  machine really does carry the switched device on 40H/41H (firmware switch,
+//  kanji) -- what it does NOT carry is the 5.37 MHz turbo: a turbo R changes
+//  CPUs instead.  Its firmware still writes 41H, so bit 0 landed in the turbo
+//  request and Z80BENCH measured a GT pack's Z80 at 5.36 MHz with the OSD set to
+//  3.58 (board, 2026-09-20).  Gate the request on turbo R features being off, so
+//  an MSX2+ Panasonic pack keeps the port turbo and a turbo R pack does not.
+wire        turbor_en    = status[117];
+wire  [2:0] cpu_speed_osd = (msx_turbo_req & ~turbor_en & cpu_speed_sel == 3'd0) ? 3'd1 : cpu_speed_sel;
 
 //  Two CPUs, one bus, no reset between them (rtl/cpu/cpuswap, msx.sv): T80s at
 //  every speed, NextZ80 as the turbo R's R800.  While NextZ80 owns the bus the
@@ -875,7 +883,7 @@ msx MSX
    .cpu_speed_q(cpu_speed_q),
    .cpu_bus_idle(cpu_bus_idle),
    .msx_turbo_req(msx_turbo_req),
-   .turbor_en(status[117]),
+   .turbor_en(turbor_en),
    .turbor_pause(turbor_pause),
    .sdram_rdtog(sdram_rdtog),
    .sdram_hit(sdram_hit),

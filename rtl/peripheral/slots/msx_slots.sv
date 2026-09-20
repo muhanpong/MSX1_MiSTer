@@ -138,12 +138,22 @@ assign sound = (snd_sum > 19'sd32767)  ? 16'sh7FFF :
 assign debug_FDC_req = FDC_req;
 
 logic [7:0] mapper_slot[4];
-wire mapper_en, mapper_rd;
+wire mapper_en, mapper_rd, mapper_wr;
 wire [7:0] slot_mapper_dout;
 wire [7:0] yamanooto_dout = mapper_yamanooto_dout_en ? mapper_yamanooto_dout : 8'hFF;
 
 assign mapper_en = (cpu_addr == 16'hFFFF & bios_config.slot_expander_en[active_slot] & mapper_mask[active_slot] & cpu_mreq );
 assign mapper_rd =  mapper_en & cpu_rd;
+//  A write to 0FFFFh in an expanded slot latches the subslot register and must
+//  go NOWHERE ELSE: the expander decodes the address and the selected subslot's
+//  memory is not written.  Without this term mem_unmaped stayed 0 for writes, so
+//  sdram_ce/ram_rnw also committed the byte to memory -- for a page-3 RAM block
+//  that is byte 3FFFh of whatever mapper segment is in page 3, silently rewritten
+//  by every ENASLT/RDSLT/CALSLT (thousands per second under DOS 2) and read back
+//  wrong the moment that same segment is viewed through page 0, 1 or 2.
+//  Confirmed against openMSX by sentinel (peer session, 2026-09-20): a byte
+//  planted under CPU 0FFFFh survived 10,619 FFFFh writes unchanged.
+assign mapper_wr =  mapper_en & cpu_wr;
 assign slot_mapper_dout  =  mapper_rd ? ~mapper_slot[active_slot] : 8'hFF;
 always @(posedge clk) begin
    if (reset) begin
@@ -244,7 +254,8 @@ wire mem_unmaped = mapper_konami_unmaped     |
                    mapper_yamanooto_unmaped  |
                    mapper_msxdos2_unmaped    | 
                    mapper_halnote_unmaped    | 
-                   mapper_rd                 | 
+                   mapper_rd                 |
+                   mapper_wr                 |
                    FDC_req                   |
                    flash_rq                  ;
                    

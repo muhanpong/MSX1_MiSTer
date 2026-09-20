@@ -9,8 +9,12 @@
 //  0038h.  The debug panel only keeps LAST values, so it shows the wreck and never
 //  the first nested interrupt.  This keeps the order.
 //
-//  One 80-bit word per EVENT (not per clock), into a 2048-word ring that runs from
-//  configuration and wraps:
+//  One 80-bit word per EVENT (not per clock), into an 8192-word ring that runs from
+//  configuration and wraps.  2048 was the original depth and it held 24 ms of a
+//  machine emitting ~10^5 events a second -- far less than the distance between a
+//  hang and its cause.  Loop folding bought 4x of that; this buys another 4x, and
+//  costs 48 more M10K out of 166 spare.  Time span, measured on the board: 24 ms
+//  at 2048 unfolded, 103 ms at 2048 folded.
 //     INTA   an interrupt acceptance          data = {6'b0, ms_int_n, vdp_int_n}
 //     IOR    IN  from 98h-9Bh, C4h, A5h/A7h, D0h-D7h (FDC)  data = value read
 //     IOW    OUT to  98h-9Bh, A8h, E4h/E5h, A5h/A7h, D0h-D7h  data = value written
@@ -85,7 +89,7 @@ module evt_trace
    localparam [7:0]  STORM = 8'd8;
    localparam [15:0] LOOPIN = 16'd8;            // repeats stored before a loop is folded
    localparam [25:0] WEDGE_T = 26'd43_000_000;  // ~2.0 s at 21.48 MHz: one target that long is a wedge
-   localparam [10:0] POST = 11'd64;
+   localparam [12:0] POST = 13'd64;
 
    logic [27:0] tdiv = 28'd0;
    wire  [23:0] now  = tdiv[27:4];
@@ -126,7 +130,7 @@ module evt_trace
    logic [15:0] sp_last = 16'hFFFF;
    logic [7:0]  depth = 8'd0;
    logic        trig = 1'b0, stopped = 1'b0, marked = 1'b0;
-   logic [10:0] post = 11'd0, ptr = 11'd0, wa = 11'd0;
+   logic [12:0] post = 13'd0, ptr = 13'd0, wa = 13'd0;
    logic        we = 1'b0;
    logic [79:0] wd = 80'd0;
    //  Loop folding.  in_loop: the recorder is inside a loop it has stopped storing;
@@ -191,7 +195,7 @@ module evt_trace
       if (io_rd & p_rd) begin rd_val <= d_rd; if (~iord_q) rd_port <= a_lo; end
 
       if (reset) begin                                  // re-arm, keep the ring
-         trig <= 1'b0; stopped <= 1'b0; marked <= 1'b0; post <= 11'd0;
+         trig <= 1'b0; stopped <= 1'b0; marked <= 1'b0; post <= 13'd0;
          depth <= 8'd0; sp_last <= 16'hFFFF;
          in_loop <= 1'b0; rep <= 16'd0; pend <= 1'b0;
       end
@@ -205,13 +209,13 @@ module evt_trace
       if (stopped & ~reset) begin
          if (!marked) begin marked <= 1'b1; we <= 1'b1; wa <= ptr; wd <= {80{1'b1}}; end
       end else if (pend) begin                           // the event that broke a loop
-         we <= 1'b1; wa <= ptr; wd <= pend_wd; ptr <= ptr + 11'd1; pend <= 1'b0;
+         we <= 1'b1; wa <= ptr; wd <= pend_wd; ptr <= ptr + 13'd1; pend <= 1'b0;
          if (trig) begin
-            if (post == 11'd1) stopped <= 1'b1;
-            post <= post - 11'd1;
+            if (post == 13'd1) stopped <= 1'b1;
+            post <= post - 13'd1;
          end
       end else if (lp_end) begin                         // one word for the whole loop
-         we <= 1'b1; wa <= ptr; wd <= loop_wd; ptr <= ptr + 11'd1;
+         we <= 1'b1; wa <= ptr; wd <= loop_wd; ptr <= ptr + 13'd1;
          in_loop <= 1'b0; rep <= 16'd0;
          pend <= 1'b1; pend_wd <= norm_wd;
          if (br_ev) br_last <= pc_bus;
@@ -221,8 +225,8 @@ module evt_trace
             if (!trig && depth == STORM - 8'd1) begin trig <= 1'b1; post <= POST; end
          end
          if (trig) begin
-            if (post == 11'd1) stopped <= 1'b1;
-            post <= post - 11'd1;
+            if (post == 13'd1) stopped <= 1'b1;
+            post <= post - 13'd1;
          end
       end else if (hush) begin                           // inside a folded loop: count only
          if (br_same && rep != 16'hFFFF) rep <= rep + 16'd1;
@@ -230,7 +234,7 @@ module evt_trace
          we  <= 1'b1;
          wa  <= ptr;
          wd  <= norm_wd;
-         ptr <= ptr + 11'd1;
+         ptr <= ptr + 13'd1;
          if (br_ev) begin
             br_last <= pc_bus;
             if (br_same) begin
@@ -244,8 +248,8 @@ module evt_trace
             if (!trig && depth == STORM - 8'd1) begin trig <= 1'b1; post <= POST; end
          end
          if (trig) begin
-            if (post == 11'd1) stopped <= 1'b1;
-            post <= post - 11'd1;
+            if (post == 13'd1) stopped <= 1'b1;
+            post <= post - 13'd1;
          end
       end
 
@@ -258,7 +262,7 @@ module evt_trace
 
    altsyncram #(
       .operation_mode("SINGLE_PORT"),
-      .width_a(80), .widthad_a(11), .numwords_a(2048),
+      .width_a(80), .widthad_a(13), .numwords_a(8192),
       .outdata_reg_a("UNREGISTERED"),
       .lpm_hint("ENABLE_RUNTIME_MOD=YES, INSTANCE_NAME=EVTR"),
       .lpm_type("altsyncram")
