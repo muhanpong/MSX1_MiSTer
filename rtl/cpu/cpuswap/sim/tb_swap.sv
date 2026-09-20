@@ -91,6 +91,7 @@ end
 
 //  ---------------------------------------------------------------- interrupt
 logic int_req = 1'b0;
+logic [31:0] iff_hist = 0; logic inta_q = 1'b0; int unsigned intas = 0, di_viol = 0;
 
 //  ---------------------------------------------------------------- fabric side
 logic       wait_n;                      // WAIT to whichever core owns the bus
@@ -353,6 +354,28 @@ always_ff @(posedge clk) begin
       end
 
       //  while paused the owning core's bus must not change (T80s) / take an edge (NextZ80)
+      //  DI-honoured check (2026-09-20, Illusion City): an acceptance -- M1 with
+      //  IORQ, the INTA cycle -- may only happen with IFF1 set.  The reference
+      //  machine survives a 3.2 ms window in which the IM1 vector is zeroed and
+      //  the IRQ is already asserted, purely because DI holds; if either core (or
+      //  the wrapper) takes an interrupt with IFF1 clear, that window is fatal.
+      //  IFF1 is sampled 4 T-states back, the way the board probe does it.
+      iff_hist <= {iff_hist[30:0], (use_nz ? n_xreg[210] : t_reg[210])};
+      inta_q   <= ~m1_n & ~iorq_n;
+      if ((~m1_n & ~iorq_n) & ~inta_q) begin
+         intas++;
+         //  A single lookback tap cannot work: sample too close and the core has
+         //  already cleared IFF1 for this acceptance, too far and a legal
+         //  acceptance right after EI reads the pre-EI 0 (measured: both happen).
+         //  So the test is "IFF1 was never 1 anywhere in the last 8 clocks",
+         //  which a real DI region -- microseconds long -- always satisfies.
+         if (iff_hist[7:0] == 8'd0) begin
+            di_viol++;
+            $display("VIOL-DI INTA inside a DI region: pc=%04x core=%s clk=%0d",
+                     (use_nz ? n_xreg[79:64] : t_reg[79:64]), use_nz ? "nz" : "t80", clk_n);
+         end
+      end
+
       t_bus_q <= {t_a, t_mreq_n, t_iorq_n, t_rd_n, t_wr_n, t_m1_n};
       tr_pause_q <= tr_pause;
       if (tr_pause && tr_pause_q && ((!use_nz && t_bus_q != {t_a, t_mreq_n, t_iorq_n, t_rd_n, t_wr_n, t_m1_n}) || (use_nz && !n_wait)))
@@ -382,6 +405,7 @@ endtask
 
 task automatic out_port(input [7:0] p, input [7:0] d);
    if (p == 8'hFF) begin
+      $display("INTA %0d DI-violations %0d", intas, di_viol);
       $display("END clk=%0d swaps=%0d waits=%0d", clk_n, swaps, wait_clks);
       $finish;
    end else

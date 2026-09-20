@@ -1921,7 +1921,26 @@ logic [15:0] pc_f1, pc_f2;
 //                    (IFF disabled / spin), so the handler never acks.
 logic [13:0] wait_cnt = 0, nom1_cnt = 0;
 logic [16:0] irq_cnt  = 0;
-logic [15:0] intack_cnt = 0;   // ~3ms threshold (> the ~880us Timer-1 period, so a
+logic [15:0] intack_cnt = 0;
+//  Illusion City forensics (2026-09-20).  openMSX FS-A1GT reference: the game
+//  DIs at 11.2078, zeroes ALL of page 0 at 5A36 (so 0038h reads 00), the VDP
+//  asserts its IRQ 3.2 ms later while the vector is still 00, and only at 5ABE/
+//  5AC1 does it write the real vector (C3 92 DD) before EI at 56D3.  The board
+//  dies inside that window, so these say WHICH of the two ways it can die:
+//    m38_pc    5ABE  -> the restore ran, so the vector was live when EI came
+//              5A36/0 -> it never ran: the CPU left the DI region early
+//    ack_iff0  != 0  -> an interrupt was accepted with IFF1 low through the whole
+//                       8-clock window before it: the DI was not honoured.
+//                       (One lookback tap does not work -- measured in
+//                       rtl/cpu/cpuswap/sim: sample close and IFF1 is already
+//                       cleared for this very acceptance, sample far and a legal
+//                       acceptance just after EI reads the pre-EI 0.)
+//    ack_clear       -> an acceptance happened while 0038h still read 00
+logic [15:0] dbg_m38_pc   = 16'd0;   // PC of the last write to 0038h
+logic [7:0]  iff1_hist    = 8'd0;    // IFF1, one clk21m per bit
+logic [7:0]  ackiff0_cnt  = 8'd0;    // acceptances with IFF1 low 4 T earlier
+logic        iff_at_ack   = 1'b0, ack_on_clear = 1'b0, m38_c3_seen = 1'b0;
+logic        intack_d     = 1'b0;   // ~3ms threshold (> the ~880us Timer-1 period, so a
                                // CPU taking the IRQ once per overflow doesn't false-latch)
 logic [15:0] iffoff_cnt = 0, refuse_cnt = 0;
 logic        iff1_d = 1'b0, ghost_arm = 1'b0, intack_seen = 1'b0;
@@ -1934,6 +1953,8 @@ always_ff @(posedge clk21m) begin
         wait_cnt <= 0; irq_cnt <= 0; nom1_cnt <= 0; intack_cnt <= 0;
         iffoff_cnt <= 0; refuse_cnt <= 0;
         iff1_d <= 0; ghost_arm <= 0; intack_seen <= 0;
+        dbg_m38_pc <= 0; iff1_hist <= 0; ackiff0_cnt <= 0;
+        iff_at_ack <= 0; ack_on_clear <= 0; m38_c3_seen <= 0; intack_d <= 0;
         dbg_wait_stuck <= 0; dbg_irq_stuck <= 0; dbg_cpu_nom1 <= 0; dbg_intack_stop <= 0;
         dbg_iff_stuck_off <= 0; dbg_int_refused <= 0; dbg_int_ghost <= 0;
         dbg_spin <= 0; dbg_a8_pc <= 0; dbg_a8_vc <= 0; a8_cnt <= 0;
@@ -1988,7 +2009,7 @@ always_ff @(posedge clk21m) begin
         //          check dbg_pc_vec (the vector jump target) for corruption.
         iff1_d <= t80_reg[210];
         if (iff1_d && !t80_reg[210]) begin
-            if (!dbg_iff_stuck_off) dbg_pc_snap <= t80_reg[79:64];
+            // (row 7 now carries dbg_m38_pc -- see the Illusion City block)
             ghost_arm <= 1'b1;
         end else if (~m1_n & ~iorq_n) begin
             ghost_arm <= 1'b0;                      // INTA seen → real acceptance
@@ -2002,10 +2023,21 @@ always_ff @(posedge clk21m) begin
                      : (intack_seen && !(~m1_n & iorq_n)) ? intack_seen : 1'b0;
         if (intack_seen && ~m1_n && iorq_n && !dbg_iff_stuck_off) begin
             dbg_pc_vec <= t80_reg[79:64];
-            dbg_im_i   <= {t80_reg[209:208], 6'd0, t80_reg[39:32]};  // IM + I at dispatch
+            // (row 10 now carries the acceptance fields -- Illusion City block)
         end
+        //  DI-honoured test: IFF1 four T-states before each acceptance.
+        iff1_hist <= {iff1_hist[6:0], t80_reg[210]};
+        intack_d  <= ~m1_n & ~iorq_n;
+        if ((~m1_n & ~iorq_n) & ~intack_d) begin
+            iff_at_ack <= |iff1_hist;
+            if ((iff1_hist == 8'd0) && ~&ackiff0_cnt) ackiff0_cnt <= ackiff0_cnt + 8'd1;
+            if (dbg_m38 == 8'h00) ack_on_clear <= 1'b1;
+        end
+
         dbg_pc_now <= t80_reg[79:64];
         //  {use_nz, r800, dram, 5'b0, byte@0038} and {byte@0039, byte@003A}
+        dbg_pc_snap  <= dbg_m38_pc;                                   // row 7
+        dbg_im_i     <= {iff_at_ack, ack_on_clear, m38_c3_seen, 5'd0, ackiff0_cnt};  // row 10
         dbg_watch_pc <= {use_nz, tr_r800, tr_dram, 5'd0, dbg_m38};
         dbg_watch_dc <= {dbg_m39, dbg_m3a};
 
@@ -2189,7 +2221,11 @@ always_ff @(posedge clk21m) begin
         //     08 D9 F5  early boot     C3 3C 0C  BIOS ISR     C3 CD E6  game ISR
         //  (values measured on openMSX FS-A1ST/GT running Illusion City).
         if (~mreq_n_d & mreq_n & ~wr_n_d) begin   // end of a memory write cycle
-            if (addr_d == 16'h0038) dbg_m38 <= data_d;
+            if (addr_d == 16'h0038) begin
+                dbg_m38    <= data_d;
+                dbg_m38_pc <= t80_reg[79:64];
+                if (data_d == 8'hC3) m38_c3_seen <= 1'b1;
+            end
             if (addr_d == 16'h0039) dbg_m39 <= data_d;
             if (addr_d == 16'h003A) dbg_m3a <= data_d;
         end
