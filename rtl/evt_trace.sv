@@ -12,8 +12,8 @@
 //  One 80-bit word per EVENT (not per clock), into a 2048-word ring that runs from
 //  configuration and wraps:
 //     INTA   an interrupt acceptance          data = {6'b0, ms_int_n, vdp_int_n}
-//     IOR    IN  from 98h-9Bh, C4h            data = value read
-//     IOW    OUT to  98h-9Bh, A8h, E4h, E5h   data = value written
+//     IOR    IN  from 98h-9Bh, C4h, A5h/A7h, D0h-D7h (FDC)  data = value read
+//     IOW    OUT to  98h-9Bh, A8h, E4h/E5h, A5h/A7h, D0h-D7h  data = value written
 //     SWAP   use_nz changed                   data = new use_nz
 //     IFF    IFF1 changed                     data = new IFF1
 //     RST38  an M1 fetch of the RST 38h vector, data+port = the PC of the
@@ -52,7 +52,7 @@ module evt_trace
    input   [7:0] d_wr,          // data from the CPU
    input   [7:0] d_rd           // data to the CPU
 );
-   localparam [3:0]  K_INTA = 4'd1, K_IOR = 4'd2, K_IOW = 4'd3, K_SWAP = 4'd4, K_IFF = 4'd5, K_R38 = 4'd6, K_RST = 4'd7;
+   localparam [3:0]  K_INTA = 4'd1, K_IOR = 4'd2, K_IOW = 4'd3, K_SWAP = 4'd4, K_IFF = 4'd5, K_R38 = 4'd6, K_RST = 4'd7, K_BR = 4'd8;
    localparam [7:0]  NEST = 8'd10;
    localparam [10:0] POST = 11'd384;
 
@@ -64,17 +64,26 @@ module evt_trace
    wire io_rd = ~iorq_n & ~rd_n & m1_n;
    wire io_wr = ~iorq_n & ~wr_n & m1_n;
    wire p_vdp = (a_lo[7:2] == 6'b100110);                       // 98h-9Bh
-   wire p_rd  = p_vdp | (a_lo == 8'hC4) | (a_lo == 8'hA7) | (a_lo[7:1] == 7'b1010001);
-   wire p_wr  = p_vdp | (a_lo == 8'hA8) | (a_lo[7:1] == 7'b1110010) | (a_lo[7:1] == 7'b1010001) | (a_lo == 8'hA7);
+   wire p_fdc = (a_lo[7:3] == 5'b11010);                        // D0h-D7h (WD2793 + side/motor)
+   wire p_map = (a_lo[7:2] == 6'b111111);                       // FCh-FFh (memory mapper)
+   wire p_rd  = p_vdp | p_fdc | p_map | (a_lo == 8'hC4) | (a_lo == 8'hA7) | (a_lo[7:1] == 7'b1010001);
+   wire p_wr  = p_vdp | p_fdc | p_map | (a_lo == 8'hA8) | (a_lo[7:1] == 7'b1110010) | (a_lo[7:1] == 7'b1010001) | (a_lo == 8'hA7);
    //  Opcode-fetch tracking: the address of the fetch BEFORE the one at 0038h is
    //  the runaway's own PC, which names the FF-reading region.
    wire       m1_fetch = ~m1_n & ~mreq_n & ~rd_n;
    logic      m1f_q    = 1'b0;
    logic [15:0] m1_a = 16'd0, m1_prev = 16'd0;
    wire       fetch_38 = m1_fetch & ~m1f_q & (pc_bus == 16'h0038);
+   //  Branch trace: an opcode fetch whose address is not 1..4 bytes past the
+   //  previous one -- every jump, call, return and loop-back, and nothing else
+   //  (no Z80 opcode is longer than four bytes).  A machine wedged in a loop that
+   //  touches no port shows up here as the same address over and over, which is
+   //  what the board's two silent hangs need (2026-09-20).
+   wire [15:0] delta    = pc_bus - m1_a;
+   wire        is_br    = m1_fetch & ~m1f_q & ((delta == 16'd0) | (delta > 16'd4));
 
    logic inta_q = 1'b0, iord_q = 1'b0, iowr_q = 1'b0, nz_q = 1'b0, iff_q = 1'b0, rst_q = 1'b0;
-   logic [7:0]  rd_val = 8'd0;
+   logic [7:0]  rd_val = 8'd0, rd_port = 8'd0;
    logic [15:0] sp_last = 16'hFFFF;
    logic [7:0]  depth = 8'd0;
    logic        trig = 1'b0, stopped = 1'b0, marked = 1'b0;
@@ -91,6 +100,7 @@ module evt_trace
       ev = 1'b1; ev_kind = K_RST; ev_data = 8'd0;
       if      (reset & ~rst_q)                  begin ev_kind = K_RST;  ev_data = 8'd0; end
       else if (fetch_38)                        begin ev_kind = K_R38;  ev_data = m1_prev[7:0]; end
+      else if (is_br)                           begin ev_kind = K_BR;   ev_data = pc_bus[7:0]; end
       else if (inta & ~inta_q)                  begin ev_kind = K_INTA; ev_data = {6'd0, ms_int_n, vdp_int_n}; end
       else if (iord_q & ~(io_rd & p_rd))        begin ev_kind = K_IOR;  ev_data = rd_val; end   // end of the read: value settled
       else if ((io_wr & p_wr) & ~iowr_q)        begin ev_kind = K_IOW;  ev_data = d_wr; end
@@ -109,7 +119,10 @@ module evt_trace
       rst_q  <= reset;
       m1f_q  <= m1_fetch;
       if (m1_fetch & ~m1f_q) begin m1_a <= pc_bus; m1_prev <= m1_a; end
-      if (io_rd & p_rd) rd_val <= d_rd;
+      //  A read's address bus has often moved on by the time the cycle ends, which
+      //  logged one S#0 read as "port 0D" (the low byte of the next fetch address).
+      //  Latch the port at the START of the read, the data at the end.
+      if (io_rd & p_rd) begin rd_val <= d_rd; if (~iord_q) rd_port <= a_lo; end
 
       if (reset) begin                                  // re-arm, keep the ring
          trig <= 1'b0; stopped <= 1'b0; marked <= 1'b0; post <= 11'd0;
@@ -121,7 +134,9 @@ module evt_trace
          we  <= 1'b1;
          wa  <= ptr;
          wd  <= {now, ms_int_n, vdp_int_n, iff1, use_nz, ev_kind,
-                 (ev_kind == K_R38) ? m1_prev[15:8] : a_lo, ev_data, sp, pc};
+                 (ev_kind == K_R38) ? m1_prev[15:8] :
+                 (ev_kind == K_BR)  ? pc_bus[15:8]  :
+                 (ev_kind == K_IOR) ? rd_port       : a_lo, ev_data, sp, pc};
          ptr <= ptr + 11'd1;
          if (ev_kind == K_INTA) begin
             sp_last <= sp;
