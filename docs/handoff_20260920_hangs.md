@@ -24,7 +24,7 @@ The machine packs are the **peer session's** work (`msx1-mister-sonydos2-55`, br
 | `20260920n_midi` | dae6123ef33d | **MSX-MIDI status stub** (dev_midi) |
 | `20260920o_blockfix` | 0b508b333255 | block-instruction exclusion by opcode byte, **does not work**, see §4 |
 | `20260920p_blkaddr` | 9b9587489183 | same by ADDRESS — works for LDIR, then froze on the RAM search |
-| `20260920q_loopfold` | (see §2) | loops folded to one word, wedge trigger by TIME |
+| `20260920q_loopfold` | cf6b52207b19 | loops folded to one word, wedge trigger by TIME |
 
 ## 1. Fixed and confirmed
 
