@@ -1319,6 +1319,17 @@ vdp vdp_vdp
    .VDP_ID(5'b00000 | msxConfig.vdp_id << 1)
 );
 
+//  Time-ordered event recorder for the nested-interrupt stack runaway (JTAG,
+//  tools/dump_evtrace.tcl).  See rtl/evt_trace.sv.
+evt_trace u_evtrace
+(
+   .clk(clk21m), .reset(reset),
+   .pc(t80_reg[79:64]), .pc_bus(a), .sp(t80_reg[63:48]), .iff1(t80_reg[210]),
+   .use_nz(use_nz), .vdp_int_n(vdp_int_n), .ms_int_n(ms_int_n),
+   .mreq_n(mreq_n), .m1_n(m1_n), .iorq_n(iorq_n), .rd_n(rd_n), .wr_n(wr_n),
+   .a_lo(a[7:0]), .d_wr(d_from_cpu), .d_rd(d_to_cpu)
+);
+
 vdp_regprobe u_regprobe (
    .clk(clk21m), .reset(reset),
    .a(a), .din(d_from_cpu),

@@ -168,47 +168,17 @@ module memory_upload
          else                             ram_addr <= ram_addr + 1'd1;
       end
       if (ddr3_ready & ddr3_rd) begin ddr3_rd <= 1'b0; ddr3_addr <= ddr3_addr + 1'd1; end
-      if (load_go) begin
-         state <= STATE_CLEAN;
-         ddr3_addr             <= 0;
-         ram_addr              <= 27'd0;
-         sram_addr             <= 27'd0;
-         save_ram_addr         <= 27'd0;
-         block_num             <= 6'd0;
-         config_head_addr      <= 4'd0;
-         ref_ram               <= 4'd0;
-         ddr3_rd               <= 1'd0;        
-         save_addr             <= 0;
-         refAdd                <= 1'b0;
-         subslot               <= 2'd0; 
-         cart_slot_expander_en <= 4'd0;
-         cart_device           <= '{0, 0};
-         // msx_device is OR-accumulated as the config records are walked, so it MUST
-         // be cleared here or its bits survive into the NEXT machine pack.
-         //
-         // PROVEN on hardware 2026-08-30: without this, a Sony HB-F1XV pack reported
-         // itself to software as "MSX2+ (Panasonic)" and ran at 5.36 MHz -- Z80BENCH
-         // v1.4.2 screenshot, machine selector showing SONY_HB-F1XV1MB_NOLOGO.  The
-         // leaked DEV_MATSUSHITA answers I/O 41H bit2, so anything that probes the
-         // Panasonic turbo (Z80BENCH, MGSDRV, Tales of Popolon, Hi no Tori's 60Hz
-         // patch) switches itself to 5.37 MHz on a machine that has no turbo.
-         //
-         // An earlier revert of this line (1b57fd4) was a mistake: the crashes blamed
-         // on it were software that had been riding that false turbo and genuinely
-         // cannot run at 3.58.  See docs/TODO_msx_device_leak.md.
-         msx_device            <= '0;
-         bios_config.ram_size  <= 8'h00;
-         bios_config.use_FDC   <= 1'b0;
-         lookup_SRAM[0].size   <= 16'd0;
-         lookup_SRAM[1].size   <= 16'd0;
-         lookup_SRAM[2].size   <= 16'd0;
-         lookup_SRAM[3].size   <= 16'd0;
-         pcm_rom_base          <= 27'h1800000;  // default, overwritten when yrw801.rom is loaded
-         ms_reserve_pending    <= 1'b0;
-         ms_zerofill_active    <= 1'b0;
-         ms_zerofill_jump      <= 1'b0;
-         x16_pad               <= 25'd0;
-      end
+      //  (The restart block used to sit HERE, above the FSM.  `load` is a one-clock
+      //  pulse and it arrives whenever a download ends -- machine pack, FW pack, a
+      //  cart ROM -- or the OSD config changes, so it can land in the middle of a
+      //  running upload.  With the block above the case, any register the FSM
+      //  assigned in that same clock kept the FSM's value: `state` went on from
+      //  where it was while ddr3_addr/ram_addr/block_num were already back at 0, the
+      //  next header read missed its "MSX" signature, and the upload ENDED -- the
+      //  machine was released on a half-written SDRAM.  OSD Reset cannot repair that;
+      //  only another, undisturbed upload does.  Bench (real FS-A1GT pack, second
+      //  load injected at 300 points): 36 corrupt products before, 0 after.  It is
+      //  at the end of this always block now.)
       if (ddr3_ready & ~ddr3_rd) begin
          case(state)
             STATE_ERROR,
@@ -666,6 +636,53 @@ module memory_upload
             end
             default: ;
          endcase
+      end
+      //  LAST in the block on purpose: a restart must win over whatever the FSM
+      //  assigned this same clock.
+      if (load_go) begin
+         state <= STATE_CLEAN;
+         kbd_request           <= 1'b0;
+         kbd_we                <= 1'b0;
+         ram_ce                <= 1'b0;
+         ddr3_request          <= 1'b0;
+         ddr3_addr             <= 0;
+         ram_addr              <= 27'd0;
+         sram_addr             <= 27'd0;
+         save_ram_addr         <= 27'd0;
+         block_num             <= 6'd0;
+         config_head_addr      <= 4'd0;
+         ref_ram               <= 4'd0;
+         ddr3_rd               <= 1'd0;        
+         save_addr             <= 0;
+         refAdd                <= 1'b0;
+         subslot               <= 2'd0; 
+         cart_slot_expander_en <= 4'd0;
+         cart_device           <= '{0, 0};
+         // msx_device is OR-accumulated as the config records are walked, so it MUST
+         // be cleared here or its bits survive into the NEXT machine pack.
+         //
+         // PROVEN on hardware 2026-08-30: without this, a Sony HB-F1XV pack reported
+         // itself to software as "MSX2+ (Panasonic)" and ran at 5.36 MHz -- Z80BENCH
+         // v1.4.2 screenshot, machine selector showing SONY_HB-F1XV1MB_NOLOGO.  The
+         // leaked DEV_MATSUSHITA answers I/O 41H bit2, so anything that probes the
+         // Panasonic turbo (Z80BENCH, MGSDRV, Tales of Popolon, Hi no Tori's 60Hz
+         // patch) switches itself to 5.37 MHz on a machine that has no turbo.
+         //
+         // An earlier revert of this line (1b57fd4) was a mistake: the crashes blamed
+         // on it were software that had been riding that false turbo and genuinely
+         // cannot run at 3.58.  See docs/TODO_msx_device_leak.md.
+         msx_device            <= '0;
+         bios_config.ram_size  <= 8'h00;
+         bios_config.use_FDC   <= 1'b0;
+         lookup_SRAM[0].size   <= 16'd0;
+         lookup_SRAM[1].size   <= 16'd0;
+         lookup_SRAM[2].size   <= 16'd0;
+         lookup_SRAM[3].size   <= 16'd0;
+         pcm_rom_base          <= 27'h1800000;  // default, overwritten when yrw801.rom is loaded
+         ms_reserve_pending    <= 1'b0;
+         ms_zerofill_active    <= 1'b0;
+         ms_zerofill_jump      <= 1'b0;
+         x16_pad               <= 25'd0;
       end
    end
 
