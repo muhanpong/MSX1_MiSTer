@@ -30,6 +30,10 @@
 //  TRIGGER 2: the same opcode address fetched LOOPCNT times in a row -- a `jr $`
 //  style wedge, which is how SC.COM stops after its MAPPER SEGMENT scan (board,
 //  2026-09-20: 2D30 fetched every 1.5 us, interrupts off, the VDP IRQ pending).
+//  A BLOCK instruction looks identical from the address bus -- LDIR re-fetches its
+//  own ED prefix once per byte -- and the first build of this trigger duly froze
+//  the ring on the BIOS clearing 3191 bytes of workspace at 7B78, throwing away
+//  the hang that came after it.  So the repeated opcode has to not be ED.
 //  TRIGGER: STORM RST 38h executions in a row with no interrupt acceptance
 //  between them -- a machine walking through FF-filled memory, which is how every
 //  hang captured on 2026-09-20 ends.  POST more events are then recorded, the ring
@@ -83,6 +87,7 @@ module evt_trace
    wire       m1_fetch = ~m1_n & ~mreq_n & ~rd_n;
    logic      m1f_q    = 1'b0;
    logic [15:0] m1_a = 16'd0, br_last = 16'd0;
+   logic  [7:0] m1_op = 8'd0;       // the byte of the fetch in progress
    logic  [7:0] br_cnt = 8'd0;
    wire       fetch_38 = m1_fetch & ~m1f_q & (pc_bus == 16'h0038);
    //  Secondary slot register.  A memory cycle, so an I/O log never sees it, yet
@@ -141,6 +146,7 @@ module evt_trace
       subw_q <= sub_wr;
       subr_q <= sub_rd;
       if (m1_fetch & ~m1f_q) m1_a <= pc_bus;
+      if (m1_fetch)          m1_op <= d_rd;   // settles by the end of the fetch
       //  A read's address bus has often moved on by the time the cycle ends, which
       //  logged one S#0 read as "port 0D" (the low byte of the next fetch address).
       //  Latch the port at the START of the read, the data at the end.
@@ -163,7 +169,7 @@ module evt_trace
          if (ev_kind == K_BR) begin
             br_last <= pc_bus;
             br_cnt  <= (pc_bus == br_last) ? br_cnt + 8'd1 : 8'd0;
-            if (!trig && (pc_bus == br_last) && br_cnt == LOOPCNT - 8'd1) begin trig <= 1'b1; post <= POST; end
+            if (!trig && (pc_bus == br_last) && (m1_op != 8'hED) && br_cnt == LOOPCNT - 8'd1) begin trig <= 1'b1; post <= POST; end
          end
          if (ev_kind == K_INTA) depth <= 8'd0;              // a real interrupt: not a storm
          else if (ev_kind == K_R38) begin
