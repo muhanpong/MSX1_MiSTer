@@ -23,10 +23,12 @@
 //            with IFF1 still set and no interrupt acceptance anywhere (board,
 //            2026-09-20: ISR body at 6.5 kHz, INTA 0, IFF1 1).
 //     RST    machine reset
-//  TRIGGER: NEST acceptances in a row, each with SP lower than at the one before
-//  (an interrupt that returned puts SP back, so a healthy machine never gets
-//  there).  POST more events are then recorded, the ring stops and a marker word
-//  is written at the stop position.  A reset re-arms it; the ring keeps its data.
+//  TRIGGER: STORM RST 38h executions in a row with no interrupt acceptance
+//  between them -- a machine walking through FF-filled memory, which is how every
+//  hang captured on 2026-09-20 ends.  POST more events are then recorded, the ring
+//  stops and a marker word is written at the stop position, so the dump holds the
+//  ~2000 events BEFORE the storm: how the CPU got there.  A reset re-arms it; the
+//  ring keeps its data.
 //
 //  Word layout:
 //     15:0 PC   31:16 SP   39:32 data   47:40 port (a[7:0])   51:48 kind
@@ -53,8 +55,8 @@ module evt_trace
    input   [7:0] d_rd           // data to the CPU
 );
    localparam [3:0]  K_INTA = 4'd1, K_IOR = 4'd2, K_IOW = 4'd3, K_SWAP = 4'd4, K_IFF = 4'd5, K_R38 = 4'd6, K_RST = 4'd7, K_BR = 4'd8;
-   localparam [7:0]  NEST = 8'd10;
-   localparam [10:0] POST = 11'd384;
+   localparam [7:0]  STORM = 8'd8;
+   localparam [10:0] POST = 11'd64;
 
    logic [27:0] tdiv = 28'd0;
    wire  [23:0] now  = tdiv[27:4];
@@ -72,7 +74,7 @@ module evt_trace
    //  the runaway's own PC, which names the FF-reading region.
    wire       m1_fetch = ~m1_n & ~mreq_n & ~rd_n;
    logic      m1f_q    = 1'b0;
-   logic [15:0] m1_a = 16'd0, m1_prev = 16'd0;
+   logic [15:0] m1_a = 16'd0;
    wire       fetch_38 = m1_fetch & ~m1f_q & (pc_bus == 16'h0038);
    //  Branch trace: an opcode fetch whose address is not 1..4 bytes past the
    //  previous one -- every jump, call, return and loop-back, and nothing else
@@ -99,7 +101,7 @@ module evt_trace
    always_comb begin
       ev = 1'b1; ev_kind = K_RST; ev_data = 8'd0;
       if      (reset & ~rst_q)                  begin ev_kind = K_RST;  ev_data = 8'd0; end
-      else if (fetch_38)                        begin ev_kind = K_R38;  ev_data = m1_prev[7:0]; end
+      else if (fetch_38)                        begin ev_kind = K_R38;  ev_data = m1_a[7:0]; end
       else if (is_br)                           begin ev_kind = K_BR;   ev_data = pc_bus[7:0]; end
       else if (inta & ~inta_q)                  begin ev_kind = K_INTA; ev_data = {6'd0, ms_int_n, vdp_int_n}; end
       else if (iord_q & ~(io_rd & p_rd))        begin ev_kind = K_IOR;  ev_data = rd_val; end   // end of the read: value settled
@@ -118,7 +120,7 @@ module evt_trace
       iff_q  <= iff1;
       rst_q  <= reset;
       m1f_q  <= m1_fetch;
-      if (m1_fetch & ~m1f_q) begin m1_a <= pc_bus; m1_prev <= m1_a; end
+      if (m1_fetch & ~m1f_q) m1_a <= pc_bus;
       //  A read's address bus has often moved on by the time the cycle ends, which
       //  logged one S#0 read as "port 0D" (the low byte of the next fetch address).
       //  Latch the port at the START of the read, the data at the end.
@@ -134,14 +136,14 @@ module evt_trace
          we  <= 1'b1;
          wa  <= ptr;
          wd  <= {now, ms_int_n, vdp_int_n, iff1, use_nz, ev_kind,
-                 (ev_kind == K_R38) ? m1_prev[15:8] :
+                 (ev_kind == K_R38) ? m1_a[15:8]   :
                  (ev_kind == K_BR)  ? pc_bus[15:8]  :
                  (ev_kind == K_IOR) ? rd_port       : a_lo, ev_data, sp, pc};
          ptr <= ptr + 11'd1;
-         if (ev_kind == K_INTA) begin
-            sp_last <= sp;
-            depth   <= (sp < sp_last) ? depth + 8'd1 : 8'd0;
-            if (!trig && (sp < sp_last) && depth == NEST - 8'd1) begin trig <= 1'b1; post <= POST; end
+         if (ev_kind == K_INTA) depth <= 8'd0;              // a real interrupt: not a storm
+         else if (ev_kind == K_R38) begin
+            depth <= depth + 8'd1;
+            if (!trig && depth == STORM - 8'd1) begin trig <= 1'b1; post <= POST; end
          end
          if (trig) begin
             if (post == 11'd1) stopped <= 1'b1;

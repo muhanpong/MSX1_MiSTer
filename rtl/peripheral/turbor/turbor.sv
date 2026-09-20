@@ -79,7 +79,15 @@ wire io     = en & ~iorq_n & m1_n;
 wire p_s19  = io & (a[7:1] == 7'b1110_010);     // E4h/E5h
 wire p_tmr  = io & (a[7:1] == 7'b1110_011);     // E6h/E7h
 wire p_pcm  = io & (a[7:1] == 7'b1010_010);     // A4h/A5h
-wire p_pau  = io & (a[7:0] == 8'hA7);
+//  A7h is decoded even with the features OFF, and then reads 00 (= PAUSE not
+//  pressed).  A turbo R firmware polls it in its interrupt handler --
+//  `1A0F in a,(#a7) / rrca / jr nc` -- and bit 0 set sends it into
+//  `1A1F in a,(#a7) / rrca / jr c,#1a1f`, a wait that nothing ever ends.  With
+//  A7h left undecoded the read came back 3F on hardware (2026-09-20 capture:
+//  the board sat in that loop at 1A1F, A7 = 3F), so switching the feature off
+//  made every GT/ST pack unbootable with a black screen.  A machine with no
+//  pause hardware answering "not paused" is the harmless reading.
+wire p_pau  = ~iorq_n & m1_n & (a[7:0] == 8'hA7);
 assign io_sel = ~rd_n & (p_s19 | p_tmr | p_pcm | p_pau);
 wire wr     = iowr_stb & en;
 
@@ -274,7 +282,7 @@ always_comb begin
    else if (p_s19)  dout = s19_dout;
    else if (p_tmr)  dout = a[0] ? tmr[15:8] : tmr[7:0];
    else if (p_pcm)  dout = a[0] ? {comp, 2'b00, pcm_st} : {6'd0, pcm_cnt};
-   else if (p_pau)  dout = {7'd0, pause_key};
+   else if (p_pau)  dout = {7'd0, en & pause_key};
    else             dout = 8'hFF;
 end
 

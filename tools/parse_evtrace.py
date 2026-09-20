@@ -12,7 +12,7 @@ MARK = (1 << 80) - 1
 mk = [i for i, w in enumerate(raw) if w == MARK]
 if mk:
     m = mk[0]; words = raw[m+1:] + raw[:m]
-    print(f"# marker at {m}: ring unrolled, {len(words)} events oldest->newest (trigger = 10 nested acceptances, +384 after)")
+    print(f"# marker at {m}: ring unrolled, {len(words)} events oldest->newest (trigger = 8 RST 38 in a row, +64 after)")
 else:
     words = raw; print("# no marker: ring not stopped (trigger never fired) -- raw order, newest is somewhere inside")
 KIND = {1: "INTA", 2: "IOR ", 3: "IOW ", 4: "SWAP", 5: "IFF ", 6: "R38 ", 7: "RST ", 8: "BR  "}
