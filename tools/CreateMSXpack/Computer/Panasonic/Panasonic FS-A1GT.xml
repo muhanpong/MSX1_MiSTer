@@ -38,7 +38,11 @@
   4. MIDI (the GT's built-in interface) and the PCM sampler.  No RTL exists for
      either; software that requires them will not find them.
 
-  The Opening ROM (blocks 36-37) is blank (FFh) in this dump, so it is not carried.
+  The Opening ROM (blocks 36-37) IS carried, in slot 0-3 at 4000h.  Do not judge it
+  by its first bytes: it starts with FFh and has no AB header, but the turbo R BIOS
+  calls into it by a hard-coded address during boot (blank from 4000h to 78FFh but holds 1673 bytes of code from 7900h).
+  Leaving it out makes that call read FFh = RST 38 and the machine never reaches
+  VDP init; measured against openMSX, which calls 7900h in slot 0-3 at t=0.599 s.
 -->
 <msxConfig>
   <type>MSX2</type>
@@ -74,6 +78,15 @@
         <filename>fs-a1gt_firmware.rom</filename>
         <SHA1>e779c338eb91a7dea3ff75f3fde76b8af22c4a3a</SHA1>
         <skip>507904</skip>
+      </block>
+    </secondary>
+    <secondary slot="3">
+      <block start="1" id="MSX Opening ROM">
+        <type>ROM</type>
+        <block_count>1</block_count>
+        <filename>fs-a1gt_firmware.rom</filename>
+        <SHA1>e779c338eb91a7dea3ff75f3fde76b8af22c4a3a</SHA1>
+        <skip>294912</skip>
       </block>
     </secondary>
   </primary>

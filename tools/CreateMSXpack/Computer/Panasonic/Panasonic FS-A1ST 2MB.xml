@@ -47,7 +47,11 @@
   4. The PCM sampler.  No RTL exists for it; software that requires it will not
      find it.  (This machine has no MIDI at all, so nothing is lost there.)
 
-  The Opening ROM (blocks 36-37) is blank (FFh) in this dump, so it is not carried.
+  The Opening ROM (blocks 36-37) IS carried, in slot 0-3 at 4000h.  Do not judge it
+  by its first bytes: it starts with FFh and has no AB header, but the turbo R BIOS
+  calls into it by a hard-coded address during boot (holds 13007 bytes of code from 4010h).
+  Leaving it out makes that call read FFh = RST 38 and the machine never reaches
+  VDP init; measured against openMSX, which calls 7900h in slot 0-3 at t=0.599 s.
 -->
 <msxConfig>
   <type>MSX2</type>
@@ -83,6 +87,15 @@
         <filename>fs-a1st_firmware.rom</filename>
         <SHA1>c212b11fda13f83dafed688c54d098e7e47ab225</SHA1>
         <skip>507904</skip>
+      </block>
+    </secondary>
+    <secondary slot="3">
+      <block start="1" id="MSX Opening ROM">
+        <type>ROM</type>
+        <block_count>1</block_count>
+        <filename>fs-a1st_firmware.rom</filename>
+        <SHA1>c212b11fda13f83dafed688c54d098e7e47ab225</SHA1>
+        <skip>294912</skip>
       </block>
     </secondary>
   </primary>
