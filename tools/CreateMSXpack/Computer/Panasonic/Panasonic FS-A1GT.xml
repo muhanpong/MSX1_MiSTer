@@ -61,6 +61,12 @@
        switches CPUs instead — but the port itself is present, so it is declared. -->
   <device typ="MATSUSHITA" id="Matsushita switched I/O"></device>
   <device typ="MOONSOUND" id="MoonSound PCM Wave ROM"></device>
+  <!-- The GT has a built-in MSX-MIDI interface.  Its BIOS services it from inside
+       the interrupt handler (1A74 in a,(0E9h) / and 02h / call nz,0FF75h), so a core
+       that leaves E9h floating at FFh calls the MIDI hooks on every interrupt.  The
+       ST has no MIDI and its BIOS has no such poll, which is why only the GT needs
+       this.  openMSX returns 05h (TxRDY|TxEMPTY, RxRDY clear) here. -->
+  <device typ="MIDI" id="MSX-MIDI"></device>
   <primary slot="0">
     <secondary slot="0">
       <block start="0" id="MSX BIOS with BASIC ROM">
