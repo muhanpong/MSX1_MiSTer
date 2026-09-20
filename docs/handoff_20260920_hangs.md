@@ -99,6 +99,40 @@ the bug:
    complemented, a second LDIR at 7C84) and the screen showed the machine had
    run on well past it.
 
+The peer session then measured the reference (openMSX `Panasonic_FS-A1ST`, disk 1),
+which clears two of our candidate causes and confirms the third capture was healthy:
+
+- **It does not hang.**  With no input it reaches the start menu at t≈30 s and
+  waits there; down-down-RETURN on "スタート地点から" loads more from disk (FDC
+  accesses 5,742 -> 10,087) and asks for disk 2 at t≈80 s.
+- **The WD2793 substitution is innocent** — tested directly, by swapping openMSX's
+  `<TC8566AF>` for `<WD2793>` + the same `hb-f1xd_disk.rom` (12f2cc79) our pack
+  loads: identical progress, same menu, same disk-2 prompt, VDP write counts within
+  3%.
+- **Slot 3-3 is never mapped.**  120 s of `slotselect` sampled every 20 ms: 13
+  distinct mappings, none of them 3.3.  Only 0-0, 0-2, 3-0, 3-1, 3-2 are used, so
+  the 2 MB built-in software our pack cannot represent is not the cause.
+- **The RAM search matches us exactly**: 28,672 iterations, 19.03 us each, 0.5456 s,
+  HL EF00 -> 8000, t=0.0246 to 0.5702, and it is never re-run.  Our 28,672 / 19.0 us
+  / 545 ms is the same measurement, arrived at independently.
+
+Reference milestones (ST, disk 1), the next gates to compare against:
+
+    0.0246-0.5702  the RAM search above      1.974-3.855  longest DI region, 1.881 s
+    0.5757  first EI                         4.921  first FDC FIFO write, pc=7967
+    0.5800  first VDP write                  7.028  E4<-05 from game code, pc=822E
+    0.5991  JP (IX) 7900 (FFFF<-08, 0-2)     8.311/8.536  R800 -> Z80 -> R800
+    0.599   E4<-06 / E5<-40 -> R800          10-20  bulk load, FDC 54 -> 5,742
+    1.897   E5<-60 -> Z80                    ~30    start menu
+
+Note the 1.881 s DI region at 1.974-3.855: it is a *region*, not one loop, so the
+2 s wedge threshold clears it — but only because no single branch target inside it
+is held that long.  If a capture ever freezes in there, raise `WEDGE_T`.
+
+Caveat the peer flagged: openMSX cannot model our pack *exactly* (no 3-3, ASCII
+DOS 2.20, WD2793, MSX-MUSIC at 0-2, Opening ROM).  The above removes each
+substitution one at a time; it is not an equivalent of the whole pack.
+
 So a repeat count cannot find a wedge at all, and the ring was being spent on
 loops.  Both are fixed in `20260920q_loopfold`: loops are folded to one word with
 a count, and the wedge trigger is TIME — one branch target held unbroken for ~2 s
