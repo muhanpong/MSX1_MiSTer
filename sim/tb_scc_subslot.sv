@@ -39,7 +39,7 @@ module tb_scc_subslot;
       .cpu_addr(cpu_addr), .din(din),
       .cpu_mreq(cpu_mreq), .cpu_wr(cpu_wr), .cpu_rd(cpu_rd),
       .cs(1'b1), .cart_num(cart_num), .subslot(dut_subslot),
-      .sccDevice(1'b1),
+      .sccDevice(1'b1), .scc2_slot(2'b11),   // both slots SCC+ (port added by 35f3ae8)
       .mem_unmaped(mem_unmaped), .mem_addr(mem_addr),
       .scc_req(scc_req), .scc_mode(scc_mode)
    );
