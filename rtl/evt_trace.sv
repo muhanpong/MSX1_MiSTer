@@ -85,8 +85,15 @@ module evt_trace
    input   [7:0] d_wr,          // data from the CPU
    input   [7:0] d_rd           // data to the CPU
 );
-   localparam [3:0]  K_INTA = 4'd1, K_IOR = 4'd2, K_IOW = 4'd3, K_SWAP = 4'd4, K_IFF = 4'd5, K_R38 = 4'd6, K_RST = 4'd7, K_BR = 4'd8, K_SUB = 4'd9, K_SUBR = 4'd10, K_LOOP = 4'd11;
+   localparam [3:0]  K_INTA = 4'd1, K_IOR = 4'd2, K_IOW = 4'd3, K_SWAP = 4'd4, K_IFF = 4'd5, K_R38 = 4'd6, K_RST = 4'd7, K_BR = 4'd8, K_SUB = 4'd9, K_SUBR = 4'd10, K_LOOP = 4'd11, K_MW = 4'd12;
    localparam [7:0]  STORM = 8'd8;
+   //  Memory-write watch.  One page, because the word has room for the low byte
+   //  of the address and the byte written, and the page is implied.  EAh is
+   //  where Illusion City's stack lives at the moment it dies: a RET inside the
+   //  disk ROM's sector-transfer loop popped 0000 instead of 7669 (board,
+   //  2026-09-21), and nothing in the ring says who wrote that word -- the
+   //  recorder watched 0FFFFh and no other memory address.
+   localparam [7:0]  WATCH_PAGE = 8'hEA;
    localparam [15:0] LOOPIN = 16'd8;            // repeats stored before a loop is folded
    localparam [25:0] WEDGE_T = 26'd43_000_000;  // ~2.0 s at 21.48 MHz: one target that long is a wedge
    localparam [12:0] POST = 13'd64;
@@ -114,6 +121,11 @@ module evt_trace
    //  it decides which subslot of an expanded primary answers a fetch: the board's
    //  runaway began on a BIOS inter-slot call jumping to 7900h and reading FF
    //  (2026-09-20), which is what an empty subslot looks like.
+   //  A data write anywhere in the watched page.  m1_n excludes the opcode
+   //  fetch; the refresh cycle drives no write strobe.
+   wire       mem_wr   = ~mreq_n & ~wr_n & m1_n;
+   wire       mw_hit   = mem_wr & (pc_bus[15:8] == WATCH_PAGE);
+   logic      mw_q = 1'b0;
    wire       sub_wr   = ~mreq_n & ~wr_n & (pc_bus == 16'hFFFF);
    wire       sub_rd   = ~mreq_n & ~rd_n &  m1_n & (pc_bus == 16'hFFFF);
    logic      subw_q = 1'b0, subr_q = 1'b0;
@@ -159,13 +171,15 @@ module evt_trace
       else if ((io_wr & p_wr) & ~iowr_q)        begin ev_kind = K_IOW;  ev_data = d_wr; end
       else if (use_nz != nz_q)                  begin ev_kind = K_SWAP; ev_data = {7'd0, use_nz}; end
       else if (iff1 != iff_q)                   begin ev_kind = K_IFF;  ev_data = {7'd0, iff1}; end
+      else if (mw_hit & ~mw_q)                  begin ev_kind = K_MW;   ev_data = d_wr; end
       else                                      ev = 1'b0;
    end
 
    wire [79:0] norm_wd = {now, ms_int_n, vdp_int_n, iff1, use_nz, ev_kind,
                           (ev_kind == K_R38) ? m1_a[15:8]  :
                           (ev_kind == K_BR)  ? pc_bus[15:8] :
-                          (ev_kind == K_IOR) ? rd_port      : a_lo, ev_data, sp, pc};
+                          (ev_kind == K_IOR) ? rd_port      :
+                          (ev_kind == K_MW)  ? pc_bus[7:0]  : a_lo, ev_data, sp, pc};
    wire [79:0] loop_wd = {now, ms_int_n, vdp_int_n, iff1, use_nz, K_LOOP, rep, sp, br_last};
 
    wire br_ev   = ev & (ev_kind == K_BR);
@@ -187,6 +201,7 @@ module evt_trace
       m1f_q  <= m1_fetch;
       subw_q <= sub_wr;
       subr_q <= sub_rd;
+      mw_q   <= mw_hit;
       if (m1_fetch & ~m1f_q) m1_a <= pc_bus;
       if (m1_fetch)          m1_op <= d_rd;   // settles by the end of the fetch
       //  A read's address bus has often moved on by the time the cycle ends, which

@@ -16,7 +16,7 @@ if mk:
           " (trigger = 8 RST 38 in a row, or one branch target held ~2 s; +64 after)")
 else:
     words = raw; print("# no marker: ring not stopped (trigger never fired) -- raw order, newest is somewhere inside")
-KIND = {1: "INTA", 2: "IOR ", 3: "IOW ", 4: "SWAP", 5: "IFF ", 6: "R38 ", 7: "RST ", 8: "BR  ", 9: "SUB ", 10: "SUBR", 11: "LOOP"}
+KIND = {1: "INTA", 2: "IOR ", 3: "IOW ", 4: "SWAP", 5: "IFF ", 6: "R38 ", 7: "RST ", 8: "BR  ", 9: "SUB ", 10: "SUBR", 11: "LOOP", 12: "MW  "}
 prev_t = None
 print("   n  t(ms)      dt(us)  kind port data  PC   SP   cpu iff vdp ms")
 for n, w in enumerate(words):
@@ -29,6 +29,7 @@ for n, w in enumerate(words):
     k = KIND.get(kind, f"?{kind:X}  ")
     p = f"{port:02X}" if kind in (2, 3) else "--"
     if kind in (6, 8, 9, 10, 11): p = "  "
+    if kind == 12: p = "EA"
     note = ""
     if kind == 1: note = "  <- src:" + ("" if vdp else " VDP") + ("" if ms else " OPL")
     if kind == 4: note = "  -> " + ("R800" if data & 1 else "Z80")
@@ -37,4 +38,5 @@ for n, w in enumerate(words):
     if kind == 9: note = f"  FFFF <- {data:02X}  (pg3..pg0 subslots {(data>>6)&3},{(data>>4)&3},{(data>>2)&3},{data&3})"
     if kind == 10: note = f"  FFFF -> {data:02X} (complemented: {(~data)&0xFF:02X})"
     if kind == 11: note = f"  == loop at {pc:04X} x{(port << 8) | data} (folded; ends here)"
+    if kind == 12: note = f"  WRITE EA{port:02X} <- {data:02X}   (by PC {pc:04X})"
     print(f"{n:4d} {t*0.000745:9.3f} {dt:>10}  {k} {p}   {data:02X}  {pc:04X} {sp:04X}  {'nz ' if nz else 't80'}  {iff}   {'-' if vdp else 'A'}   {'-' if ms else 'A'}{note}")
