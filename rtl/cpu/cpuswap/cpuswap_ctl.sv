@@ -17,6 +17,18 @@
 //           latch data read at the previous owner's address (found in the bench: a
 //           hand-over right at a BIOS-overlay fetch executed RAM bytes instead).
 //
+//           SETTLE also lasts until `rate_ok`: the CPU clock-enable rate follows
+//           the owner (NextZ80 runs at full rate, T80s at the OSD speed), but
+//           clock.sv latches a new rate only when one phase in twelve coincides
+//           with an idle bus.  Released after one clock, T80s came back from an
+//           R800 stint still clocked at 21.5 MHz and STAYED there until that
+//           coincidence happened by luck -- a window in which a stack read
+//           returned the previous opcode byte (board, 2026-09-22: the firmware's
+//           RET at 790Dh popped F3C9h where the reference pops F392h; C9h is the
+//           RET opcode itself) and the machine died in the boot, intermittently.
+//           Both cores are frozen here and the bus mux holds every strobe idle, so
+//           the latch is reached within 12 clk21m; SETTLE_MAX is only a backstop.
+//
 //  At a swap point the architectural state sits between two instructions with the
 //  next opcode not yet executed (T80.vhd "Swap point", nextz80 patches/README.md).
 //  WZ (MEMPTR) and Q are not transferred: undocumented flag bits 3/5 may differ for
@@ -36,11 +48,13 @@ module cpuswap_ctl
    output logic nz_hold,        // force NextZ80 WAIT
    output logic t80_dirset,     // load T80s from NextZ80 XREG
    output logic nz_load,        // load NextZ80 from T80s REG
-   output logic busy
+   output logic busy,
+   input  logic rate_ok         // the CE rate has been latched for the NEW owner
 );
 
 typedef enum logic [1:0] { RUN, XFER, FLIP, SETTLE } st_t;
 st_t st = RUN;
+logic [5:0] settle_n = 6'd0;       // SETTLE_MAX = 63 clocks, a backstop only
 initial use_nz = 1'b0;
 
 wire pending = want_nz != use_nz;
@@ -61,10 +75,14 @@ always_ff @(posedge clk) begin
       RUN:  if (pending & at_pt) st <= XFER;
       XFER: st <= FLIP;
       FLIP: begin
+         settle_n <= 6'd0;
          use_nz <= ~use_nz;
          st     <= SETTLE;
       end
-      SETTLE: st <= RUN;
+      SETTLE: begin
+         settle_n <= settle_n + 6'd1;
+         if (rate_ok | (&settle_n)) st <= RUN;
+      end
       default: st <= RUN;
    endcase
 end

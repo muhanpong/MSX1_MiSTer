@@ -30,7 +30,7 @@ open('$obj/swaptest.hex','w').write('\n'.join('%02x'%b for b in d)+'\n')"
 
 nz=$cpu/nextz80/patched
 verilator --cc --exe --build -j 8 -O2 +1364-2005ext+v +1800-2012ext+sv -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN -Wno-COMBDLY -Wno-TIMESCALEMOD \
-  --top-module tb -Mdir "$obj/vl" "$here/tb_swap.sv" "$cpu/cpuswap/cpuswap_ctl.sv" "$cpu/cpuswap/nz_bus.sv" "$cpu/../peripheral/turbor/turbor.sv" "$cpu/../peripheral/turbor/pcm_play.sv" "$obj/t80/t80s.v" \
+  --top-module tb -Mdir "$obj/vl" "$here/tb_swap.sv" "$cpu/cpuswap/cpuswap_ctl.sv" "$cpu/cpuswap/nz_bus.sv" "$cpu/../peripheral/turbor/turbor.sv" "$cpu/../peripheral/turbor/pcm_play.sv" "$cpu/../peripheral/clock.sv" "$obj/t80/t80s.v" \
   "$nz/nextz80cpu.v" "$nz/nextz80reg.v" "$nz/nextz80alu.v" "$here/sim_main.cpp" > "$out/build.log" 2>&1 \
   || { echo "verilator build failed, see $out/build.log"; exit 1; }
 
@@ -74,6 +74,18 @@ printf '%-14s ' "sdram st every"; run sdstall +mode=2 +swapmin=0 +swapmax=0 +t80
 printf '%-14s ' "sdram turbo";   run sdturbo +mode=2 +swapmin=0 +swapmax=0 +sdlat=7 +turbo=1 +maxclk=12000000; check sdturbo SAME
 printf '%-14s ' "sdram nz";      run sdnz +mode=1 +sdlat=6 +maxclk=8000000; check sdnz SAME
 printf '%-14s ' "sdram soft";    run sdsoft +mode=3 +t80div=6 +sdlat=4 +maxclk=12000000; check sdsoft SAME
+
+#  The CE-rate window after a hand-over, with the REAL clock.sv in the loop.
+#  holdrate=0 is the behaviour up to 20260922a and is the negative control: T80s must
+#  be SEEN fetching at the R800's rate, or this case proves nothing.  holdrate=1 is
+#  the SETTLE hold and must bring that count to zero.  Both must still run the
+#  program identically.
+printf '%-14s ' "rate window";   run rate0 +mode=3 +realclk=1 +holdrate=0 +maxclk=12000000; check rate0 SAME
+r0=$(grep -o 'ran [0-9]* clocks' "$out/rate0.log" | grep -o '[0-9]*'); grep '^RATE' "$out/rate0.log" | sed 's/^/    /'
+[ "${r0:-0}" -gt 0 ] && echo "    PASS (negative control: the window exists, $r0 clocks at the R800 rate)" || { echo "    FAIL (T80s never seen at the R800 rate without the hold -- the case is not testing anything)"; fail=1; }
+printf '%-14s ' "rate hold";     run rate1 +mode=3 +realclk=1 +holdrate=1 +maxclk=12000000; check rate1 SAME
+r1=$(grep -o 'ran [0-9]* clocks' "$out/rate1.log" | grep -o '[0-9]*'); grep '^RATE' "$out/rate1.log" | sed 's/^/    /'
+[ "${r1:-1}" -eq 0 ] && echo "    PASS (T80s never ran at the R800 rate)" || { echo "    FAIL ($r1 clocks at the R800 rate with the hold on)"; fail=1; }
 printf '%-14s ' "no resume grd"; run sdnorg +mode=2 +seed=1 +t80div=6 +sdlat=4 +norg=1 +maxclk=8000000; check sdnorg DIFF
 #  R800 MULUB / MULUW: NextZ80 only -- a Z80 executes these as NOPs, so this is not a
 #  lockstep run.  The OUT log is compared with gen_mulref.py, which encodes the R800

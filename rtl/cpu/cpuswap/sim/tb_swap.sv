@@ -47,6 +47,8 @@ initial begin
    if (!$value$plusargs("nowait=%d", nowait)) nowait = 0;
    if (!$value$plusargs("sdlat=%d", sdlat)) sdlat = 0;
    if (!$value$plusargs("turbo=%d", turbo)) turbo = 0;
+   if (!$value$plusargs("realclk=%d", realclk)) realclk = 0;
+   if (!$value$plusargs("holdrate=%d", holdrate)) holdrate = 1;
    if (!$value$plusargs("norg=%d", norg)) norg = 0;
    if (!$value$plusargs("pcmstop=%d", pcmstop)) pcmstop = 0;
    if (!$value$plusargs("maxclk=%d", maxclk)) maxclk = 50000000;
@@ -65,6 +67,37 @@ end
 int unsigned divc = 0;
 wire ce_t80 = (divc == 0);
 always_ff @(posedge clk) divc <= (divc + 1 >= t80div) ? 0 : divc + 1;
+
+//  ---------------------------------------------------------------- the REAL rate latch
+//  +realclk=1 puts rtl/peripheral/clock.sv in the loop, wired the way MSX1.sv
+//  wires it: the CE rate follows the bus owner (NextZ80 = 4 = 21.48 MHz, T80s = the
+//  OSD speed, here 0 = 3.58 MHz) and is latched only when one phase in twelve meets
+//  an idle bus.  The bench then COUNTS what the board could only suffer: T80s opcode
+//  fetches taken while the latched rate is still the R800's.  +holdrate=0 disables
+//  the SETTLE hold (the behaviour up to 20260922a), =1 enables it.
+int realclk = 0, holdrate = 1;
+wire [2:0] rc_speed_q;
+wire       rc_ce_cpu, rc_turbo;
+wire [2:0] rc_speed = use_nz ? 3'd4 : 3'd0;
+clock RCLK (
+   .clk21m(clk), .reset(reset),
+   .ce_10m7_p(), .ce_10m7_n(), .ce_5m39_p(), .ce_5m39_n(),
+   .ce_3m58_p(), .ce_3m58_n(), .ce_10hz(),
+   .cpu_speed(rc_speed), .cpu_bus_idle(mreq_n & iorq_n),
+   .ce_cpu(rc_ce_cpu), .cpu_turbo(rc_turbo), .cpu_speed_q(rc_speed_q)
+);
+wire rate_ok = (realclk == 0) | (holdrate == 0) | (rc_speed_q == rc_speed);
+int unsigned fast_fetch = 0, back_to_t80 = 0, fast_clks = 0;
+logic t_m1_q = 1'b1, use_nz_q = 1'b0;
+always_ff @(posedge clk) begin
+   t_m1_q   <= t_m1_n;
+   use_nz_q <= use_nz;
+   if (realclk != 0) begin
+      if (use_nz_q & ~use_nz) back_to_t80 <= back_to_t80 + 1;
+      if (~use_nz & ~t80_hold & (rc_speed_q != 3'd0)) fast_clks <= fast_clks + 1;
+      if (~use_nz & (rc_speed_q != 3'd0) & t_m1_q & ~t_m1_n & ~t_mreq_n) fast_fetch <= fast_fetch + 1;
+   end
+end
 
 //  ---------------------------------------------------------------- swap request
 logic want_nz = 1'b0;
@@ -106,7 +139,7 @@ logic [211:0] t_reg, t_dir;
 logic t_swappt;
 
 T80s T80 (
-   .RESET_n(~reset), .CLK(clk), .CEN(ce_t80 & ~t80_hold & ~tr_pause), .WAIT_n(wait_n),
+   .RESET_n(~reset), .CLK(clk), .CEN((realclk != 0 ? rc_ce_cpu : ce_t80) & ~t80_hold & ~tr_pause), .WAIT_n(wait_n),
    .INT_n(~int_req), .NMI_n(1'b1), .BUSRQ_n(1'b1), .OUT0(1'b0),
    .M1_n(t_m1_n), .MREQ_n(t_mreq_n), .IORQ_n(t_iorq_n), .RD_n(t_rd_n), .WR_n(t_wr_n),
    .RFSH_n(t_rfsh_n), .HALT_n(t_halt_n), .BUSAK_n(t_busak_n),
@@ -147,7 +180,8 @@ cpuswap_ctl CTL (
    .clk(clk), .reset(reset), .want_nz(want_nz),
    .t80_swappt(t_swappt), .nz_swappt(n_swappt),
    .use_nz(use_nz), .t80_hold(t80_hold), .nz_hold(nz_hold),
-   .t80_dirset(t80_dirset), .nz_load(nz_load), .busy(busy)
+   .t80_dirset(t80_dirset), .nz_load(nz_load), .busy(busy),
+   .rate_ok(rate_ok)
 );
 
 int unsigned xfers = 0;
@@ -407,6 +441,9 @@ task automatic out_port(input [7:0] p, input [7:0] d);
    if (p == 8'hFF) begin
       $display("INTA %0d DI-violations %0d", intas, di_viol);
       $display("END clk=%0d swaps=%0d waits=%0d", clk_n, swaps, wait_clks);
+      if (realclk != 0)
+         $display("RATE holdrate=%0d: %0d hand-overs back to T80s, T80s ran %0d clocks and %0d opcode fetches at the R800 rate",
+                  holdrate, back_to_t80, fast_clks, fast_fetch);
       $finish;
    end else
       $display("O %02x %02x", p, d);

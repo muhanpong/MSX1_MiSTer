@@ -882,6 +882,7 @@ msx MSX
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),
    .cpu_bus_idle(cpu_bus_idle),
+   .cpu_rate_ok(cpu_speed_q == cpu_speed),   // cpuswap holds SETTLE until the CE rate matches the new owner
    .msx_turbo_req(msx_turbo_req),
    .turbor_en(turbor_en),
    .turbor_pause(turbor_pause),

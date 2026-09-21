@@ -22,6 +22,7 @@ module msx
    input                    sdram_rdtog,         // flips once per completed SDRAM ch2 READ (P3 closed loop)
    input                    sdram_hit,           // level: this ch2 READ was answered from sdram.sv's word latch
    input              [2:0] cpu_speed_q,         // LATCHED speed, selects the guard limit
+   input                    cpu_rate_ok,         // clock.sv has latched the rate the current bus owner wants (cpuswap SETTLE)
    output                   cpu_bus_idle,        // -> clock.sv: safe point to change speed
    output                   msx_turbo_req,       // Panasonic 40H/41H: software asked for 5.37MHz
    input                    turbor_en,           // OSD: turbo R features (rtl/peripheral/turbor)
@@ -381,7 +382,8 @@ cpuswap_ctl CPUSWAP
    .nz_hold(nz_hold),
    .t80_dirset(t80_dirset),
    .nz_load(nz_load),
-   .busy(swap_busy)
+   .busy(swap_busy),
+   .rate_ok(cpu_rate_ok)
 );
 
 //  The owner's strobes, forced idle while a hand-over is in progress: the frozen
