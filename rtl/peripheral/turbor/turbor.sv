@@ -96,9 +96,28 @@ logic [7:0] ov_byte;
 always_comb begin
    ov_byte = 8'hFF;
    case (a)
-      16'h002D: ov_byte = 8'h03;
-      16'h0180: ov_byte = 8'hD3;  16'h0181: ov_byte = 8'hE5;  16'h0182: ov_byte = 8'hC9;
-      16'h0183: ov_byte = 8'hDB;  16'h0184: ov_byte = 8'hE5;  16'h0185: ov_byte = 8'hC9;
+      //  002Dh (MSXVER) and 0180-0185h (CHGCPU/GETCPU) are NO LONGER overlaid.
+      //  Every turbo R pack we ship carries a genuine turbo R BIOS, which has
+      //  002Dh=03, 0180h=JP 046A and 0183h=JP 04D2 already -- so the overlay was
+      //  replacing working code with something materially weaker:
+      //
+      //    real CHGCPU  a=00 -> E5<-60 (Z80)   a=01 -> E5<-40   a=02 -> E5<-00,
+      //                 after AND 7F / CP 03, then DI, then PUSH HL,DE,BC,AF,IX,IY
+      //    the stub     OUT (E5),A / RET -- the mode NUMBER straight to E5, no
+      //                 validation, NO DI, no registers saved
+      //    real GETCPU  selects register 6 (OUT (E4),6) before IN A,(E5)
+      //    the stub     IN A,(E5) / RET, relying on the get_arm one-shot
+      //
+      //  Board, 2026-09-22: Illusion City calls CHGCPU(0) while on the R800, the
+      //  stub writes E5<-00 and hands the bus over with interrupts still enabled
+      //  and nothing preserved; 50 us later execution is in FFh-filled RAM at
+      //  F3E8h and never comes back.  Measured in the ring, instruction by
+      //  instruction: 0180 -> OUT E5,00 -> SWAP -> 0182 -> 7916 -> 790D -> F3C9
+      //  -> RST 38h.  The reference values above are the peer session's openMSX
+      //  measurement of a real FS-A1ST.
+      //
+      //  The PCM entries below stay: 0186h/0189h are the real PCMPLY/PCMREC on a
+      //  genuine BIOS, and we have no PCM hardware for them to drive.
       //  PCMPLY: the fetch of 0186h is parked while pcm_play runs, and the
       //  opcode handed back afterwards carries the abort flag in carry --
       //  37h = SCF (aborted by CTRL+STOP), B7h = OR A (clean).
@@ -108,11 +127,13 @@ always_comb begin
       default: ;
    endcase
 end
-wire ov_addr = (a == 16'h002D) | (a >= 16'h0180 & a <= 16'h018B);
+wire ov_addr = (a >= 16'h0186 & a <= 16'h018B);
 assign mem_ov = en & main_rom0 & ~mreq_n & ~rd_n & ov_addr;
 
 //  One-shots: evaluated on every clock of an opcode fetch (NextZ80 can fetch back to
 //  back without releasing M1), held through the instruction's own I/O cycle.
+//  With 0180-0185 no longer overlaid these arm only if a pack's own BIOS
+//  happens to put an OUT/IN E5h right there, which a genuine turbo R does not.
 logic chg_arm = 1'b0, get_arm = 1'b0;
 wire  fetch = ~m1_n & ~mreq_n & ~rd_n;
 always_ff @(posedge clk) begin
