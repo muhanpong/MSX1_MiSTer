@@ -107,3 +107,16 @@ module altsyncram #(parameter operation_mode = "", width_a = 1, widthad_a = 1,
    assign q_b = '0;
    assign eccstatus = '0;
 endmodule
+
+//  altddio_out: sdram.sv uses one to forward the clock to the chip.  The bench
+//  does not model the clock pin, so this only has to exist.
+module altddio_out #(parameter intended_device_family = "", lpm_type = "", width = 1,
+                     parameter power_up_high = "OFF", oe_reg = "UNREGISTERED",
+                     parameter extend_oe_disable = "OFF", invert_output = "OFF",
+                     parameter lpm_hint = "")
+(input outclock, input outclocken, input aclr, input aset,
+ input sclr, input sset,
+ input [width-1:0] datain_h, input [width-1:0] datain_l,
+ input oe, input outclock_ena, output [width-1:0] dataout);
+   assign dataout = '0;
+endmodule

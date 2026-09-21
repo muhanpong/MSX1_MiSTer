@@ -28,6 +28,11 @@ if [ ! -x "$Q/quartus_map" ]; then
   echo "GATE-FAIL: Quartus volume not mounted at $Q"
   echo "           try: udisksctl mount -b /dev/disk/by-uuid/0eb4bebc-0644-4c2f-9a97-ddca5afcd8f3"; exit 3
 fi
+#  Before any Quartus stage: let the diff trip the records (landmines.tsv) and run
+#  the benches it is answerable to.  A failing bench refuses the build.
+if [ "$SIGNOFF_ONLY" = 0 ] && [ "${BUILDGATE_SKIP_PRECHECK:-0}" != 1 ]; then
+  tools/buildgate/precheck.sh || { echo "GATE-FAIL: precheck refused the build (rc=$?)"; exit 4; }
+fi
 if [ "$SIGNOFF_ONLY" = 0 ]; then
   for st in ${STAGES//,/ }; do
     t0=$(date +%s)
@@ -55,4 +60,7 @@ awk '$2<0{f=1} END{exit f}' "$LOG/signoff.txt" || { echo "GATE-FAIL: negative sl
 grep -q '^GATE-FAIL' "$LOG/relations.txt" && fail=1
 tools/buildgate/sdc_ignored.sh "$LOG/sta.log" || fail=1
 grep -E 'M10K blocks|Logic utilization \(in ALMs\)' output_files/MSX1.fit.rpt | head -2 | sed 's/  */ /g'
+#  A passing build becomes the base the next precheck diffs against.  (A dirty
+#  tree still records HEAD: precheck also diffs the working tree against it.)
+if [ $fail = 0 ]; then git rev-parse HEAD > output_files/.buildgate_last_pass 2>/dev/null || true; fi
 if [ $fail = 0 ]; then echo "BUILDGATE: PASS" | tee "$LOG/buildgate.out"; else echo "BUILDGATE: FAIL" | tee "$LOG/buildgate.out"; exit 1; fi

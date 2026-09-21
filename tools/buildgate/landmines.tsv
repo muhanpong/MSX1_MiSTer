@@ -1,0 +1,28 @@
+# landmines.tsv -- what this project already learned, keyed by what a DIFF touches.
+#
+# Read by tools/buildgate/precheck.sh before every build.  The problem it solves:
+# the lessons were all written down (docs/, the memory notes) and were still not
+# in mind at the moment of the decision.  So recall is not left to memory -- the
+# change itself trips the record.
+#
+# Columns, TAB separated:
+#   1  id        short name, used for the bench stamp
+#   2  regex     extended regex, matched against the diff since the last PASSING
+#                build: changed FILE PATHS and changed LINES (added and removed)
+#   3  bench     command that must PASS before the build may start, or "-"
+#   4  note      what was learned.  Name the memory note / doc so it can be opened.
+#
+# Add a line whenever a build, a board session or a day is lost to something a
+# one-line warning would have prevented.  Keep the regex on the SMELL of the area
+# (signal names, file names, idioms), not on one exact line.
+
+cpuswap	turbor\.sv|cpuswap|nz_bus|mem_ov|ov_addr|chg_arm|get_arm|LDIR|XREG|SWAPPT|use_nz|t80_hold|nz_hold	GHDL=$(command -v ghdl) SJASMPLUS=$(command -v sjasmplus) rtl/cpu/cpuswap/sim/run.sh	The hand-over COPIES one register context across; the BIOS overlay stub (single OUT (E5),A at 0180h) is its other half.  The real CHGCPU writes TWO bytes with OTIR ([mode,60h]) because real hardware has two independent CPUs parked mid-OTIR -- under the copy model the incoming core inherits PC=OTIR,B=1 and writes the 60h at once, bouncing back to Z80 in 0.7 us.  Removing the stub killed every R800 switch (20260922b).  memory: feedback-chestertons-fence-before-removing-rtl
+evtrace	evt_trace\.sv|parse_evtrace|dump_evtrace	verilator --binary -Wno-fatal -Wno-WIDTH -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN --top-module tb -o tbevt -Mdir /tmp/buildgate_bench/evt tools/evtrace/tb_evt.sv rtl/evt_trace.sv >/dev/null 2>&1 && /tmp/buildgate_bench/evt/tbevt | grep -c MARKER | grep -qx 4	A repeat COUNT cannot find a wedge, only time can: LDIR looks like jr $, and the turbo R BIOS RAM search repeats one address 28672 times while working.  CALL 0038 is NORMAL in Illusion City's ISR -- an 0038 fetch without INTA is not by itself a runaway.  tools/evtrace/README.md
+sdram	peripheral/sdram\.sv|sdram_hit|sdram_rdtog|hs_done|hs_tog0|guard_open|guard_cnt|cpu_paced|resume_guard|CACHE_LINES	make -C tb	ch2 has no handshake at stock speed (open-loop deadline) and a hit LEVEL plus a done TOGGLE when paced.  Stale reads have cost this project twice: the vgmplay freeze, and 20260922 a stack read that returned the previous opcode byte (F392 read as F3C9) in the 21 MHz window right after a CPU hand-over.  memory: project-vgmplay-freeze-rootcause, project-sdram-readcache
+upload	memory_upload\.sv|mapper_detect\.sv|ioctl_download|reset_rq	sim/run_device_reload.sh	A second `load` racing the FSM restart released the machine on half-written SDRAM (36 corrupt products in 300 trials before e23e531).  reset_rq is LOW before a load starts as well as after it.  STATE_CLEAN does not clear ref_ram/offset_ram.  docs/handoff_20260920_hangs.md
+slots	msx_slots\.sv|mem_unmaped|mapper_en|mapper_rd|mapper_wr|slot_expander	sim/run_subslot_dev.sh	A write to 0FFFFh in an expanded slot must latch the subslot register and go nowhere else; unmapped reads are FFh and FFh executes as RST 38h, so a wrong decode looks like a runaway, not like a bus error.
+confstr	CONF_STR|status\[[0-9]+|status_menumask|menumask	-	MiSTer's menu silently ignores what it has not seen before: token index 1 is reserved (SS/UART/MIDI), an `I` token in the middle shifts every row below it, status bits above the highest precedent do nothing, and a "free" bit may hold a stale 1 in the user's MSX1.CFG -- read the board's CFG with xxd first.  memory: feedback-stay-inside-proven-range, reference-confstr-i-token-placement
+vdptiming	OFFSET_Y|PREWINDOW|VD_LEAD|vdp_interrupt|W_ACTIVE|BWINDOW|vblank	-	Shared VDP timing signals have many consumers: enumerate them ALL before changing one, write the invariants both ways first, and verify on several games (they measure the IRQ period themselves).  A GND warning may be intent.  memory: feedback-vdp-timing-change-protocol
+pcm	ymf278_pcm|pcm_engine|compute_vib|compute_am|ymf278b_	-	No division and no large combinational cloud inside the PCM engine: a signed /12 grew a LUT cloud that broke SDRAM_DQ IOB packing and made 2 MB RAM read 0/384KB at random -- silently, on the board only.  Re-verify 2 MB RAM after any change here.  memory: project-pcm-noise-rootcause, reference-pcm-engine-optimization
+gain	_vol\b|volume|trim|PCM_HEADROOM|x181|/128	-	Gain and trim changes need the user's permission first; a label that does not match the real gain is a lie, and the user works from a level meter.  memory: feedback-gain-changes-need-permission
+fullsys	sim/fullsys/|stubs\.sv|prep\.sh	sim/fullsys/prep.sh >/dev/null	ghdl synth exits 0 with black-boxed entities when a package is analysed twice -- only the Verilator lint catches it.  spram/dpram stubs MUST return FFh when cs=0 or the runaway being hunted disappears from the simulation.  sim/fullsys/README.md

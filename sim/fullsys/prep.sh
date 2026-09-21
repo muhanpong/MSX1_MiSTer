@@ -195,4 +195,13 @@ for f in files:
 for g in ("stubs.sv",): print(root + "/sim/fullsys/" + g)
 for g in ("t80s.v", "vdp.v", "vdp18_core.v", "rtc.v"): print(out + "/" + g)
 PY
+#  The bench's own two generated pieces:
+#    msx_ports.svh -- one declaration per msx.sv port, so the bench can use `.*`
+#                     and BREAKS when a port is added instead of floating it.
+#    sdram_sim.sv  -- tb/mkshim.py's Verilator adaptation of the real sdram.sv
+#                     (splits the inout SDRAM_DQ; cache logic untouched).
+python3 sim/fullsys/mkports.py > "$OUT/msx_ports.svh"
+python3 tb/mkshim.py rtl/peripheral/sdram.sv "$OUT/sdram_sim.sv" > /dev/null
+echo "ports:    $(grep -c ';' "$OUT/msx_ports.svh") declarations"
+
 echo "filelist: $(wc -l < "$OUT/filelist.txt") files -> $OUT/filelist.txt"

@@ -128,4 +128,7 @@ else echo "    FAIL (no aborted run in the trace)"; fail=1; fi
 grep -q 'CPU MOVED' "$out"/pcm*.log && { echo "pcm: the parked CPU moved"; fail=1; } || true
 
 printf '%-14s ' "negative";    run neg +mode=2 +seed=1 +corrupt=5; check neg DIFF
-[ $fail = 0 ] && echo "RESULT PASS" || echo "RESULT FAIL"
+#  The exit status has to carry the verdict: `a && echo || echo` ends in an echo and
+#  exits 0 whatever happened, and a gate that trusts the status then waves a failing
+#  bench through -- which tools/buildgate/precheck.sh did on its first self-test.
+if [ $fail = 0 ]; then echo "RESULT PASS"; exit 0; else echo "RESULT FAIL"; exit 1; fi
