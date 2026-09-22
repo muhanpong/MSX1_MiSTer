@@ -30,9 +30,11 @@ Sessions: `msx1-mister-8f` (this document, RTL, cross-checks) and
   openMSX both games now run the stock machine's exact path.
 * **Core change.** One mapper enum (`MAPPER_TRFDC`), one input on
   `mapper_msxdos2` (`win_7ff0_only`), two lines in `msx_slots.sv`.  No new FDC.
-* **Not done yet.** Hardware verification; new pack XMLs (sony session);
-  removal of the 2.20 kernel from the Panasonic MSX2+ 1/2/4 MB packs, which has
-  the same SD Snatcher symptom.
+* **Done alongside.** The `MSXDOS2` (ASCII 2.20) block is removed from all 30
+  packs that carried it — Panasonic 18 and Sony 12 — since the Sony HB-F1XDmk2
+  shows the same two symptoms (sony session, 37c7975).
+* **Not done yet.** Hardware verification; the turbo R pack XMLs with the
+  `TURBOR_FDC` block (sony session, awaiting the user's go).
 
 ---
 
@@ -146,8 +148,9 @@ moot.
 Nextor was tried as an alternative kernel (2.1.4 standalone in 3-3, and the MFRSD
 cartridge's built-in Nextor): its default DOS 2 mode has the same SD Snatcher
 symptom; its DOS 1 mode (hold `1` at boot) runs both games but needs a key press
-every boot.  The MFRSD ROM's kernel turned out to be **Nextor 2.10 alpha 2** and
-fails both games in every mode — a separate item (update it).
+every boot.  (A first reading that the MFRSD cartridge ROM held "Nextor 2.10
+alpha 2" and failed both games was wrong: that test used a stale copy under
+`releases/`; the ROM the packs build with is Nextor 2.1.4.)
 
 ---
 
