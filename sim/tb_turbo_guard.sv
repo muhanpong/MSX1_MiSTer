@@ -57,7 +57,9 @@ module guard #(parameter int GUARD_RD = 8, parameter int GUARD_WR = 2,
          if (ce_3m58_p)         guard_ce  <= 1'b1;
       end
    end
-   wire guard_slow = ~iorq_n | slow_dev;
+   //  20260923: an I/O read that is really an SDRAM read (the kanji ROM) takes the
+   //  fast closed loop -- mirrors rtl/msx.sv.
+   wire guard_slow = (~iorq_n & ~sdram_rd) | slow_dev;
    //  Slow path only -- mirrors rtl/msx.sv.
    wire [4:0] guard_min = guard_slow
        ? 5'd2 + (wr_n ? GUARD_RD[4:0] : GUARD_WR[4:0])

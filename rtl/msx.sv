@@ -600,7 +600,14 @@ end
 // cpu_paced == 0 (stock speed, T80s, no hand-over just done) short-circuits the whole guard, so wait_n === wait_m1_n and
 // the stock core is reproduced exactly.
 wire slow_dev;   // from msx_slots: this memory access hits a ce_3m58-latched device
-wire guard_slow  = ~iorq_n | slow_dev;
+//  An I/O cycle is slow -- EXCEPT the one I/O read that is really a memory read:
+//  the kanji ROM (D9h/DBh) answers from SDRAM through device_kanji_ram_ce, which
+//  raises sdram_ce & ram_rnw inside an IORQ cycle.  On the slow path it got the
+//  fixed I/O floor and no SDRAM completion handshake; at 3.58 MHz an IN cycle is
+//  24 clk21m and the data was home by luck, on the R800 it was not and Illusion
+//  City drew its kanji from stale words (board, 2026-09-23).  Route that read
+//  through the fast closed loop (hs_done / sdram_hit) like any SDRAM read.
+wire guard_slow  = (~iorq_n & ~(sdram_ce & ram_rnw)) | slow_dev;
 wire [3:0] guard_rd   = (cpu_speed_q == 3'd1) ? GUARD_RD_DIV4[3:0] : GUARD_RD[3:0];
 //  +2, and only on the SLOW path.
 //
