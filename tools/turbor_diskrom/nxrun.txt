@@ -1,0 +1,64 @@
+######## ST_nextorA_-_ic
+   5.946 F2CF<-00
+   7.742 F2CF<-0B
+   9.043 DSKIO sec=0000 n=01 dst=B88D sp=E9C1 FE=11 FF=0
+   9.222 DSKIO sec=0000 n=01 dst=B88D sp=E9C1 FE=11 FF=0
+   9.649 F2CF<-00
+  11.424 C01E CY=0
+  11.633 C01E CY=1
+  12.693 DSKIO sec=000B n=01 dst=EA00 sp=FAC6 FE=1 FF=0
+  14.622 first bank 0
+  15.768 first bank 201
+  80.000 end DSKIO=36 crash=0
+######## ST_nextorA_-_sd
+   5.946 F2CF<-00
+   7.742 F2CF<-0B
+   9.043 DSKIO sec=0000 n=01 dst=B88D sp=E9C1 FE=11 FF=0
+   9.221 DSKIO sec=0000 n=01 dst=B88D sp=E9C1 FE=11 FF=0
+  45.000 end DSKIO=8 crash=0
+######## GT_nextorA_-_ic
+   5.946 F2CF<-00
+   7.745 F2CF<-1B
+   9.043 DSKIO sec=0000 n=01 dst=B88D sp=E9C1 FE=27 FF=0
+   9.222 DSKIO sec=0000 n=01 dst=B88D sp=E9C1 FE=27 FF=0
+   9.649 F2CF<-00
+  11.424 C01E CY=0
+  11.633 C01E CY=1
+  12.693 DSKIO sec=000B n=01 dst=EA00 sp=FAC6 FE=1 FF=0
+  15.222 first bank 0
+  16.368 first bank 201
+  80.000 end DSKIO=32 crash=0
+######## GT_nextorA_-_sd
+   5.946 F2CF<-00
+   7.745 F2CF<-1B
+   9.043 DSKIO sec=0000 n=01 dst=B88D sp=E9C1 FE=27 FF=0
+   9.221 DSKIO sec=0000 n=01 dst=B88D sp=E9C1 FE=27 FF=0
+  45.000 end DSKIO=8 crash=0
+######## ST_pack_nodos_mfr_ic
+   5.015 F2CF<-00
+   7.873 F2CF<-0B
+   9.353 C01E CY=0
+  10.151 first bank 176
+  35.245 *** PC=0000 sp=F65E
+  36.051 first bank 32
+  80.000 end DSKIO=0 crash=1
+######## ST_pack_nodos_mfr_sd
+   5.015 F2CF<-00
+   7.873 F2CF<-0B
+   9.353 C01E CY=0
+  10.151 first bank 176
+  45.000 end DSKIO=0 crash=0
+######## GT_pack_nodos_mfr_ic
+   5.016 F2CF<-00
+   7.872 F2CF<-1B
+   9.353 C01E CY=0
+  10.151 first bank 176
+  35.245 *** PC=0000 sp=F65E
+  36.051 first bank 32
+  80.000 end DSKIO=0 crash=1
+######## GT_pack_nodos_mfr_sd
+   5.016 F2CF<-00
+   7.872 F2CF<-1B
+   9.353 C01E CY=0
+  10.151 first bank 176
+  45.000 end DSKIO=0 crash=0

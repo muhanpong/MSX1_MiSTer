@@ -22,7 +22,8 @@ MAPPER_TYPES = ["MAPPER_UNUSED" , "MAPPER_RAM"    , "MAPPER_AUTO"  , "MAPPER_NON
                 "MAPPER_KOEI"   , "MAPPER_LINEAR" , "MAPPER_RTYPE" , "MAPPER_WIZARDY"   ,
                 "MAPPER_FMPAC"  , "MAPPER_OFFSET" , "MAPPER_MFRSD1", "MAPPER_MFRSD2"    ,
                 "MAPPER_MFRSD3" , "MAPPER_GM2"    , "MAPPER_HALNOTE", "MAPPER_ASCII16X"  ,
-                "MAPPER_YAMANOOTO", "MAPPER_NEO8" , "MAPPER_NEO16" , "MAPPER_MSXDOS2"   ]
+                "MAPPER_YAMANOOTO", "MAPPER_NEO8" , "MAPPER_NEO16" , "MAPPER_MSXDOS2"   ,
+                "MAPPER_TRFDC"    ]
 MSX_TYPES    = ["MSX1", "MSX2"]
 
 BLOCK_TYPES = {"NONE"       : {"MEMORY": "NONE", "DEVICE" : "NONE" , "MAPPER" : "MAPPER_UNUSED" , "CONFIG" : "NONE"         , "SRAM": 0  },
@@ -40,6 +41,11 @@ BLOCK_TYPES = {"NONE"       : {"MEMORY": "NONE", "DEVICE" : "NONE" , "MAPPER" : 
                "ASCII8"     : {"MEMORY": "ROM" , "DEVICE" : "NONE" , "MAPPER" : "MAPPER_ASCII8" , "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
                "MSX-MUSIC"  : {"MEMORY": "ROM" , "DEVICE" : "OPL3" , "MAPPER" : "MAPPER_NONE"   , "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
                "MSXDOS2"    : {"MEMORY": "ROM" , "DEVICE" : "NONE" , "MAPPER" : "MAPPER_MSXDOS2", "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
+               # turbo R disk ROM block: 64 kB (4 x 16 kB) DOS 2 kernel banked by a write to
+               # 7FF0h, WITH the WD2793 register set at 7FF8-7FFF in the same page (Sony
+               # layout, as the FDC block).  Carries the synthesized ROM from
+               # tools/turbor_diskrom (DOS 2.30/2.31 kernel + hb-f1xd WD2793 driver).
+               "TURBOR_FDC" : {"MEMORY": "FDC" , "DEVICE" : "NONE" , "MAPPER" : "MAPPER_TRFDC"  , "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
                }
 
 def file_hash(filename):

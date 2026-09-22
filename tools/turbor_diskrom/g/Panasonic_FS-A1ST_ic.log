@@ -1,0 +1,13 @@
+   4.921 first bank 0
+   5.925 first bank 1
+   5.970 F2CF<-00
+   7.083 F2CF<-0B
+   7.302 first bank 2
+   8.313 DSKIO sec=0000 n=01 dst=AF70 sp=EAB9 FE=0 FF=0
+   8.538 first bank 3
+  10.114 DSKIO sec=0000 n=01 dst=EB85 sp=C1D4 FE=1 FF=0
+  10.320 C01E CY=0
+  10.532 C01E CY=1
+  11.619 DSKIO sec=000B n=01 dst=EA00 sp=FAC6 FE=1 FF=0
+  14.980 first bank 201
+  80.000 end DSKIO=34 crash=0

@@ -1,0 +1,26 @@
+######## ST_pack_nodos_nofat_ic
+   5.015 F2CF<-00
+   7.873 F2CF<-0B
+   9.278 DSKIO sec=0000 n=01 dst=B882 sp=EA24 FE=11 FF=0
+   9.456 DSKIO sec=0000 n=01 dst=B882 sp=EA24 FE=11 FF=0
+   9.978 F2CF<-00
+  80.000 end DSKIO=4 crash=0
+######## ST_pack_nodos_nofat_sd
+   5.015 F2CF<-00
+   7.873 F2CF<-0B
+   9.278 DSKIO sec=0000 n=01 dst=B882 sp=EA24 FE=11 FF=0
+   9.456 DSKIO sec=0000 n=01 dst=B882 sp=EA24 FE=11 FF=0
+  45.000 end DSKIO=8 crash=0
+######## GT_pack_nodos_nofat_ic
+   5.016 F2CF<-00
+   7.872 F2CF<-1B
+   9.294 DSKIO sec=0000 n=01 dst=B882 sp=EA24 FE=27 FF=0
+   9.473 DSKIO sec=0000 n=01 dst=B882 sp=EA24 FE=27 FF=0
+   9.994 F2CF<-00
+  80.000 end DSKIO=4 crash=0
+######## GT_pack_nodos_nofat_sd
+   5.016 F2CF<-00
+   7.872 F2CF<-1B
+   9.294 DSKIO sec=0000 n=01 dst=B882 sp=EA24 FE=27 FF=0
+   9.473 DSKIO sec=0000 n=01 dst=B882 sp=EA24 FE=27 FF=0
+  45.000 end DSKIO=8 crash=0

@@ -1,0 +1,5 @@
+bank 00 : 199 writes
+bank 01 : 3 writes
+bank 02 : 1 writes
+bank 03 : 1 writes
+first seen: {00@t=4.921 pc=7FD0} {01@t=5.925 pc=7FD0} {02@t=7.302 pc=7FD0} {03@t=8.538 pc=7FD0}

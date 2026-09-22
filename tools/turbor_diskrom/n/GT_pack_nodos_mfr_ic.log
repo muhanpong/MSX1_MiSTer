@@ -1,0 +1,7 @@
+   5.016 F2CF<-00
+   7.872 F2CF<-1B
+   9.353 C01E CY=0
+  10.151 first bank 176
+  35.245 *** PC=0000 sp=F65E
+  36.051 first bank 32
+  80.000 end DSKIO=0 crash=1

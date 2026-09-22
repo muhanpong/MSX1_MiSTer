@@ -1,0 +1,240 @@
+[
+ [
+  "drv",
+  "7694",
+  "cdc25f",
+  "cdd84d",
+  "GETWRK"
+ ],
+ [
+  "drv",
+  "7869",
+  "cdc25f",
+  "cdd84d",
+  "GETWRK"
+ ],
+ [
+  "drv",
+  "78A7",
+  "cdc25f",
+  "cdd84d",
+  "GETWRK"
+ ],
+ [
+  "drv",
+  "78BD",
+  "cdc25f",
+  "cdd84d",
+  "GETWRK"
+ ],
+ [
+  "drv",
+  "7B62",
+  "cdc25f",
+  "cdd84d",
+  "GETWRK"
+ ],
+ [
+  "drv",
+  "7B95",
+  "cdc25f",
+  "cdd84d",
+  "GETWRK"
+ ],
+ [
+  "drv",
+  "78B4",
+  "c3f65f",
+  "c3094e",
+  "SETINT"
+ ],
+ [
+  "drv",
+  "776C",
+  "cd5a62",
+  "cd5a4d",
+  "PROMPT"
+ ],
+ [
+  "drv",
+  "76CD",
+  "cd2f49",
+  "cd724e",
+  "DIV"
+ ],
+ [
+  "drv",
+  "78B1",
+  "21b778",
+  "21d47f",
+  "INIENV handler -> trampoline 7FD4"
+ ],
+ [
+  "drv",
+  "78B7",
+  "c32760",
+  "c31f4e",
+  "timer handler -> DOS2 generic"
+ ],
+ [
+  0,
+  "7405-7FCF",
+  "<TC8566AF driver>",
+  "<hb driver patched 4885a7e6>",
+  "driver swap"
+ ],
+ [
+  0,
+  "4010",
+  "c35974",
+  "c31e75",
+  "jump table DSKIO"
+ ],
+ [
+  0,
+  "4013",
+  "c39d77",
+  "c3ba78",
+  "jump table DSKCHG"
+ ],
+ [
+  0,
+  "4016",
+  "c3f977",
+  "c34379",
+  "jump table GETDPB"
+ ],
+ [
+  0,
+  "4019",
+  "c31a78",
+  "c35d79",
+  "jump table CHOICE"
+ ],
+ [
+  0,
+  "401C",
+  "c3527c",
+  "c3a079",
+  "jump table DSKFMT"
+ ],
+ [
+  0,
+  "401F",
+  "c31377",
+  "c3e27d",
+  "jump table MTOFF"
+ ],
+ [
+  1,
+  "7405-7FCF",
+  "<TC8566AF driver>",
+  "<hb driver patched 4885a7e6>",
+  "driver swap"
+ ],
+ [
+  1,
+  "4010",
+  "c35974",
+  "c31e75",
+  "jump table DSKIO"
+ ],
+ [
+  1,
+  "4013",
+  "c39d77",
+  "c3ba78",
+  "jump table DSKCHG"
+ ],
+ [
+  1,
+  "4016",
+  "c3f977",
+  "c34379",
+  "jump table GETDPB"
+ ],
+ [
+  1,
+  "4019",
+  "c31a78",
+  "c35d79",
+  "jump table CHOICE"
+ ],
+ [
+  1,
+  "401C",
+  "c3527c",
+  "c3a079",
+  "jump table DSKFMT"
+ ],
+ [
+  1,
+  "401F",
+  "c31377",
+  "c3e27d",
+  "jump table MTOFF"
+ ],
+ [
+  0,
+  "47D6",
+  "cdf176",
+  "cd2778",
+  "INIHRD"
+ ],
+ [
+  0,
+  "48C6",
+  "cd4777",
+  "cd6778",
+  "DRIVES"
+ ],
+ [
+  0,
+  "48F8",
+  "21da73",
+  "21e774",
+  "DEFDPB"
+ ],
+ [
+  0,
+  "4904",
+  "cd7177",
+  "cda778",
+  "INIENV"
+ ],
+ [
+  0,
+  "5796",
+  "c35d78",
+  "c3e07d",
+  "OEMSTA"
+ ],
+ [
+  0,
+  "7FDE",
+  "cd8977",
+  "cdb778",
+  "trampoline CALL handler"
+ ],
+ [
+  1,
+  "7FDE",
+  "cd8977",
+  "cdb778",
+  "trampoline CALL handler"
+ ],
+ [
+  2,
+  "7FDE",
+  "cd8977",
+  "cdb778",
+  "trampoline CALL handler"
+ ],
+ [
+  3,
+  "4000-7FFF",
+  "<vendor DOS1 kernel+TC8566AF>",
+  "<hb-f1xd 12f2cc79 + 7FD0 32F07FC9 + 7FD4 C3B778>",
+  "bank3"
+ ]
+]

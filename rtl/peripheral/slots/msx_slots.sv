@@ -210,6 +210,7 @@ wire [26:0] mapper_addr = mem_unmaped                 ? 27'hDEAD                
                           mapper == MAPPER_MFRSD2     ? 27'(mapper_mfrsd2_addr)     :
                           mapper == MAPPER_MFRSD3     ? 27'(mapper_mfrsd3_addr)     :
                           mapper == MAPPER_MSXDOS2    ? 27'(mapper_msxdos2_addr)    :
+                          mapper == MAPPER_TRFDC      ? 27'(mapper_msxdos2_addr)    :   // turbo R disk ROM: same banked page 1, WD2793 regs alongside
                           mapper == MAPPER_HALNOTE    ? 27'(mapper_halnote_addr)    :
                           cart_ascii8                 ? 27'(mapper_ascii8_addr)     :
                           cart_ascii16                ? 27'(mapper_ascii16_addr)    :
@@ -279,7 +280,8 @@ mapper_msxdos2 msxdos2
 (
    .rom_size(25'(size) << 14),
    .din(cpu_dout),
-   .cs(mapper == MAPPER_MSXDOS2),
+   .cs(mapper == MAPPER_MSXDOS2 | mapper == MAPPER_TRFDC),
+   .win_7ff0_only(mapper == MAPPER_TRFDC),
    .mem_unmaped(mapper_msxdos2_unmaped),
    .mem_addr(mapper_msxdos2_addr),
    .*

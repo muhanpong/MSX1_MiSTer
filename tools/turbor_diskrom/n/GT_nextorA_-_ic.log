@@ -1,0 +1,11 @@
+   5.946 F2CF<-00
+   7.745 F2CF<-1B
+   9.043 DSKIO sec=0000 n=01 dst=B88D sp=E9C1 FE=27 FF=0
+   9.222 DSKIO sec=0000 n=01 dst=B88D sp=E9C1 FE=27 FF=0
+   9.649 F2CF<-00
+  11.424 C01E CY=0
+  11.633 C01E CY=1
+  12.693 DSKIO sec=000B n=01 dst=EA00 sp=FAC6 FE=1 FF=0
+  15.222 first bank 0
+  16.368 first bank 201
+  80.000 end DSKIO=32 crash=0

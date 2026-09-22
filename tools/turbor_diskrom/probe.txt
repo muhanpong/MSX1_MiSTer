@@ -1,0 +1,3 @@
+debuggable: Memory Mapped FDC ROM size=16384
+before: C3 1E
+after : C3 1E 75

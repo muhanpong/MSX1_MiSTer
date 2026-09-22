@@ -34,13 +34,19 @@ module mapper_msxdos2
    input               cpu_mreq,
    input               cpu_wr,
    input               cs,
+   input               win_7ff0_only, // MAPPER_TRFDC: the turbo R disk ROM banks on 7FF0 alone
    output              mem_unmaped,
    output       [24:0] mem_addr
 );
 
 // 16 kB blocks, so the count is the ROM size shifted down by 14.
 wire [10:0] blocks    = 11'(rom_size >> 14);
-wire        bank_win  = cpu_addr[15:12] == 4'h6          // 6000-6FFF
+//  The turbo R internal disk ROM (openMSX TurboRFDC.cc) decodes ONLY 7FF0: the
+//  WD2793 register set of the TURBOR_FDC block shares this page at 7FF8-7FFF, and
+//  a 6000-6FFF window would turn any ASCII8-style probe into a bank switch while
+//  the disk ROM is paged in.  tools/turbor_diskrom/README.md.
+wire        bank_win  = win_7ff0_only ? cpu_addr == 16'h7FF0
+                      : cpu_addr[15:12] == 4'h6          // 6000-6FFF
                       | cpu_addr        == 16'h7FF0
                       | cpu_addr        == 16'h7FFE;
 

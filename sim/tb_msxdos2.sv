@@ -6,7 +6,7 @@
 `timescale 1ns/1ps
 module tb_msxdos2;
 
-   logic        clk = 0, reset = 1, cpu_mreq = 0, cpu_wr = 0, cs = 1;
+   logic        clk = 0, reset = 1, cpu_mreq = 0, cpu_wr = 0, cs = 1, narrow = 0;
    logic [15:0] cpu_addr = 0;
    logic  [7:0] din = 0;
    logic [24:0] rom_size = 25'd65536;        // 4 blocks, the real DOS 2 ROMs
@@ -16,7 +16,7 @@ module tb_msxdos2;
 
    mapper_msxdos2 dut (.clk(clk), .reset(reset), .rom_size(rom_size),
                        .cpu_addr(cpu_addr), .din(din), .cpu_mreq(cpu_mreq),
-                       .cpu_wr(cpu_wr), .cs(cs),
+                       .cpu_wr(cpu_wr), .cs(cs), .win_7ff0_only(narrow),
                        .mem_unmaped(mem_unmaped), .mem_addr(mem_addr));
 
    always #5 clk = ~clk;
@@ -89,6 +89,20 @@ module tb_msxdos2;
       bankwr(16'h6000, 8'd3);
       reset = 1; @(negedge clk); reset = 0; @(negedge clk);
       look(16'h4000); check(25'h0000000, 1'b0, "reset returns to block 0");
+
+      // 18..22 -- MAPPER_TRFDC (turbo R disk ROM, openMSX TurboRFDC.cc): 7FF0 is the
+      // ONLY bank window.  6000-6FFF and 7FFE are plain ROM there, because the
+      // WD2793 registers share this page at 7FF8-7FFF and a game probing for an
+      // ASCII8 mapper writes 6000-7FFF freely.
+      narrow = 1;
+      reset = 1; @(negedge clk); reset = 0; @(negedge clk);
+      look(16'h4000); check(25'h0000000, 1'b0, "trfdc: reset parks block 0");
+      bankwr(16'h7FF0, 8'd2); look(16'h4000); check(25'h0008000, 1'b0, "trfdc: 7FF0 banks");
+      bankwr(16'h6000, 8'd1); look(16'h4000); check(25'h0008000, 1'b0, "trfdc: 6000 does NOT bank");
+      bankwr(16'h7FFE, 8'd3); look(16'h4000); check(25'h0008000, 1'b0, "trfdc: 7FFE does NOT bank");
+      bankwr(16'h7FF8, 8'd3); look(16'h4000); check(25'h0008000, 1'b0, "trfdc: WD2793 command write does NOT bank");
+      look(16'h8000); check(25'h0008000, 1'b1, "trfdc: page 2 still unmapped");
+      narrow = 0;
 
       $display("%0d checks, %0d failed", checks, fails);
       if (fails) begin $display("FAILED"); $fatal(1); end

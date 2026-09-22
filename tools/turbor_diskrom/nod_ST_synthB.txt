@@ -1,0 +1,3 @@
+VRAM@0x0000: ~B~B~B T (D 4R 8T (| 8T | ~BB~BB~ @~H<(~ (D < $L ( \ l P | |D|D| p ~ "D |(((N B$ $B | (D TT 0 PPP PP P PP x p( @ @ @ ` @ @@@ @ @ p p @ x `` @ p p `
+VRAM@0x1800: 
+7FF0 writes: 00:187 01:3 02:1    pc=7709 iff=0
