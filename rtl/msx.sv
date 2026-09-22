@@ -1325,7 +1325,7 @@ vdp vdp_vdp
 //  tools/dump_evtrace.tcl).  See rtl/evt_trace.sv.
 evt_trace u_evtrace
 (
-   .clk(clk21m), .reset(reset),
+   .clk(clk21m), .reset(reset), .pause(msx_pause),
    .pc(t80_reg[79:64]), .pc_bus(a), .sp(t80_reg[63:48]), .iff1(t80_reg[210]),
    .use_nz(use_nz), .vdp_int_n(vdp_int_n), .ms_int_n(ms_int_n),
    .mreq_n(mreq_n), .m1_n(m1_n), .iorq_n(iorq_n), .rd_n(rd_n), .wr_n(wr_n),

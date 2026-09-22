@@ -69,6 +69,7 @@ module evt_trace
 (
    input         clk,
    input         reset,
+   input         pause,         // msx_pause: the CPU is frozen, so the wedge clock must freeze too
    input  [15:0] pc,
    input  [15:0] pc_bus,        // the address bus (an M1 fetch address, unlike `pc`)
    input  [15:0] sp,
@@ -219,7 +220,7 @@ module evt_trace
       //  to any other target.  It measures "one target, unbroken", which is the
       //  only thing that separates a wedge from a loop doing its job.
       if (reset | (br_ev & ~br_same)) run_t <= 26'd0;
-      else if (in_loop)               run_t <= run_t + 26'd1;
+      else if (in_loop & ~pause)      run_t <= run_t + 26'd1;   // 2026-09-23: an OSD pause inside the 1.65 s BIOS boot delay (2CAB) tripped the 2 s wedge and froze the ring at boot -- every later capture was empty
 
       if (stopped & ~reset) begin
          if (!marked) begin marked <= 1'b1; we <= 1'b1; wa <= ptr; wd <= {80{1'b1}}; end
