@@ -301,8 +301,10 @@ wait with the same bank sequence (`00 / 01×3 / 02×1`).  Logs and probe scripts
 Pack side (sony session, not in this branch): turbo R packs ST ×5 / GT ×4
 replaced — 3-2 = `TURBOR_FDC`, 4 blocks, `fs-a1{st,gt}_diskrom_wd2793.rom`
 (the synthesized ROMs, placed in the untracked ROM store), 3-3 empty.  The
-Panasonic MSX2+ 1/2/4 MB packs lose their `MSXDOS2` block (same SD Snatcher
-symptom, and the real machines never had DOS 2).  Built `.MSX` files are not
+`MSXDOS2` block removed from all 30 packs that carried it — Panasonic 18 (F FM /
+FX / WX ×3, GT 4, ST 5) and Sony 12 (HB-F1XDmk2, HB-F1XV) — after the Sony
+HB-F1XDmk2 1 MB showed the same two symptoms (sony, 37c7975; FS-A1WX 1 MB and
+HB-F1XDmk2 1 MB then run both games, the WX t=80 screen pixel-identical to stock).  Built `.MSX` files are not
 pushed.
 
 ---
@@ -312,7 +314,9 @@ pushed.
 1. **Hardware run** of a `MAPPER_TRFDC` build with the new ST/GT packs: DOS 2
    prompt, Illusion City past the ninth transfer (watch `EAE8` with the event
    recorder's `K_MW`), SD Snatcher to the logo.
-2. MFRSD pack: replace the Nextor 2.10 alpha 2 kernel.
+2. ~~MFRSD pack: replace the Nextor 2.10 alpha 2 kernel.~~  Withdrawn: the packs already
+   ship Nextor 2.1.4 (`mfrsd.rom` 411c6d8c…); the alpha-2 reading came from a stale
+   copy under `releases/`.  Files renamed `*_nextor214.rom` (sony, 37c7975).
 3. Why ASCII 2.20 skips SD Snatcher's boot sector — academic now.
 4. The FS-A1GT SRAM-disk option inside the retained driver prefix: harmless in
    openMSX, never exercised.
