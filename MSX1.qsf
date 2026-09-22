@@ -335,7 +335,9 @@ set_global_assignment -name SYSTEMVERILOG_FILE MSX1.sv
 # register, and the path only passes on placement luck.  Moved to 7 to get a build
 # out; the real fix is to synchronise `reset` into clk21m, which touches a global
 # and needs its own review (handoff 20260920 §2).
-set_global_assignment -name SEED 7
+# 2026-09-23: SEED 7 gave -0.100 ns setup on the TURBOR_FDC build, all ten worst paths
+# ascal o_div[0][20] -> o_div[1][20] in the pll_hdmi domain again, none of ours; moved to 8.
+set_global_assignment -name SEED 8
 
 
 
