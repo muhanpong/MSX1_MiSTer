@@ -3,8 +3,8 @@ RTL   = ../rtl/package.sv sdram_sim.sv tb_common.sv
 FLAGS = --binary --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT \
         -Wno-BLKANDNBLK -Wno-TIMESCALEMOD -Wno-MULTIDRIVEN
 
-.PHONY: all latch nolatch guard clean
-all: nolatch latch guard
+.PHONY: all latch nolatch guard kanji clean
+all: nolatch latch guard kanji
 
 # 'latch'/'nolatch' target names kept: cache on (8192 lines) / off
 
@@ -29,5 +29,10 @@ guard: sdram_sim.sv
 		--Mdir obj_guard -o sim $(RTL) guard_tb.sv >/dev/null
 	@./obj_guard/sim
 
+kanji: sdram_sim.sv
+	@verilator $(FLAGS) --top-module kanji_tb \
+		--Mdir obj_kanji -o sim $(RTL) ../rtl/peripheral/slots/kanji.sv kanji_tb.sv >/dev/null
+	@./obj_kanji/sim
+
 clean:
-	rm -rf obj_latch obj_nolatch obj_guard obj_guard0 sdram_sim.sv
+	rm -rf obj_latch obj_nolatch obj_guard obj_guard0 obj_kanji sdram_sim.sv
