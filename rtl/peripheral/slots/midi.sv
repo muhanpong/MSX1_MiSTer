@@ -35,7 +35,14 @@ module dev_midi
 
 localparam [7:0] I8251_STATUS = 8'h05;   // TxRDY | TxEMPTY, RxRDY clear (measured on openMSX FS-A1GT)
 
-wire status_rd = cs & cpu_iorq & cpu_m1 & cpu_rd & (cpu_addr == 8'hE9);
+//  ~cpu_m1, like every other I/O stub here (cpu_m1 is ~m1_n, high only in the
+//  interrupt acknowledge).  It was `cpu_m1` until 2026-09-23, so a plain IN A,(E9)
+//  never matched and read FFh -- bit 7 set -- and Illusion City's own interrupt
+//  handler (E6DC: IN A,(E9) / BIT 7,A) took its MIDI branch, which never reads
+//  the VDP status; the frame interrupt was never cleared, the handler re-entered
+//  every 35 us and the stack walked down into the slot register (board ring,
+//  GT DOS2 pack).  The reference machine reads 05h there 255 times in 22 s.
+wire status_rd = cs & cpu_iorq & ~cpu_m1 & cpu_rd & (cpu_addr == 8'hE9);
 
 assign dout = status_rd ? I8251_STATUS : 8'hFF;
 
