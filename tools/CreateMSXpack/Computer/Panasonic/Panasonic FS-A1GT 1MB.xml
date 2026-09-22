@@ -25,8 +25,7 @@
 
   2. The 4 MB built-in software in slot 3-3 (MSX View, etc.).  It needs the
      PANASONIC mapper plus 32 KB SRAM, neither of which exists in createMSXpack's
-     BLOCK_TYPES nor package.sv's mapper_typ_t.  Omitted; MSX-DOS 2 goes there
-     instead, which is what the built-in DOS 2 would otherwise provide.
+     BLOCK_TYPES nor package.sv's mapper_typ_t.  Omitted; 3-3 is left empty.
 
   3. The floppy controller.  The real FS-A1GT has a TC8566AF (uPD765 family) with
      its driver inside the 0x60000 block above.  This core implements only a
@@ -34,7 +33,11 @@
      Slot 3-2 carries a WD2793 disk ROM instead (sha1 12f2cc79..., the same bytes
      the working Sony HB-F1XV pack loads) — proven on hardware in the FS-A1F pack.
      The tradeoff: this is no longer an authentic FS-A1GT disk subsystem, and the
-     machine's own DOS 2 2.31 is replaced by the ASCII MSX-DOS 2.20 kernel in 3-3.
+     machine's own DOS 2 2.31 is gone; the pack runs MSX-DOS 1 from that disk ROM.
+     (An ASCII MSX-DOS 2.20 kernel used to sit in 3-3.  Removed 2026-09-23: with
+     DOS 2.20 active, SD Snatcher never gets its boot sector called and Illusion
+     City loads through a path that overwrites its own stack.  Measured in
+     openMSX against the reference machines, and confirmed on the board.)
 
   4. MIDI (the GT's built-in interface) and the PCM sampler.  No RTL exists for
      either; software that requires them will not find them.
@@ -141,17 +144,6 @@
         <block_count>1</block_count>
         <filename>hb-f1xd_disk.rom</filename>
         <SHA1>12f2cc79b3d09723840bae774be48c0d721ec1c6</SHA1>
-      </block>
-    </secondary>
-    <secondary slot="3">
-      <!-- MSX-DOS 2 kernel only; the driver comes from the disk ROM in 3-2.
-           Stands in for the GT's own DOS 2 2.31, which lives in the TC8566AF
-           block this core cannot use. -->
-      <block start="1" id="MSX-DOS2 ROM">
-        <type>MSXDOS2</type>
-        <block_count>4</block_count>
-        <filename>ascii_msxdos22.rom</filename>
-        <SHA1>42f4e3360eb134857b0efa82c1abedf342680124</SHA1>
       </block>
     </secondary>
   </primary>
