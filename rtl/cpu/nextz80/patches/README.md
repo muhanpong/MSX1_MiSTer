@@ -9,6 +9,7 @@ the originals plus these patches, in order.
 | `0001-cpuswap-state-load-export-swappt.patch` | runtime hand-over with T80s (`rtl/cpu/cpuswap/`) |
 | `0002-ld-r-a-counts-its-own-fetch.patch` | accuracy fix: R lagged by one after `LD R,A` |
 | `0003-r800-mulub-muluw.patch` | the R800 multiplies, which NextZ80 stands in for |
+| `0004-block-repeat-refetches-opcode.patch` | accuracy fix: a repeating LDIR/LDDR re-fetches its opcode every iteration (PC-2 + real fetch), so a fill that erases its own `ED B0` stops there as on a Z80/R800.  Illusion City's loader (801Bh) does exactly that; the internal loop wiped the code behind it (2026-09-23).  CPIR/INIR/OTIR still loop internally. |
 
 ## 0001 — state load, state export, swap point
 

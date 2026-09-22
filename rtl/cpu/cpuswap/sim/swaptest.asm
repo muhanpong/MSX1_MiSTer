@@ -408,6 +408,8 @@ iter:
         ld bc,0080h
         lddr
         call flags_out
+        call selfldir           ; L: the LDIR that erases its own opcode (0D000h)
+        call flags_out
         ld hl,8200h
         ld bc,0100h
         ld a,(VAR_IT)
@@ -639,6 +641,30 @@ iter:
         jp nz,iter
         out (0FFh),a
         jr $
+
+; --- L: a LDIR that erases its own opcode.  A Z80 (and the R800) re-fetches the
+;  ED B0 on every iteration, so the fill stops the moment it overwrites itself:
+;  BC is left non-zero and the code right after the LDIR runs.  Illusion City's
+;  loader (801Bh, fill 7D7Dh..B600h) relies on exactly this.  A core that repeats
+;  the block internally without re-fetching fills the whole range, wipes the code
+;  after the LDIR, walks the zeros as NOPs and reaches the second marker instead.
+;  The routine sits in the uncompared E000h+ area: T80s stops one iteration later
+;  than a Z80 (it fetches the next ED before the write lands), so the fill's own
+;  writes must stay out of the trace; only which marker ran is compared.
+        ORG 0E100h
+selfldir:
+        ld hl,selfldir
+        ld de,selfldir+1
+        ld bc,30h
+        ld (hl),0
+        ldir                    ; 0E10Ah: ED B0 -- zeroed by its own 10th write
+        ld a,1
+        ld (0D100h),a           ; reached only when the LDIR stopped on its erasure
+        ret
+        ORG selfldir+31h        ; first byte past the fill
+        ld a,2
+        ld (0D100h),a           ; reached only by a non-refetching core
+        ret
 
         ORG 0C0FFh
         dw isr2

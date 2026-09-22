@@ -1,0 +1,68 @@
+--- a/nextz80cpu.v
++++ b/nextz80cpu.v
+@@ -1307,8 +1307,17 @@
+             if({FETCH[5], FETCH[2]} == 4'b10)
+                case(FETCH[1:0])
+                   2'b00:   // LDI, LDD, LDIR, LDDR
+-                     case(STAGE[1:0])
+-                        2'b00:   begin       // stage1, read data, inc/dec HL
++                     //  A repeating LDIR/LDDR re-fetches its ED B0 on every iteration, as a
++                     //  Z80 does (PC-2 and a real opcode fetch), instead of looping inside
++                     //  the microcode with M1=0.  A fill that runs over its own opcode then
++                     //  stops the moment it erases it: Illusion City's loader at 801Bh
++                     //  (fill 7D7Dh..B600h) depends on that, and the internal loop wiped
++                     //  the code after the LDIR and ran off into FFh (2026-09-23).  Cost:
++                     //  4 stages + the 2 refetched bytes per iteration instead of 3.  The
++                     //  interrupt sample moves to the fetch stage (M1=1 -> intop=DEC pushes
++                     //  the ED address, the same restart point as before).
++                     case(STAGE[2:0])
++                        3'b000:   begin       // stage1, read data, inc/dec HL
+                            ALU160_SEL = 0;               // regs
+                            DINW_SEL = 0;                 // ALU8OUT
+                            WE       = 6'b100111;         // flags, tmpHI, hi, lo
+@@ -1318,7 +1327,7 @@
+                            REG_RSEL = 4'b0101;           // L
+                            M1       = 0;
+                         end
+-                        2'b01:   begin       // stage2, dec BC
++                        3'b001:   begin       // stage2, dec BC
+                            DINW_SEL = 0;                 // ALU8OUT
+                            WE       = 6'b100011;         // flags, hi, lo (affects PF only)
+                            ALU8OP   = 5'b01111;          // DEC
+@@ -1328,22 +1337,33 @@
+                            M1       = 0;
+                            MREQ     = 0;
+                         end
+-                        2'b10:   begin       // stage2, write data, inc/dec DE
++                        3'b010:   begin       // stage3, write data, inc/dec DE
+                            DO_SEL   = 2'b01;             // th
+                            ALU160_SEL = 0;               // regs
+                            DINW_SEL = 0;                 // ALU8OUT
+                            WE       = 6'b000x11;         // hi, lo
+                            ALU8OP   = {4'b0111, FETCH[3]};  // INC / DEC
+-                           next_stage = FETCH[4] ? !FLAGS[2] : 1'b1;
++                           next_stage = 1;
+                            REG_WSEL = 4'b0010;           // D
+                            REG_RSEL = 4'b0011;           // E
+                            M1       = 0;
+                            WR       = 1;
+                         end
+-                        2'b11: begin
++                        3'b011: begin
++                           ALU160_SEL = 1;               // PC
++                           WE       = 6'b010x00;         // PC
++                           if(FETCH[4] & FLAGS[2]) begin // repeat (BC != 0): PC <- PC-2, no bus cycle
++                              ALU16OP  = 6;              // DEC2, no post inc
++                              M1       = 0;
++                              MREQ     = 0;
++                              next_stage = 1;
++                           end                           // else: done, fetch the next opcode
++                        end
++                        3'b100: begin        // stage5 (repeat only): re-fetch the ED at PC
+                            ALU160_SEL = 1;               // PC
+                            WE       = 6'b010x00;         // PC
+                         end
++                        default: ;
+                      endcase
+                   2'b01:   // CPI, CPD, CPIR, CPDR
+                      case(STAGE[1:0])
