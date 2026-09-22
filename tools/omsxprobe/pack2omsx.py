@@ -54,6 +54,11 @@ def dev_for(b):
         e=ET.Element('WD2793',id='Memory Mapped FDC'); ET.SubElement(e,'connectionstyle').text='Sony'
         ET.SubElement(e,'motor_off_timeout_ms').text='4000'; ET.SubElement(e,'drives').text='1'
         e.append(romel(fn,sha)); ET.SubElement(e,'mem',base='0x4000',size='0x8000'); return e
+    if t=='TURBOR_FDC':                       # 64K banked disk ROM, bank register at 7FF0
+        e=ET.Element('BankedSonyFDC',id='turbo R disk ROM')
+        ET.SubElement(e,'connectionstyle').text='Sony'
+        ET.SubElement(e,'motor_off_timeout_ms').text='4000'; ET.SubElement(e,'drives').text='1'
+        e.append(romel(fn,sha)); ET.SubElement(e,'mem',base='0x4000',size='0x4000'); return e
     if t=='MSXDOS2':
         e=ET.Element('ROM',id='MSX-DOS2 ROM'); ET.SubElement(e,'mappertype').text='MSXDOS2'
         e.append(romel(fn,sha)); ET.SubElement(e,'mem',base='0x4000',size='0x4000'); return e
