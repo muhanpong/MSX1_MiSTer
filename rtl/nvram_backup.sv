@@ -55,18 +55,24 @@ logic       wr           = 1'b0, rd = 1'b0;
 
 logic last_load_req = 1'b0;
 logic last_save_req = 1'b0;
+//  The request edges are sampled OUTSIDE the reset branch, and a reset does not
+//  clear a request that arrived during it.  `load_sram` is a one-clock pulse that
+//  memory_upload raises on the same edge it leaves its FSM -- which is the edge
+//  `reset_rq` falls -- and since 2026-09-20 the machine reset is stretched 63
+//  clk21m past that (MSX1.sv `rst_hold`).  With the latch inside `else`, that
+//  pulse landed entirely inside reset, was never seen, and never came again: no
+//  .sav was read when a ROM was loaded, while the OSD's own SRAM Load (no reset)
+//  still worked.  A load/save request is a host command, not machine state.
 always @(posedge clk) begin
+   if (~last_load_req & load_req) request_load <= 4'b1111;
+   if (~last_save_req & save_req) request_save <= 4'b1111;
+   last_load_req <= load_req;
+   last_save_req <= save_req;
    if (reset) begin
-      request_load   <= 4'b0;
-      request_save   <= 4'b0;
       wr             <= 1'b0;
       rd             <= 1'b0;
       num            <= 2'd0;
-      last_load_req  <= 1'b0;
-      last_save_req  <= 1'b0;
    end else begin
-      if (~last_load_req & load_req) request_load <= 4'b1111;
-      if (~last_save_req & save_req) request_save <= 4'b1111;
       if (done) begin
          wr <= 1'b0;
          rd <= 1'b0;
@@ -83,8 +89,6 @@ always @(posedge clk) begin
             else num <= num + 2'b1;
          end
       end
-      last_load_req <= load_req;
-      last_save_req <= save_req;
    end
 end
 

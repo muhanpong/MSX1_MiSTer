@@ -136,8 +136,19 @@ always @(posedge clk) begin
     last_ack <= sd_ack;
     if (img_mounted) begin mounted_rw <= ~img_readonly; image_size <= img_size; end
 
+    // ---- latch a LOAD request (load_req pulse); OUTSIDE reset ----
+    //  `load_sram` is one clock wide and memory_upload raises it on the same edge
+    //  it leaves its FSM -- the edge `reset_rq` falls.  Since 2026-09-20 the
+    //  machine reset is stretched 63 clk21m past that (MSX1.sv `rst_hold`), so
+    //  with this latch inside the `else` the pulse fell entirely inside reset and
+    //  was lost for good: loading an ASCII16X ROM never read its .sav, while the
+    //  OSD's SRAM Load (no reset) still worked.  A host request is not machine
+    //  state; only a new game (log_clear) or starting the load clears it.
+    if (log_clear)                load_pending <= 1'b0;   // new game: drop stale request
+    else if (load_req & ~load_q)  load_pending <= 1'b1;   // capture SRAM Load / load_sram pulse
+
     if (reset) begin
-        st<=IDLE; sdram_req<=0; sd_rd<=0; sd_wr<=0; dirty<='0; dirty_new<='0; pw_q<=0; load_pending<=0; merge_save<=0;
+        st<=IDLE; sdram_req<=0; sd_rd<=0; sd_wr<=0; dirty<='0; dirty_new<='0; pw_q<=0; merge_save<=0;
     end else begin
         // ---- dirty capture (passive snoop, live in IDLE only) ----
         if (log_clear) begin dirty <= '0; dirty_new <= '0; end
@@ -145,10 +156,6 @@ always @(posedge clk) begin
             dirty    [prog_addr[22:16]] <= 1'b1;
             dirty_new[prog_addr[22:16]] <= 1'b1;
         end
-
-        // ---- latch a LOAD request (load_req pulse); cleared when it starts ----
-        if (log_clear)                load_pending <= 1'b0;   // new game: drop stale request
-        else if (load_req & ~load_q)  load_pending <= 1'b1;   // capture SRAM Load / load_sram pulse
 
         case (st)
         IDLE: begin

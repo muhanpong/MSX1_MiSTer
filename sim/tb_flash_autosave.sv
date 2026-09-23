@@ -66,6 +66,7 @@ always begin
 end
 
 integer errors = 0, save_count = 0;
+reg [31:0] sd_lba_seen = 32'hFFFF_FFFF;
 reg sdwr_q = 0;
 always @(posedge clk) begin
     sdwr_q <= sd_wr;
@@ -127,6 +128,24 @@ initial begin
     pulse_auto; wait_idle;
     check(save_count == 3, "T5 new program re-arms the autosave");
     check(dut.dirty_new === 128'd0, "T5 cleared again after the save");
+
+    // T6: a LOAD request that arrives while reset is still asserted must survive.
+    //     memory_upload raises `load_sram` for ONE clock on the edge its FSM goes
+    //     idle -- the same edge `reset_rq` falls -- and MSX1.sv stretches the
+    //     machine reset 63 clk21m past that.  Latching the request inside the
+    //     `else` of `if (reset)` threw the pulse away and no .sav was ever read
+    //     on a ROM load (hardware, 2026-09-24), while the OSD's own SRAM Load
+    //     still worked because that path has no reset.
+    sd_lba_seen = 32'hFFFF_FFFF;
+    @(negedge clk); reset = 1;
+    repeat (4) @(posedge clk);
+    @(negedge clk); load_req = 1;                 // the one-clock pulse, inside reset
+    @(posedge clk); @(negedge clk); load_req = 0;
+    repeat (60) @(posedge clk);                   // the rest of the stretched reset
+    check(dut.load_pending === 1'b1, "T6 load request latched while reset is high");
+    @(negedge clk); reset = 0;
+    repeat (8) @(posedge clk);
+    check(dut.st != 0 || dut.load_pending === 1'b0, "T6 the load starts once reset releases");
 
     $display("RESULT: %0d error(s)", errors);
     if (errors) $fatal(1, "tb_flash_autosave FAILED");
