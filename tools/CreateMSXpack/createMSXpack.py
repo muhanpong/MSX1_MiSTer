@@ -46,6 +46,11 @@ BLOCK_TYPES = {"NONE"       : {"MEMORY": "NONE", "DEVICE" : "NONE" , "MAPPER" : 
                # layout, as the FDC block).  Carries the synthesized ROM from
                # tools/turbor_diskrom (DOS 2.30/2.31 kernel + hb-f1xd WD2793 driver).
                "TURBOR_FDC" : {"MEMORY": "FDC" , "DEVICE" : "NONE" , "MAPPER" : "MAPPER_TRFDC"  , "CONFIG" : "SLOT_INTERNAL", "SRAM": 0  },
+               # turbo R slot 3-3: the firmware ROM behind the Panasonic 8 kB-region
+               # mapper, with its battery SRAM.  Two entries because the SRAM size
+               # differs per machine (openMSX <sramsize>: ST 16, GT 32).
+               "PANASONIC16": {"MEMORY": "ROM" , "DEVICE" : "NONE" , "MAPPER" : "MAPPER_PANASONIC", "CONFIG" : "SLOT_INTERNAL", "SRAM": 16 },
+               "PANASONIC32": {"MEMORY": "ROM" , "DEVICE" : "NONE" , "MAPPER" : "MAPPER_PANASONIC", "CONFIG" : "SLOT_INTERNAL", "SRAM": 32 },
                }
 
 def file_hash(filename):
