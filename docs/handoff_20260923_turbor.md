@@ -106,8 +106,17 @@ report.
 
 ## 4. Other open items
 
-* Slot 3-3: `MAPPER_PANASONIC` exists (`050965e`, peer session) but no pack XML declares it yet,
-  and its main-RAM banks (0x180+) are unimplemented — a machine that pages them will stop there.
+* Slot 3-3: `MAPPER_PANASONIC` exists (`050965e`, peer session) but no pack XML declares it yet.
+  Parked on purpose, and **not because it is risky**: `matsushita.sv` reports port 41H bit 7 = 1,
+  the front-panel firmware switch OFF with no OSD toggle, so the built-in software never runs and
+  the one path that needs the unimplemented main-RAM banks (>= 0x180, `mem_unmaped` in
+  `panasonic.sv`) is GT + switch ON -> MSX-View.  openMSX, 90 s boots (peer session,
+  `docs/panasonic_mapper.md`): switch OFF, ST and GT both write 7FF8 non-zero 0 times; only GT
+  MSX-View does, 639 times.  So turning 3-3 on today buys nothing visible — that is the reason to
+  wait, and a firmware-switch toggle is what would change it.
+  When it IS turned on, the first thing to get right is the SRAM size (ST 16 KB / GT 32 KB): a
+  plain BASIC boot already selects SRAM block 0x81 (ST once, GT twice), and a wrong window reads
+  ROM there instead, silently.
 * `docs/turbor_diskrom_20260923.md` needs a §9 with the LDIR/MIDI/kanji chapter (the memory file
   has it; the doc stops at §8).
 * Turbo R internal SRAM (ST 16 KB / GT 32 KB, slot 3-3 PANASONIC mapper): no block type; user wants
