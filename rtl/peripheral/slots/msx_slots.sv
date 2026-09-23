@@ -211,6 +211,7 @@ wire [26:0] mapper_addr = mem_unmaped                 ? 27'hDEAD                
                           mapper == MAPPER_MFRSD3     ? 27'(mapper_mfrsd3_addr)     :
                           mapper == MAPPER_MSXDOS2    ? 27'(mapper_msxdos2_addr)    :
                           mapper == MAPPER_TRFDC      ? 27'(mapper_msxdos2_addr)    :   // turbo R disk ROM: same banked page 1, WD2793 regs alongside
+                          mapper == MAPPER_PANASONIC  ? 27'(mapper_panasonic_addr)  :   // turbo R 3-3 firmware: 8 regions of 8kB over the whole space
                           mapper == MAPPER_HALNOTE    ? 27'(mapper_halnote_addr)    :
                           cart_ascii8                 ? 27'(mapper_ascii8_addr)     :
                           cart_ascii16                ? 27'(mapper_ascii16_addr)    :
@@ -234,6 +235,7 @@ assign cpu_din          = mapper_ram_dout                        //IO
                         & d_to_cpu_reset_status                  //IO
                         & d_to_cpu_midi                          //IO E9h (GT MSX-MIDI status)
                         & d_to_cpu_matsushita                    //IO 40H/41H
+                        & mapper_panasonic_dout                  //UNMAPPED (turbo R 3-3 mapper read-back)
                         & (mem_unmaped  ? 8'hFF : ram_dout);
 
 assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
@@ -255,14 +257,15 @@ wire mem_unmaped = mapper_konami_unmaped     |
                    mapper_yamanooto_unmaped  |
                    mapper_msxdos2_unmaped    | 
                    mapper_halnote_unmaped    | 
+                   mapper_panasonic_unmaped  | 
                    mapper_rd                 |
                    mapper_wr                 |
                    FDC_req                   |
                    flash_rq                  ;
                    
 wire [3:0] mapper_mask = mapper_mfrd_mask;
-wire sram_cs     = fmpac_sram_cs | gm2_sram_cs | ascii16_sram_cs | ascii8_sram_cs | halnote_sram_cs;
-wire sram_wr     = fmpac_sram_wr | gm2_sram_wr | ascii16_sram_wr | ascii8_sram_wr | halnote_sram_wr;
+wire sram_cs     = fmpac_sram_cs | gm2_sram_cs | ascii16_sram_cs | ascii8_sram_cs | halnote_sram_cs | panasonic_sram_cs;
+wire sram_wr     = fmpac_sram_wr | gm2_sram_wr | ascii16_sram_wr | ascii8_sram_wr | halnote_sram_wr | panasonic_sram_wr;
 
 //MAPPER NONE
 wire [26:0] mapper_none_addr = 27'(cpu_addr[13:0]) + (27'(offset_ram) << 14);
@@ -284,6 +287,24 @@ mapper_msxdos2 msxdos2
    .win_7ff0_only(mapper == MAPPER_TRFDC),
    .mem_unmaped(mapper_msxdos2_unmaped),
    .mem_addr(mapper_msxdos2_addr),
+   .*
+);
+
+wire [24:0] mapper_panasonic_addr;
+wire        mapper_panasonic_unmaped;
+wire        panasonic_sram_cs, panasonic_sram_wr;
+wire  [7:0] mapper_panasonic_dout;
+mapper_panasonic panasonic
+(
+   .rom_size(25'(size) << 14),
+   .din(cpu_dout),
+   .cs(mapper == MAPPER_PANASONIC),
+   .sram_kb(size_sram),
+   .mem_unmaped(mapper_panasonic_unmaped),
+   .mem_addr(mapper_panasonic_addr),
+   .sram_cs(panasonic_sram_cs),
+   .sram_we(panasonic_sram_wr),
+   .dout(mapper_panasonic_dout),
    .*
 );
 
