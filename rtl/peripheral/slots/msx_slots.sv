@@ -68,6 +68,10 @@ module msx_slots
    output                   debug_scc_wr,
    // ASCII16X flash info (for SDRAM-based save/load)
    output logic       [1:0] flash16x_active,
+   //  MSX-MIDI (FS-A1GT built-in): the serial pair and its interrupt
+   output                   midi_int_n,
+   input                    midi_rx,
+   output                   midi_tx,
    output logic      [26:0] flash16x_base[2],
    output logic      [15:0] flash16x_size[2],
    // ASCII16X write-time capture (for change-log persistence)
@@ -763,6 +767,9 @@ dev_midi dev_midi
    .cpu_addr(cpu_addr[7:0]),
    .cs(|(msx_device & DEV_MIDI)),
    .dout(d_to_cpu_midi),
+   .int_n(midi_int_n),
+   .midi_rx(midi_rx),
+   .midi_tx(midi_tx),
    .*
 );
 

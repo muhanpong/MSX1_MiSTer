@@ -174,8 +174,23 @@ module emu
 
 ///////// Default values for ports not used in this core /////////
 assign ADC_BUS  = 'Z;
-assign USER_OUT = '1;
-assign {UART_RTS, UART_TXD, UART_DTR} = 0;
+//  MSX-MIDI leaves the machine on BOTH paths at once, because they cost the
+//  same one wire and the user may have either:
+//    * the HPS UART -- MiSTer's own MIDI link.  Set `uart_mode` to MIDI and the
+//      HPS bridges this at 31250 baud to ALSA on the board (a software synth) or
+//      over the network.  No adapter, nothing plugged in.
+//    * the USER port -- pin 1 out / pin 0 in, the MiSTer MIDI pinout, for a
+//      dongle to a real synthesiser (and, later, MT32-pi through sys/mt32pi.sv,
+//      which also returns its audio over I2S on these pins).
+//  Receive merges the two: both lines idle HIGH, so an AND passes a start bit
+//  from whichever is connected.  Talk on both at once and they collide -- that
+//  is the user's choice to make, not something to arbitrate here.
+//  (UART_TXD used to be tied to 0, which holds the line in a permanent break.)
+wire midi_tx, midi_rx;
+assign UART_TXD = midi_tx;
+assign midi_rx  = UART_RXD & USER_IN[0];
+assign USER_OUT = {5'b11111, midi_tx, 1'b1};   // [1] = MIDI out, rest idle
+assign {UART_RTS, UART_DTR} = 0;
 
 assign VGA_F1 = 0;
 assign VGA_SCALER  = 0;
@@ -1137,6 +1152,8 @@ debug_overlay u_overlay (
    .dbg_trap_cnt(dbg_trap_cnt),
    .dbg_trap_bus(dbg_trap_bus),
    .dbg_spin(dbg_spin),
+   .midi_tx(midi_tx),
+   .midi_rx(midi_rx),
    .dbg_wait_ratio(dbg_wait_ratio),
    .dbg_hit_ratio(dbg_hit_ratio),
    .dbg_a8_pc(dbg_a8_pc),

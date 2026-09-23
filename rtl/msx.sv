@@ -171,6 +171,10 @@ module msx
    output logic       [15:0] dbg_trap_cnt,      // {escapes, bus strobes at freeze}
    output logic       [15:0] dbg_trap_bus,      // CPU address bus frozen at the trap
    output logic       [15:0] dbg_spin,          // consecutive opcode fetches AT 0038 = RST 38 spin
+   //  MSX-MIDI (FS-A1GT built-in): the serial pair leaves the machine for
+   //  MSX1.sv, which offers it on the HPS UART and on the USER port at once.
+   output                    midi_tx,
+   input                     midi_rx,
    output logic       [15:0] dbg_wait_ratio,    // P5: CPU T-states with WAIT_n low, per 65536 T-states
    output logic       [15:0] dbg_hit_ratio,     // P5: SDRAM reads answered by the read cache, per 65536 reads
    output logic       [15:0] dbg_a8_pc,         // PC of the last OUT (A8) -- who moved page 0
@@ -285,7 +289,7 @@ T80s #(.Mode(0), .T2Write(1), .IOWait(1)) T80
    .CLK(clk21m),
    .CEN(ce_cpu & ~t80_hold),
    .WAIT_n(wait_n),
-   .INT_n(vdp_int_n & ms_int_n),
+   .INT_n(vdp_int_n & ms_int_n & midi_int_n),
    .NMI_n(1),
    .BUSRQ_n(1),
    .M1_n(t_m1_n),
@@ -328,7 +332,7 @@ NextZ80 NZ
    .M1(nz_m1),
    .CLK(clk21m),
    .RESET(1'b0),
-   .INT(~(vdp_int_n & ms_int_n)),
+   .INT(~(vdp_int_n & ms_int_n & midi_int_n)),
    .NMI(1'b0),
    .WAIT(nz_wait),
    .LOAD(nz_load),
@@ -1189,6 +1193,7 @@ rtc rtc
 //  -----------------------------------------------------------------------------
 wire       VRAM_we_lo_vdp, VRAM_we_hi_vdp, vdp18, vdp ;
 wire       vdp_int_n;
+wire       midi_int_n;   // MSX-MIDI: timer / RxRDY, active low
 wire [7:0] d_to_cpu_vdp;
 
 assign vdp18          = bios_config.MSX_typ == MSX1;
