@@ -1,25 +1,23 @@
 # Handoff 2026-09-23 — turbo R packs: DOS 2 synthesized disk ROM, LDIR fix, MIDI stub, kanji on the R800
 
-Branch `nextz80`, worktree `.claude/worktrees/readcache`, HEAD `b6d3d6a` (origin is one behind:
-the kanji bench commit is pushed together with this handoff).  Predecessor:
+Branch `nextz80`, worktree `.claude/worktrees/readcache`.  Updated 2026-09-24 when §3 closed on
+hardware; the kanji fix and its harness are `d031a4c`.  Predecessor:
 `docs/handoff_20260922_turbor.md`.  The full write-up of the disk-ROM work is
 `docs/turbor_diskrom_20260923.md`; read that before touching anything in it.
 
 ## 0. Read first
 
-* **Board**: core `MSX1_20260923c_midikanji.rbf` (md5 dbb91493…) loaded, pack `Panasonic FS-A1WX.MSX`,
-  sitting at a BASIC prompt with the kanji probe program in memory.  RBFs deployed today, all on
-  the board and in `output_files/`: `20260923a_trfdc` (d30beb5e), `20260923b_ldirfix` (cd4194fd),
-  `20260923c_midikanji` (dbb91493).  Never delete an RBF.
-* **Nothing is unbuilt on this branch** (everything through `b6d3d6a` is in 23c except the kanji
-  bench, which is a bench).  No Quartus process is running.
-* **One open defect, reproduced and narrowed, NOT understood**: kanji ROM reads (D9h/DBh) return
-  stale bytes **only on the NextZ80 (R800) path** — §3.  Illusion City's dialogue text is
-  therefore unreadable on the R800 even though the game now runs.
-* Two hardware confirmations still owed: GT DOS2 pack Illusion City past the loader (23c has the
-  MIDI fix), and kanji readable once §3 is fixed.
+* **Board**: core `MSX1_20260923d_kanjifix.rbf` (md5 5a2d8184…).  RBFs deployed, all on the board
+  and in `output_files/`: `20260923a_trfdc` (d30beb5e), `20260923b_ldirfix` (cd4194fd),
+  `20260923c_midikanji` (dbb91493), `20260923d_kanjifix` (5a2d8184).  Never delete an RBF.
+* **Nothing is unbuilt on this branch.**  No Quartus process is running.
+* **§3 is CLOSED (2026-09-24, hardware)**: the kanji fix `d031a4c` is in 23d and the user confirms
+  Japanese kanji AND the Korean patch font both render correctly.  Illusion City is now fully
+  playable — this was the last of its five gates.
+* One hardware confirmation still owed: GT DOS2 pack Illusion City past the loader (ST passed).
+  The Korean-font pack `Panasonic FS-A1GT DOS2-ILLUK` is on the board for it.
 
-## 1. What changed today (all pushed except b6d3d6a)
+## 1. What changed (all pushed)
 
 | commit | what |
 |---|---|
@@ -31,7 +29,8 @@ the kanji bench commit is pushed together with this handoff).  Predecessor:
 | 5fba913 | **NextZ80 patch 0004**: repeating LDIR/LDDR re-fetches its opcode (self-erasing fill stops as on a Z80).  cpuswap bench section L.  Capture `tools/evtrace/captures/evt_ic_dos2_halt.txt.gz` |
 | b64aaea | guard: I/O read that is really an SDRAM read (kanji) takes the closed loop, not the I/O floor.  **Did not fix §3.**  Harmless, kept. |
 | 913a4ab | **midi stub**: `IN A,(E9h)` decoded on `~cpu_m1` (was `cpu_m1` = only the interrupt acknowledge, so the game read FFh and took its MIDI branch).  `sim/run_midi_stub.sh` |
-| b6d3d6a | `tb/kanji_tb.sv`: kanji.sv + real sdram.sv at Z80 INI timing — PASS (so §3 is not in those two files alone) |
+| b6d3d6a | `tb/kanji_tb.sv`: kanji.sv + real sdram.sv at Z80 INI timing — PASS (so §3 was not in those two files alone) |
+| d031a4c | **kanji fix** (§3): latch which JIS counter the post-read increment bumps; `sim/fullsys/tb_kanji.sv` + `run_kanji.sh` (whole machine, real pack, one run per CPU); `NZ_BUS` shape in `tb/kanji_tb.sv`; landmines `kanji` |
 
 Pack side (sony / `msx-machine-expert` session, branch `sony-dos2-3-3`, not pushed): 37c7975
 (MSXDOS2 block removed from 30 packs, MFRSD ROMs renamed `*_nextor214.rom`), b920a87 (nine new
@@ -65,50 +64,51 @@ Pack side (sony / `msx-machine-expert` session, branch `sony-dos2-3-3`, not push
 7. A DOS 2.30-booted turbo R **runs BASIC on the R800** (the reference boots on the R800).  A
    measurement "on Z80" made after a DOS2 boot is on the R800 unless you switched.
 
-## 3. OPEN — kanji ROM reads are stale on the R800
+## 3. CLOSED — kanji ROM reads were stale on the R800
 
-Symptom: Illusion City dialogue glyphs fragmented (screenshots `20260923_065003`, `072928`).
+Fixed by `d031a4c`, built as `20260923d_kanjifix`, **confirmed on hardware 2026-09-24**: Japanese
+kanji and the Korean Illusion City patch font both render correctly on the R800.
 
-Measured with the BASIC probe (scratchpad `kanjiprobe.bas`; type it with
-`tools/hinotori_rig/keyinject_remote.py --file`; it POKEs two routines at D000h: `OUT (C),H /
-OUT (C),L / INIR` and a plain `IN A,(C)` loop, JIS 07FBh, prints the 32 bytes):
+**The defect.**  `kanji.sv`'s post-read pointer increment fires one clock AFTER `ram_ce` falls, and
+it chose between the JIS1 and JIS2 counters from `addr[1]` **on that clock** — i.e. from whatever
+the address bus held after the strobe had gone.
 
-| core | pack | CPU | INIR | plain IN |
-|---|---|---|---|---|
-| 23c | FS-A1WX | Z80 | **32/32 correct** | correct |
-| 23c | FS-A1WX | R800 (OUT E5,40) | **stale**: `00 08 04 04 04 04 04 04 04 47 3C 3C 3C 04 00 00 …` (right order, each new word lags; 18 distinct bytes in 32) | **all 00** |
-| 23c | ST DOS2 | (R800 after DOS2 boot) | same stale pattern | all 00 |
-| 0913b | FS-A1WX | Z80 | correct | correct |
+* T80s (Z80) still shows the port address there, so `addr[1]` was 0 and `addr1` advanced.  Correct.
+* `nz_bus` (NextZ80 / R800) drops the strobes on the same edge that puts the NEXT stage's address on
+  the bus.  That address is the following opcode fetch; when its bit 1 was set the increment went to
+  `addr2` (JIS2) and `addr1` stayed put — the CPU re-read the same JIS1 byte.
 
-Reference (msx-machine-expert, `scratchpad/dos23/ic2/kanji3.log`): JIS 07FB =
-`00 08 04 04 04 47 3C 04 00 00 00 08 7C 84 08 10 04 04 04 04 04 03 00 00 20 00 00 00 10 F8 00 00`;
-the game reads with exactly that `OUT/OUT/INIR` idiom (2AC1h), on the R800, 32 bytes in ~2 µs.
+One cause, both symptoms: under INIR the fetch address alternates, so each new word lagged (18
+distinct bytes in 32); under a plain `IN A,(C)` loop the loop's fetch address has bit 1 set every
+time, so the pointer never moved at all — the "all 00" nobody had explained.
 
-What is ruled out: the font file (same 5aff2d9b… as openMSX, all Panasonic 2+/turbo R share it);
-kanji.sv + sdram.sv alone (`tb/kanji_tb.sv` passes at Z80 timing, also with the ROM at high
-addresses); the read cache tag (26 bits); the bus-guard classification (b64aaea changed nothing
-on the board); the turbo R block's decode (D8–DB are not its ports); STA (no SDC exception on
-the clk_sdram → CPU data path; 23c signs off).
+**The fix**: latch the counter select while the strobe is high (`last_sel`).  Three lines.
 
-What is NOT known: whether the bus data at the end of the IN cycle is already stale (kanji/SDRAM
-request side — e.g. `ram_addr` switching to the kanji address at the same instant `sdram_ce`
-rises, which violates the "address leads the request" assumption the `-end 6` multicycle on
-`*sdram*ch2_*` encodes; the T80 gets away with it) or whether NextZ80 samples DI before the
-data is home (nz_bus `adv` is combinational in `wait_n`).  The plain-IN "all 00" is a second
-clue nobody has explained.
+**How it was found.**  Not by a probe build.  `sim/fullsys/tb_kanji.sv` runs the whole machine in
+Verilator from a real `.MSX` pack with the probe written over the BIOS reset vector, once per CPU:
+the R800 column reproduced the board's bytes exactly and the Z80 column was correct, so the two
+could be diffed at clock resolution.  Getting there also fixed the harness blocker from
+`handoff_20260922` §"fullsys": the bench's DDR3 model returned the byte at the live address instead
+of latching it on the accept, so the pack header read "SX@" and the upload was skipped in silence.
 
-Next step (proposed, not started): add ports D8h–DBh to evt_trace's recorded I/O set (one line,
-`p_rd`/`p_wr` in `rtl/evt_trace.sv`), rebuild, run the probe on the R800, and read the ring:
-`rd_val` is sampled at the END of each read, so it says whether the bus lags or the CPU samples
-early.  If the bus lags: give the kanji read an address lead (register the kanji request one
-clk21m after `ram_addr` switches, or key the `ram_addr` mux on IORQ+address before RD).  If the
-CPU samples early: hold `guard_open` one clk21m after `sdram_hit`/`hs_done` for I/O reads on
-`use_nz`.  SignalTap on `ram_ce/ram_addr/sdram_ce/ch2_dout/guard_open/wait_n` is the heavier
-alternative (`docs/signaltap_msx1_stp.md`).
+**Regression**: `make -C tb kanji` now runs both bus shapes (`NZ_BUS=0/1`); the nz_bus shape fails
+on the pre-fix RTL and passes on this one.  `tools/buildgate/landmines.tsv` has a `kanji` record.
+
+**The general lesson**, worth applying elsewhere: a device that acts one clock AFTER a bus cycle
+ends must latch its select signals **during** the strobe.  How long the address stays valid past the
+strobe is a property of the CPU core, and this machine now has two with different answers.
+
+**A harness trap paid for here**: `build.sh --expect` matches strings in `fit.rpt`, which is not an
+exhaustive register list — `--expect 'kanji:kanji|last_sel'` GATE-FAILed on a build that did contain
+the register.  Register-level presence is checked with `quartus_sta` and `get_registers`, not the
+report.
 
 ## 4. Other open items
 
-* GT DOS2 pack + Illusion City on 23c: not yet confirmed past the loader (user tested ST).
+* GT DOS2 pack + Illusion City: not yet confirmed past the loader (user tested ST).  The pack
+  `Panasonic FS-A1GT DOS2-ILLUK` (Korean font in the KANJI device) is on the board for this.
+* Slot 3-3: `MAPPER_PANASONIC` exists (`050965e`, peer session) but no pack XML declares it yet,
+  and its main-RAM banks (0x180+) are unimplemented — a machine that pages them will stop there.
 * `docs/turbor_diskrom_20260923.md` needs a §9 with the LDIR/MIDI/kanji chapter (the memory file
   has it; the doc stops at §8).
 * Turbo R internal SRAM (ST 16 KB / GT 32 KB, slot 3-3 PANASONIC mapper): no block type; user wants
