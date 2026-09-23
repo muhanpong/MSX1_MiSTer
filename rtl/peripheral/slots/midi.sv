@@ -27,9 +27,9 @@
 //      tests `and #80` to mean "MIDI timer pending" (MSXMidi.cc:272).
 //    * The 8251's DTR output ENABLES the timer IRQ and RTS ENABLES the RxRDY
 //      IRQ (MSXMidi.cc:260-270).  CTS is tied active.
-//    * 8254 CLK0 and CLK2 are 4 MHz.  CLK1 is tied LOW -- counter 1 never
-//      counts, it is not a cascade off OUT2 (MSXMidi.cc:37).  OUT0 is the
-//      8251's TxC/RxC, and OUT2's rising edge sets the timer IRQ latch.
+//    * 8254 CLK0 and CLK2 are 4 MHz; CLK1 is OUT2 (cascade, made in
+//      Counter2::signal).  OUT0 is the 8251's TxC/RxC, and OUT2's rising edge
+//      sets the timer IRQ latch.
 //
 //  The GT BIOS programs it like this (measured at PC 1A31-1A6B):
 //      E9 <- 00,00,00, 40 (internal reset), 4E (async x16, 8N1), 00 (command)
@@ -76,7 +76,7 @@ wire       io_wr = sel & cpu_wr;
 wire       io_rd = sel & cpu_rd;
 
 //  ── 8254: three counters ───────────────────────────────────────────────────
-//  CLK0 = CLK2 = ce_4m, CLK1 = low.  Loading follows the chip: a counter
+//  CLK0 = CLK2 = ce_4m, CLK1 = OUT2.  Loading follows the chip: a counter
 //  starts when its full count has been written, and mode 3 halves the count
 //  each half period (odd counts spend the extra tick high, as the chip does).
 logic [15:0] cnt_init [0:2];
@@ -95,18 +95,19 @@ wire [1:0] ctl_sel  = cpu_dout[7:6];
 wire [1:0] ctl_rw   = cpu_dout[5:4];
 wire [2:0] ctl_mode = cpu_dout[3:1];
 
-//  Per-counter clock.  Counters 0 and 2 run at 4 MHz; counter 1's CLK pin is
-//  tied LOW, so it never counts -- `i8254.getClockPin(1).setState(false)` and a
-//  nullptr where its output handler would go (MSXMidi.cc:31,37).  It is NOT the
-//  OUT2 cascade it looks like it should be, and the GT BIOS never touches it;
-//  software may still write and read its count register, which works, but the
-//  count does not move.
-wire  cnt_tick [0:2];
-assign cnt_tick[0] = ce_4m;
-assign cnt_tick[1] = 1'b0;
-assign cnt_tick[2] = ce_4m;
+//  Per-counter clock: counters 0 and 2 at 4 MHz, counter 1 CASCADED off OUT2.
+//  `MSXMidi.cc:37 setState(false)` is only counter 1's initial level and the
+//  `nullptr` in the I8254 constructor is OUT1's listener, not CLK1 -- the
+//  cascade is made in `Counter2::signal`, which copies OUT2's waveform into
+//  `getClockPin(1)` on every change.  Measured on a stock FS-A1GT: with
+//  counter 2 at 200 Hz and counter 1 loaded with 100, counter 1 steps down by
+//  10 every 50 ms, i.e. exactly OUT2's rate.
 logic out2_q;
 wire  out2_rise = cnt_out[2] & ~out2_q;
+wire  cnt_tick [0:2];
+assign cnt_tick[0] = ce_4m;
+assign cnt_tick[1] = out2_rise;
+assign cnt_tick[2] = ce_4m;
 
 //  ── 8251 ───────────────────────────────────────────────────────────────────
 logic       cmd_phase;          // 1 = the next E9h write is the MODE byte

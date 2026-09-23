@@ -195,6 +195,23 @@ initial begin
    repeat (4) @(posedge clk);
    check(int_n === 1'b1, "T10 reading the byte clears the receive interrupt");
 
+   // T12 -- counter 1 is CASCADED off OUT2, one step per 200 Hz tick.
+   //        This case exists because the cascade was removed here once, on a
+   //        misreading of openMSX: the I8254 constructor's nullptr is OUT1's
+   //        listener, not CLK1, and the cascade is made in Counter2::signal.
+   //        Measured on a stock FS-A1GT: counter 1 loaded with 100 steps down
+   //        by 10 every 50 ms.  With CLK1 held low it would not move at all.
+   io_out(8'hEF, 8'h54);                 // counter 1: LSB only, mode 2
+   io_out(8'hED, 8'd100);
+   @(posedge dut.cnt_out[2]);            // line up just after a tick
+   repeat (4) @(posedge clk);
+   io_in(8'hED, rb);  c0 = int'(rb);
+   repeat (3) @(posedge dut.cnt_out[2]);
+   repeat (4) @(posedge clk);
+   io_in(8'hED, rb);  c1 = int'(rb);
+   check(c0 - c1 == 3,
+         $sformatf("T12 counter 1 follows OUT2 (%0d -> %0d over 3 ticks, want -3)", c0, c1));
+
    // T11 -- loopback: tie the port's own output back to its input and send a
    //        three-byte note-on.  This is the whole path at once, and it is also
    //        what MiSTer's MIDI link does on the host side when it is pointed at
@@ -225,7 +242,7 @@ end
 
 //  Safety net: never let a broken device hang the run.
 initial begin
-   #200_000_000;
+   #400_000_000;
    $display("RESULT FAIL: tb_midi timed out");
    $fatal(1, "timeout");
 end
