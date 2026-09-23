@@ -18,22 +18,26 @@ way the real machine does (openMSX, differential against the stock machine).
 
 | file | what |
 |---|---|
-| `synth2.py` | the generator.  Reads `bank_st.rom` / `bank_gt.rom` (the 64 kB firmware block) and `hb.bin` (hb-f1xd_disk.rom), applies the 34 patches, writes `synth_{st,gt}.rom`, per-bank `.bin`, and the patch log.  **Every patch asserts the original bytes first**, so a different source ROM stops it. |
+| `synth_diskrom.py` | the generator.  Finds your own dumps by sha1 in the pack builder's ROM store (`fs-a1st_firmware.rom` / `fs-a1gt_firmware.rom`, or an already cut 64 kB disk ROM, and `hb-f1xd_disk.rom`), cuts 0x60000-0x6FFFF, applies the 34 patches and writes `fs-a1{st,gt}_diskrom_wd2793.rom` next to the firmware.  **Every patch asserts the original bytes first**, the output is checked against the known sha1, and an existing output is never overwritten unless identical.  The file holds addresses and the few jump/call bytes we write, no ROM content. |
 | `synth_st_patches.json`, `synth_gt_patches.json` | the 34 patches each: `[bank, address, old bytes, new bytes, why]`. |
-| `analyze.py` | reproduces the static analysis that found the kernel↔driver contract (§3 of the doc). |
+| `analyze.py` | reproduces the static analysis that found the kernel↔driver contract (§3 of the doc).  Reads `hb.bin` (= hb-f1xd_disk.rom) and the firmware from the working directory; copy your dumps in first, they are git-ignored here. |
 | `scanref.py`, `syms_b0.json` | helpers of the analysis: cross-references into the driver region, driver symbols of bank 0. |
 | `omsx/BankedSonyFDC.{hh,cc}` | the openMSX device used for verification: `WD2793BasedFDC` + a TurboRFDC-style bank register at 7FF0.  openMSX has no stock device that puts a bank register and a WD2793 in one page. |
 | `*.tcl`, `*.txt`, `g/`, `n/` | the openMSX probes and their logs: bank-switch watch (`bankw*`), landing points (`land*`), game milestones (`game*`), no-disk boot (`nod*`), Nextor comparison (`nx*`, `n/`). |
-| `bank_st.rom`, `bank_gt.rom`, `mmcsd231.rom`, `hb.bin`, `synth_*.rom`, `*.bin` | ROM material and products.  Third-party code (ASCII / Microsoft / Sony / Panasonic); kept here for the record, not part of any distributed pack file. |
 
-Regenerate:
+No ROM material is kept in this directory (`.gitignore` blocks `*.rom`, `*.bin`):
+the inputs are third-party code (ASCII / Microsoft / Sony / Panasonic) and stay in
+the untracked ROM store.  Generate from your own dumps:
 
-    cd tools/turbor_diskrom
-    python3 synth2.py          # -> synth_st.rom 94f4587d…  synth_gt.rom 86f81c71…
+    python3 tools/turbor_diskrom/synth_diskrom.py          # both; or: st / gt
+    # st: OK  fs-a1st_diskrom_wd2793.rom  sha1 94f4587d  patches 34  written
+    # gt: OK  fs-a1gt_diskrom_wd2793.rom  sha1 86f81c71  patches 34  written
 
-`bank_st.rom` = `fs-a1st_firmware.rom` (sha1 c212b11f…) bytes 0x60000-0x6FFFF;
-`bank_gt.rom` = the same range of `fs-a1gt_firmware.rom` (sha1 e779c338…);
-`hb.bin` = `hb-f1xd_disk.rom` (sha1 12f2cc79…).
+Inputs it looks for (by sha1, anywhere under `--store`, default
+`tools/CreateMSXpack/ROM`): `fs-a1st_firmware.rom` c212b11f… (disk ROM at
+0x60000 = 84a44ecf…), `fs-a1gt_firmware.rom` e779c338… (0527fb75…),
+`hb-f1xd_disk.rom` 12f2cc79….  `--out DIR` writes elsewhere, `--patches`
+rewrites the two patch logs (they come out identical to the committed ones).
 
 ## How the pack uses it
 
@@ -76,4 +80,6 @@ untracked ROM store next to the firmware dumps
   Illusion City and SD Snatcher along the stock machine's path (same sector
   sequence, same stack, same boot-sector call).  Details and numbers in
   `docs/turbor_diskrom_20260923.md` §5.
-* Hardware: **not yet** (needs a build with `MAPPER_TRFDC` and new packs).
+* Hardware (2026-09-24, `MSX1_20260923d_kanjifix`): Illusion City runs on the
+  ST DOS2 pack and on the GT DOS2 pack (as `FS-A1GT DOS2-ILLUK`, the Korean
+  translation with its own kanji font); SD Snatcher runs on ST.

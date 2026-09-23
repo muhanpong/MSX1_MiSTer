@@ -224,7 +224,7 @@ pack it registers nothing harmful (boot and both games unaffected).
 
 ## 4. The synthesized ROM
 
-`tools/turbor_diskrom/synth2.py` (README there).  Per machine, 34 patches, each
+`tools/turbor_diskrom/synth_diskrom.py` (README there).  Per machine, 34 patches, each
 asserting the original bytes:
 
 1. Take the HB-F1XD driver `7405–7FCF` and re-point its five DOS 1 kernel calls
