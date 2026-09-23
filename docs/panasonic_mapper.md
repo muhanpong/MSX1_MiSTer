@@ -78,8 +78,31 @@ an `msx_slots`-level change, so here those banks report `mem_unmaped` — they r
 and swallow writes. They deliberately do **not** alias ROM, so if firmware uses them
 the failure is loud rather than silent corruption. The bench asserts exactly that.
 
-Whether the turbo R firmware needs them is untested. That is the first thing to find
-out on hardware or in a full-machine run.
+**Measured 2026-09-23, openMSX, both machines, 6000-7FF9 writes recorded with value,
+time and PC.** `7FF8` is the only way a bank can reach 0x180, so counting its
+non-zero writes settles it:
+
+| firmware switch | machine | boots into | 7FF8 non-zero | main-RAM banks used |
+|---|---|---|---|---|
+| off (today's core) | ST | BASIC | 0 | no |
+| off | GT | BASIC | 0 | no |
+| on | ST | internal menu | 0 | no — banks 0x80-0xFF only |
+| on | GT | MSX-View (VSHELL) | 639 | **yes** — 0x1A0-0x1A8, 0x1C0-0x1DC |
+
+So the unimplemented path is not reachable today: `matsushita.sv` reports port 41H
+bit 7 = 1, the firmware switch OFF, so the machine always boots to BASIC and the
+built-in software never runs (that module's header notes the bit an OSD toggle would
+drive). BASIC boot touches the mapper anyway — control 0x10 at t=7.028 s / PC 4121,
+then bank values 01, 0C, 0D, 2C, 2D and **0x81, which is SRAM block 1** (ST once, GT
+twice). The SRAM path is live from the first boot, so the pack must give the right
+SRAM size or 0x81 falls outside the window and reads ROM instead.
+
+If a firmware-switch toggle is ever added, the ST's internal menu still fits this
+implementation (it stays inside banks 0x80-0xFF, ~494k bank writes, no ninth bit);
+the GT's MSX-View does not, and would need the main-RAM banks first.
+
+(First measurement here, firmware switch off, 60 s; extended to the firmware-switch-on
+case by the msx-machine-expert session, 90 s, page-1-is-3-3 qualified by A8h/FFFFh.)
 
 ## 4. Verification
 
@@ -109,8 +132,9 @@ which is the 16 kB size granularity and is identical on the existing `msxdos2` i
 
 ## 5. Open items
 
-1. **Main-RAM banks** (§3) — needed or not, and if needed, how `msx_slots` reaches the
-   RAM mapper's allocation.
+1. **Main-RAM banks** (§3) — needed only by the GT's MSX-View, which today cannot be
+   reached (firmware switch forced off). If that toggle is added, this becomes the
+   blocker for the GT: how `msx_slots` reaches the RAM mapper's allocation.
 2. **Pack XMLs.** The turbo R packs live on branch `sony-dos2-3-3`, not here, and today
    leave 3-3 empty. Adding `PANASONIC16` / `PANASONIC32` there is the next step, with
    the firmware ROM as the block file and the SRAM size picked per machine.
