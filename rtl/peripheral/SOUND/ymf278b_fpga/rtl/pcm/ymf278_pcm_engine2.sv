@@ -1020,7 +1020,6 @@ wire [3:0]  wr_field = (reg_addr >= 8'h08) ? 4'((reg_addr - 8'h08) / 8'd24) : 4'
 wire        wr_slot_reg = reg_wr && (reg_addr >= 8'h08) && (reg_addr <= 8'hF7);
 
 always_ff @(posedge clk or negedge rst_n) begin
-    slot_regs_t reg_upd;
     logic [6:0] tl_t;
 
     if (!rst_n) begin
@@ -1043,7 +1042,6 @@ always_ff @(posedge clk or negedge rst_n) begin
             pcm_mix_r <= reg_data[5:3];
         end
         if (wr_slot_reg) begin
-            reg_upd = ram_regs[wr_snum];
             // dirty tracking for deferred header backfill
             case (wr_field)
                 4'd0: bf_dirty[wr_snum] <= 5'b0;
@@ -1055,46 +1053,45 @@ always_ff @(posedge clk or negedge rst_n) begin
                 default: ;
             endcase
             case (wr_field)
-                4'd0: reg_upd.wave[7:0] = reg_data[7:0];
+                4'd0: ram_regs[wr_snum].wave[7:0] <= reg_data[7:0];
                 4'd1: begin
-                    reg_upd.wave[8] = reg_data[0];
-                    reg_upd.fn[6:0] = reg_data[7:1];
+                    ram_regs[wr_snum].wave[8] <= reg_data[0];
+                    ram_regs[wr_snum].fn[6:0] <= reg_data[7:1];
                 end
                 4'd2: begin
-                    reg_upd.fn[9:7] = reg_data[2:0];
-                    reg_upd.prvb    = reg_data[3];
-                    reg_upd.oct     = $signed(reg_data[7:4]);
+                    ram_regs[wr_snum].fn[9:7] <= reg_data[2:0];
+                    ram_regs[wr_snum].prvb    <= reg_data[3];
+                    ram_regs[wr_snum].oct     <= $signed(reg_data[7:4]);
                 end
                 4'd3: begin
                     tl_t = reg_data[7:1];
-                    reg_upd.tl = (tl_t != 7'h7F) ? {1'b0, tl_t} : 8'hFF;
+                    ram_regs[wr_snum].tl <= (tl_t != 7'h7F) ? {1'b0, tl_t} : 8'hFF;
                 end
                 4'd4: begin
-                    reg_upd.pan        = reg_data[4] ? 4'd8 : reg_data[3:0];
-                    reg_upd.damp       = reg_data[6];
-                    reg_upd.keyon      = reg_data[7];
-                    reg_upd.lfo_active = ~reg_data[5];
+                    ram_regs[wr_snum].pan        <= reg_data[4] ? 4'd8 : reg_data[3:0];
+                    ram_regs[wr_snum].damp       <= reg_data[6];
+                    ram_regs[wr_snum].keyon      <= reg_data[7];
+                    ram_regs[wr_snum].lfo_active <= ~reg_data[5];
                 end
                 4'd5: begin
-                    reg_upd.lfo_speed = reg_data[5:3];
-                    reg_upd.vib       = reg_data[2:0];
+                    ram_regs[wr_snum].lfo_speed <= reg_data[5:3];
+                    ram_regs[wr_snum].vib       <= reg_data[2:0];
                 end
                 4'd6: begin
-                    reg_upd.ar  = reg_data[7:4];
-                    reg_upd.d1r = reg_data[3:0];
+                    ram_regs[wr_snum].ar  <= reg_data[7:4];
+                    ram_regs[wr_snum].d1r <= reg_data[3:0];
                 end
                 4'd7: begin
-                    reg_upd.dl_idx = reg_data[7:4];
-                    reg_upd.d2r    = reg_data[3:0];
+                    ram_regs[wr_snum].dl_idx <= reg_data[7:4];
+                    ram_regs[wr_snum].d2r    <= reg_data[3:0];
                 end
                 4'd8: begin
-                    reg_upd.rc = reg_data[7:4];
-                    reg_upd.rr = reg_data[3:0];
+                    ram_regs[wr_snum].rc <= reg_data[7:4];
+                    ram_regs[wr_snum].rr <= reg_data[3:0];
                 end
-                4'd9: reg_upd.am = reg_data[2:0];
+                4'd9: ram_regs[wr_snum].am <= reg_data[2:0];
                 default: ;
             endcase
-            ram_regs[wr_snum] <= reg_upd;
         end
 
         // HF backfill (header bytes 7..11 → slot envelope/LFO regs).  CPU
@@ -1102,32 +1099,26 @@ always_ff @(posedge clk or negedge rst_n) begin
         // fields (chip "don't access during LD" rule); different slot: both
         // land (separate array elements).
         if (hf_store_now) begin
-            slot_regs_t hf_upd;
             logic [4:0] dly;
-            if (wr_slot_reg && wr_snum == hf_cur_slot)
-                hf_upd = reg_upd;
-            else
-                hf_upd = ram_regs[hf_cur_slot];
             dly = bf_dirty[hf_cur_slot];
             if (!dly[0]) begin
-                hf_upd.lfo_speed = hf_buf[7][5:3];
-                hf_upd.vib       = hf_buf[7][2:0];
+                ram_regs[hf_cur_slot].lfo_speed <= hf_buf[7][5:3];
+                ram_regs[hf_cur_slot].vib       <= hf_buf[7][2:0];
             end
             if (!dly[1]) begin
-                hf_upd.ar        = hf_buf[8][7:4];
-                hf_upd.d1r       = hf_buf[8][3:0];
+                ram_regs[hf_cur_slot].ar        <= hf_buf[8][7:4];
+                ram_regs[hf_cur_slot].d1r       <= hf_buf[8][3:0];
             end
             if (!dly[2]) begin
-                hf_upd.dl_idx    = hf_buf[9][7:4];
-                hf_upd.d2r       = hf_buf[9][3:0];
+                ram_regs[hf_cur_slot].dl_idx    <= hf_buf[9][7:4];
+                ram_regs[hf_cur_slot].d2r       <= hf_buf[9][3:0];
             end
             if (!dly[3]) begin
-                hf_upd.rc        = hf_buf[10][7:4];
-                hf_upd.rr        = hf_buf[10][3:0];
+                ram_regs[hf_cur_slot].rc        <= hf_buf[10][7:4];
+                ram_regs[hf_cur_slot].rr        <= hf_buf[10][3:0];
             end
             if (!dly[4])
-                hf_upd.am        = hf_buf[11][2:0];
-            ram_regs[hf_cur_slot] <= hf_upd;
+                ram_regs[hf_cur_slot].am        <= hf_buf[11][2:0];
         end
     end
 end
