@@ -14,8 +14,9 @@ hardware; the kanji fix and its harness are `d031a4c`.  Predecessor:
 * **§3 is CLOSED (2026-09-24, hardware)**: the kanji fix `d031a4c` is in 23d and the user confirms
   Japanese kanji AND the Korean patch font both render correctly.  Illusion City is now fully
   playable — this was the last of its five gates.
-* One hardware confirmation still owed: GT DOS2 pack Illusion City past the loader (ST passed).
-  The Korean-font pack `Panasonic FS-A1GT DOS2-ILLUK` is on the board for it.
+* **Illusion City is closed on both packs.**  The Korean translation ran on `Panasonic FS-A1GT
+  DOS2-ILLUK`, which differs from the GT DOS2 pack only in the Kanji font file, so the GT DOS2
+  configuration (3-2 TURBOR_FDC, MIDI, 512 KB) is confirmed on hardware too.
 
 ## 1. What changed (all pushed)
 
@@ -105,8 +106,6 @@ report.
 
 ## 4. Other open items
 
-* GT DOS2 pack + Illusion City: not yet confirmed past the loader (user tested ST).  The pack
-  `Panasonic FS-A1GT DOS2-ILLUK` (Korean font in the KANJI device) is on the board for this.
 * Slot 3-3: `MAPPER_PANASONIC` exists (`050965e`, peer session) but no pack XML declares it yet,
   and its main-RAM banks (0x180+) are unimplemented — a machine that pages them will stop there.
 * `docs/turbor_diskrom_20260923.md` needs a §9 with the LDIR/MIDI/kanji chapter (the memory file
