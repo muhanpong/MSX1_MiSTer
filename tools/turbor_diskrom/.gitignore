@@ -1,0 +1,5 @@
+# ROM material and synthesized ROMs stay out of this public repository.
+# The inputs are the user's own dumps (fs-a1st/gt firmware, hb-f1xd_disk.rom),
+# kept in the untracked ROM store (tools/CreateMSXpack/ROM/).
+*.rom
+*.bin
