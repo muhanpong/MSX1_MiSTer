@@ -13,7 +13,7 @@
     <SHA1>8924e3e11eb1c8c1edcb7efa63c26d2bdc142473</SHA1>
   </fw> 
   <fw name="MEGA_FLASH_ROM">
-    <filename>mfrsd_2slot.ROM</filename>
+    <filename>mfrsd_2slot_nextor214.rom</filename>
     <SHA1>95cfb1886ea62a938fa4c9537e763490816ba266</SHA1>
   </fw>
   <fw name="MOONSOUND">
