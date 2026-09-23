@@ -29,10 +29,16 @@ guard: sdram_sim.sv
 		--Mdir obj_guard -o sim $(RTL) guard_tb.sv >/dev/null
 	@./obj_guard/sim
 
+#  Two bus shapes: T80s (address held past the strobe) and nz_bus/NextZ80 (next
+#  stage's address on the edge the strobe falls) -- the second is the R800 kanji
+#  fault of 2026-09-23 and fails on the pre-fix kanji.sv.
 kanji: sdram_sim.sv
 	@verilator $(FLAGS) --top-module kanji_tb \
 		--Mdir obj_kanji -o sim $(RTL) ../rtl/peripheral/slots/kanji.sv kanji_tb.sv >/dev/null
 	@./obj_kanji/sim
+	@verilator $(FLAGS) --top-module kanji_tb -GNZ_BUS=1 \
+		--Mdir obj_kanji_nz -o sim $(RTL) ../rtl/peripheral/slots/kanji.sv kanji_tb.sv >/dev/null
+	@./obj_kanji_nz/sim
 
 clean:
-	rm -rf obj_latch obj_nolatch obj_guard obj_guard0 obj_kanji sdram_sim.sv
+	rm -rf obj_latch obj_nolatch obj_guard obj_guard0 obj_kanji obj_kanji_nz sdram_sim.sv

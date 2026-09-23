@@ -8,7 +8,13 @@
 // The sdram_model returns a byte that is a function of its address
 // (exp_byte), so every read here has one right answer.
 `timescale 1ns/1ps
-module kanji_tb #(parameter int RD_T = 15, parameter int SAMPLE_T = 12, parameter int GAP_T = 81);
+//  NZ_BUS = 1: the bus is shaped the way nz_bus shapes it for NextZ80 -- the
+//  strobes fall on the same edge that puts the NEXT stage's address on the bus.
+//  That address is an opcode fetch (here 005Bh, bit 1 set); the old kanji.sv
+//  chose addr1/addr2 for its post-read increment from addr[1] on the clock
+//  after the strobe fell, and bumped the JIS2 counter instead (R800: the same
+//  byte twice, or "all 00" from a plain IN loop -- board and fullsys, 2026-09-23).
+module kanji_tb #(parameter int RD_T = 15, parameter int SAMPLE_T = 12, parameter int GAP_T = 81, parameter bit NZ_BUS = 0);
     logic clk = 0;  always #5.82 clk = ~clk;              // clk_sdram 85.909 MHz
     logic clk21m = 0;
     initial begin #(2 * 5.82 * 4 / 6); forever #(2 * 5.82 * 2) clk21m = ~clk21m; end
@@ -56,6 +62,7 @@ module kanji_tb #(parameter int RD_T = 15, parameter int SAMPLE_T = 12, paramete
         @(posedge clk21m); #1; port = p; cpu_iorq = 1; cpu_rd = 1;
         repeat (SAMPLE_T) @(posedge clk21m); #1; v = ch2_dout;
         repeat (RD_T - SAMPLE_T) @(posedge clk21m); #1; cpu_rd = 0; cpu_iorq = 0;
+        if (NZ_BUS) port = 8'h5B;                       // next stage: opcode fetch, A1 = 1
         repeat (GAP_T) @(posedge clk21m);
     endtask
     int errors = 0, distinct = 0;

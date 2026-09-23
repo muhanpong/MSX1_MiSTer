@@ -21,8 +21,17 @@ wire kanji_en = cpu_iorq & addr[7:2] == 6'b1101_10;
 assign mem_addr = base_ram + (addr[1] ? addr2 : addr1);
 assign ram_ce   = cs & addr[0] & cpu_rd & kanji_en & (rom_size == 16'd16 | ~addr[1]);
 
+//  The post-read increment fires one clock AFTER ram_ce falls, and which counter
+//  it bumps used to be decided by addr[1] on THAT clock.  T80s still shows the
+//  port address there; nz_bus (NextZ80 / R800) drops the strobes on the same
+//  edge that puts the next stage's address on the bus, so the increment went to
+//  addr2 whenever the following opcode address had bit 1 set -- the R800 read
+//  the same JIS1 byte twice (INIR: "each new word lags"; a plain IN loop: byte 0
+//  forever, "all 00").  sim/fullsys/tb_kanji.sv reproduces it; latch the counter
+//  select while the read is in progress instead.
+logic last_ce = 1'b0, last_sel = 1'b0;
+
 always @(posedge clk) begin
-   logic last_ce;
    if (reset) begin
       addr1 <= 27'h00000;
       addr2 <= 27'h20000;
@@ -37,8 +46,9 @@ always @(posedge clk) begin
             endcase
          end
       end
-      if (last_ce & ~ram_ce) begin 
-         if (addr[1])
+      if (ram_ce) last_sel <= addr[1];
+      if (last_ce & ~ram_ce) begin
+         if (last_sel)
             addr2 <= (addr2 & ~27'h1f) | ((addr2 + 27'd1) & 27'h1f);
          else
             addr1 <= (addr1 & ~27'h1f) | ((addr1 + 27'd1) & 27'h1f);
