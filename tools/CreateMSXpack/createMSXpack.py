@@ -139,6 +139,27 @@ def create_MSX_device(typ, size) :
         head.append(0)
     return head
 
+def sha_list(node) :
+    """Accepted SHA-1s for one entry.  Several <SHA1> elements may be listed when more
+    than one dump is usable (different revisions of the same firmware image); the first
+    one that is actually in the ROM store wins, so the choice is deterministic.
+    <sha1> is accepted as well because the device entries spell it lowercase."""
+    out = []
+    for tag in ('SHA1', 'sha1') :
+        for e in node.findall(tag) :
+            if e.text is not None and e.text.strip() and e.text.strip() not in out :
+                out.append(e.text.strip())
+    return out
+
+
+def pick_sha(hashes) :
+    """The first accepted SHA-1 present in the store, else None."""
+    for h in hashes :
+        if h in rom_hashes :
+            return h
+    return None
+
+
 def create_FW_block(type, size):
     """Create and return a bytearray representing a block."""
     head = bytearray()
@@ -156,13 +177,14 @@ def createFWpack(root, fileHandle) :
         for fw in root.findall("./fw"):
             fw_name = fw.attrib["name"]
             fw_filename = fw.find('filename').text if fw.find('filename') is not None else None
-            fw_SHA1 = fw.find('SHA1').text if fw.find('SHA1') is not None else None
+            fw_SHA1s = sha_list(fw)
+            fw_SHA1 = pick_sha(fw_SHA1s)
             fw_size = int(fw.find('size').text) if fw.find('size') is not None else None
             fw_skip = int(fw.find('skip').text) if fw.find('skip') is not None else None
             if fw_name in EXTENSIONS :
                 typ = EXTENSIONS.index(fw_name)
-                if fw_SHA1 is not None :
-                    if fw_SHA1 in rom_hashes.keys() :                    
+                if fw_SHA1s :
+                    if fw_SHA1 is not None :
                         inFileName = rom_hashes[fw_SHA1]
                         fileSize = os.path.getsize(inFileName)
                         size = fw_size if fw_size is not None else fileSize
@@ -179,7 +201,7 @@ def createFWpack(root, fileHandle) :
                             fileHandle.write(bytes([0xFF] * (size - fileSize)))
                     else :
                         fileHandle.close()
-                        raise Exception(f"Skip: {filename} Not found ROM {fw_filename} SHA1:{fw_SHA1}")
+                        raise Exception(f"Skip: {filename} Not found ROM {fw_filename} SHA1:{'/'.join(fw_SHA1s)}")
         fileHandle.close()
         return False
     except Exception as e:
@@ -196,7 +218,8 @@ def getValues(block, secondary) :
     values['type']     = block.find('type').text if block.find('type') is not None else None
     values['count']    = int(block.find('block_count').text) if block.find('block_count') is not None else 0
     values['filename'] = block.find('filename').text if block.find('filename') is not None else None
-    values['SHA1']     = block.find('SHA1').text if block.find('SHA1') is not None else None  
+    values['SHA1S']    = sha_list(block)
+    values['SHA1']     = pick_sha(values['SHA1S'])
     values['pattern']  = int(block.find('pattern').text) if block.find('pattern') is not None else 3 
     values['skip']     = int(block.find('skip').text) if block.find('skip') is not None else None 
     if secondary is not None and block.find('ref') is not None :
@@ -223,8 +246,8 @@ def createMSXpack(root, fileHandle) :
                     #print(' '.join([f'{byte:02X}' for byte in head[3:15]]) + " {0}/{1} ".format(primary_slot, secondary_slot) + str(values))
                     if block_ref is None :
                         fileHandle.write(head)                      
-                        if values["SHA1"] is not None :
-                            if values["SHA1"] in rom_hashes.keys() :
+                        if values["SHA1S"] :
+                            if values["SHA1"] is not None :
                                 infile = open(rom_hashes[values["SHA1"]], "rb")
                                 if values["skip"] is not None :
                                     infile.seek(values["skip"], os.SEEK_SET)
@@ -234,7 +257,7 @@ def createMSXpack(root, fileHandle) :
                                 infile.close()
                             else :
                                 fileHandle.close()
-                                raise Exception(f"Skip: {filename} Not found ROM {0} SHA1:{1}",values["filename"],values["SHA1"])
+                                raise Exception(f"Skip: {filename} Not found ROM {0} SHA1:{1}",values["filename"],'/'.join(values["SHA1S"]))
                     else :
                         heads.append(head)
                 if int(secondary_slot) > 0 :
@@ -248,9 +271,8 @@ def createMSXpack(root, fileHandle) :
             rom_size = 0
             if rom is not None:
                 rom_name = rom.find('filename').text if rom.find('filename') is not None else None
-                rom_SHA1 = rom.find('sha1').text if rom.find('sha1') is not None else None
+                rom_SHA1 = pick_sha(sha_list(rom))
                 if rom_SHA1 is not None:
-                    if rom_SHA1 in rom_hashes.keys() :
                         rom_size = os.path.getsize(rom_hashes[rom_SHA1]) >> 14
                         
             head = create_MSX_device(device_typ, rom_size);

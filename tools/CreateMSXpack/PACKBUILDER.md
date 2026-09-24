@@ -86,6 +86,29 @@ The sidebar list carries a count per ROM and is sorted by it, so the file that u
 the most machines is at the top. Clicking an entry there scrolls to the first pack that
 needs it.
 
+## Several accepted hashes, and forcing a file into a slot
+
+An entry in the XML may now list more than one `<SHA1>`. The builder takes the first one
+that is actually in the store, so the result stays the same whenever the store does, and
+an entry with a single hash behaves exactly as before. `createMSXpack.py`, the extractor
+and the page all follow the same rule; the extractor emits the list as `hs` and keeps the
+first as `h`.
+
+This exists for the MegaFlashROM SCC+ SD image. The packs name the Nextor 2.1.4 flash
+image, which is not published anywhere and cannot be built from the open Nextor source:
+it also contains Manuel Pazos's cartridge firmware. The image openMSX pins for the same
+cartridge (`1621f623…`, Nextor 2.1.0, SD driver v1.2) is in the usual system-ROM set, so
+`CART_FW_EN` and `CART_FW_JP` list it as a second acceptable hash. The `_2slot` packs do
+not, because that image is not the two-slot one and silently substituting it would be
+misleading.
+
+The page also lets a missing slot be filled by hand. A red or amber line in a pack's
+detail carries a **지정** button that takes any file and registers it under the hash that
+slot wanted, skipping verification. It is for trying another revision of a dump that
+cannot be obtained; a pack built that way is not guaranteed to run, so the slot, the
+pack's pill and the log all keep saying so, and the build logs a warning. If the genuine
+file turns up later it quietly replaces the stand-in.
+
 ## Notes
 
 - ROMs are matched by SHA-1, never by filename, so a renamed dump still resolves.

@@ -2,14 +2,35 @@
 #  Everything else in the XML (comments, prose, unused tags) is dropped.
 import glob, json, os, re, xml.etree.ElementTree as ET, collections
 
+def shas(node):
+    """Every accepted SHA-1, in XML order.  More than one is allowed when several dumps
+    of the same firmware are usable; the page takes the first one it actually has."""
+    out = []
+    for tag in ('SHA1', 'sha1'):
+        for e in node.findall(tag):
+            if e.text is not None and e.text.strip() and e.text.strip() not in out:
+                out.append(e.text.strip())
+    return out
+
+
+def put_shas(e, node):
+    hs = shas(node)
+    if hs:
+        e['h'] = hs[0]                 # 대표 해시 (한 개뿐이면 이것만)
+        if len(hs) > 1:
+            e['hs'] = hs
+    return e
+
+
 def blk(b, sec):
     v = {'start': int(b.attrib['start']) & 3 if 'start' in b.attrib else None}
     for tag, key, conv in (('type','t',str), ('block_count','n',int), ('filename','f',str),
-                           ('SHA1','h',str), ('pattern','p',int), ('skip','s',int), ('ref','r',str)):
+                           ('pattern','p',int), ('skip','s',int), ('ref','r',str)):
         e = b.find(tag)
         if e is not None and e.text is not None:
             v[key] = conv(e.text.strip())
-    return {k: x for k, x in v.items() if x is not None}
+    v = {k: x for k, x in v.items() if x is not None}
+    return put_shas(v, b)
 
 machines, layouts = [], collections.OrderedDict()
 for f in sorted(glob.glob('Computer/*/*.xml')):
@@ -37,10 +58,9 @@ for f in sorted(glob.glob('Computer/*/*.xml')):
         e = {'typ': d.attrib['typ']}
         rom = d.find('./rom')
         if rom is not None:
-            h = rom.findtext('sha1')
             fn = rom.findtext('filename')
-            if h: e['h'] = h.strip()
             if fn: e['f'] = fn.strip()
+            put_shas(e, rom)
         devs.append(e)
     if devs:
         m['devices'] = devs
@@ -53,11 +73,11 @@ for f in sorted(glob.glob('Extension/*.xml')):
     fws = []
     for fw in r.findall('./fw'):
         e = {'name': fw.attrib['name']}
-        for tag, key, conv in (('filename','f',str), ('SHA1','h',str), ('size','sz',int), ('skip','s',int)):
+        for tag, key, conv in (('filename','f',str), ('size','sz',int), ('skip','s',int)):
             x = fw.find(tag)
             if x is not None and x.text is not None:
                 e[key] = conv(x.text.strip())
-        fws.append(e)
+        fws.append(put_shas(e, fw))
     machines.append({'name': os.path.basename(f)[:-4], 'vendor': 'Extension', 'kind': 'fw', 'fw': fws})
 
 out = {'layouts': list(layouts.keys()), 'machines': machines}
