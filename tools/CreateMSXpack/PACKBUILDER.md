@@ -73,6 +73,19 @@ Checked from the stock dumps with the two pre-built copies removed from the stor
 ROMs come out byte-identical to the Python's, and all ten DOS2 packs then build
 byte-identical to `createMSXpack.py`.
 
+## Finding out what to fetch next
+
+A pack that cannot be built used to say only how many ROMs it wanted, which left the
+question of *which* ones unanswered. Clicking any row now unfolds the list of every ROM
+that pack uses: filename, the slots it sits in, the first eight hex digits of its SHA-1,
+and a dot that is green when the store has it, red when it blocks the pack, amber when
+it is an optional device ROM. Clicking a red or amber line marks that ROM in the
+sidebar's missing list and outlines every other pack waiting on the same file.
+
+The sidebar list carries a count per ROM and is sorted by it, so the file that unblocks
+the most machines is at the top. Clicking an entry there scrolls to the first pack that
+needs it.
+
 ## Notes
 
 - ROMs are matched by SHA-1, never by filename, so a renamed dump still resolves.

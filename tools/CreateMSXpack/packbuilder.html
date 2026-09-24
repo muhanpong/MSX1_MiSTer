@@ -64,6 +64,25 @@ header.top .spacer{flex:1}
 .missing li{font-family:var(--mono);font-size:11.5px;color:var(--ink-2);padding:3px 0;border-bottom:1px solid var(--line-soft);
   word-break:break-all}
 .missing li:last-child{border-bottom:0}
+.missing li{cursor:pointer;display:flex;gap:8px;align-items:baseline}
+.missing li:hover{color:var(--ink)}
+.missing li .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.missing li .c{color:var(--ink-3);font-size:10.5px;white-space:nowrap}
+.missing li.hit{background:var(--accent-soft);color:var(--ink);border-radius:4px;padding-left:5px;padding-right:5px}
+.row{cursor:pointer}
+.row.hit{box-shadow:inset 0 0 0 2px var(--accent)}
+.det{grid-column:1/-1;margin-top:9px;border-top:1px solid var(--line-soft);padding-top:8px;
+  display:flex;flex-direction:column;gap:2px}
+.det .r{display:grid;grid-template-columns:9px 1fr auto;gap:8px;align-items:center;
+  font-family:var(--mono);font-size:11.5px;color:var(--ink-2);padding:3px 5px;border-radius:5px}
+.det .r .dot{width:7px;height:7px;border-radius:50%;background:var(--ok)}
+.det .r.no{color:var(--bad);cursor:pointer} .det .r.no .dot{background:var(--bad)}
+.det .r.optno{color:var(--warn);cursor:pointer} .det .r.optno .dot{background:var(--warn)}
+.det .r.hit{background:var(--accent-soft)}
+.det .f{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.det .where{font-style:normal;color:var(--ink-3)}
+.det .sha{color:var(--ink-3);font-size:10.5px;white-space:nowrap}
+.det .tip{font-family:var(--sans);font-size:11.5px;color:var(--ink-3);margin-top:5px}
 .toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
 .toolbar input[type=search]{font:inherit;flex:1;min-width:150px;padding:7px 11px;border-radius:7px;border:1px solid var(--line);
   background:var(--panel);color:var(--ink)}
@@ -528,6 +547,27 @@ function trSynth(disk, hb, m){
 const store=new Map();            // sha1 -> File
 const cache=new Map();            // sha1 -> Uint8Array (빌드 중 재사용)
 let filesRead=0, onlyReady=false, query="";
+const opened=new Set();           // 펼쳐 둔 기종
+let focusHash=null;               // 짚어 둔 ROM 해시
+
+//  이 팩이 쓰는 ROM 전부.  같은 파일을 여러 슬롯이 쓰면 한 줄로 묶고 자리만 모읍니다.
+function romNeeds(m){
+  const out=[], seen=new Map();
+  const add=(h,f,where,opt)=>{
+    if(!h) return;
+    h=h.toLowerCase();
+    const e=seen.get(h);
+    if(e){ if(!e.where.includes(where)) e.where.push(where); if(!opt) e.opt=false; return; }
+    const n={h, f:f||h, where:[where], opt:!!opt};
+    seen.set(h,n); out.push(n);
+  };
+  if(m.kind==="fw") for(const f of m.fw) add(f.h, f.f, f.name, false);
+  else{
+    for(const sl of m.slots) for(const b of sl.b) add(b.h, b.f, `${sl.ps}-${sl.ss} ${b.t||"ROM"}`, false);
+    for(const d of (m.devices||[])) add(d.h, d.f, d.typ||"장치", true);
+  }
+  return out;
+}
 const $=id=>document.getElementById(id);
 const allNeeded=(()=>{const s=new Set();for(const m of DATA.machines) for(const h of requiredHashes(m)) s.add(h);return s;})();
 //  아카이브를 풀 때 쓸모없는 파일을 메모리에 붙들지 않기 위한 집합 (필수 + 선택).
@@ -708,13 +748,15 @@ function render(){
   $("bar").style.width=(needed?100*have/needed:0)+"%";
   $("buildAll").disabled=!ready;
 
+  //  빠진 ROM 을 그걸 기다리는 기종 수와 함께 모읍니다.  많이 막고 있는 것이 위로 옵니다.
   const miss=new Map();
-  for(const m of DATA.machines){ const st=state(m);
-    if(st.k==="blocked") for(const h of st.missing){
-      if(!miss.has(h)){ let nm=null;
-        for(const sl of (m.slots||[])) for(const b of sl.b) if(b.h&&b.h.toLowerCase()===h) nm=b.f||nm;
-        for(const f of (m.fw||[])) if(f.h&&f.h.toLowerCase()===h) nm=f.f||nm;
-        miss.set(h,nm||h); } } }
+  for(const m of DATA.machines) for(const n of romNeeds(m)){
+    if(store.has(n.h)) continue;
+    let e=miss.get(n.h);
+    if(!e){ e={f:n.f, req:0, opt:0}; miss.set(n.h,e); }
+    if(n.opt) e.opt++; else e.req++;
+  }
+  const missSorted=[...miss].sort((a,b)=>b[1].req-a[1].req || b[1].opt-a[1].opt || a[1].f.localeCompare(b[1].f));
   $("synthWrap").hidden=synthed.size===0;
   $("synthList").innerHTML="";
   for(const [h,o] of synthed){
@@ -728,10 +770,57 @@ function render(){
   $("missingWrap").hidden=miss.size===0;
   $("missCount").textContent=miss.size?`(${miss.size})`:"";
   $("missingList").innerHTML="";
-  for(const [h,nm] of [...miss].slice(0,80)){
-    const li=document.createElement("li"); li.textContent=nm; li.title=h; $("missingList").appendChild(li);
+  for(const [h,e] of missSorted.slice(0,80)){
+    const li=document.createElement("li");
+    li.dataset.h=h; li.title=h;
+    if(focusHash===h) li.classList.add("hit");
+    const n=document.createElement("span"); n.className="n"; n.textContent=e.f;
+    const c=document.createElement("span"); c.className="c";
+    c.textContent=(e.req?`${e.req}종`:"") + (e.opt?(e.req?" + ":"")+`장치 ${e.opt}종`:"");
+    li.append(n,c);
+    li.addEventListener("click",()=>{ focusHash = focusHash===h ? null : h; render(); scrollToRow(); });
+    $("missingList").appendChild(li);
   }
 
+  renderList();
+}
+
+//  펼친 행에 붙는 판.  이 팩이 쓰는 ROM 을 하나씩, 있는지 없는지와 함께 보여줍니다.
+function detail(m,needs){
+  const d=document.createElement("div"); d.className="det";
+  let noReq=0, noOpt=0;
+  for(const n of needs){
+    const have=store.has(n.h);
+    if(!have) (n.opt?noOpt++:noReq++);
+    const r=document.createElement("div");
+    r.className="r"+(have?"":(n.opt?" optno":" no"))+(focusHash===n.h?" hit":"");
+    const dot=document.createElement("i"); dot.className="dot";
+    const f=document.createElement("span"); f.className="f";
+    f.textContent=n.f;
+    const w=document.createElement("em"); w.className="where";
+    w.textContent=" · "+n.where.join(", ")+(n.opt?" · 없어도 됨":"");
+    f.appendChild(w);
+    const sha=document.createElement("span"); sha.className="sha"; sha.textContent=n.h.slice(0,8);
+    r.append(dot,f,sha); r.title=n.h;
+    if(!have) r.addEventListener("click",e=>{
+      e.stopPropagation();
+      focusHash = focusHash===n.h ? null : n.h;
+      render(); scrollToMissing();
+    });
+    d.appendChild(r);
+  }
+  const tip=document.createElement("div"); tip.className="tip";
+  tip.textContent = noReq
+    ? `빨간 줄이 이 팩을 막고 있는 ROM ${noReq}개입니다. 눌러 보면 왼쪽 "빠진 ROM" 목록에서 같은 항목을 짚어 줍니다.`
+    : (noOpt ? `필요한 ROM은 다 있습니다. 주황 줄 ${noOpt}개는 없어도 팩이 만들어지고, 그 장치만 비게 됩니다.`
+             : "필요한 ROM이 모두 있습니다.");
+  d.appendChild(tip);
+  return d;
+}
+const scrollToMissing=()=>{ const el=$("missingList").querySelector("li.hit"); if(el) el.scrollIntoView({block:"nearest"}); };
+const scrollToRow=()=>{ const el=$("list").querySelector(".row.hit"); if(el) el.scrollIntoView({block:"nearest",behavior:"smooth"}); };
+
+function renderList(){
   const byVendor=new Map();
   for(const m of DATA.machines){
     const st=state(m);
@@ -760,8 +849,17 @@ function render(){
       else { pill.className="pill bad"; pill.textContent=`ROM ${st.missing.length}개 필요`; }
       const btn=document.createElement("button");
       btn.className="btn btn-primary btn-sm"; btn.textContent="받기"; btn.disabled=st.k==="blocked";
-      btn.addEventListener("click",()=>buildOne(m));
-      row.append(nm,pill,btn); rows.appendChild(row);
+      btn.addEventListener("click",e=>{ e.stopPropagation(); buildOne(m); });
+      row.append(nm,pill,btn);
+      const needs=romNeeds(m);
+      if(focusHash && needs.some(n=>n.h===focusHash && !store.has(n.h))) row.classList.add("hit");
+      row.addEventListener("click",e=>{
+        if(e.target.closest("button")) return;
+        if(opened.has(m.name)) opened.delete(m.name); else opened.add(m.name);
+        render();
+      });
+      if(opened.has(m.name)) row.appendChild(detail(m,needs));
+      rows.appendChild(row);
     }
     sec.appendChild(rows); host.appendChild(sec);
   }
