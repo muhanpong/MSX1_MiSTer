@@ -130,6 +130,10 @@ header.top .spacer{flex:1}
             <dt>필요한 ROM</dt><dd id="mNeeded">0</dd>
             <dt>빌드 가능</dt><dd id="mReady">0</dd>
           </dl>
+          <div class="missing" id="synthWrap" hidden>
+            <h3>합성한 turbo R 디스크 ROM</h3>
+            <ul id="synthList"></ul>
+          </div>
           <div class="missing" id="missingWrap" hidden>
             <h3>빠진 ROM <span id="missCount" style="font-weight:400;color:var(--ink-3)"></span></h3>
             <ul id="missingList"></ul>
@@ -141,6 +145,8 @@ header.top .spacer{flex:1}
         ROM은 파일명이 아니라 <b>SHA-1</b>로 찾습니다. 이름이 달라도 내용이 맞으면 인식합니다.
         <b>ZIP</b>과 <b>.gz</b>는 그대로 넣어도 됩니다. 안에서 풀어 읽고, 어느 팩에도 쓰이지 않는 파일은 버립니다.
         한자 폰트처럼 <code>device</code>로 붙는 ROM은 없어도 팩이 만들어지고, 그 장치만 비어 있게 됩니다.
+        FS-A1ST·FS-A1GT 펌웨어와 Sony HB-F1XD 디스크 ROM이 함께 들어오면 turbo R용
+        <b>WD2793 디스크 ROM</b>을 그 자리에서 합성해서 DOS2 팩까지 만들 수 있게 합니다.
       </p>
     </aside>
 
@@ -433,6 +439,91 @@ async function expandArchive(name, bytes, depth, sink, onSkip){
   }
 }
 
+/* ---------- turbo R 디스크 ROM 합성 ----------
+   FS-A1ST / FS-A1GT 는 디스크 드라이버와 MSX-DOS 2 커널을 펌웨어 0x60000 의 64 kB
+   한 덩어리에 담고 있습니다.  그 드라이버는 TC8566AF 용이고 이 코어에는 WD2793 밖에
+   없어서, Sony HB-F1XD 의 WD2793 드라이버로 갈아 끼우고 커널을 다시 연결합니다.
+   tools/turbor_diskrom/synth_diskrom.py 와 같은 34개 패치이며, 여기에는 주소와 우리가
+   써 넣는 점프/콜 바이트만 있습니다.  ROM 내용은 들어 있지 않고, 재료는 사용자가 올린
+   본인 덤프입니다.  결과는 알려진 SHA-1 로 검사하고, 어긋나면 버립니다.        */
+const TR_HB='12f2cc79b3d09723840bae774be48c0d721ec1c6';
+const TR_HBSYM={DSKIO:0x751E,DSKCHG:0x78BA,GETDPB:0x7943,CHOICE:0x795D,DSKFMT:0x79A0,MTOFF:0x7DE2,
+                INIHRD:0x7827,DRIVES:0x7867,DEFDPB:0x74E7,INIENV:0x78A7,OEMSTA:0x7DE0};
+const TR_OFF=0x60000, TR_LEN=0x10000, TR_LO=0x7405, TR_HI=0x7FD0;
+const TR_STUB=[0x32,0xF0,0x7F,0xC9,0xC3,0xB7,0x78];         // 7FD0: LD (7FF0),A / RET   7FD4: JP 78B7
+const TR_MODELS={
+  st:{label:"FS-A1ST", fw:'c212b11fda13f83dafed688c54d098e7e47ab225',
+      disk:'84a44ecf6f2dcfc1102f43ec7f6ddf687a44aadf',
+      out:'fs-a1st_diskrom_wd2793.rom', outSha:'94f4587db749af02f82837b3dbad7fc6e55f15e9',
+      jt:{DSKIO:0x7495,DSKCHG:0x77CA,GETDPB:0x7820,CHOICE:0x783B,DSKFMT:0x7C6D,MTOFF:0x7746},
+      k:{INIHRD:[0x47D6,0x7724],DRIVES:[0x48C6,0x777A],DEFDPB:[0x48F8,0x7416],
+         INIENV:[0x4904,0x77A1],OEMSTA:[0x5796,0x7878]},
+      mysize:[0x489A,0x1A], handler:0x77B6,
+      kmap:{GETWRK:0x4DCD,SETINT:0x4DFE,PROMPT:0x4D4F,DIV:0x4E67,TIMER:0x4E14}},
+  gt:{label:"FS-A1GT", fw:'e779c338eb91a7dea3ff75f3fde76b8af22c4a3a',
+      disk:'0527fb75775caa76c7eca8d449938ace83d36e96',
+      out:'fs-a1gt_diskrom_wd2793.rom', outSha:'86f81c71c858d98e2d4031566efd3b5a3843e279',
+      jt:{DSKIO:0x7459,DSKCHG:0x779D,GETDPB:0x77F9,CHOICE:0x781A,DSKFMT:0x7C52,MTOFF:0x7713},
+      k:{INIHRD:[0x47D6,0x76F1],DRIVES:[0x48C6,0x7747],DEFDPB:[0x48F8,0x73DA],
+         INIENV:[0x4904,0x7771],OEMSTA:[0x5796,0x785D]},
+      mysize:[0x489A,0x1F], handler:0x7789,
+      kmap:{GETWRK:0x4DD8,SETINT:0x4E09,PROMPT:0x4D5A,DIV:0x4E72,TIMER:0x4E1F}}};
+
+const trW=v=>[v&0xFF,(v>>8)&0xFF];
+const trHex=a=>[...a].map(x=>x.toString(16).padStart(2,"0")).join("");
+const trSame=(a,b)=>a.length===b.length&&[...a].every((x,i)=>x===b[i]);
+
+//  disk = 64 kB 디스크 ROM, hb = 16 kB HB-F1XD 디스크 ROM.  원본 바이트가 예상과
+//  다르면 바로 던집니다 (파이썬 쪽 assert 와 같은 자리).
+function trSynth(disk, hb, m){
+  if(disk.length!==TR_LEN) throw new Error(`디스크 ROM 길이 ${disk.length}`);
+  if(hb.length!==0x4000)   throw new Error(`HB-F1XD ROM 길이 ${hb.length}`);
+  const banks=[0,1,2,3].map(i=>disk.slice(i*0x4000,(i+1)*0x4000));
+  const put=(bk,a,nw,old,why)=>{
+    const o=a-0x4000, got=banks[bk].subarray(o,o+nw.length);
+    if(!trSame(got,old)) throw new Error(`bank${bk} ${a.toString(16).toUpperCase()}: ${trHex(got)} ≠ ${trHex(old)} (${why})`);
+    banks[bk].set(nw,o);
+  };
+  const drv=hb.slice(TR_LO-0x4000,TR_HI-0x4000);
+  const dp=(a,nw,old,why)=>{
+    const o=a-TR_LO, got=drv.subarray(o,o+nw.length);
+    if(!trSame(got,old)) throw new Error(`hb ${a.toString(16).toUpperCase()}: ${trHex(got)} ≠ ${trHex(old)} (${why})`);
+    drv.set(nw,o);
+  };
+  const km=m.kmap;
+  //  DOS1 드라이버가 부르던 DOS1 커널 서비스를 DOS2 커널의 같은 서비스로 돌립니다.
+  for(const a of [0x7694,0x7869,0x78A7,0x78BD,0x7B62,0x7B95])
+    dp(a,[0xCD,...trW(km.GETWRK)],[0xCD,...trW(0x5FC2)],'GETWRK');
+  dp(0x78B4,[0xC3,...trW(km.SETINT)],[0xC3,...trW(0x5FF6)],'SETINT');
+  dp(0x776C,[0xCD,...trW(km.PROMPT)],[0xCD,...trW(0x625A)],'PROMPT');
+  dp(0x76CD,[0xCD,...trW(km.DIV)],  [0xCD,...trW(0x492F)],'DIV');
+  dp(0x78B1,[0x21,...trW(0x7FD4)],  [0x21,...trW(0x78B7)],'INIENV 핸들러 → 트램펄린 7FD4');
+  dp(0x78B7,[0xC3,...trW(km.TIMER)],[0xC3,...trW(0x6027)],'타이머 핸들러 → DOS2 공용');
+
+  const NAMES=['DSKIO','DSKCHG','GETDPB','CHOICE','DSKFMT','MTOFF'];
+  for(const bk of [0,1]){
+    banks[bk].set(drv,TR_LO-0x4000);
+    NAMES.forEach((nm,i)=>put(bk,0x4010+3*i,[0xC3,...trW(TR_HBSYM[nm])],[0xC3,...trW(m.jt[nm])],'점프 테이블 '+nm));
+  }
+  for(const nm of Object.keys(m.k)){
+    const [site,old]=m.k[nm];
+    const op = nm==='DEFDPB'?0x21 : (nm==='OEMSTA'?0xC3:0xCD);
+    put(0,site,[op,...trW(TR_HBSYM[nm])],[op,...trW(old)],nm);
+  }
+  const ms=m.mysize[0], mv=m.mysize[1];               // MYSIZE 자리는 그대로 두고 확인만
+  if(!trSame(banks[0].subarray(ms-0x4000,ms-0x4000+3),[0x21,...trW(mv)])) throw new Error('MYSIZE 자리가 다릅니다');
+  for(const bk of [0,1,2]) put(bk,0x7FDE,[0xCD,...trW(0x78B7)],[0xCD,...trW(m.handler)],'트램펄린 CALL');
+
+  const b3=hb.slice();                                // bank 3 = HB-F1XD 커널 + 뱅크 전환 스텁
+  for(let i=0x3FC0;i<b3.length;i++) if(b3[i]!==0) throw new Error('HB-F1XD 끝 64바이트가 비어 있지 않습니다');
+  b3.set(TR_STUB,0x3FD0);
+  banks[3]=b3;
+
+  const out=new Uint8Array(TR_LEN);
+  banks.forEach((b,i)=>out.set(b,i*0x4000));
+  return out;
+}
+
 /* ---------- 상태 ---------- */
 const store=new Map();            // sha1 -> File
 const cache=new Map();            // sha1 -> Uint8Array (빌드 중 재사용)
@@ -442,6 +533,34 @@ const allNeeded=(()=>{const s=new Set();for(const m of DATA.machines) for(const 
 //  아카이브를 풀 때 쓸모없는 파일을 메모리에 붙들지 않기 위한 집합 (필수 + 선택).
 const allWanted=(()=>{const s=new Set(allNeeded);
   for(const m of DATA.machines) for(const h of optionalHashes(m)) s.add(h); return s;})();
+for(const h of [TR_HB, ...Object.values(TR_MODELS).flatMap(m=>[m.fw,m.disk])]) allWanted.add(h);
+const synthed=new Map();          // outSha -> {label, name, bytes}
+
+//  재료가 모이면 turbo R 디스크 ROM 을 만들어 보관소에 넣습니다.  그래야 DOS2 팩이
+//  "빌드 가능" 으로 바뀝니다.  합성물은 사용자의 덤프에서만 나옵니다.
+async function synthTurboR(){
+  const hb=await getRom(TR_HB);
+  if(!hb) return;
+  for(const key of Object.keys(TR_MODELS)){
+    const m=TR_MODELS[key];
+    if(store.has(m.outSha)) continue;
+    let disk=await getRom(m.disk);
+    if(!disk){
+      const fw=await getRom(m.fw);
+      if(!fw) continue;
+      if(fw.length<TR_OFF+TR_LEN) continue;
+      disk=fw.subarray(TR_OFF,TR_OFF+TR_LEN);
+    }
+    try{
+      const out=trSynth(disk,hb,m);
+      const h=await sha1(out);
+      if(h!==m.outSha){ log(`${m.label} 디스크 ROM: 결과 SHA-1 ${h.slice(0,8)} 가 기대값과 달라 버립니다`,true); continue; }
+      store.set(m.outSha,new File([out],m.out));
+      synthed.set(m.outSha,{label:m.label,name:m.out,bytes:out});
+      log(`${m.label} 디스크 ROM 합성 · ${m.out}`);
+    }catch(e){ log(`${m.label} 디스크 ROM 합성 실패: ${e.message}`,true); }
+  }
+}
 
 async function getRom(h){
   h=h.toLowerCase();
@@ -486,6 +605,7 @@ async function addFiles(list){
     }catch(e){ log(`읽기 실패: ${f.name}`,true); }
   }
   filesRead+=seen;
+  if(added) await synthTurboR();
   if(added||ignored) log(`${added}개 추가 (전체 ${store.size})` + (ignored?` · 쓰지 않는 파일 ${ignored}개 무시`:""));
   else if(seen) log(`쓸 수 있는 ROM이 없습니다 (${seen}개 확인)`,true);
   if(skipped) log(`건너뜀 ${skipped}개: ${notes.join(", ")}${skipped>notes.length?" 외":""}`,true);
@@ -595,6 +715,16 @@ function render(){
         for(const sl of (m.slots||[])) for(const b of sl.b) if(b.h&&b.h.toLowerCase()===h) nm=b.f||nm;
         for(const f of (m.fw||[])) if(f.h&&f.h.toLowerCase()===h) nm=f.f||nm;
         miss.set(h,nm||h); } } }
+  $("synthWrap").hidden=synthed.size===0;
+  $("synthList").innerHTML="";
+  for(const [h,o] of synthed){
+    const li=document.createElement("li"); li.title=h;
+    const t=document.createElement("span"); t.textContent=`${o.label} · ${(o.bytes.length>>10)}KB`;
+    const b=document.createElement("button");
+    b.className="btn btn-ghost btn-sm"; b.textContent="ROM 받기";
+    b.addEventListener("click",()=>offer(o.name,o.bytes));
+    li.append(t,b); $("synthList").appendChild(li);
+  }
   $("missingWrap").hidden=miss.size===0;
   $("missCount").textContent=miss.size?`(${miss.size})`:"";
   $("missingList").innerHTML="";

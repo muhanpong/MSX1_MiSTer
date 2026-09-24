@@ -52,6 +52,27 @@ One behaviour is easy to get wrong and is covered: a missing **device** ROM (a k
 font, say) is not an error — the pack is written with that device's size 0 and no
 payload, exactly as the Python does. Only a missing **block** ROM aborts a pack.
 
+## The turbo R disk ROM is synthesized in the page
+
+The ten `FS-A1ST / FS-A1GT … DOS2` packs need `fs-a1{st,gt}_diskrom_wd2793.rom`, which
+no one has a dump of: it is built by `tools/turbor_diskrom/synth_diskrom.py` from the
+machine's own firmware and the Sony HB-F1XD disk ROM. Requiring that script first would
+have left those ten packs out of reach of anyone using the page on its own, so the same
+34 patches are ported into it.
+
+When the firmware (or an already cut 64 kB disk ROM) and the HB-F1XD disk ROM are both
+in the store, the page builds the disk ROM, checks it against the known SHA-1, and puts
+it in the store under that hash. The DOS2 packs then turn buildable on their own, and
+the ROM itself can be downloaded from the sidebar.
+
+Like the Python, the page carries **no ROM content** — only addresses and the few
+jump/call bytes it writes — and every patch asserts the original bytes before writing.
+A result whose SHA-1 does not match is discarded rather than offered.
+
+Checked from the stock dumps with the two pre-built copies removed from the store: both
+ROMs come out byte-identical to the Python's, and all ten DOS2 packs then build
+byte-identical to `createMSXpack.py`.
+
 ## Notes
 
 - ROMs are matched by SHA-1, never by filename, so a renamed dump still resolves.
