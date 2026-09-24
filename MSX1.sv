@@ -875,6 +875,8 @@ wire msx_pause = nvbak_dma_active | dump_active | (status[43] & OSD_STATUS) | pa
 
 msx MSX
 (
+   .midi_tx(midi_tx),
+   .midi_rx(midi_rx),
    // ce_10m7_p / ce_5m39_n are NOT pause-gated: their only consumers inside
    // msx.sv are the vdp18 core and ce_pix (video timing/pixel stream).  The
    // V9938 path was never gated (CLK21M direct), so on MSX2 machines the
@@ -1152,8 +1154,6 @@ debug_overlay u_overlay (
    .dbg_trap_cnt(dbg_trap_cnt),
    .dbg_trap_bus(dbg_trap_bus),
    .dbg_spin(dbg_spin),
-   .midi_tx(midi_tx),
-   .midi_rx(midi_rx),
    .dbg_wait_ratio(dbg_wait_ratio),
    .dbg_hit_ratio(dbg_hit_ratio),
    .dbg_a8_pc(dbg_a8_pc),
