@@ -95,6 +95,10 @@ header.top .spacer{flex:1}
 .log .err{color:var(--bad)}
 .note{font-size:12px;color:var(--ink-3);margin:12px 0 0;line-height:1.55}
 .note code{font-family:var(--mono);font-size:11px;background:var(--panel-2);padding:1px 4px;border-radius:3px}
+.toast{margin-bottom:10px;padding:9px 12px;border-radius:8px;font-size:13px;border:1px solid var(--line)}
+.toast.ok{background:var(--ok-soft);color:var(--ok);border-color:transparent}
+.toast.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
+.saveinfo{font-size:12px;color:var(--ink-3);margin-left:auto}
 .hidden-input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 </style>
 
@@ -139,6 +143,7 @@ header.top .spacer{flex:1}
     </aside>
 
     <main>
+      <div id="toast" class="toast" hidden></div>
       <div class="toolbar">
         <input type="search" id="q" placeholder="기종 이름으로 거르기 (예: A1ST, HB-F1)" aria-label="기종 검색">
         <div class="seg" role="group" aria-label="보기">
@@ -390,22 +395,43 @@ async function entriesFrom(dt){
   return [...dt.files];
 }
 
-/* ---------- 내려주기: 아티팩트면 downloads, 로컬이면 일반 저장 ---------- */
-let dl=null, dlTried=false;
+/* ---------- 내려주기 ----------
+   아티팩트 안(window.claude 가 있는 경우)에서는 페이지가 스스로 시작한 다운로드가
+   샌드박스에서 막히므로 downloads 기능을 반드시 거쳐야 합니다. 그 기능은 로드 직후가
+   아니라 나중에 해석되므로, null 을 캐시하지 않고 매번 다시 시도합니다.            */
+let dl=null;
+const inArtifact=()=>typeof window.claude==="object"&&window.claude!==null;
 async function downloader(){
-  if(!dlTried){ dlTried=true; try{ dl=await (window.claude?.use?.("downloads")) ?? null; }catch(e){ dl=null; } }
+  if(dl) return dl;
+  try{ dl=(await window.claude?.use?.("downloads"))||null; }catch(e){ dl=null; }
   return dl;
+}
+function toast(msg,bad){
+  const t=$("toast"); t.textContent=msg; t.className="toast"+(bad?" bad":" ok"); t.hidden=false;
+  clearTimeout(toast._t); toast._t=setTimeout(()=>{t.hidden=true;},5000);
 }
 async function offer(filename,bytes){
   const d=await downloader();
   if(d){
-    try{ await d.save({filename,data:new Blob([bytes])}); log(`저장: ${filename}`); }
-    catch(e){ if(e&&e.code==="declined") log("저장 취소됨"); else log(`저장 실패: ${e&&e.code||e}`,true); }
+    try{ await d.save({filename,data:new Blob([bytes])}); log(`저장: ${filename}`); toast(`저장됨 · ${filename}`); }
+    catch(e){
+      const c=e&&e.code;
+      if(c==="declined") { log("저장 취소됨"); toast("저장을 취소했습니다"); }
+      else if(c==="rejected_extension"){ log(`확장자 거부: ${filename}`,true); toast("이 확장자는 저장할 수 없습니다",1); }
+      else { log(`저장 실패: ${c||e}`,true); toast(`저장 실패: ${c||e}`,1); }
+    }
     return;
   }
-  const a=document.createElement("a"); const url=URL.createObjectURL(new Blob([bytes]));
+  if(inArtifact()){
+    // 기능이 아직/끝내 해석되지 않음. 여기서 <a download> 로 내려가면 조용히 실패합니다.
+    log("저장 기능을 사용할 수 없습니다 (아티팩트)",true);
+    toast("저장 기능을 준비하지 못했습니다. 잠시 뒤 다시 누르거나, 파일을 내려받아 로컬에서 여세요.",1);
+    return;
+  }
+  const a=document.createElement("a"), url=URL.createObjectURL(new Blob([bytes]));
   a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(url),4000); log(`저장: ${filename}`);
+  setTimeout(()=>URL.revokeObjectURL(url),4000);
+  log(`저장: ${filename}`); toast(`내려받기 · ${filename}`);
 }
 const packOf=m=>m.kind==="fw"?buildFW(m,getRom):buildMSX(m,getRom);
 
@@ -527,4 +553,18 @@ $("theme").addEventListener("click",()=>{
   document.documentElement.setAttribute("data-theme",dark?"light":"dark");
 });
 render();
+
+/* 저장 경로를 미리 해석해 둡니다: 아티팩트의 downloads 기능은 늦게 붙으므로
+   첫 클릭이 그것을 기다리지 않도록 미리 깨워 두고, 어느 경로인지 표시합니다. */
+(async()=>{
+  const info=document.createElement("span"); info.className="saveinfo";
+  document.querySelector(".toolbar").appendChild(info);
+  if(!inArtifact()){ info.textContent="저장: 브라우저 다운로드 (.MSX)"; return; }
+  info.textContent="저장 경로 준비 중…";
+  for(let i=0;i<12;i++){
+    if(await downloader()){ info.textContent="저장: 아티팩트 (.zip)"; return; }
+    await new Promise(r=>setTimeout(r,1000));
+  }
+  info.textContent="저장 기능 없음 — 파일로 내려받아 사용하세요";
+})();
 </script>
