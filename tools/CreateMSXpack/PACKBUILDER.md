@@ -2,8 +2,8 @@
 
 `packbuilder.html` builds the same `.MSX` packs as `createMSXpack.py`, in a browser,
 with no server and no install. Open the file, drop the ROM folder on it, download the
-packs. Everything stays on the machine: the page makes no network request except the
-Google Fonts stylesheet.
+packs. Everything stays on the machine: the page makes **no network request at all**,
+so it works with the network off. Type is set in system fonts for that reason.
 
 ## Why it can be one file
 
