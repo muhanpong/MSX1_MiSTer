@@ -138,7 +138,14 @@ wire  txc_rise = cnt_out[0] & ~out0_q;
 //  ── timer / receive interrupts ─────────────────────────────────────────────
 logic timer_latch;
 wire  timer_irq = timer_latch & dtr;
-wire  rxrdy_irq = rx_rdy      & rts;
+//  The receive interrupt is NOT a plain `rx_rdy & rts`.  In openMSX the latch
+//  follows the byte regardless of RTS, but the IRQ only moves on a latch
+//  TRANSITION while RTS is on; turning RTS on with a byte already waiting does
+//  not raise it (MSXMidi::setRxRDYIRQ / enableRxRDYIRQ), and turning RTS off
+//  clears it.  An AND would fire the instant software enabled the interrupt,
+//  which is the same shape as the timer bug that broke the GT opening.
+logic rxrdy_irq;
+logic rx_rdy_q;
 assign int_n = ~(cs & (timer_irq | rxrdy_irq));
 
 //  STATUS: bit 7 is the DSR pin = the timer IRQ line, NOT an 8251 register bit.
@@ -189,6 +196,7 @@ always_ff @(posedge clk) begin
       rx_rdy    <= 1'b0; rx_busy <= 1'b0; rx_ovr <= 1'b0; rx_buf <= 8'h00;
       rx_bit    <= 4'd0; rx_div <= 7'd0;
       timer_latch <= 1'b0;
+      rxrdy_irq   <= 1'b0; rx_rdy_q <= 1'b0;
       for (i = 0; i < 3; i++) begin
          //  The 8254 is NOT re-initialised by the machine reset in openMSX
          //  (only by the constructor), but a core has to start somewhere:
@@ -236,8 +244,25 @@ always_ff @(posedge clk) begin
          end
       end
 
-      // ── the timer IRQ latch: set by OUT2's rising edge ────────────────────
-      if (out2_rise) timer_latch <= 1'b1;
+      // ── the receive interrupt, on the latch's edges only ─────────────────
+      rx_rdy_q <= rx_rdy;
+      if (!rts)                      rxrdy_irq <= 1'b0;
+      else if (rx_rdy & ~rx_rdy_q)   rxrdy_irq <= 1'b1;
+      else if (~rx_rdy)              rxrdy_irq <= 1'b0;
+
+      // ── the timer IRQ latch ──────────────────────────────────────────────
+      //  Only while DTR is set.  openMSX does this by not generating the edge
+      //  events at all: `wantEdges = timerIRQenabled && !timerIRQlatch`
+      //  (MSXMidi::updateEdgeEvents), so with the interrupt disabled the latch
+      //  never arms.  Latching regardless looks harmless and is not: the GT
+      //  firmware runs for a while with DTR=0, so the latch would already be
+      //  standing when it writes command 03h (TxEN|DTR), and the interrupt
+      //  would fire in that same instant instead of up to 5 ms later.  The
+      //  BIOS hook at FF93h is not installed yet at that point -- it is still
+      //  RET or, worse, unwritten RAM -- so the machine took an interrupt it
+      //  could not service and never finished booting (board, 2026-09-24:
+      //  the GT opening screen).
+      if (out2_rise & dtr) timer_latch <= 1'b1;
 
       // ── 8251 transmit, on the TxC edges the 8254 produces ────────────────
       if (txc_rise) begin

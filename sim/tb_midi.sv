@@ -142,18 +142,31 @@ initial begin
    check((c1 - c0) > 420 && (c1 - c0) < 440,
          $sformatf("T2 counter 0 runs at 500 kHz (10 periods = %0d cycles, want ~430)", c1 - c0));
 
-   // T3 -- the timer latch sets, but with DTR=0 it must not show or interrupt
-   wait (dut.timer_latch === 1'b1);
+   // T3 -- with DTR off the latch must not even ARM.  openMSX stops generating
+   //       OUT2's edge events while the interrupt is disabled, so several timer
+   //       periods can pass and nothing is pending.
+   repeat (3) @(posedge dut.cnt_out[2]);
+   repeat (4) @(posedge clk);
+   check(dut.timer_latch === 1'b0, "T3 the timer does not latch while DTR is off");
    io_in(8'hE9, st);
-   check(st[7] === 1'b0, "T3 timer latched but DSR stays 0 while DTR is off");
+   check(st[7] === 1'b0, "T3 DSR stays 0 while DTR is off");
    check(int_n === 1'b1, "T3 no interrupt while DTR is off");
 
-   // T4 -- DTR (command bit 1) publishes it on DSR and on the INT line
+   // T4 -- enabling DTR must NOT fire instantly: the interrupt belongs to the
+   //       NEXT timer edge, which is what gives the firmware its window to put
+   //       a hook at FF93h.  Latching regardless of DTR made the GT fire the
+   //       moment it wrote command 03h and the opening screen never came up.
    io_out(8'hE9, 8'h02);
    repeat (4) @(posedge clk);
+   check(int_n === 1'b1, "T4 enabling DTR does not fire an interrupt by itself");
    io_in(8'hE9, st);
-   check(st[7] === 1'b1, "T4 DTR=1 exposes the timer on status bit 7");
-   check(int_n === 1'b0, "T4 DTR=1 asserts the interrupt");
+   check(st[7] === 1'b0, "T4 DSR is still 0 right after enabling DTR");
+   c0 = cyc;
+   wait (int_n === 1'b0);
+   c1 = cyc;
+   check((c1 - c0) > 1000, "T4 the interrupt waits for the next timer edge");
+   io_in(8'hE9, st);
+   check(st[7] === 1'b1, "T4 and then shows on status bit 7");
 
    // T5 -- writing EAh is what clears it (the BIOS's acknowledge)
    io_out(8'hEA, 8'h00);
@@ -205,9 +218,15 @@ initial begin
    rx_send(8'h7F);
    repeat (20) @(posedge clk);
    check(int_n === 1'b1, "T10 RxRDY alone does not interrupt while RTS is 0");
-   io_out(8'hE9, 8'h25);                 // + RTS
+   io_out(8'hE9, 8'h25);                 // + RTS, with the byte already waiting
    repeat (4) @(posedge clk);
-   check(int_n === 1'b0, "T10 RTS=1 lets the receive interrupt through");
+   check(int_n === 1'b1,
+         "T10 enabling RTS over a waiting byte does not raise the interrupt");
+   io_in(8'hE8, rb);                     // consume it, then send another
+   repeat (4) @(posedge clk);
+   rx_send(8'h41);
+   repeat (20) @(posedge clk);
+   check(int_n === 1'b0, "T10 a byte arriving with RTS on does interrupt");
    io_in(8'hE8, rb);
    repeat (4) @(posedge clk);
    check(int_n === 1'b1, "T10 reading the byte clears the receive interrupt");
