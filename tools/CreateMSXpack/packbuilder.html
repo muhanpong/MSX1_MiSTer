@@ -119,14 +119,14 @@ header.top .spacer{flex:1}
         <div class="hd"><h2>ROM 보관소</h2></div>
         <div class="bd">
           <div class="drop" id="drop">
-            <p>ROM 파일이나 폴더를 끌어다 놓으세요</p>
+            <p>ROM 파일·폴더·ZIP을 끌어다 놓으세요</p>
             <button class="btn btn-primary btn-sm" id="pickFiles">파일 선택</button>
             <button class="btn btn-ghost btn-sm" id="pickDir">폴더 선택</button>
           </div>
           <div class="bar"><i id="bar"></i></div>
           <dl class="meter">
             <dt>읽은 파일</dt><dd id="mFiles">0</dd>
-            <dt>고유 SHA-1</dt><dd id="mHashes">0</dd>
+            <dt>쓸모 있는 ROM</dt><dd id="mHashes">0</dd>
             <dt>필요한 ROM</dt><dd id="mNeeded">0</dd>
             <dt>빌드 가능</dt><dd id="mReady">0</dd>
           </dl>
@@ -139,6 +139,7 @@ header.top .spacer{flex:1}
       </div>
       <p class="note">
         ROM은 파일명이 아니라 <b>SHA-1</b>로 찾습니다. 이름이 달라도 내용이 맞으면 인식합니다.
+        <b>ZIP</b>과 <b>.gz</b>는 그대로 넣어도 됩니다. 안에서 풀어 읽고, 어느 팩에도 쓰이지 않는 파일은 버립니다.
         한자 폰트처럼 <code>device</code>로 붙는 ROM은 없어도 팩이 만들어지고, 그 장치만 비어 있게 됩니다.
       </p>
     </aside>
@@ -346,12 +347,101 @@ function zip(files){
   return o;
 }
 
+/* ---------- ZIP / GZIP 풀기 (라이브러리 없이) ----------
+   콜렉션이 .zip 으로 도는 일이 많아서, 압축을 미리 풀지 않아도 되게 합니다.
+   브라우저 내장 DecompressionStream 만 씁니다: store(0) 와 deflate(8), 그리고 .gz.   */
+const canInflate = typeof DecompressionStream === "function";
+async function unstream(bytes, fmt){
+  const ds = new DecompressionStream(fmt);
+  const ab = await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer();
+  return new Uint8Array(ab);
+}
+const zu32=(dv,o)=>dv.getUint32(o,true), zu16=(dv,o)=>dv.getUint16(o,true);
+
+//  중앙 디렉터리를 읽어 항목 목록을 돌려줍니다.  크기는 항상 중앙 디렉터리에서 읽으므로
+//  데이터 서술자(flag bit 3)를 쓰는 아카이브도 그대로 처리됩니다.
+async function readZip(bytes, onSkip){
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let eo = -1;
+  for(let i=bytes.length-22; i>=Math.max(0,bytes.length-22-65535); i--)
+    if(zu32(dv,i)===0x06054b50){ eo=i; break; }
+  if(eo<0) throw new Error("ZIP 끝 레코드 없음");
+  let count = zu16(dv,eo+10), cdOff = zu32(dv,eo+16);
+  if(count===0xFFFF || cdOff===0xFFFFFFFF){            // ZIP64
+    const lo = eo-20;
+    if(lo>=0 && zu32(dv,lo)===0x07064b50){
+      const z = Number(dv.getBigUint64(lo+8,true));
+      if(z+56<=bytes.length && zu32(dv,z)===0x06064b50){
+        count = Number(dv.getBigUint64(z+32,true));
+        cdOff = Number(dv.getBigUint64(z+48,true));
+      }
+    }
+  }
+  const dec = new TextDecoder("utf-8"), out = [];
+  let p = cdOff;
+  for(let n=0; n<count && p+46<=bytes.length; n++){
+    if(zu32(dv,p)!==0x02014b50) break;
+    const flag=zu16(dv,p+8), method=zu16(dv,p+10);
+    const nlen=zu16(dv,p+28), elen=zu16(dv,p+30), clen=zu16(dv,p+32);
+    let csize=zu32(dv,p+20), lho=zu32(dv,p+42);
+    const name = dec.decode(bytes.subarray(p+46, p+46+nlen));
+    if(csize===0xFFFFFFFF || lho===0xFFFFFFFF){        // ZIP64 확장 필드
+      let q=p+46+nlen; const end=q+elen;
+      while(q+4<=end){
+        const id=zu16(dv,q), sz=zu16(dv,q+2); let r=q+4;
+        if(id===0x0001){
+          if(zu32(dv,p+24)===0xFFFFFFFF) r+=8;                          // uncompressed
+          if(csize===0xFFFFFFFF){ csize=Number(dv.getBigUint64(r,true)); r+=8; }
+          if(lho===0xFFFFFFFF){ lho=Number(dv.getBigUint64(r,true)); r+=8; }
+        }
+        q += 4+sz;
+      }
+    }
+    p += 46+nlen+elen+clen;
+    if(name.endsWith("/")) continue;                                    // 디렉터리
+    if(flag & 0x0001){ onSkip(name,"암호가 걸려 있음"); continue; }
+    if(method!==0 && method!==8){ onSkip(name,"지원하지 않는 압축 방식 "+method); continue; }
+    if(method===8 && !canInflate){ onSkip(name,"이 브라우저가 deflate를 풀지 못함"); continue; }
+    if(lho+30>bytes.length || zu32(dv,lho)!==0x04034b50){ onSkip(name,"지역 헤더가 어긋남"); continue; }
+    const ds = lho+30+zu16(dv,lho+26)+zu16(dv,lho+28);                  // 지역 헤더의 확장 필드가 다를 수 있음
+    out.push({name, method, data: bytes.subarray(ds, ds+csize)});
+  }
+  return out;
+}
+
+const looksZip = b => b.length>=4 && b[0]===0x50 && b[1]===0x4B && b[2]===0x03 && b[3]===0x04;
+const looksGz  = b => b.length>=2 && b[0]===0x1F && b[1]===0x8B;
+
+//  아카이브면 풀어서, 아니면 그대로 sink 로 넘깁니다.  중첩은 두 겹까지만 따라갑니다.
+async function expandArchive(name, bytes, depth, sink, onSkip){
+  if(depth>2){ await sink(name,bytes); return; }
+  if(looksGz(bytes)){
+    if(!canInflate){ onSkip(name,"이 브라우저가 gzip을 풀지 못함"); return; }
+    try{ await expandArchive(name.replace(/\.gz$/i,""), await unstream(bytes,"gzip"), depth+1, sink, onSkip); }
+    catch(e){ onSkip(name,"gzip 해제 실패"); }
+    return;
+  }
+  if(!looksZip(bytes)){ await sink(name,bytes); return; }
+  let members;
+  try{ members = await readZip(bytes,onSkip); }
+  catch(e){ onSkip(name,"ZIP을 읽지 못함"); return; }
+  for(const m of members){
+    let data;
+    try{ data = m.method===8 ? await unstream(m.data,"deflate-raw") : m.data; }
+    catch(e){ onSkip(m.name,"압축 해제 실패"); continue; }
+    await expandArchive(m.name, data, depth+1, sink, onSkip);
+  }
+}
+
 /* ---------- 상태 ---------- */
 const store=new Map();            // sha1 -> File
 const cache=new Map();            // sha1 -> Uint8Array (빌드 중 재사용)
 let filesRead=0, onlyReady=false, query="";
 const $=id=>document.getElementById(id);
 const allNeeded=(()=>{const s=new Set();for(const m of DATA.machines) for(const h of requiredHashes(m)) s.add(h);return s;})();
+//  아카이브를 풀 때 쓸모없는 파일을 메모리에 붙들지 않기 위한 집합 (필수 + 선택).
+const allWanted=(()=>{const s=new Set(allNeeded);
+  for(const m of DATA.machines) for(const h of optionalHashes(m)) s.add(h); return s;})();
 
 async function getRom(h){
   h=h.toLowerCase();
@@ -370,15 +460,35 @@ function log(msg,err){const d=document.createElement("div");if(err)d.className="
 
 /* ---------- 파일 수집 ---------- */
 async function addFiles(list){
-  let added=0;
+  let added=0, seen=0, ignored=0, skipped=0;
+  const notes=[];
+  const onSkip=(n,why)=>{ skipped++; if(notes.length<4) notes.push(`${n.split("/").pop()} — ${why}`); };
+  //  해시가 어느 팩에도 쓰이지 않으면 버립니다.  700개짜리 콜렉션을 통째로 들고 있지 않기 위해서입니다.
+  const keep=async(bytes,mkFile)=>{
+    seen++;
+    if(seen%64===0){ $("mFiles").textContent=filesRead+seen; await new Promise(r=>setTimeout(r,0)); }
+    const h=await sha1(bytes);
+    if(!allWanted.has(h)){ ignored++; return; }
+    if(store.has(h)) return;
+    store.set(h,mkFile()); added++;
+  };
   for(const f of list){
     try{
-      const h=await sha1(await f.arrayBuffer());
-      filesRead++;
-      if(!store.has(h)){ store.set(h,f); added++; }
+      const head=new Uint8Array(await f.slice(0,4).arrayBuffer());
+      if(looksZip(head)||looksGz(head)){
+        log(`${f.name} 여는 중…`);
+        const bytes=new Uint8Array(await f.arrayBuffer());
+        await expandArchive(f.name, bytes, 0,
+          (n,b)=>keep(b,()=>new File([b], n.split("/").pop())), onSkip);
+      }else{
+        await keep(new Uint8Array(await f.arrayBuffer()), ()=>f);
+      }
     }catch(e){ log(`읽기 실패: ${f.name}`,true); }
   }
-  if(added) log(`${added}개 추가 (전체 ${store.size})`);
+  filesRead+=seen;
+  if(added||ignored) log(`${added}개 추가 (전체 ${store.size})` + (ignored?` · 쓰지 않는 파일 ${ignored}개 무시`:""));
+  else if(seen) log(`쓸 수 있는 ROM이 없습니다 (${seen}개 확인)`,true);
+  if(skipped) log(`건너뜀 ${skipped}개: ${notes.join(", ")}${skipped>notes.length?" 외":""}`,true);
   render();
 }
 async function entriesFrom(dt){
