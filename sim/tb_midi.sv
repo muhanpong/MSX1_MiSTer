@@ -115,6 +115,23 @@ initial begin
    io_in(8'hE9, st);
    check(st == 8'h05, "T1 status after reset is 05 (TxRDY|TxEMPTY)");
 
+   // T1b -- the decode itself, carried over from the retired tb_midi_stub: E9h
+   //        must answer a PLAIN IN, not the interrupt acknowledge.  Decoding it
+   //        on cpu_m1 instead of ~cpu_m1 made the port read FFh, and Illusion
+   //        City's own ISR took its MIDI branch and never cleared the frame
+   //        interrupt (board, 2026-09-23).  And a pack that does not declare
+   //        the device must answer FFh everywhere.
+   @(negedge clk); addr = 8'hE9; iorq = 1; rd = 1; m1 = 1;
+   repeat (2) @(posedge clk);
+   check(dout === 8'hFF, "T1b an interrupt acknowledge at E9h is not a status read");
+   @(negedge clk); m1 = 0; rd = 0; iorq = 0;
+   repeat (2) @(posedge clk);
+   force dut.cs = 1'b0;
+   io_in(8'hE9, st);
+   check(st === 8'hFF, "T1b a pack without the device reads FF");
+   release dut.cs;
+   repeat (2) @(posedge clk);
+
    bios_init();
 
    // T2 -- counter 0 gives the MIDI bit clock: OUT0 period is 2 us (500 kHz)
