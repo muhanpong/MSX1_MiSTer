@@ -23,7 +23,7 @@ MAPPER_TYPES = ["MAPPER_UNUSED" , "MAPPER_RAM"    , "MAPPER_AUTO"  , "MAPPER_NON
                 "MAPPER_FMPAC"  , "MAPPER_OFFSET" , "MAPPER_MFRSD1", "MAPPER_MFRSD2"    ,
                 "MAPPER_MFRSD3" , "MAPPER_GM2"    , "MAPPER_HALNOTE", "MAPPER_ASCII16X"  ,
                 "MAPPER_YAMANOOTO", "MAPPER_NEO8" , "MAPPER_NEO16" , "MAPPER_MSXDOS2"   ,
-                "MAPPER_TRFDC"    ]
+                "MAPPER_TRFDC"  , "MAPPER_PANASONIC" ]
 MSX_TYPES    = ["MSX1", "MSX2"]
 
 BLOCK_TYPES = {"NONE"       : {"MEMORY": "NONE", "DEVICE" : "NONE" , "MAPPER" : "MAPPER_UNUSED" , "CONFIG" : "NONE"         , "SRAM": 0  },
