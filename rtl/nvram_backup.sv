@@ -46,7 +46,10 @@ always @(posedge clk) begin
    if (img_mounted[1]) begin image_mounted[1] <= ~img_readonly; image_size[1] <= img_size; end //Extension A
    if (img_mounted[2]) begin image_mounted[2] <= ~img_readonly; image_size[2] <= img_size; end //Extension B
    if (img_mounted[3]) begin image_mounted[3] <= ~img_readonly; image_size[3] <= img_size; end //Computer CMOS
-   if (store_new_size) image_size[num] <= (64'(lookup_SRAM[num].size)) << 13;
+   //  size is in kB, so bytes is << 10.  It was << 13, which is eight times too
+   //  large; harmless only because image_size is compared against zero and never
+   //  used as a length.  Fixed here rather than left for whoever does use it.
+   if (store_new_size) image_size[num] <= (64'(lookup_SRAM[num].size)) << 10;
 end
 
 logic [3:0] request_load = 4'b0, request_save = 4'b0;
