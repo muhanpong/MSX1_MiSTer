@@ -175,9 +175,86 @@ module tb;
       .enable_a(1'b1),
       .wren_a(upl_bram_rq ? upl_ce : (bram_ce & ~ram_rnw)),
       .q_a(bram_dout), .cs_a(1'b1),
-      .address_b(16'd0), .data_b(8'd0), .enable_b(1'b1), .wren_b(1'b0),
-      .q_b(), .cs_b(1'b1)
+      .address_b(16'(nv_ram_addr)), .data_b(nv_buff_dout), .enable_b(1'b1),
+      .wren_b(nv_ram_we), .q_b(nv_ram_dout), .cs_b(1'b1)
    );
+
+   //  ── the save engine, and an SD card behind it ────────────────────────────
+   //  nvram_backup lives in MSX1.sv rather than in msx.sv, so the whole-machine
+   //  bench did not contain it and a .sav auto-load could not be exercised here
+   //  at all.  This is the block device the README's third open item asks for,
+   //  in the only shape it needs: ONE image, on VD0, which is where the firmware
+   //  always mounts <rom>.sav.
+   //
+   //      +sav=<file>     the image to serve
+   //      +savlate        mount it AFTER the upload finishes, rather than before
+   //
+   //  +savlate is the ordering that used to lose the auto-load: the end-of-upload
+   //  request arrives while the image is not mounted yet.
+   localparam int SAVMAX = 1 << 17;
+   logic [7:0] savmem [SAVMAX];
+   int         sav_bytes = 0;
+   string      sav_file;
+   bit         sav_late  = 1'b0;
+
+   wire  [31:0] nv_sd_lba[4];
+   wire   [3:0] nv_sd_rd, nv_sd_wr;
+   logic  [3:0] nv_sd_ack    = 4'b0;
+   logic [13:0] nv_buff_addr = 14'd0;
+   logic  [7:0] nv_buff_dout = 8'd0;
+   wire   [7:0] nv_buff_din[4];
+   wire  [17:0] nv_ram_addr;
+   wire         nv_ram_we;
+   wire   [7:0] nv_ram_dout;
+   logic  [3:0] nv_img_mounted = 4'b0;
+   logic [63:0] nv_img_size    = 64'd0;
+   logic        nv_img_ro      = 1'b0;
+
+   nvram_backup u_nvram
+   (
+      .clk(clk21m), .reset(reset),
+      .lookup_SRAM(lookup_SRAM),
+      .load_req(upl_load_sram), .save_req(1'b0),
+      .img_mounted(nv_img_mounted), .img_readonly(nv_img_ro), .img_size(nv_img_size),
+      .sd_lba(nv_sd_lba), .sd_rd(nv_sd_rd), .sd_wr(nv_sd_wr), .sd_ack(nv_sd_ack),
+      .sd_buff_addr(nv_buff_addr), .sd_buff_dout(nv_buff_dout), .sd_buff_din(nv_buff_din),
+      .ram_addr(nv_ram_addr), .ram_we(nv_ram_we), .ram_dout(nv_ram_dout),
+      .flash16x_active(1'b0), .flash16x_base(27'd0), .flash16x_size(16'd0),
+      .sdram_addr(), .sdram_req(), .sdram_rnw(), .sdram_din(),
+      .sdram_dout(8'h00), .sdram_ready(1'b1),
+      .dma_active(), .dma_save()
+   );
+
+   //  Serve one sector: hold ack, sweep the 512 offsets, drop ack.  nvram_backup
+   //  makes its own BRAM write enable from ack and the offset, so the model only
+   //  has to present the address and the byte.
+   int sectors_served = 0;
+   initial begin
+      forever begin
+         @(posedge clk21m);
+         if (sav_idx >= 0 && (nv_sd_rd[sav_idx] | nv_sd_wr[sav_idx])) begin
+            automatic int base = int'(nv_sd_lba[sav_idx]) * 512;
+            nv_sd_ack[sav_idx] <= 1'b1;
+            for (int i = 0; i < 512; i++) begin
+               nv_buff_addr <= 14'(i);
+               nv_buff_dout <= (base + i < SAVMAX) ? savmem[base + i] : 8'hFF;
+               @(posedge clk21m);
+               if (nv_sd_wr[sav_idx] && base + i < SAVMAX) savmem[base + i] = nv_buff_din[sav_idx];
+            end
+            nv_sd_ack[sav_idx] <= 1'b0;
+            sectors_served++;
+            @(posedge clk21m);
+         end
+      end
+   end
+
+   //  Every byte the engine writes into SRAM must be the byte the image held.
+   int  sram_bytes = 0, sram_bad = 0;
+   always @(posedge clk21m) if (nv_ram_we) begin
+      automatic int off = (sav_idx < 0) ? -1 : int'(nv_ram_addr) - int'(lookup_SRAM[sav_idx].addr);
+      sram_bytes++;
+      if (off >= 0 && off < sav_bytes && nv_buff_dout !== savmem[off]) sram_bad++;
+   end
 
    //  MSX1.sv:1267 -- and the FFh default is load-bearing: an unmapped read is
    //  what a runaway executes as RST 38h.
@@ -250,10 +327,54 @@ module tb;
       end
    end
 
+   //  Which of the four images this pack's SRAM belongs to is the pack's choice,
+   //  not ours: a machine's own battery SRAM is the Computer CMOS image, a cart's
+   //  is the ROM one.  Take the first allocation the pack actually made.
+   int sav_idx = -1;
+   task pick_idx;
+      begin
+         sav_idx = -1;
+         for (int i = 3; i >= 0; i--) if (lookup_SRAM[i].size > 0) sav_idx = i;
+      end
+   endtask
+
+   task mount_sav;
+      begin
+         pick_idx();
+         if (sav_idx < 0) $display("sav: this pack allocates no SRAM -- nothing to mount");
+         else begin
+            nv_img_size    = 64'(sav_bytes);
+            nv_img_mounted = 4'(1 << sav_idx);
+            @(posedge clk21m);
+            nv_img_mounted = 4'b0000;
+            $display("sav: mounted on image %0d (%0d kB allocated)", sav_idx, lookup_SRAM[sav_idx].size);
+         end
+      end
+   endtask
+
    initial begin
       #1;
+      //  the .sav, if one was given
+      begin
+         int fd, c;
+         if ($value$plusargs("sav=%s", sav_file)) begin
+            fd = $fopen(sav_file, "rb");
+            if (fd == 0) begin $display("FATAL: cannot open %0s", sav_file); $finish; end
+            c = $fgetc(fd);
+            while (c >= 0 && sav_bytes < SAVMAX) begin
+               savmem[sav_bytes] = 8'(c); sav_bytes++; c = $fgetc(fd);
+            end
+            $fclose(fd);
+            sav_late = $test$plusargs("savlate");
+            $display("sav: %0d bytes from %0s (%0s)", sav_bytes, sav_file,
+                     sav_late ? "mounted after the upload" : "mounted before the upload");
+         end
+      end
       wait (pack_bytes > 0);
       repeat (64) @(posedge clk21m);
+      //  The firmware mounts <rom>.sav around the ROM load.  Both orders happen
+      //  in the field, and the late one is what used to lose the auto-load.
+      if (sav_bytes > 0 && !sav_late) mount_sav();
       //  stage the machine pack (index 1), exactly as hps_io's falling edge does
       ioctl_index = 16'd1; ioctl_download = 1'b1;
       repeat (32) @(posedge clk21m);
@@ -273,12 +394,27 @@ module tb;
          if (!reset_rq) break;
       end
       $display("upload: done at %0t", $time);
+      if (sav_bytes > 0 && sav_late) begin
+         repeat (200) @(posedge clk21m);      // the request is already out by now
+         mount_sav();
+      end
       repeat (64) @(posedge clk21m);
       reset = 1'b0; reset_ms = 1'b0;
       trace_on = 1;
       $display("reset released at %0t", $time);
       #(limit_ms * 1_000_000);
       $display("--- %0d ms elapsed, %0d branch events ---", limit_ms, nev);
+      if (sav_bytes > 0) begin
+         for (int i = 0; i < 4; i++)
+            $display("sav: lookup_SRAM[%0d] = %0d kB at %0d", i, lookup_SRAM[i].size, lookup_SRAM[i].addr);
+         $display("sav: image %0d, %0d sectors served, %0d bytes into SRAM, %0d wrong",
+                  sav_idx, sectors_served, sram_bytes, sram_bad);
+         if (sav_idx < 0)              $display("RESULT SKIP: this pack allocates no SRAM");
+         else if (sectors_served == 0) $display("RESULT FAIL: the .sav was never read");
+         else if (sram_bytes == 0)     $display("RESULT FAIL: nothing reached SRAM");
+         else if (sram_bad != 0)       $display("RESULT FAIL: %0d bytes differ", sram_bad);
+         else                          $display("RESULT PASS");
+      end
       $finish;
    end
 
