@@ -35,6 +35,8 @@ reg  [7:0] addr = 8'h00, din = 8'h00;
 wire [7:0] dout;
 wire       int_n;
 wire       midi_tx;
+//  +ext selects the cartridge variant, which answers nothing until E2h says so.
+reg        ext_mode = 1'b0;
 
 dev_midi dut
 (
@@ -42,7 +44,8 @@ dev_midi dut
    .cpu_iorq(iorq), .cpu_m1(m1), .cpu_wr(wr), .cpu_rd(rd),
    .cpu_addr(addr), .cpu_dout(din), .cs(1'b1),
    .dout(dout), .int_n(int_n),
-   .midi_rx(1'b1), .midi_tx(midi_tx)
+   .midi_rx(1'b1), .midi_tx(midi_tx),
+   .external(ext_mode)
 );
 
 int cyc = 0;
@@ -134,8 +137,14 @@ initial begin
    $fclose(fd);
    $display("stream: %0d bytes from %0s", n_src, in_file);
 
+   ext_mode = $test$plusargs("ext");
+   if (ext_mode) $display("cartridge variant (E2h enable)");
+
    repeat (8) @(posedge clk); @(negedge clk); reset = 0;
    repeat (8) @(posedge clk);
+   //  The cartridge is off the bus until E2h says otherwise; 00 is enabled with
+   //  the full E8h-EFh window, which is what the rest of this bench assumes.
+   if (ext_mode) io_out(8'hE2, 8'h00);
    bios_init();
    io_out(8'hE9, 8'h37);                 // TxEN | DTR | RxEN | ER | RTS
 
@@ -189,7 +198,12 @@ initial begin
       end
    end
 
-   $display(errors == 0 ? "RESULT PASS" : "RESULT FAIL");
+   //  A $display whose argument is a ternary picking between two string
+   //  literals prints NOTHING here, which silently cost this bench its summary
+   //  line.  Spell the two cases out.  (And a comment must not open with the
+   //  tool's own name, or it is read as a pragma.)
+   if (errors == 0) $display("RESULT PASS");
+   else             $display("RESULT FAIL (%0d)", errors);
    $finish;
 end
 

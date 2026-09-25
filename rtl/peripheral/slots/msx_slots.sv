@@ -765,7 +765,8 @@ wire [7:0] d_to_cpu_midi;
 dev_midi dev_midi
 (
    .cpu_addr(cpu_addr[7:0]),
-   .cs(|(msx_device & DEV_MIDI)),
+   .cs(|(msx_device & (DEV_MIDI | DEV_MIDI_EXT))),
+   .external(|(msx_device & DEV_MIDI_EXT)),
    .dout(d_to_cpu_midi),
    .int_n(midi_int_n),
    .midi_rx(midi_rx),

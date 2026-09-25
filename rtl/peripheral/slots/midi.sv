@@ -1,5 +1,19 @@
-//  dev_midi -- the FS-A1GT's built-in MSX-MIDI: an i8251 USART and an i8254
-//  timer, on ports E8h-EFh.
+//  dev_midi -- MSX-MIDI: an i8251 USART and an i8254 timer.
+//
+//  Two variants, chosen by `external`, exactly as openMSX splits them on the
+//  presence of an <external> tag (MSXMidi.cc:27):
+//
+//    external = 0   the FS-A1GT's BUILT-IN device.  Always present, always at
+//                   E8h-EFh.  There is no enable register.
+//    external = 1   the CARTRIDGE.  E2h is write-only and always answers; the
+//                   byte written to it decides whether the device is on the bus
+//                   at all and which window it uses.  Bit 7 DISABLES it and
+//                   bit 0 LIMITS it to E0h-E1h, the 8251's two registers alone
+//                   (MSXMidi.cc:19-20, registerIOports).  Reset leaves it
+//                   disabled AND limited, i.e. 81h, so a machine that never
+//                   writes E2h never sees the device -- which is what lets this
+//                   sit in a machine that is not a turbo R without colliding
+//                   with whatever else lives at E8h.
 //
 //  Until 2026-09-24 this was a single constant: E9h answered 05h and nothing
 //  else existed, which stopped the GT firmware servicing a receiver that was not
@@ -55,7 +69,8 @@ module dev_midi
    output        [7:0] dout,
    output              int_n,        // wired-AND with the VDP's
    input               midi_rx,      // serial in  (idle high)
-   output              midi_tx       // serial out (idle high)
+   output              midi_tx,      // serial out (idle high)
+   input               external      // 1 = the cartridge variant, with E2h
 );
 
 //  ── 4 MHz enable ───────────────────────────────────────────────────────────
@@ -70,8 +85,22 @@ wire         ce_4m = ce4_acc[16];
 always_ff @(posedge clk) ce4_acc <= {1'b0, ce4_acc[15:0]} + CE4_INC;
 
 //  ── port decode ────────────────────────────────────────────────────────────
-wire       sel   = cs & cpu_iorq & ~cpu_m1 & (cpu_addr[7:3] == 5'b1110_1);
-wire [2:0] port  = cpu_addr[2:0];
+//  E2h, the cartridge's enable register.  Write-only, and live whenever the
+//  cartridge is present -- it is the one port that does not depend on itself.
+logic [7:0] ext_ctl;
+wire  io_cyc  = cs & cpu_iorq & ~cpu_m1;
+wire  e2_wr   = io_cyc & cpu_wr & external & (cpu_addr == 8'hE2);
+wire  ext_on  = ~ext_ctl[7];
+wire  ext_lim =  ext_ctl[0];
+
+wire  win_hi  = cpu_addr[7:3] == 5'b1110_1;      // E8-EF, all eight registers
+wire  win_lo  = cpu_addr[7:1] == 7'b1110_000;    // E0-E1, the 8251 alone
+
+wire       sel   = io_cyc & (external ? (ext_on & (ext_lim ? win_lo : win_hi))
+                                      : win_hi);
+//  In the limited window E0h is the data register and E1h the command register,
+//  which are indices 0 and 1 of the same map.
+wire [2:0] port  = (external & ext_lim) ? {2'b00, cpu_addr[0]} : cpu_addr[2:0];
 wire       io_wr = sel & cpu_wr;
 wire       io_rd = sel & cpu_rd;
 
@@ -182,6 +211,7 @@ always_ff @(posedge clk) begin
    rx_q     <= rx_sync2;
 
    if (reset) begin
+      ext_ctl   <= 8'h81;           // cartridge: disabled, and limited when enabled
       cmd_phase <= 1'b1;            // after a reset the next E9h write is MODE
       mode_reg  <= 8'h00;
       cmd_reg   <= 8'h00;
@@ -294,6 +324,10 @@ always_ff @(posedge clk) begin
       end
 
       // ── CPU writes ───────────────────────────────────────────────────────
+      //  E2h sits outside `sel` on purpose: it is what decides whether the rest
+      //  of the device is on the bus, so it cannot be gated by that decision.
+      if (e2_wr) ext_ctl <= cpu_dout;
+
       if (io_wr) begin
          case (port)
          3'd0: begin tx_buf <= cpu_dout; tx_full <= 1'b1; end      // E8 transmit

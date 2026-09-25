@@ -61,6 +61,9 @@ proc finish {} {
 
 proc go {} {
     uplevel #0 [list set midi-out-logfilename $::env(OMSX_LOG)]
+    #  The cartridge variant answers nothing until E2h is written; 00 enables it
+    #  on the full E8h-EFh window.  OMSX_E2 is unset for the GT's built-in one.
+    if {[info exists ::env(OMSX_E2)]} { io 0xE2 $::env(OMSX_E2) }
     log "logfile: [uplevel #0 {set midi-out-logfilename}]"
     if {[catch {plug MSX-MIDI-out midi-out-logger} e]} {
         log "PLUG FAIL: $e" ; close $::dbg ; exit 1
