@@ -82,7 +82,7 @@ task bios_init;
 endtask
 
 //  ── the stream to send ──────────────────────────────────────────────────────
-localparam int MAXB = 1 << 16;
+localparam int MAXB = 1 << 20;   // a whole song is a few tens of kB
 logic [7:0] src [MAXB];
 logic [7:0] got [MAXB];
 int  n_src = 0, n_got = 0;

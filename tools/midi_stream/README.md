@@ -57,7 +57,25 @@ gives the connectors `MSX-MIDI-in` and `MSX-MIDI-out`.
 - **`puts` in an openMSX script goes to openMSX's console**, not to stdout.
   Write to a file or you will see nothing at all.
 
+## Turning a .mid into a wire stream
+
+`smf2wire.py song.mid out.bin` does it.  A Standard MIDI File is not what travels
+down the cable: delta times, the track structure and every meta event exist only
+in the file.  What a player transmits is the channel and system messages in time
+order, merged across tracks, with SysEx carrying its own bytes rather than a
+length.  Running status is applied by default, because that is what a player does
+and because a stream that depends on the previous status byte still being right
+is the one where a lost byte shows up soonest.
+
 ## Result, 2026-09-25
 
-A 155-byte stream: all three identical, and our transmitter measured at 31,262
-baud, 687 cycles per bit at 21.477272 MHz, 0.04% off nominal.
+A 155-byte generated stream: all three identical, and our transmitter measured at
+31,262 baud, 687 cycles per bit at 21.477272 MHz, 0.04 per cent off nominal.
+
+Then 31 real songs converted from Standard MIDI Files, 963,241 wire bytes in
+total, the largest a single stream of 99,080.  All 31 identical across all three
+legs.  Sixteen comparisons at a time took about ten minutes of wall clock: each
+one is an independent process, which is the shape of parallelism this hardware is
+good at.  Making one simulation faster would not have helped.
+
+The songs themselves are not in the tree.  Point `smf2wire.py` at your own files.
