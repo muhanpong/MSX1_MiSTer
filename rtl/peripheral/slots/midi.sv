@@ -104,6 +104,25 @@ wire [2:0] port  = (external & ext_lim) ? {2'b00, cpu_addr[0]} : cpu_addr[2:0];
 wire       io_wr = sel & cpu_wr;
 wire       io_rd = sel & cpu_rd;
 
+//  ONE side effect per bus cycle.  cpu_wr/cpu_rd are levels (`~wr_n`, `~rd_n`)
+//  that stay up for the whole cycle -- several clk21m on either CPU, and on the
+//  R800 path an I/O write is held for at least GUARD_WR+2 and until a ce_3m58.
+//  Acting on the level repeated every side effect once per clock: a byte written
+//  to an idle transmitter went out twice whenever a TxC edge fell inside the
+//  strobe, an RW=3 count was written as {MSB,MSB} (4E20 -> 4E4E), and an RW=3
+//  read came back byte-swapped.  sim/tb_midi_strobe.sv drives W-clock strobes at
+//  random phase and fails on all three.
+//    * writes act on the strobe's FIRST clock (the data is valid there; same as
+//      tr_iowr_stb in msx.sv);
+//    * reads act on its END, because the CPU takes the data at the end and must
+//      see the value from before the read's own side effect.  The port is held
+//      from inside the strobe, since the address may already have moved on.
+logic       io_wr_q, io_rd_q, e2_wr_q;
+logic [2:0] rd_port;
+wire        wr_stb = io_wr & ~io_wr_q;
+wire        e2_stb = e2_wr & ~e2_wr_q;
+wire        rd_end = io_rd_q & ~io_rd;
+
 //  ── 8254: three counters ───────────────────────────────────────────────────
 //  CLK0 = CLK2 = ce_4m, CLK1 = OUT2.  Loading follows the chip: a counter
 //  starts when its full count has been written, and mode 3 halves the count
@@ -211,6 +230,11 @@ integer i;
 always_ff @(posedge clk) begin
    logic [15:0] half;
 
+   io_wr_q  <= io_wr;
+   io_rd_q  <= io_rd;
+   e2_wr_q  <= e2_wr;
+   if (io_rd) rd_port <= port;
+
    out0_q   <= cnt_out[0];
    out2_q   <= cnt_out[2];
    rx_sync1 <= midi_rx;
@@ -250,10 +274,12 @@ always_ff @(posedge clk) begin
                //  N/2 clocks and the whole period lasts N -- count 8 at 4 MHz
                //  is 500 kHz, which is the MIDI bit clock x16.  (Reloading N/2
                //  instead made each half N/4 and the port ran at twice the
-               //  baud rate; tb_midi T2 measures this.)  Odd counts are
-               //  rounded here; the chip gives the extra clock to the high
-               //  half, and nothing in this machine uses an odd one.
-               half = cnt_init[i];
+               //  baud rate; tb_midi T2 measures this.)  An odd N gives the
+               //  extra clock to the high half: high ceil(N/2), low floor(N/2),
+               //  period N (openMSX I8254.cc Counter::writeLoad).  Reloading N
+               //  for both halves made the period N+1; the low half therefore
+               //  reloads N-1.  tb_midi_strobe C measures N = 3..10.
+               half = cnt_init[i] - {15'd0, cnt_hi[i] & cnt_init[i][0]};
                if (cnt_val[i] <= 16'd2) begin
                   cnt_val[i] <= (half < 16'd2) ? 16'd2 : half;
                   cnt_hi[i]  <= ~cnt_hi[i];
@@ -318,7 +344,13 @@ always_ff @(posedge clk) begin
          end
       end
 
-      // ── 8251 receive: start bit, then sample each bit at its middle ──────
+      // ── 8251 receive ────────────────────────────────────────────────────
+      //  KNOWN WRONG, not fixed yet: the data bits are sampled when rx_div
+      //  wraps, i.e. at the bit BOUNDARY, not the middle -- the half-bit check
+      //  below only rejects a false start.  A sender a few % fast is misread
+      //  (msx1-audit bench, 2026-09-26: +2% and +3.5% fail, -3.5..0% pass); a
+      //  real 8251A samples mid-bit at x16.  The loopback in tb_midi passes
+      //  because both sides run off the same TxC.  MIDI IN only.
       if (txc_rise) begin
          if (!rx_busy) begin
             if (rx_en & ~rx_q) begin                      // falling edge = start
@@ -351,9 +383,9 @@ always_ff @(posedge clk) begin
       // ── CPU writes ───────────────────────────────────────────────────────
       //  E2h sits outside `sel` on purpose: it is what decides whether the rest
       //  of the device is on the bus, so it cannot be gated by that decision.
-      if (e2_wr) ext_ctl <= cpu_dout;
+      if (e2_stb) ext_ctl <= cpu_dout;
 
-      if (io_wr) begin
+      if (wr_stb) begin
          case (port)
          3'd0: begin tx_buf <= cpu_dout; tx_full <= 1'b1; end      // E8 transmit
          3'd1: begin                                               // E9 mode/cmd
@@ -413,11 +445,11 @@ always_ff @(posedge clk) begin
       end
 
       // ── CPU reads with a side effect ─────────────────────────────────────
-      if (io_rd) begin
-         if (port == 3'd0) begin                                   // E8 clears RxRDY
+      if (rd_end) begin
+         if (rd_port == 3'd0) begin                                // E8 clears RxRDY
             rx_rdy <= 1'b0;
-         end else if (port >= 3'd4 && port <= 3'd6) begin
-            int c; c = int'(port) - 4;
+         end else if (rd_port >= 3'd4 && rd_port <= 3'd6) begin
+            int c; c = int'(rd_port) - 4;
             if (cnt_rw[c] == 2'd3) begin
                cnt_rdhi[c] <= ~cnt_rdhi[c];
                if (cnt_rdhi[c]) cnt_latched[c] <= 1'b0;            // both bytes read
