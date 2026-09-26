@@ -76,15 +76,34 @@ never arrives. Mutations: key it off the FSM state instead of the request, and k
 it off `load_req` instead of `load_sram`.
 
 **B. Whole machine — `sim/fullsys/tb_msx.sv`.** This is the measurement that decides
-section 2. The bench now carries the save engine and an SD card behind it, so it can
-count CPU writes that land in the SRAM window while the load is streaming.
+section 2, and the first two attempts asked the wrong question.
 
-    writes into the SRAM window, load in flight   before: ?   after: 0
+Both counters sit inside `if (load_flight)`, and `load_flight` clears once
+`sectors_served` reaches `size * 2`. So the counting window IS the load, 3.87 ms at
+`SDSLOW=2150`, and a longer run does not widen it: 8 ms, 20 ms and 200 ms all report
+0/0 for the same reason. Worse, the number they report is a function of `SDSLOW`,
+which was a guess, so it is not an independent fact at all.
 
-A non-zero "before" is the defect, in numbers, on the machine that owns the SRAM.
-Zero "before" would mean the firmware does not touch it that early and the guard is
-a precaution — still worth having, and the plan does not change, but the commit
-message should say so.
+The number that decides it is **T_first**: the machine time from reset release to the
+first CPU write into the SRAM window. Count writes ungated, stamp the first one, and
+one run answers it whatever `SDSLOW` is set to.
+
+    T_first  (reset release -> first CPU write inside lookup_SRAM[3])
+    vs
+    T_load   (how long a 32-sector (ST) or 64-sector (GT) .sav read takes
+              through the HPS on real hardware)
+
+T_first < T_load makes the guard a fix. T_first > T_load, or no write at all in a
+boot long enough to reach the firmware's SRAM init, makes it a precaution.
+
+That leaves T_load as a second unknown, and it is not a simulation question: time an
+OSD SRAM Load on the board, or read it out of the HPS logs. Get it before choosing
+`SDSLOW` for step 4.
+
+An ungated total also checks the counter itself. If it stays zero through a long boot
+the firmware may never reach that code on this pack, and the branch trace says where
+it stopped instead — 2,373 branch events in 8 ms is very little for a running
+machine, which is its own lead.
 
 **C. The content check already in the bench.** Every byte the engine writes into
 SRAM is compared against the byte the image held. With the machine running that
@@ -92,8 +111,10 @@ comparison is no longer trivially true: a mismatch is the corruption itself.
 
 ## 6. Order of work
 
-1. Add the write counter to `tb_msx.sv` and run an FS-A1ST pack with a `.sav`.
-   Record the number. Nothing is committed to RTL before this number exists.
+1. Add UNGATED write counters and a timestamp for the first write into the SRAM
+   window, and run an FS-A1ST 3-3 pack with a `.sav` sized to the whole allocation.
+   Record T_first. Nothing is committed to RTL before that number exists.
+1b. Measure T_load on hardware. The comparison needs both.
 2. Add the busy output to `nvram_backup`, on the request and off on completion.
 3. Widen `dma_active`.
 4. Re-run B; the counter must be zero. Re-run A with its mutations.
