@@ -788,14 +788,18 @@ clock clock
 // Power-on is unaffected either way -- RESET covers it.
 // Caveat, and it is why the default is Yes: across a no-reset swap the slot/subslot
 // select registers and the mapper's own bank registers keep their old values.
-// S3 guard: `flash16x_active`/`base`/`size` (msx_slots.sv) are cleared ONLY by
-// reset, and flash_dirtysave reads flash16x_base LIVE.  With the hold path taken
-// they would survive a cart swap and point the next .sav DMA at the departed
-// cart's SDRAM region.  Rather than thread a clear signal through two modules,
-// simply refuse the no-reset path whenever a flash cart is involved -- that is the
-// case where getting it wrong destroys a save, and it is not the case the toggle
-// exists for (comparing mappers on a running program).
-wire upload_hold = reset_rq & status[64] & ~|flash16x_active;
+// S3 (OPEN): `flash16x_active`/`base`/`size` (msx_slots.sv) are cleared ONLY by
+// reset, and flash_dirtysave reads flash16x_base LIVE, so across a no-reset swap
+// of a flash cart the next .sav DMA can point at the departed cart's SDRAM region.
+// 042cc0d tried to guard this with `& ~|flash16x_active` HERE, meaning to refuse
+// the no-reset path -- but the no-reset path is decided by reset_raw, so the term
+// only dropped this hold: after one flash-cart access every later upload ran with
+// the CPU unpaused and the OPL4 live, and S3 was not prevented either
+// (sim/run_uphold.sh T2/T3/T2c).  Removed.  Forcing a reset instead would break
+// what the toggle promises; S3 wants a narrow fix -- release a cart's base only
+// when the upload replaces that cart's slot, touching the restore decision alone
+// (not save, autosave or dirty capture, which a still-inserted cart needs).
+wire upload_hold = reset_rq & status[64];
 // msx_pause freezes the CPU clock enables, but MoonSound runs on clk_sdram and is
 // held only by `reset`.  With the toggle at No it would keep issuing SDRAM ch4
 // traffic while memory_upload streams megabytes into ch1 -- and a FW PACK upload
