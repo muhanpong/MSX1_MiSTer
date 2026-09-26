@@ -43,10 +43,16 @@ module tb_uphold;
       .o_reset(reset), .o_upload_hold(upload_hold), .o_reset_ms(reset_ms)
    );
 
-   int errors = 0;
-   task automatic ck(input string what, input logic ok);
-      if (!ok) begin errors++; $display("FAIL  %s", what); end
-      else                     $display("ok    %s", what);
+   //  Two groups, because two separate fixes are in play.  HOLD is what fix (1) --
+   //  deleting `& ~|flash16x_active` from upload_hold -- is responsible for.  S3 is
+   //  the stale-base question, which is fix (2) and lives in MSX1.sv; it is expected
+   //  to stay red here until that lands, and sim/run_staleflash.sh is its bench.
+   int err_hold = 0, err_s3 = 0;
+   task automatic ck(input string grp, input string what, input logic ok);
+      if (!ok) begin
+         if (grp == "S3") err_s3++; else err_hold++;
+         $display("FAIL  %s", what);
+      end else $display("ok    %s", what);
    endtask
 
    //  one CPU memory access through a mapper, the way the latch sees it
@@ -92,24 +98,24 @@ module tb_uphold;
       measure_reset_len();
       $display("  reset_ms for a machine reset: %0d clk21m (= %0d clk_sdram at 4x)",
                ms_len, ms_len*4);
-      ck("R  a machine reset holds the OPL4 for >= 63 clk21m", ms_len >= 63);
+      ck("HOLD", "R  a machine reset holds the OPL4 for >= 63 clk21m", ms_len >= 63);
 
       //  ---- T1: clean machine, the toggle set: the hold works --------------
       machine_reset();
       status_hi[0] = 1'b1;                   // status[64] = 1
       upload(UPLEN);
       $display("  T1 clean machine        : held %0d of %0d", held, UPLEN);
-      ck("T1 the OPL4 is held for the whole transfer", held == UPLEN);
+      ck("HOLD", "T1 the OPL4 is held for the whole transfer", held == UPLEN);
 
       //  ---- T2: one ASCII16X access first ----------------------------------
       machine_reset();
       status_hi[0] = 1'b1;
       touch_cart(MAPPER_ASCII16X, 1'b0);
-      ck("T2a the flash latch is set by one ASCII16X access", flash16x_active != 2'b00);
+      ck("HOLD", "T2a the flash latch is set by one ASCII16X access", flash16x_active != 2'b00);
       upload(UPLEN);
       $display("  T2 after ASCII16X access: held %0d of %0d  (latch=%b)",
                held, UPLEN, flash16x_active);
-      ck("T2 the OPL4 is held for the whole transfer", held == UPLEN);
+      ck("HOLD", "T2 the OPL4 is held for the whole transfer", held == UPLEN);
       $display("  T2b latch after the upload: %b base[0]=%x (set-only: only `reset` clears it)",
                flash16x_active, flash16x_base[0]);
       //  This is the S3 defect the guard in 042cc0d was written to prevent: the
@@ -117,7 +123,7 @@ module tb_uphold;
       //  `reset` clears flash16x_active but NOT base/size, and both save paths are
       //  gated on active (flash_dump_test.sv:72-73, flash_changelog.sv:100-101), so
       //  the property that matters is that a stale base cannot still be armed.
-      ck("T2c a stale flash base is not left armed after the upload",
+      ck("S3", "T2c a stale flash base is not left armed after the upload",
          flash16x_active == 2'b00 | flash16x_base[0] == 27'd0);
 
       //  ---- T3: Yamanooto does the same ------------------------------------
@@ -126,7 +132,7 @@ module tb_uphold;
       touch_cart(MAPPER_YAMANOOTO, 1'b1);
       upload(UPLEN);
       $display("  T3 after Yamanooto      : held %0d of %0d", held, UPLEN);
-      ck("T3 the OPL4 is held for the whole transfer", held == UPLEN);
+      ck("HOLD", "T3 the OPL4 is held for the whole transfer", held == UPLEN);
 
       //  ---- T4: with the toggle clear, `reset` covers the upload ----------
       machine_reset();
@@ -138,19 +144,21 @@ module tb_uphold;
       //  cycles at the start of the upload that upload_hold, being combinational,
       //  does not.  Two clk21m of live OPL4 at the very start of a transfer is not
       //  the hazard this bench is about.
-      ck("T4 the OPL4 is held for the transfer, bar the 2-cycle sync", held >= UPLEN - 2);
+      ck("HOLD", "T4 the OPL4 is held for the transfer, bar the 2-cycle sync", held >= UPLEN - 2);
 
       //  ---- T5: a machine reset restores the hold --------------------------
       machine_reset();
       status_hi[0] = 1'b1;
       touch_cart(MAPPER_ASCII16X, 1'b0);
       machine_reset();                       // clears the latch
-      ck("T5a a machine reset clears the flash latch", flash16x_active == 2'b00);
+      ck("HOLD", "T5a a machine reset clears the flash latch", flash16x_active == 2'b00);
       upload(UPLEN);
       $display("  T5 reset, then upload   : held %0d of %0d", held, UPLEN);
-      ck("T5 the OPL4 is held for the whole transfer", held == UPLEN);
+      ck("HOLD", "T5 the OPL4 is held for the whole transfer", held == UPLEN);
 
-      $display("RESULT: %0d error(s)", errors);
+      $display("RESULT hold: %0d error(s)   <- fix (1), delete the term from upload_hold", err_hold);
+      $display("RESULT s3:   %0d error(s)   <- fix (2), the per-cart restore gate (MSX1.sv)", err_s3);
+      $display("RESULT: %0d error(s)", err_hold + err_s3);
       $finish;
    end
 
