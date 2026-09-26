@@ -33,6 +33,16 @@ fi
 if [ "$SIGNOFF_ONLY" = 0 ] && [ "${BUILDGATE_SKIP_PRECHECK:-0}" != 1 ]; then
   tools/buildgate/precheck.sh || { echo "GATE-FAIL: precheck refused the build (rc=$?)"; exit 4; }
 fi
+#  build_id.v (the OSD's version date) is written by sys/build_id.tcl, which the
+#  qsf runs as a PRE_FLOW script -- and a pre-flow script only runs under
+#  `quartus_sh --flow`.  This gate calls the stages one by one, so from the day it
+#  was introduced (2026-09-14) every RBF said "260914" until 2026-09-27.  Write it
+#  here, in the script's exact format, and refuse to go on if it is not today.
+if [ "$SIGNOFF_ONLY" = 0 ] && [[ ",$STAGES," == *",map,"* ]]; then
+  printf '`define BUILD_DATE "%s"' "$(date +%y%m%d)" > build_id.v
+  grep -q "\"$(date +%y%m%d)\"" build_id.v || { echo "GATE-FAIL: build_id.v is not today's date"; exit 5; }
+  echo "build_id: $(cat build_id.v)"
+fi
 if [ "$SIGNOFF_ONLY" = 0 ]; then
   for st in ${STAGES//,/ }; do
     t0=$(date +%s)
