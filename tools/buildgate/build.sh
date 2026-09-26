@@ -43,6 +43,12 @@ if [ "$SIGNOFF_ONLY" = 0 ]; then
     rc=$?; el=$(( $(date +%s)-t0 ))
     echo "stage $st rc=$rc elapsed=${el}s errors=$(grep -c '^Error' "$LOG/$st.log")"
     [ $rc -ne 0 ] && { grep -E '^Error|Critical Warning \((140003|16618|188026)' "$LOG/$st.log" | head -8; exit 1; }
+    #  Right after map, before the 15-minute fit: Quartus had already printed
+    #  every defect that shipped this week (10030 midi_int_n, 10034 midi_tx,
+    #  10999 the PCM MLAB that never inferred) and no gate read it.  New ones
+    #  against a hand-checked baseline stop the build here, ~5 min in.
+    [ $st = map ] && { tools/buildgate/quartus_warnings.py output_files/MSX1.map.rpt \
+        || { echo "GATE-FAIL: new Quartus warning(s) after map -- see above"; exit 1; }; }
     [ $st = fit ] && [ $el -lt 180 ] && { echo "GATE-WARN: fit took ${el}s -- smart recompile probably skipped it; results may be stale"; fail=1; }
     [ $st = fit ] && grep -q 'Critical Warning (140003)' "$LOG/$st.log" && echo "GATE-WARN: LogicLock assignments present but unlicensed (silently dropped)"
   done
