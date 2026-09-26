@@ -363,6 +363,14 @@ localparam CONF_STR = {
    //  T80s is unaffected: it keeps the 32 clk21m spacing and loses nothing.
    "P1O[77:75],R800 VDP wait,8.66us (real),10.1us,9.3us,7.5us,6.0us,10.8us,11.8us,4.7us;",
    "-;",
+   //  MIDI: an I/O-only MSX-MIDI (the "MIDI Interface 3" kind -- no ROM, no
+   //  memory slot) at E8h-EFh, on any machine.  An I/O device, so it sits with
+   //  the joystick adapter rather than under Audio.  The FS-A1GT's built-in one
+   //  is declared by its machine pack and does not need this.  Off by default:
+   //  a device that always answers E8h-EFh changes what MIDI-aware software
+   //  does, which is right when the user plugged one in and wrong otherwise.
+   "O[24],MIDI,Off,On;",
+   "-;",
    "O[16:15],JoyMega Pad,Off,Port A,Port B,Both;",
    "O[43],Pause on OSD,No,Yes;",
    "T[44],Pause;",

@@ -1455,7 +1455,8 @@ msx_slots msx_slots
    //  drive dev_midi directly) and -Wno-UNDRIVEN hid it from the lint.
    .midi_int_n(midi_int_n),
    .midi_rx(midi_rx),
-   .midi_tx(midi_tx)
+   .midi_tx(midi_tx),
+   .midi_io_en(msxConfig.midi_io_en)
 );
 
 //  -----------------------------------------------------------------------------

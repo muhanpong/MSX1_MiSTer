@@ -193,6 +193,9 @@ assign msxConfig.cas_audio_src = cas_audio_src_t'(HPS_status[8]);
 assign msxConfig.border = HPS_status[41];
 assign msxConfig.vdp_id = HPS_status[42];
 assign msxConfig.moonsound_en = HPS_status[45];
+//  status[24] was free: no CONF_STR row and no reader anywhere (checked against
+//  every source, comments stripped, legacy O/T/o tokens included -- 2026-09-26).
+assign msxConfig.midi_io_en   = HPS_status[24];
 
 assign ROM_A_load_hide    = ~fileA_present;
 assign ROM_B_load_hide    = ~fileB_present;

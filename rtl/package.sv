@@ -37,6 +37,7 @@ package MSX;
         video_mode_t    video_mode;
         cas_audio_src_t cas_audio_src;
         logic           moonsound_en;
+        logic           midi_io_en;     // OSD "MIDI": an I/O-only MSX-MIDI at E8h-EFh
     } user_config_t;
     
     typedef struct {

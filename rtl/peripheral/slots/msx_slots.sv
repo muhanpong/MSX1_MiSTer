@@ -90,7 +90,8 @@ module msx_slots
    //  subslot 0.
    output                   main_rom0,
    output            [22:0] flash16x_prog_addr,
-   output             [7:0] flash16x_prog_data
+   output             [7:0] flash16x_prog_data,
+   input                    midi_io_en          // OSD "MIDI": I/O-only MSX-MIDI at E8h-EFh
 );
 
 assign flash16x_prog_we   = mapper_ascii16x_prog_we | mapper_yamanooto_prog_we;
@@ -779,8 +780,13 @@ wire [7:0] d_to_cpu_midi;
 dev_midi dev_midi
 (
    .cpu_addr(cpu_addr[7:0]),
-   .cs(|(msx_device & (DEV_MIDI | DEV_MIDI_EXT))),
-   .external(|(msx_device & DEV_MIDI_EXT)),
+   //  Three ways in: the GT's built-in device (pack), the OSD toggle, and the
+   //  E2h-controlled cartridge (pack).  The first two are always on at E8h-EFh;
+   //  only the cartridge alone is the `external` variant.  If a pack declares
+   //  the cartridge AND the user turns MIDI on, the always-on kind wins -- the
+   //  user asked for a device that is there, not one that waits for E2h.
+   .cs(|(msx_device & (DEV_MIDI | DEV_MIDI_EXT)) | midi_io_en),
+   .external(|(msx_device & DEV_MIDI_EXT) & ~|(msx_device & DEV_MIDI) & ~midi_io_en),
    .dout(d_to_cpu_midi),
    .int_n(midi_int_n),
    .midi_rx(midi_rx),
