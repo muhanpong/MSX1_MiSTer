@@ -1446,7 +1446,16 @@ msx_slots msx_slots
    .flash16x_prog_addr(flash16x_prog_addr),
    .flash16x_prog_data(flash16x_prog_data),
    .msx_turbo_req(msx_turbo_req),
-   .main_rom0(tr_main_rom0)
+   .main_rom0(tr_main_rom0),
+   //  MSX-MIDI.  These were added to msx_slots by e6e7e1c and never connected
+   //  here, and this instance has no `.*` to cover for that: `midi_int_n` was
+   //  therefore an undriven wire, which Quartus ties to GND -- INT asserted for
+   //  ever, so the machine hung at its first EI, and midi_tx sat low on
+   //  UART_TXD and USER_OUT.  Simulation could not see it (the MIDI benches
+   //  drive dev_midi directly) and -Wno-UNDRIVEN hid it from the lint.
+   .midi_int_n(midi_int_n),
+   .midi_rx(midi_rx),
+   .midi_tx(midi_tx)
 );
 
 //  -----------------------------------------------------------------------------

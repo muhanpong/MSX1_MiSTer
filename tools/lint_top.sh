@@ -21,7 +21,7 @@ cd "$(dirname "$0")/.."
 OUT=${OUT:-/tmp/lint_top}
 mkdir -p "$OUT"
 verilator --lint-only -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-DECLFILENAME \
-   -Wno-UNUSEDSIGNAL -Wno-UNDRIVEN -Wno-PINMISSING -Wno-CASEINCOMPLETE \
+   -Wno-UNUSEDSIGNAL -Wno-PINMISSING -Wno-CASEINCOMPLETE \
    -Wno-MULTIDRIVEN -Wno-IMPLICIT -Wno-BLKANDNBLK -Wno-LATCH -Wno-SIDEEFFECT \
    -Wno-TIMESCALEMOD -Wno-ASCRANGE -Wno-SELRANGE \
    --top-module emu +incdir+sim/fullsys/gen \
