@@ -39,14 +39,21 @@ module nvram_backup
 
 logic [63:0] image_size[4], new_size;
 logic  [3:0] image_mounted;
+logic  [3:0] image_ro = 4'b0;
 logic        store_new_size = 1'b0;
 
 always @(posedge clk) begin
-   if (img_mounted[0]) begin image_mounted[0] <= ~img_readonly; image_size[0] <= img_size; end //ROM
-   if (img_mounted[1]) begin image_mounted[1] <= ~img_readonly; image_size[1] <= img_size; end //Extension A
-   if (img_mounted[2]) begin image_mounted[2] <= ~img_readonly; image_size[2] <= img_size; end //Extension B
-   if (img_mounted[3]) begin image_mounted[3] <= ~img_readonly; image_size[3] <= img_size; end //Computer CMOS
-   if (store_new_size) image_size[num] <= (64'(lookup_SRAM[num].size)) << 13;
+   //  Read-only is a reason not to WRITE the image, not a reason to refuse to
+   //  read it.  Folding it into image_mounted made a read-only .sav skip its
+   //  auto-load silently, which looks exactly like the .sav not being there.
+   if (img_mounted[0]) begin image_mounted[0] <= 1'b1; image_ro[0] <= img_readonly; image_size[0] <= img_size; end //ROM
+   if (img_mounted[1]) begin image_mounted[1] <= 1'b1; image_ro[1] <= img_readonly; image_size[1] <= img_size; end //Extension A
+   if (img_mounted[2]) begin image_mounted[2] <= 1'b1; image_ro[2] <= img_readonly; image_size[2] <= img_size; end //Extension B
+   if (img_mounted[3]) begin image_mounted[3] <= 1'b1; image_ro[3] <= img_readonly; image_size[3] <= img_size; end //Computer CMOS
+   //  size is in kB, so bytes is << 10.  It was << 13, which is eight times too
+   //  large; harmless only because image_size is compared against zero and never
+   //  used as a length.  Fixed here rather than left for whoever does use it.
+   if (store_new_size) image_size[num] <= (64'(lookup_SRAM[num].size)) << 10;
 end
 
 logic [3:0] request_load = 4'b0, request_save = 4'b0;
@@ -63,21 +70,60 @@ logic last_save_req = 1'b0;
 //  pulse landed entirely inside reset, was never seen, and never came again: no
 //  .sav was read when a ROM was loaded, while the OSD's own SRAM Load (no reset)
 //  still worked.  A load/save request is a host command, not machine state.
+//  `unserved` is a bank the engine looked at and could not act on yet -- the
+//  image is not mounted, or has no size.  That is NOT completion: clearing the
+//  request there threw the auto-load away for good, because nothing ever asks
+//  again (load_req is the OSD button or memory_upload's one-clock end-of-upload
+//  pulse, and a later img_mounted raises neither).  Keep it pending and come
+//  back, with a bound so a request that can never be served does not spin for
+//  the rest of the session.
+localparam int PEND_BITS = 26;              // ~3 s at 21.477272 MHz
+logic [PEND_BITS-1:0] pend_age = '0;
+wire                  pend_expired = pend_age[PEND_BITS-1];
+
 always @(posedge clk) begin
-   if (~last_load_req & load_req) request_load <= 4'b1111;
-   if (~last_save_req & save_req) request_save <= 4'b1111;
+   logic [3:0] rl, rs;
+   rl = request_load;
+   rs = request_save;
+
+   //  Completion clears the bank it served; an arriving request sets all four.
+   //  Doing both on the same edge used to lose one bank, because the bit write
+   //  came after the vector write and won.  Setting last means a request is
+   //  never lost -- at worst a bank is served twice, which is harmless.
+   if (done) begin
+      if (wr) rs[num] = 1'b0;
+      if (rd) rl[num] = 1'b0;
+   end
+   if (~last_load_req & load_req) rl = 4'b1111;
+   if (~last_save_req & save_req) rs = 4'b1111;
+   request_load <= rl;
+   request_save <= rs;
+
    last_load_req <= load_req;
    last_save_req <= save_req;
+
+   //  Age only while something is pending and nothing is in flight.
+   if ((rl | rs) == 4'b0 | done)  pend_age <= '0;
+   else if (~pend_expired)        pend_age <= pend_age + 1'b1;
+   if (pend_expired) begin
+      request_load <= 4'b0;
+      request_save <= 4'b0;
+   end
+
    if (reset) begin
       wr             <= 1'b0;
       rd             <= 1'b0;
       num            <= 2'd0;
    end else begin
-      if (done) begin
+      if (done | unserved) begin
          wr <= 1'b0;
          rd <= 1'b0;
-         if (wr) request_save[num] <= 1'b0;
-         if (rd) request_load[num] <= 1'b0;
+         //  Keeping the request pending is only half of it: the scan has to move
+         //  on as well, or it re-offers the same unserviceable bank forever and
+         //  never reaches the one that IS ready.  That livelock is the reported
+         //  symptom again, so the round-robin advances here and the pending bank
+         //  is retried on the next pass.
+         if (unserved) num <= (num == 2'd3) ? 2'd0 : num + 2'd1;
       end
       if (~wr & ~rd) begin
          if (request_save[num]) begin
@@ -109,6 +155,7 @@ typedef enum logic [3:0] {
 logic [20:0] block_count;
 logic [31:0] lba_start;
 logic        done = 1'b0;
+logic        unserved = 1'b0;   // looked at, cannot act yet -- keep the request
 
 // Flash DMA state
 logic  [8:0] flash_byte_ptr;
@@ -141,6 +188,7 @@ assign dma_active = (state == STATE_FLASH_PREFETCH)
 
 always @(posedge clk) begin
    done           <= 1'b0;
+   unserved       <= 1'b0;
    store_new_size <= 1'b0;
 
    if (reset) begin
@@ -152,7 +200,7 @@ always @(posedge clk) begin
    case (state)
       // -----------------------------------------------------------------------
       STATE_SLEEP: begin
-         if ((rd | wr) & ~done) begin
+         if ((rd | wr) & ~done & ~unserved) begin
             // ASCII16X flash save DISABLED: SDRAM ch1 DMA corrupts SDRAM controller
             // after sustained read traffic. Requires future Flash FSM + BRAM mirror.
             if (1'b0 & num == 2'd0 & flash16x_active & image_mounted[0]
@@ -169,7 +217,7 @@ always @(posedge clk) begin
                   state    <= STATE_FLASH_SD_RD;
                end
             end else if (lookup_SRAM[num].size > 16'h00 & image_mounted[num]
-                         & (wr | (rd & (image_size[num] > 0)))) begin
+                         & (wr ? ~image_ro[num] : (image_size[num] > 0))) begin
                // Existing BRAM path
                sd_lba[num] <= 0;
                block_count <= 21'(lookup_SRAM[num].size) << 1;
@@ -178,7 +226,9 @@ always @(posedge clk) begin
                state       <= STATE_PROCESS;
                $display("START %d", num);
             end else begin
-               done <= 1'b1;
+               //  Not done -- just not now.  `done` here would clear the
+               //  request and the auto-load would never happen.
+               unserved <= 1'b1;
             end
          end
       end

@@ -103,6 +103,13 @@ ghdl synth $GHDL_FLAGS --latches --out=verilog rtc        > "$OUT/rtc.v"
 
 cd "$ROOT"
 
+#  Two things ghdl emits that Verilog does not accept: a flattened name built by
+#  prefixing an already-escaped identifier, and a port called `do`, which is a
+#  SystemVerilog keyword Verilator 5 refuses where Verilator 4 took it.  Both are
+#  repairs of the generated text, both are no-ops on output that does not contain
+#  them, and the verilator lint below is what proves the result still elaborates.
+python3 "$ROOT/sim/fullsys/fix_gen_ids.py" "$OUT"
+
 #  ghdl synth bakes the generics in and emits a module with no parameter list,
 #  but msx.sv instantiates these two WITH parameters.  The values it passes are
 #  the VHDL defaults, so the hardware is already right; the generated modules

@@ -202,7 +202,11 @@ wire cart_ascii16 = mapper == MAPPER_ASCII16 | mapper == MAPPER_RTYPE;
 wire cart_neo8    = mapper == MAPPER_NEO8;
 wire cart_neo16   = mapper == MAPPER_NEO16;
 
-wire [26:0] mapper_addr = mem_unmaped                 ? 27'hDEAD                    :
+//  Split in two so the SRAM bound below can be taken from the address a mapper
+//  actually produced.  Folding it into mapper_addr instead would make
+//  mem_unmaped depend on mapper_addr and mapper_addr depend on mem_unmaped.
+wire [26:0] mapper_addr = mem_unmaped ? 27'hDEAD : mapper_addr_raw;
+wire [26:0] mapper_addr_raw =
                           mapper == MAPPER_NONE       ? 27'(mapper_none_addr)       :
                           mapper == MAPPER_RAM        ? 27'(mapper_ram_addr)        :
                           mapper == MAPPER_LINEAR     ? 27'(mapper_linear_addr)     :
@@ -248,7 +252,17 @@ assign ram_rnw  = ~((sram_cs & sram_wr) | (~sram_cs & cpu_wr & cpu_mreq & ~ram_r
 
 assign ram_din  = cpu_dout;
 
-wire mem_unmaped = mapper_konami_unmaped     | 
+//  A device addresses its own SRAM and nothing else.  The pack hands each one a
+//  base and a size; the address below is a plain add, so without this bound a
+//  device that runs past its allocation walks straight into whichever one
+//  follows -- and that corruption is then written back to the .sav and survives
+//  the next boot.  Refuse the access instead, which reads FF and writes nothing.
+//  size is in kB (memory_upload.sv:486 divides the pack's byte count by 1024).
+wire [26:0] sram_bytes = 27'(size_sram) << 10;
+wire        sram_over  = sram_cs & (mapper_addr_raw >= sram_bytes);
+
+wire mem_unmaped = sram_over                | 
+                   mapper_konami_unmaped     | 
                    mapper_konami_scc_unmaped |
                    fmpac_mem_unmaped         | 
                    mapper_mfrsd1_unmaped     | 
@@ -765,7 +779,8 @@ wire [7:0] d_to_cpu_midi;
 dev_midi dev_midi
 (
    .cpu_addr(cpu_addr[7:0]),
-   .cs(|(msx_device & DEV_MIDI)),
+   .cs(|(msx_device & (DEV_MIDI | DEV_MIDI_EXT))),
+   .external(|(msx_device & DEV_MIDI_EXT)),
    .dout(d_to_cpu_midi),
    .int_n(midi_int_n),
    .midi_rx(midi_rx),

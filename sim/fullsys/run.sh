@@ -32,4 +32,9 @@ verilator --binary --timing --public-flat-rw \
    > "$OUT/build.log" 2>&1 || { echo "BUILD FAIL:"; grep -E '%Error' "$OUT/build.log" | head -20; exit 1; }
 
 echo "built -> $OUT/v/tbmsx"
-"$OUT/v/tbmsx" +pack="$PACK" +ms=$MS
+#  SAV=<file> serves it on VD0; SAVLATE=1 mounts it after the upload instead.
+EXTRA=""
+[ -n "${SAV:-}" ]     && EXTRA="$EXTRA +sav=$SAV"
+[ -n "${SAVLATE:-}" ] && EXTRA="$EXTRA +savlate"
+[ -n "${SDSLOW:-}" ]  && EXTRA="$EXTRA +sdslow=$SDSLOW"
+"$OUT/v/tbmsx" +pack="$PACK" +ms=$MS $EXTRA
