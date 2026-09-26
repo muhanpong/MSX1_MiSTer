@@ -40,6 +40,15 @@ stretch = take(top, "reg  [1:0] rst_meta", "wire reset = rst_meta[1] | (|rst_hol
 #  Once (1) lands in MSX1.sv the term is gone from the source, so FIX=1 has nothing
 #  left to model.  That is not an error: say so on stderr and extract as-is, and the
 #  HOLD group should then be green with no flag at all.
+#  BREAK=1 puts the term BACK, modelling the behaviour before a4541d9.  Without it this
+#  bench has no way to go red on the HOLD group and cannot be shown to measure anything;
+#  sim/checkrun.sh fails a bench whose outcome nothing can change.
+if os.environ.get("BREAK") == "1":
+    a = "wire upload_hold = reset_rq & status[64];"
+    if a not in uphold: sys.exit("mk_uphold_dut: BREAK anchor moved (upload_hold)")
+    uphold = "wire upload_hold = reset_rq & status[64] & ~|flash16x_active;"
+    print("mk_uphold_dut: BREAK=1 -> term restored, pre-a4541d9 behaviour", file=sys.stderr)
+
 TERM = " & ~|flash16x_active"
 if TERM in uphold:
     if os.environ.get("FIX") == "1":
