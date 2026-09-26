@@ -123,8 +123,8 @@ module tb_golden_pcm;
 
         fd_out = $fopen(out_f, "w");
 
-        repeat (8) @(negedge clk);
-        rst_n = 1;
+        repeat (300) @(negedge clk);   // reset_ms is held >= 252 clk in hardware, and
+        rst_n = 1;                     // the engine clears its register file meanwhile
         repeat (8) @(negedge clk);
     end
 
