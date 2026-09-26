@@ -85,7 +85,8 @@ task bios_init;
 endtask
 
 //  ── the stream to send ──────────────────────────────────────────────────────
-localparam int MAXB = 1 << 20;   // a whole song is a few tens of kB
+localparam int MAXB = 1 << 20;
+   int gap_bits = 0;   // a whole song is a few tens of kB
 logic [7:0] src [MAXB];
 logic [7:0] got [MAXB];
 int  n_src = 0, n_got = 0;
@@ -148,11 +149,25 @@ initial begin
    bios_init();
    io_out(8'hE9, 8'h37);                 // TxEN | DTR | RxEN | ER | RTS
 
+   //  +gap=<n> idles the line for n bit times after every byte, waiting for
+   //  TxEMPTY first so the transmitter really goes idle and has to restart.  A
+   //  .mid's delta times do exactly that thousands of times per song, and
+   //  smf2wire.py strips them, so the back-to-back loop below never tested it:
+   //  every byte arrived while the shifter was already running.  A byte lost on
+   //  the restart from idle is a missing note-on or a stuck note-off.
+   void'($value$plusargs("gap=%d", gap_bits));
+   if (gap_bits > 0) $display("stream: %0d bit-times idle after each byte", gap_bits);
+
    //  Write each byte the way a player does: wait for TxRDY, then store it.
    for (int i = 0; i < n_src; i++) begin
       st = 8'h00;
       while (!st[0]) io_in(8'hE9, st);
       io_out(8'hE8, src[i]);
+      if (gap_bits > 0) begin
+         st = 8'h00;
+         while (!st[2]) io_in(8'hE9, st);       // TxEMPTY: shifter drained
+         #(32000.0 * gap_bits);
+      end
    end
    //  Wait for TxEMPTY, the way software does: TxRDY only says the holding
    //  register is free, so the last character is still going out when it sets.
