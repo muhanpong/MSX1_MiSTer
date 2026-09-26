@@ -72,3 +72,24 @@ the counter and narrow it again; the bench does exactly that.
   MSX-MIDI, an FS-A1WX with the cartridge produced the same 3,353 bytes as our
   RTL, byte for byte.
 - The whole machine still lints: `verilator --lint-only --top-module msx`.
+
+**What the stream comparison does NOT check, and it cost real notes.** `io_out` in
+`sim/tb_midi_stream.sv` drives a FIXED 3-clock I/O strobe at a phase set by the polling
+loop. `dev_midi` took `cpu_wr`/`cpu_rd` as LEVELS (`.cpu_wr(~wr_n)`) and repeated every
+side effect on every `clk21m` of the strobe, so a byte written to an idle transmitter
+went out TWICE whenever a TxC edge fell inside the strobe, RW=3 counter writes became
+{MSB,MSB}, and RW=3 reads came back swapped. Because this bench never varies the strobe
+width or phase, it passes on that RTL -- with or without the `+gap` idle mode added
+2026-09-27, which varies the time BETWEEN bytes and not the geometry of the write
+itself. So "963,241 bytes byte-for-byte against openMSX" was true and insufficient: the
+bytes matched because the one phase this bench uses is a benign one.
+
+Fixed on `stable_Turbo-R`'s branch by `7df8915`, with `sim/tb_midi_strobe.sv` as the
+bench that can see it: W = 1..16 clocks, random phase 0..63, W = 1 as the negative
+control, and a row with no exposure is explicitly not a pass. It fails the old RTL
+(e.g. 48 duplicates in 200 at W = 16) and passes the fixed one. **Do not cite
+`run_midi_stream.sh` as evidence of byte correctness without the strobe bench beside
+it.** The general form: a bench that holds a parameter fixed cannot see a defect in that
+parameter, and a negative control proves the RTL change matters, not that the stimulus
+space was adequate.
+
