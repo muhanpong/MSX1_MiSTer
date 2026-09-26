@@ -61,26 +61,36 @@ module tb;
    //  sim/tb_device_reload.sv.
    logic [27:0] ddr3_addr;
    logic        ddr3_rd, ddr3_wr, ddr3_request;
-   logic  [7:0] ddr3_dout;
+   logic  [7:0] ddr3_dout = 8'hFF;
    logic        ddr3_ready = 1'b0;
+   //  One grant every fourth cycle costs eight cycles per byte, and the upload
+   //  reads the whole pack a byte at a time: a 1.4 MB pack then takes longer to
+   //  stage than the run it is staging for.  The arbiter's rate is not what this
+   //  bench is testing, so grant every cycle.  DDR3_SLOW=1 restores the slower
+   //  rate for anything that does care.
    int          rdiv = 0;
+   bit          ddr3_slow = 1'b0;
+   initial      ddr3_slow = $test$plusargs("ddr3slow");
    always @(posedge clk21m) begin
       rdiv <= (rdiv == 3) ? 0 : rdiv + 1;
-      ddr3_ready <= (rdiv == 3);
+      ddr3_ready <= ddr3_slow ? (rdiv == 3) : 1'b1;
    end
    //  The data must be valid AT the ready pulse, not one cycle after it -- that
    //  is what ddram.sv does, and getting it wrong makes memory_upload parse the
    //  byte before the one it asked for: the pack comes out as a 32 kB stub and
    //  the machine reads FFh everywhere.  (The toy model in sim/tb_device_reload
    //  registers it, which that bench tolerates and this one does not.)
-   //  One cycle of read latency, like a real memory: memory_upload advances
-   //  ddr3_addr on the same edge it consumes the byte (memory_upload.sv:170), so
-   //  a combinational lookup on the LIVE address hands it the NEXT byte -- the
-   //  header then reads "SX@" instead of "MSX", the magic check fails silently
-   //  and the whole pack is skipped with no message at all.
-   logic [27:0] ddr3_addr_d;
-   always @(posedge clk21m) ddr3_addr_d <= ddr3_addr;
-   always_comb ddr3_dout = (ddr3_addr_d < 28'(pack_bytes)) ? packmem[ddr3_addr_d] : 8'hFF;
+   //  Latch the byte WHEN THE READ COMPLETES, and hold it.  memory_upload
+   //  advances ddr3_addr on that same edge (memory_upload.sv:170) and stores the
+   //  byte on the NEXT grant, so anything that keeps following the address --
+   //  live or registered -- has already moved on by then and hands over the byte
+   //  after the one that was asked for.  Every header then came out shifted by
+   //  one: "SX@" instead of "MSX", the magic check failed, and the pack was
+   //  skipped in silence, leaving all 64 slot-layout entries empty and the
+   //  machine reading FFh everywhere.
+   always @(posedge clk21m)
+      if (ddr3_ready & ddr3_rd)
+         ddr3_dout <= (ddr3_addr < 28'(pack_bytes)) ? packmem[ddr3_addr] : 8'hFF;
 
    //  ioctl_download/index/addr are msx ports too: declared in msx_ports.svh.
 
@@ -225,26 +235,77 @@ module tb;
       .dma_active(), .dma_save()
    );
 
+   //  What the uploader actually read for each 16-byte header.  A header whose
+   //  magic is not "MSX" sends the FSM back to IDLE with nothing parsed and no
+   //  message, so this is the only place the failure is visible.
+   int hdr_seen = 0;
+   always @(posedge clk21m) begin
+      if (u_upload.state == 4'd4 /*STATE_CHECK_CONFIG*/ && hdr_seen < 4) begin
+         hdr_seen++;
+         $display("hdr %0d: %02x %02x %02x %02x  ddr3_addr=%0d  magic=%0s",
+                  hdr_seen, u_upload.conf[0], u_upload.conf[1], u_upload.conf[2],
+                  u_upload.conf[3], u_upload.ddr3_addr,
+                  ({u_upload.conf[0],u_upload.conf[1],u_upload.conf[2]} == "MSX") ? "OK" : "BAD");
+      end
+   end
+
    //  Serve one sector: hold ack, sweep the 512 offsets, drop ack.  nvram_backup
    //  makes its own BRAM write enable from ack and the offset, so the model only
    //  has to present the address and the byte.
    int sectors_served = 0;
+   int sd_gap = 0;
+   initial if (!$value$plusargs("sdslow=%d", sd_gap)) sd_gap = 0;
    initial begin
       forever begin
          @(posedge clk21m);
-         if (sav_idx >= 0 && (nv_sd_rd[sav_idx] | nv_sd_wr[sav_idx])) begin
-            automatic int base = int'(nv_sd_lba[sav_idx]) * 512;
-            nv_sd_ack[sav_idx] <= 1'b1;
+         if (|nv_sd_rd | |nv_sd_wr) begin
+            automatic int n = 0;
+            automatic int base;
+            for (int k = 0; k < 4; k++) if (nv_sd_rd[k] | nv_sd_wr[k]) n = k;
+            sav_idx = n;
+            base = int'(nv_sd_lba[n]) * 512;
+            nv_sd_ack[n] <= 1'b1;
             for (int i = 0; i < 512; i++) begin
                nv_buff_addr <= 14'(i);
                nv_buff_dout <= (base + i < SAVMAX) ? savmem[base + i] : 8'hFF;
                @(posedge clk21m);
-               if (nv_sd_wr[sav_idx] && base + i < SAVMAX) savmem[base + i] = nv_buff_din[sav_idx];
+               if (nv_sd_wr[n] && base + i < SAVMAX) savmem[base + i] = nv_buff_din[n];
             end
-            nv_sd_ack[sav_idx] <= 1'b0;
+            nv_sd_ack[n] <= 1'b0;
             sectors_served++;
+            //  A sector here costs about 512 cycles, which is far faster than an
+            //  HPS transaction on hardware.  That matters for one measurement
+            //  only -- how long the machine runs beside an unfinished load -- so
+            //  +sdslow=<cycles> stretches the gap between sectors to something
+            //  representative instead of flattering the result.
+            repeat (sd_gap) @(posedge clk21m);
             @(posedge clk21m);
          end
+      end
+   end
+
+   //  docs/sram_load_guard.md step 1: the machine is released 2.9 us after the
+   //  .sav is asked for, while the read is tens of SD sectors.  Count the writes
+   //  the CPU lands in the SRAM window during that time.  A non-zero count is the
+   //  defect in numbers; zero means the guard is a precaution rather than a fix.
+   //  Either way the number has to exist before any RTL changes.
+   logic load_flight = 1'b0;
+   int   cpu_sram_writes = 0, flight_sectors = 0;
+   int   flight_cycles = 0, bram_writes_in_flight = 0;
+   always @(posedge clk21m) begin
+      if (upl_load_sram) load_flight <= 1'b1;
+      if (load_flight && sav_idx >= 0 && lookup_SRAM[sav_idx].size > 0
+          && sectors_served >= int'(lookup_SRAM[sav_idx].size) * 2) load_flight <= 1'b0;
+      if (load_flight) begin
+         flight_sectors <= sectors_served;
+         flight_cycles  <= flight_cycles + 1;
+         //  Any CPU write to BRAM at all.  If this is zero the machine was not
+         //  doing anything and a zero in the window below means nothing.
+         if (bram_ce && !ram_rnw) bram_writes_in_flight <= bram_writes_in_flight + 1;
+         if (bram_ce && !ram_rnw && sav_idx >= 0
+             && ram_addr >= 27'(lookup_SRAM[sav_idx].addr)
+             && ram_addr <  27'(lookup_SRAM[sav_idx].addr) + 27'(lookup_SRAM[sav_idx].size) * 1024)
+            cpu_sram_writes <= cpu_sram_writes + 1;
       end
    end
 
@@ -330,25 +391,20 @@ module tb;
    //  Which of the four images this pack's SRAM belongs to is the pack's choice,
    //  not ours: a machine's own battery SRAM is the Computer CMOS image, a cart's
    //  is the ROM one.  Take the first allocation the pack actually made.
-   int sav_idx = -1;
-   task pick_idx;
-      begin
-         sav_idx = -1;
-         for (int i = 3; i >= 0; i--) if (lookup_SRAM[i].size > 0) sav_idx = i;
-      end
-   endtask
-
+   //  Mount all four images.  Which one the pack's SRAM lands on is only known
+   //  after the upload has run, and the firmware mounts <rom>.sav around the ROM
+   //  load without knowing either; the engine walks the banks and uses the one
+   //  that has an allocation.  Picking an index up front needed the allocation to
+   //  exist already, which before the upload it never does -- that is what made
+   //  the first run report SKIP on a pack that allocates 16 kB perfectly well.
+   int sav_idx = -1;                       // filled in by the SD model, on first use
    task mount_sav;
       begin
-         pick_idx();
-         if (sav_idx < 0) $display("sav: this pack allocates no SRAM -- nothing to mount");
-         else begin
-            nv_img_size    = 64'(sav_bytes);
-            nv_img_mounted = 4'(1 << sav_idx);
-            @(posedge clk21m);
-            nv_img_mounted = 4'b0000;
-            $display("sav: mounted on image %0d (%0d kB allocated)", sav_idx, lookup_SRAM[sav_idx].size);
-         end
+         nv_img_size    = 64'(sav_bytes);
+         nv_img_mounted = 4'b1111;
+         @(posedge clk21m);
+         nv_img_mounted = 4'b0000;
+         $display("sav: mounted on all four images, %0d bytes", sav_bytes);
       end
    endtask
 
@@ -394,6 +450,17 @@ module tb;
          if (!reset_rq) break;
       end
       $display("upload: done at %0t", $time);
+      for (int i = 0; i < 4; i++)
+         $display("upload: lookup_SRAM[%0d] = %0d kB at %0d", i, lookup_SRAM[i].size, lookup_SRAM[i].addr);
+      begin
+         int nz = 0;
+         for (int i = 0; i < 64; i++) if (slot_layout[i].mapper != MAPPER_UNUSED) begin
+            nz++;
+            if (nz <= 6) $display("upload: slot_layout[%0d] (slot %0d-%0d page %0d) mapper=%0d ref_sram=%0d",
+                                  i, i>>4, (i>>2)&3, i&3, slot_layout[i].mapper, slot_layout[i].ref_sram);
+         end
+         $display("upload: %0d of 64 layout entries populated", nz);
+      end
       if (sav_bytes > 0 && sav_late) begin
          repeat (200) @(posedge clk21m);      // the request is already out by now
          mount_sav();
@@ -409,6 +476,10 @@ module tb;
             $display("sav: lookup_SRAM[%0d] = %0d kB at %0d", i, lookup_SRAM[i].size, lookup_SRAM[i].addr);
          $display("sav: image %0d, %0d sectors served, %0d bytes into SRAM, %0d wrong",
                   sav_idx, sectors_served, sram_bytes, sram_bad);
+         $display("sav: sector gap %0d cycles, load spanned %0d cycles (%0.2f ms), %0d sectors",
+                  sd_gap, flight_cycles, real'(flight_cycles) / 21477.272, flight_sectors);
+         $display("sav: CPU writes to BRAM during that span: %0d, of which inside the SRAM window: %0d",
+                  bram_writes_in_flight, cpu_sram_writes);
          if (sav_idx < 0)              $display("RESULT SKIP: this pack allocates no SRAM");
          else if (sectors_served == 0) $display("RESULT FAIL: the .sav was never read");
          else if (sram_bytes == 0)     $display("RESULT FAIL: nothing reached SRAM");

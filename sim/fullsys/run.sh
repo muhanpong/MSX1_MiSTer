@@ -36,4 +36,5 @@ echo "built -> $OUT/v/tbmsx"
 EXTRA=""
 [ -n "${SAV:-}" ]     && EXTRA="$EXTRA +sav=$SAV"
 [ -n "${SAVLATE:-}" ] && EXTRA="$EXTRA +savlate"
+[ -n "${SDSLOW:-}" ]  && EXTRA="$EXTRA +sdslow=$SDSLOW"
 "$OUT/v/tbmsx" +pack="$PACK" +ms=$MS $EXTRA
