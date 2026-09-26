@@ -294,7 +294,16 @@ wire      [64:0] rtc;
 `include "build_id.v" 
 localparam CONF_STR = {
    "MSX1;",
-   "-;",
+   //  Entry 1 is not a menu row -- the OSD draws from entry 2 (menu.cpp,
+   //  `int i = 2`) -- it is where the firmware looks for SS/UART/MIDI.  The
+   //  firmware shows a UART setting for a core only when `uart_speeds[0]` is set
+   //  (user_io.cpp: `uart_mode = UIO_GETUARTFLG || uart_speeds[0]`, and hps_io
+   //  does not answer 0x28), so UART needs a speed or the menu never appears;
+   //  MIDI with no speed defaults to 31250.  With this, System > UART mode = MIDI
+   //  starts MiSTer's MIDI link for this core and the framework routes it:
+   //  FluidSynth, MUNT, USB MIDI to a real synth, or the network.  Without it the
+   //  MSX-MIDI stream reached UART_TXD and nothing on the HPS was listening.
+   "UART31250,MIDI;",
    "FC1,MSX,Load ROM PACK,30000000;",
    "FC2,MSX,Load FW  PACK,32000000;",
    CONF_STR_SLOT_A,
