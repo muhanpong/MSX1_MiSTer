@@ -3,11 +3,12 @@
 #  from an ASCII16X/Yamanooto cart, load_sram fires flash_dirtysave.s LOAD with the
 #  departed cart's address, over the ROM that was just staged.  See sim/tb_staleflash.sv.
 #  The latch and reset chain are extracted from the RTL by sim/mk_uphold_dut.py.
-#  FIX=1 models the candidate repair (see the +fix comment in the bench).
+#  FIX=1 models THIS bench's candidate (the +fix comment in the bench).  It must not
+#  reach mk_uphold_dut.py, which reads the same name for run_uphold's candidate.
 set -u
 cd "$(dirname "$0")/.."
 OUT=${OUT:-/tmp/staleflash_sim}; mkdir -p "$OUT"
-python3 sim/mk_uphold_dut.py > "$OUT/uphold_dut.sv" || exit 1
+env -u FIX python3 sim/mk_uphold_dut.py > "$OUT/uphold_dut.sv" || exit 1
 verilator --binary --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-DECLFILENAME \
    -Wno-ENUMVALUE -Wno-UNUSEDSIGNAL -Wno-TIMESCALEMOD -Wno-ASCRANGE -Wno-UNDRIVEN \
    -Wno-PINMISSING -Wno-CASEINCOMPLETE \

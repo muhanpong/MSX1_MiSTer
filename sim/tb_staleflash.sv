@@ -71,28 +71,37 @@ module tb_staleflash;
    logic [13:0] sd_buff_addr = 0;
    logic  [7:0] sd_buff_dout = 0;
 
-   //  +fix models the candidate repair, and it lives in MSX1.sv, not msx_slots: hold a
-   //  "disarmed" flop set when new staging starts (log_clear) and cleared by the next
-   //  ASCII16X/Yamanooto access -- the same edge on which msx_slots refreshes
-   //  flash16x_base -- and gate the engine's flash16x_active with it.  042cc0d chose
-   //  the guard it did rather than "thread a clear signal through two modules"; this
-   //  needs no such signal.  A latched request still waits, so F keeps working, and the
-   //  stale pair can no longer satisfy load_ready, which is B.
+   //  +fix models the NARROW candidate: gate only the restore request.
+   //
+   //  An earlier version of this bench gated the engine's flash16x_active instead, and
+   //  that was wrong.  Inside flash_dirtysave that one input gates four things:
+   //  save_start (123), auto_start (125), load_ready (128) and the DIRTY CAPTURE at
+   //  155.  Gating it would stop recording dirty blocks for a flash cart that is still
+   //  inserted while an upload targets another slot, so writes in that window would be
+   //  missing from the next save -- data loss, in the case the guard exists to protect.
+   //  Cases W and D below exist because that version passed without exercising it.
+   //
+   //  So the gate goes on the request alone, and only when this upload replaced the
+   //  slot the armed cart was in:  stale_req = armed & the upload took that slot.
+   //  In a cold load the pair is not armed when load_sram fires, so the request is
+   //  captured and still waits (F).  In a swap away from the cart it is armed and the
+   //  slot was taken, so nothing is captured (B).  When the upload targets another
+   //  slot the cart is still there and its base still valid, so the request stands (W).
    logic fix = 1'b0;
    initial fix = $test$plusargs("fix");
-   logic disarmed = 1'b0;
-   always @(posedge clk) begin
-      if (log_clear)                                                          disarmed <= 1'b1;
-      else if (cpu_mreq & (mapper == MAPPER_ASCII16X | mapper == MAPPER_YAMANOOTO))
-                                                                              disarmed <= 1'b0;
-   end
-   wire fx_act_eff = fix ? (fx_active[0] & ~disarmed) : fx_active[0];
+   logic upl_hits_cart = 1'b1;     // does this upload replace cart 0's slot?  (RTL: ioctl index)
+   wire  stale_req     = fx_active[0] & upl_hits_cart;
+   wire  load_req_eff  = fix ? (load_req & ~stale_req) : load_req;
+
+   //  flash programming, so dirty capture is actually exercised
+   logic        prog_we = 1'b0;
+   logic [22:0] prog_addr = 23'h1000;
 
    flash_dirtysave #(.RDWAIT(4)) u_ds (
       .clk(clk), .reset(reset),
-      .flash16x_active(fx_act_eff), .flash16x_base(fx_base[0]), .flash16x_size(fx_size[0]),
-      .prog_we(1'b0), .prog_addr(23'd0),
-      .save_req(save_req), .save_req_auto(save_req_auto), .load_req(load_req),
+      .flash16x_active(fx_active[0]), .flash16x_base(fx_base[0]), .flash16x_size(fx_size[0]),
+      .prog_we(prog_we), .prog_addr(prog_addr),
+      .save_req(save_req), .save_req_auto(save_req_auto), .load_req(load_req_eff),
       .upload_active(upload_active), .log_clear(log_clear),
       .img_mounted(img_mounted), .img_readonly(img_readonly), .img_size(img_size),
       .sdram_addr(sdram_addr), .sdram_req(sdram_req), .sdram_rnw(sdram_rnw),
@@ -130,9 +139,10 @@ module tb_staleflash;
    end
 
    // ---- watch every SDRAM write -------------------------------------------
-   int wr_total, wr_old, wr_new;  logic [26:0] wr_first;  logic seen;
+   int wr_total, wr_old, wr_new;  logic [26:0] wr_first;  logic seen, seen_save;
    always @(posedge clk) begin
       if (cl_active) seen <= 1'b1;
+      if (cl_save)   seen_save <= 1'b1;
       if (sdram_req & ~sdram_rnw) begin
          if (wr_total == 0) wr_first <= sdram_addr;
          wr_total <= wr_total + 1;
@@ -141,7 +151,7 @@ module tb_staleflash;
       end
    end
    task automatic watch_clear();
-      wr_total = 0; wr_old = 0; wr_new = 0; wr_first = 27'd0; seen = 1'b0;
+      wr_total = 0; wr_old = 0; wr_new = 0; wr_first = 27'd0; seen = 1'b0; seen_save = 1'b0;
    endtask
 
    int errors = 0;
@@ -169,6 +179,11 @@ module tb_staleflash;
       @(negedge clk); load_req = 1'b1; repeat (2) @(posedge clk);
       @(negedge clk); load_req = 1'b0;
    endtask
+   task automatic flash_write();
+      @(negedge clk); prog_we = 1'b1; repeat (2) @(posedge clk);
+      @(negedge clk); prog_we = 1'b0; repeat (2) @(posedge clk);
+   endtask
+
    task automatic settle();  repeat (2_000_000) @(posedge clk);  endtask
 
    //  A latched restore request is NOT cleared by `reset` -- only by log_clear or by
@@ -244,6 +259,41 @@ module tb_staleflash;
       $display("  Y : restore=%0d writes=%0d old=%0d new=%0d (active=%b)",
                seen, wr_total, wr_old, wr_new, fx_active);
       ck("Y  the default toggle prevents it", wr_old == 0 && !seen);
+
+      //  ---- W: the upload targets ANOTHER slot; the flash cart stays ------
+      //  Its base is still valid, so a restore must still be allowed to run.
+      machine_reset();
+      clear_pending();
+      status_hi[0] = 1'b1;
+      base_ram = OLD_BASE;
+      touch_cart(MAPPER_ASCII16X);               // the cart is in, and stays in
+      watch_clear();
+      upl_hits_cart = 1'b0;                      // e.g. a FW PACK, or the other slot
+      osd_load();
+      settle();
+      $display("  W : restore=%0d writes=%0d old=%0d new=%0d",
+               seen, wr_total, wr_old, wr_new);
+      ck("W  an upload elsewhere still lets the inserted cart restore",
+         seen && wr_old == BLK);
+      upl_hits_cart = 1'b1;
+
+      //  ---- D: a flash write in that window must still reach the next save --
+      machine_reset();
+      clear_pending();
+      status_hi[0] = 1'b1;
+      base_ram = OLD_BASE;
+      touch_cart(MAPPER_ASCII16X);
+      upl_hits_cart = 1'b0;
+      osd_load();                                // the window opens here
+      settle();
+      watch_clear();
+      flash_write();                             // the program writes flash now
+      @(negedge clk); save_req = 1'b1; repeat (4) @(posedge clk);
+      @(negedge clk); save_req = 1'b0;
+      settle();
+      $display("  D : save=%0d (dirty capture survived the window)", seen_save);
+      ck("D  a flash write during that window is still saved", seen_save);
+      upl_hits_cart = 1'b1;
 
       $display("RESULT: %0d error(s)", errors);
       $finish;
