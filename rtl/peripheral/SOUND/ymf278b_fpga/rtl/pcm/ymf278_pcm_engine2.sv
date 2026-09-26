@@ -158,7 +158,12 @@ typedef struct packed {
     logic [17:0] lfo_cnt;
 } slot_dyn_t;
 
-slot_regs_t   ram_regs   [0:23];
+// Slot register file, stored the way the chip addresses it: one 24x8 memory per
+// register byte (field 0..9), so every CPU write is a whole-word write to one
+// memory.  The struct is only a decoded VIEW at the read ports.  keyon lives in
+// flops because three places need it at three different indices.
+slot_regs_t   rr_ld, rr_hf;          // decoded views at ld_slot / hf_pick
+logic [23:0]  keyon_v;
 // 20260917: header and dyn state live in MLAB with an ASYNCHRONOUS read, which
 // is exactly the combinational read the flop arrays had -- no read moves by a
 // cycle, and the one same-address write-then-read the header path relies on
@@ -298,9 +303,14 @@ logic signed [23:0] accum_l, accum_r;
 // wholesale on any CPU sample-RAM write.  This removes most SDRAM traffic for
 // sustained voices — the property that lets 24 slots survive heavy ch2
 // contention (v2 learned this the hard way).
-logic [20:0] cache_tagA [0:23];
-logic [20:0] cache_tagB [0:23];
-logic [15:0] cache_w0 [0:23], cache_w1 [0:23], cache_w2 [0:23], cache_w3 [0:23];
+logic [20:0] cache_tagA [0:23] /* synthesis ramstyle = "MLAB, no_rw_check" */;
+logic [20:0] cache_tagB [0:23] /* synthesis ramstyle = "MLAB, no_rw_check" */;
+logic [20:0] inv_tagA [0:23] /* synthesis ramstyle = "MLAB, no_rw_check" */;
+logic [20:0] inv_tagB [0:23] /* synthesis ramstyle = "MLAB, no_rw_check" */;
+logic [15:0] cache_w0 [0:23] /* synthesis ramstyle = "MLAB, no_rw_check" */;
+logic [15:0] cache_w1 [0:23] /* synthesis ramstyle = "MLAB, no_rw_check" */;
+logic [15:0] cache_w2 [0:23] /* synthesis ramstyle = "MLAB, no_rw_check" */;
+logic [15:0] cache_w3 [0:23] /* synthesis ramstyle = "MLAB, no_rw_check" */;
 logic [23:0] cache_vld;
 // Did the fill that populated this entry actually FETCH the B pair?  A partial fill
 // (need_b==0) still stores cache_w2/w3 from the shared w_word[] regs (possibly another
@@ -364,6 +374,7 @@ endfunction
 // finishes (variable-length turns).  A long SDRAM stall delays later slots
 // instead of corrupting the current one; slots that don't fit before the
 // frame-end CPU reserve are skipped for this frame (graceful degradation).
+wire clr_run;
 wire dispatch_now = (sl_state == SL_IDLE) && (cur_slot < 5'd24) && !in_reserve
                     && !sample_start;
 wire [4:0]  ld_slot = cur_slot;
@@ -379,7 +390,7 @@ always_comb begin
     dyn_rst_c.env_vol   = MAX_ATT_INDEX;
     dyn_rst_c.env_state = EG_OFF;
     dyn_rst_c.lfo_cnt   = 18'd0;
-    ld_regs_c = ram_regs[ld_slot];
+    ld_regs_c = rr_ld;
     ld_dyn_c  = dyn_init[ld_slot] ? dyn_rst_c : ram_dyn_m[ld_slot];
     ld_hdr_c  = hdr_init[ld_slot] ? '0        : ram_header_m[ld_slot];
 end
@@ -471,11 +482,11 @@ always_ff @(posedge clk or negedge rst_n) begin
             inv_idx  <= 5'd0;
             inv_run  <= 1'b1;
         end else if (inv_run) begin
-            if (cache_tagA[inv_idx[4:0]]           == inv_word
-             || (cache_tagA[inv_idx[4:0]] + 21'd1) == inv_word
+            if (inv_tagA[inv_idx[4:0]]           == inv_word
+             || (inv_tagA[inv_idx[4:0]] + 21'd1) == inv_word
              || (cache_hasb[inv_idx[4:0]]
-                 && (cache_tagB[inv_idx[4:0]]           == inv_word
-                  || (cache_tagB[inv_idx[4:0]] + 21'd1) == inv_word)))
+                 && (inv_tagB[inv_idx[4:0]]           == inv_word
+                  || (inv_tagB[inv_idx[4:0]] + 21'd1) == inv_word)))
                 cache_vld[inv_idx[4:0]] <= 1'b0;
             if (inv_idx == 5'd23) inv_run <= 1'b0;
             else                  inv_idx <= inv_idx + 5'd1;
@@ -524,7 +535,7 @@ always_ff @(posedge clk or negedge rst_n) begin
                     if (ld_run) begin
                         cur_slot <= cur_slot + 5'd1; // consume this slot's turn
                         w_slot <= ld_slot;
-                        w_regs <= ram_regs[ld_slot];
+                        w_regs <= rr_ld;
                         w_hdr  <= ld_hdr_c;
                         w_dyn  <= ld_dyn_c;
                         w_edge <= ld_edge_w;
@@ -548,7 +559,7 @@ always_ff @(posedge clk or negedge rst_n) begin
                 if (!hf_pending[ld_slot]) begin
                     cur_slot <= cur_slot + 5'd1;
                     w_slot <= ld_slot;
-                    w_regs <= ram_regs[ld_slot];
+                    w_regs <= rr_ld;
                     w_hdr  <= ld_hdr_c;
                     w_dyn  <= ld_dyn_c;
                     w_edge <= ld_edge_w;
@@ -666,6 +677,8 @@ always_ff @(posedge clk or negedge rst_n) begin
                         // fill the slot's cache entry
                         cache_tagA[w_slot] <= w_a0[21:1];
                         cache_tagB[w_slot] <= w_b0[21:1];
+                        inv_tagA[w_slot] <= w_a0[21:1];
+                        inv_tagB[w_slot] <= w_b0[21:1];
                         cache_w0[w_slot] <= (w_fidx == 2'd0) ? mem_rd_data16 : w_word[0];
                         cache_w1[w_slot] <= (w_fidx == 2'd1) ? mem_rd_data16 : w_word[1];
                         cache_w2[w_slot] <= (w_fidx == 2'd2) ? mem_rd_data16 : w_word[2];
@@ -859,7 +872,7 @@ always_comb begin
             hf_pick  = 5'(i);
         end
 end
-always_comb hf_pick_regs_c = ram_regs[hf_pick];
+always_comb hf_pick_regs_c = rr_hf;
 
 wire [21:0] hf_base_calc = (hf_cur_wave < 9'd384 || wavetblhdr == 3'd0)
     ? 22'({13'd0, hf_cur_wave} * 22'd12)
@@ -1020,15 +1033,13 @@ wire [3:0]  wr_field = (reg_addr >= 8'h08) ? 4'((reg_addr - 8'h08) / 8'd24) : 4'
 wire        wr_slot_reg = reg_wr && (reg_addr >= 8'h08) && (reg_addr <= 8'hF7);
 
 always_ff @(posedge clk or negedge rst_n) begin
-    logic [6:0] tl_t;
-
     if (!rst_n) begin
         wavetblhdr <= '0;
         pcm_mix_l  <= 3'd0;
         pcm_mix_r  <= 3'd0;
         fm_mix_l   <= 3'd0;
         fm_mix_r   <= 3'd0;
-        for (int i = 0; i < 24; i++) ram_regs[i] <= '0;
+        keyon_v    <= '0;
         for (int i = 0; i < 24; i++) bf_dirty[i] <= '0;
     end else begin
         if (reg_wr && reg_addr == 8'h02)
@@ -1042,7 +1053,6 @@ always_ff @(posedge clk or negedge rst_n) begin
             pcm_mix_r <= reg_data[5:3];
         end
         if (wr_slot_reg) begin
-            // dirty tracking for deferred header backfill
             case (wr_field)
                 4'd0: bf_dirty[wr_snum] <= 5'b0;
                 4'd5: bf_dirty[wr_snum][0] <= 1'b1;
@@ -1052,75 +1062,114 @@ always_ff @(posedge clk or negedge rst_n) begin
                 4'd9: bf_dirty[wr_snum][4] <= 1'b1;
                 default: ;
             endcase
-            case (wr_field)
-                4'd0: ram_regs[wr_snum].wave[7:0] <= reg_data[7:0];
-                4'd1: begin
-                    ram_regs[wr_snum].wave[8] <= reg_data[0];
-                    ram_regs[wr_snum].fn[6:0] <= reg_data[7:1];
-                end
-                4'd2: begin
-                    ram_regs[wr_snum].fn[9:7] <= reg_data[2:0];
-                    ram_regs[wr_snum].prvb    <= reg_data[3];
-                    ram_regs[wr_snum].oct     <= $signed(reg_data[7:4]);
-                end
-                4'd3: begin
-                    tl_t = reg_data[7:1];
-                    ram_regs[wr_snum].tl <= (tl_t != 7'h7F) ? {1'b0, tl_t} : 8'hFF;
-                end
-                4'd4: begin
-                    ram_regs[wr_snum].pan        <= reg_data[4] ? 4'd8 : reg_data[3:0];
-                    ram_regs[wr_snum].damp       <= reg_data[6];
-                    ram_regs[wr_snum].keyon      <= reg_data[7];
-                    ram_regs[wr_snum].lfo_active <= ~reg_data[5];
-                end
-                4'd5: begin
-                    ram_regs[wr_snum].lfo_speed <= reg_data[5:3];
-                    ram_regs[wr_snum].vib       <= reg_data[2:0];
-                end
-                4'd6: begin
-                    ram_regs[wr_snum].ar  <= reg_data[7:4];
-                    ram_regs[wr_snum].d1r <= reg_data[3:0];
-                end
-                4'd7: begin
-                    ram_regs[wr_snum].dl_idx <= reg_data[7:4];
-                    ram_regs[wr_snum].d2r    <= reg_data[3:0];
-                end
-                4'd8: begin
-                    ram_regs[wr_snum].rc <= reg_data[7:4];
-                    ram_regs[wr_snum].rr <= reg_data[3:0];
-                end
-                4'd9: ram_regs[wr_snum].am <= reg_data[2:0];
-                default: ;
-            endcase
-        end
-
-        // HF backfill (header bytes 7..11 → slot envelope/LFO regs).  CPU
-        // write to the SAME slot in the same cycle: backfill wins for its
-        // fields (chip "don't access during LD" rule); different slot: both
-        // land (separate array elements).
-        if (hf_store_now) begin
-            logic [4:0] dly;
-            dly = bf_dirty[hf_cur_slot];
-            if (!dly[0]) begin
-                ram_regs[hf_cur_slot].lfo_speed <= hf_buf[7][5:3];
-                ram_regs[hf_cur_slot].vib       <= hf_buf[7][2:0];
-            end
-            if (!dly[1]) begin
-                ram_regs[hf_cur_slot].ar        <= hf_buf[8][7:4];
-                ram_regs[hf_cur_slot].d1r       <= hf_buf[8][3:0];
-            end
-            if (!dly[2]) begin
-                ram_regs[hf_cur_slot].dl_idx    <= hf_buf[9][7:4];
-                ram_regs[hf_cur_slot].d2r       <= hf_buf[9][3:0];
-            end
-            if (!dly[3]) begin
-                ram_regs[hf_cur_slot].rc        <= hf_buf[10][7:4];
-                ram_regs[hf_cur_slot].rr        <= hf_buf[10][3:0];
-            end
-            if (!dly[4])
-                ram_regs[hf_cur_slot].am        <= hf_buf[11][2:0];
+            if (wr_field == 4'd4) keyon_v[wr_snum] <= reg_data[7];
         end
     end
+end
+
+// Reset: MLAB cannot be reset, so zeros are swept through every entry WHILE the
+// engine is held in reset (clr_run is the reset level itself).  reset_ms is held
+// for at least 63 clk21m = 252 clk cycles, upload_hold for a whole upload, so the
+// 24-entry sweep has finished long before release: the register file comes out of
+// reset already cleared, as the flop array did, and no CPU write can race it.
+// Stored bytes are encoded so that all-zero decodes to the old reset value.
+//
+// LOAD-BEARING ASSUMPTION: rst_n must stay low for >= 24 clk, or some register
+// bytes leave reset with stale values.  Today every source of reset_ms holds it
+// far longer: `reset` is rst_meta | rst_hold (6'h3F reload = 63 clk21m = 252 clk,
+// MSX1.sv), and upload_hold spans a whole upload.  Whoever shortens rst_hold or
+// adds a new term to reset_ms must keep this >= 24 clk.  The lockstep harness
+// checks both sides: +reset_len=256 must match, +reset_len=8 must MISMATCH.
+assign clr_run = ~rst_n;
+logic [4:0] clr_idx = 5'd0;
+always_ff @(posedge clk) clr_idx <= (clr_idx == 5'd23) ? 5'd0 : clr_idx + 5'd1;
+
+// Backfill (header bytes 7..11 -> fields 5..9) and a CPU write can hit the same
+// field memory in the same cycle.  Same slot: backfill wins (as before).
+// Different slot: the CPU write is deferred one cycle.
+logic [9:0] bf_we;
+always_comb begin
+    logic [4:0] dly;
+    dly   = bf_dirty[hf_cur_slot];
+    bf_we = '0;
+    if (hf_store_now) bf_we[9:5] = ~dly;
+end
+logic       pend_v;
+logic [3:0] pend_f;
+logic [4:0] pend_s;
+logic [7:0] pend_d;
+function automatic [7:0] enc_byte(input [3:0] f, input [7:0] d);
+    return (f == 4'd4) ? {d[7:6], ~d[5], d[4:0]} : d;   // bit5 stored as lfo_active
+endfunction
+wire cpu_col = wr_slot_reg && bf_we[wr_field];
+always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) pend_v <= 1'b0;
+    else begin
+        pend_v <= cpu_col && (wr_snum != hf_cur_slot);
+        pend_f <= wr_field;
+        pend_s <= wr_snum;
+        pend_d <= enc_byte(wr_field, reg_data);
+    end
+end
+
+logic [9:0]      fwe;
+logic [9:0][4:0] fwa;
+logic [9:0][7:0] fwd;
+logic [9:0][7:0] frd;         // read at ld_slot
+logic [1:0][7:0] frh;         // fields 0/1 read at hf_pick (wave)
+always_comb begin
+    for (int k = 0; k < 10; k++) begin
+        fwe[k] = 1'b0;
+        fwa[k] = wr_snum;
+        fwd[k] = enc_byte(4'(k), reg_data);
+        if (clr_run) begin
+            fwe[k] = 1'b1; fwa[k] = clr_idx; fwd[k] = 8'd0;
+        end else if (bf_we[k]) begin
+            fwe[k] = 1'b1; fwa[k] = hf_cur_slot; fwd[k] = hf_buf[k + 2];
+        end else if (pend_v && pend_f == 4'(k)) begin
+            fwe[k] = 1'b1; fwa[k] = pend_s; fwd[k] = pend_d;
+        end else if (wr_slot_reg && wr_field == 4'(k)) begin
+            fwe[k] = 1'b1;
+        end
+    end
+end
+genvar gk;
+generate
+    for (gk = 0; gk < 10; gk++) begin : g_f
+        pcm_mlab24 #(.W(8)) u_m (.clk(clk), .we(fwe[gk]), .wa(fwa[gk]), .wd(fwd[gk]),
+                                 .ra(ld_slot), .rd(frd[gk]));
+        if (gk < 2) begin : g_h
+            pcm_mlab24 #(.W(8)) u_mh (.clk(clk), .we(fwe[gk]), .wa(fwa[gk]), .wd(fwd[gk]),
+                                      .ra(hf_pick), .rd(frh[gk]));
+        end
+    end
+endgenerate
+
+function automatic slot_regs_t dec_regs(input logic [9:0][7:0] f, input logic kon);
+    slot_regs_t r;
+    r.wave       = {f[1][0], f[0]};
+    r.fn         = {f[2][2:0], f[1][7:1]};
+    r.prvb       = f[2][3];
+    r.oct        = $signed(f[2][7:4]);
+    r.tl         = (f[3][7:1] != 7'h7F) ? {1'b0, f[3][7:1]} : 8'hFF;
+    r.pan        = f[4][4] ? 4'd8 : f[4][3:0];
+    r.damp       = f[4][6];
+    r.keyon      = kon;
+    r.lfo_active = f[4][5];
+    r.lfo_speed  = f[5][5:3];
+    r.vib        = f[5][2:0];
+    r.ar         = f[6][7:4];
+    r.d1r        = f[6][3:0];
+    r.dl_idx     = f[7][7:4];
+    r.d2r        = f[7][3:0];
+    r.rc         = f[8][7:4];
+    r.rr         = f[8][3:0];
+    r.am         = f[9][2:0];
+    return r;
+endfunction
+always_comb begin
+    rr_ld = dec_regs(frd, keyon_v[ld_slot]);
+    rr_hf = dec_regs({64'd0, frh}, 1'b0);
 end
 
 // hf_pending: set on wave-LSB write only (openMSX case 0).  Field 1 changes
@@ -1141,7 +1190,8 @@ wire retrig_consume = (sl_state == SL_ACC);   // slot processed with edge consum
 always_ff @(posedge clk or negedge rst_n) begin
     slot_regs_t cur_r;
     logic       wr_retrig;
-    cur_r = ram_regs[wr_snum];
+    cur_r = '0;
+    cur_r.keyon = keyon_v[wr_snum];
     wr_retrig = wr_slot_reg && (
                     ((wr_field == 4'd4) && reg_data[7] && !cur_r.keyon)
                  || ((wr_field == 4'd0) && cur_r.keyon)
@@ -1163,12 +1213,12 @@ end
 wire wr_tl_load = wr_slot_reg && (wr_field == 4'd3) && reg_data[0];
 always_ff @(posedge clk or negedge rst_n) begin
     slot_regs_t r_tl;
-    r_tl = ram_regs[ld_slot];
+    r_tl = rr_ld;
     if (!rst_n) begin
         for (int i = 0; i < 24; i++) tl_cur[i] <= 8'd0;
         tl_load <= '0;
     end else begin
-        if (dispatch_now) begin
+        if (dispatch_now && !clr_run) begin   // register bytes not swept yet
             if (tl_load[ld_slot])
                 tl_cur[ld_slot] <= r_tl.tl;
             else if (tl_int_cnt == 4'd0) begin
@@ -1256,11 +1306,11 @@ slot_regs_t   dbg_s0, dbg_s5, dbg_s23;
 slot_header_t dbg_h0;
 slot_dyn_t    dbg_d0;
 always_comb begin
-    dbg_s0  = ram_regs[0];
-    dbg_s5  = ram_regs[5];
-    dbg_s23 = ram_regs[23];
-    dbg_h0  = hdr_init[0] ? '0        : ram_header_m[0];
-    dbg_d0  = dyn_init[0] ? dyn_rst_c : ram_dyn_m[0];
+    dbg_s0  = '0;
+    dbg_s5  = '0;
+    dbg_s23 = '0;
+    dbg_h0  = '0;
+    dbg_d0  = dyn_rst_c;
 end
 assign fm_mix_l_o = fm_mix_l;
 assign fm_mix_r_o = fm_mix_r;
@@ -1312,7 +1362,7 @@ genvar gi;
 generate
     for (gi = 0; gi < 24; gi++) begin : g_dbg
         slot_regs_t r_g;
-        always_comb r_g = ram_regs[gi];
+        always_comb begin r_g = '0; r_g.keyon = keyon_v[gi]; end
         assign dbg_slot_keyon[gi]   = r_g.keyon;
         //  Shadows of the two dyn-derived taps: ram_dyn changes only at the
         //  SL_ACC write and at reset, so updating these on the same edge
@@ -1333,5 +1383,19 @@ generate
     end
 endgenerate
 
+endmodule
+`default_nettype wire
+
+module pcm_mlab24 #(parameter int W = 8) (
+    input  wire          clk,
+    input  wire          we,
+    input  wire  [4:0]   wa,
+    input  wire  [W-1:0] wd,
+    input  wire  [4:0]   ra,
+    output logic [W-1:0] rd
+);
+    logic [W-1:0] m [0:23] /* synthesis ramstyle = "MLAB, no_rw_check" */;
+    always_ff @(posedge clk) if (we) m[wa] <= wd;
+    assign rd = m[ra];
 endmodule
 `default_nettype wire
