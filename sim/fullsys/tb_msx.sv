@@ -30,7 +30,12 @@ module tb;
 `include "msx_ports.svh"
 
    //  ── the pack, and the disk ───────────────────────────────────────────────
-   localparam int PACKSZ = 1 << 21;
+   //  8 MB.  It was 2 MB, and a 3-3 turbo R pack is 2.4 MB (ST) or 4.4 MB (GT):
+   //  the tail was dropped in silence, and with it the end of the 3-3 firmware and
+   //  every DEVICE record after it -- RESET_STATUS among them, so port F4 read FFh,
+   //  the BIOS took its warm CPU-switch path at 126Bh before any RAM was mapped,
+   //  and the machine looped RST 38h -> 0C3Ch -> FD9Ah for the whole run.
+   localparam int PACKSZ = 1 << 23;
    logic [7:0] packmem [PACKSZ];
    int         pack_bytes = 0;
    string      pack_file;
@@ -49,6 +54,10 @@ module tb;
          packmem[i] = 8'(c);
          i = i + 1;
          c = $fgetc(fd);
+      end
+      if (c >= 0) begin
+         $display("FATAL: %s is larger than the %0d-byte pack buffer", pack_file, PACKSZ);
+         $finish;
       end
       $fclose(fd);
       pack_bytes = i;
@@ -290,6 +299,8 @@ module tb;
    //  defect in numbers; zero means the guard is a precaution rather than a fix.
    //  Either way the number has to exist before any RTL changes.
    logic load_flight = 1'b0;
+   bit   load_sram_seen = 1'b0;
+   always @(posedge clk21m) if (upl_load_sram) load_sram_seen <= 1'b1;
    int   cpu_sram_writes = 0, flight_sectors = 0;
    int   flight_cycles = 0, bram_writes_in_flight = 0;
    always @(posedge clk21m) begin
@@ -308,6 +319,60 @@ module tb;
             cpu_sram_writes <= cpu_sram_writes + 1;
       end
    end
+
+   //  The counters above only run while the load is in flight, so their result is
+   //  a function of +sdslow, which is a guess at the HPS.  What decides the guard
+   //  is independent of it: T_first, how long after release the CPU first writes
+   //  the SRAM window at all.  If that is shorter than the real load it is a
+   //  defect; if longer, a precaution.  So count everything, from release on, and
+   //  stamp the first write.  A zero total over a long boot says the firmware
+   //  never reached that code on this pack -- the branch trace is the next
+   //  instrument, not a bigger window.
+   int      all_bram_writes = 0, all_sram_writes = 0;
+   realtime t_release = 0, t_first_bram = -1, t_first_sram = -1, t_load_end = -1;
+   logic [15:0] first_sram_pc = 16'd0;
+   logic [26:0] first_sram_addr = 27'd0;
+   logic [7:0]  first_sram_data = 8'd0;
+   logic        load_flight_q = 1'b0;
+   event        sram_first_ev;
+   always @(posedge clk21m) begin
+      load_flight_q <= load_flight;
+      if (load_flight_q && !load_flight && t_load_end < 0) t_load_end = $realtime;
+      if (trace_on && bram_ce && !ram_rnw) begin
+         all_bram_writes <= all_bram_writes + 1;
+         if (t_first_bram < 0) t_first_bram = $realtime;
+         if (sav_idx >= 0 && lookup_SRAM[sav_idx].size > 0
+             && ram_addr >= 27'(lookup_SRAM[sav_idx].addr)
+             && ram_addr <  27'(lookup_SRAM[sav_idx].addr) + 27'(lookup_SRAM[sav_idx].size) * 1024) begin
+            all_sram_writes <= all_sram_writes + 1;
+            if (t_first_sram < 0) begin
+               t_first_sram = $realtime;
+               first_sram_pc = last_fetch; first_sram_addr = ram_addr; first_sram_data = ram_din;
+               $display("sav: FIRST CPU write into the SRAM window at %0.3f ms after release, addr %0d data %02x, last fetch %04x",
+                        (t_first_sram - t_release) / 1e6, ram_addr, ram_din, last_fetch);
+               $fflush;
+               ->sram_first_ev;
+            end
+         end
+      end
+   end
+
+   //  Output is block-buffered to a file; a flushed line every 50 ms keeps a
+   //  partial log readable and shows the run is moving.
+   initial begin
+      wait (trace_on);
+      forever begin
+         #50_000_000;
+         $display("hb: %0.0f ms after release, %0d branch events, BRAM writes %0d, SRAM window %0d, load in flight=%0d",
+                  ($realtime - t_release) / 1e6, nev, all_bram_writes, all_sram_writes,
+                  load_flight);
+         $fflush;
+      end
+   end
+
+   function automatic string ms_since(realtime t);
+      return (t < 0) ? "never" : $sformatf("%0.3f ms", (t - t_release) / 1e6);
+   endfunction
 
    //  Every byte the engine writes into SRAM must be the byte the image held.
    int  sram_bytes = 0, sram_bad = 0;
@@ -461,6 +526,16 @@ module tb;
          end
          $display("upload: %0d of 64 layout entries populated", nz);
       end
+      //  An upload can also end early and quietly: a MOONSOUND device record with
+      //  no inline ROM looks for yrw801 in the FW pack, and with none staged the
+      //  walk stops before the CONFIG record and before load_sram.  MSX_typ then
+      //  stays MSX1, the TMS9918 model answers a turbo R BIOS, and the machine
+      //  sits in an interrupt it never clears.  Say so here, not an hour later.
+      //  (Plain numbers: a ternary between two string literals prints nothing.)
+      $display("upload: MSX_typ=%0d (0=MSX1 1=MSX2)  msx_device=%b  load_sram issued=%0d",
+               int'(bios_config.MSX_typ), msx_device, load_sram_seen);
+      if (sav_bytes > 0 && !load_sram_seen)
+         $display("WARNING: a .sav is mounted but the upload never asked for it");
       if (sav_bytes > 0 && sav_late) begin
          repeat (200) @(posedge clk21m);      // the request is already out by now
          mount_sav();
@@ -468,9 +543,21 @@ module tb;
       repeat (64) @(posedge clk21m);
       reset = 1'b0; reset_ms = 1'b0;
       trace_on = 1;
+      t_release = $realtime;
       $display("reset released at %0t", $time);
-      #(limit_ms * 1_000_000);
-      $display("--- %0d ms elapsed, %0d branch events ---", limit_ms, nev);
+      $fflush;
+      //  Stop at the limit, or +after=<ms> past the first SRAM write (default
+      //  100) -- once T_first exists the rest of the boot is not the question.
+      begin
+         int after_ms;
+         if (!$value$plusargs("after=%d", after_ms)) after_ms = 100;
+         fork
+            #(limit_ms * 1_000_000);
+            begin @(sram_first_ev); #(after_ms * 1_000_000); end
+         join_any
+         disable fork;
+      end
+      $display("--- %0.0f ms elapsed, %0d branch events ---", ($realtime - t_release) / 1e6, nev);
       if (sav_bytes > 0) begin
          for (int i = 0; i < 4; i++)
             $display("sav: lookup_SRAM[%0d] = %0d kB at %0d", i, lookup_SRAM[i].size, lookup_SRAM[i].addr);
@@ -480,6 +567,16 @@ module tb;
                   sd_gap, flight_cycles, real'(flight_cycles) / 21477.272, flight_sectors);
          $display("sav: CPU writes to BRAM during that span: %0d, of which inside the SRAM window: %0d",
                   bram_writes_in_flight, cpu_sram_writes);
+         $display("sav: load ended at %0s after release", ms_since(t_load_end));
+         $display("sav: CPU writes to BRAM since release: %0d, of which inside the SRAM window: %0d",
+                  all_bram_writes, all_sram_writes);
+         $display("sav: first BRAM write %0s, first SRAM-window write %0s after release",
+                  ms_since(t_first_bram), ms_since(t_first_sram));
+         if (t_first_sram >= 0)
+            $display("sav: T_first = %0.3f ms (addr %0d, data %02x, last fetch %04x)",
+                     (t_first_sram - t_release) / 1e6, first_sram_addr, first_sram_data, first_sram_pc);
+         else
+            $display("sav: T_first = none -- no SRAM-window write in this run; read the branch trace");
          if (sav_idx < 0)              $display("RESULT SKIP: this pack allocates no SRAM");
          else if (sectors_served == 0) $display("RESULT FAIL: the .sav was never read");
          else if (sram_bytes == 0)     $display("RESULT FAIL: nothing reached SRAM");
