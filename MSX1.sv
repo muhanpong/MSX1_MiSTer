@@ -180,16 +180,21 @@ assign ADC_BUS  = 'Z;
 //      HPS bridges this at 31250 baud to ALSA on the board (a software synth) or
 //      over the network.  No adapter, nothing plugged in.
 //    * the USER port -- pin 1 out / pin 0 in, the MiSTer MIDI pinout, for a
-//      dongle to a real synthesiser (and, later, MT32-pi through sys/mt32pi.sv,
-//      which also returns its audio over I2S on these pins).
+//      dongle to a real synthesiser, or an MT32-pi (sys/mt32pi.sv, below), which
+//      also returns its audio over I2S on pins 2/4/5 and talks I2C on 0/3.
 //  Receive merges the two: both lines idle HIGH, so an AND passes a start bit
 //  from whichever is connected.  Talk on both at once and they collide -- that
 //  is the user's choice to make, not something to arbitrate here.
+//  The USER half comes from mt32pi, NOT from USER_IN[0] directly: with an MT32-pi
+//  plugged in, pin 0 is its I2C SDA, and reading that as MIDI IN fed the 8251
+//  garbage the moment software enabled the receive interrupt (Illusion City, MIDI
+//  selected: command 37h has RTS, the game never reads E8h, the interrupt never
+//  clears -- the opening never came up with the MT32-pi attached, 2026-09-27).
+//  mt32pi hands back pin 0 when no MT32-pi answers, and its MIDI out pin when one does.
 //  (UART_TXD used to be tied to 0, which holds the line in a permanent break.)
-wire midi_tx, midi_rx;
+wire midi_tx, midi_rx, mt32_midi_rx;
 assign UART_TXD = midi_tx;
-assign midi_rx  = UART_RXD & USER_IN[0];
-assign USER_OUT = {5'b11111, midi_tx, 1'b1};   // [1] = MIDI out, rest idle
+assign midi_rx  = UART_RXD & mt32_midi_rx;
 assign {UART_RTS, UART_DTR} = 0;
 
 assign VGA_F1 = 0;
@@ -201,8 +206,15 @@ assign HDMI_BLACKOUT = 0;
 assign AUDIO_S = 1;
 // Silence audio while paused (CPU is frozen but MoonSound runs on clk_sdram and would
 // otherwise sustain/howl; PSG holds a DC level). Covers OSD pause and DMA save/load.
-assign AUDIO_L = msx_pause ? 16'sd0 : audio_l;
-assign AUDIO_R = msx_pause ? 16'sd0 : audio_r;
+//  The MT32-pi's I2S audio is added 1:1 (user's choice, 2026-09-27) and saturated:
+//  a plain 16-bit add, as the X68000 core does it, wraps a loud peak to the
+//  opposite rail.  Saturation changes nothing below full scale.
+wire signed [15:0] mt32_i2s_l, mt32_i2s_r;
+function automatic signed [15:0] sat16(input signed [16:0] v);
+   sat16 = (v > 17'sd32767) ? 16'sd32767 : (v < -17'sd32768) ? -16'sd32768 : v[15:0];
+endfunction
+assign AUDIO_L = msx_pause ? 16'sd0 : sat16(audio_l + mt32_i2s_l);
+assign AUDIO_R = msx_pause ? 16'sd0 : sat16(audio_r + mt32_i2s_r);
 assign AUDIO_MIX = 0;
 
 assign LED_POWER = 0;
@@ -226,6 +238,16 @@ wire       [1:0] buttons;
 // 49,50,52,53,63 were all that remained.  Widening costs nothing (the upper bits
 // are already generated) and gives the audio trims room.
 wire     [127:0] status;
+//  MT32-pi (sys/mt32pi.sv) -- declared here because the menu mask, the info
+//  channel and the audio sum all read them before the instance further down.
+wire        mt32_use_n    = status[25];       // "Use MT32-pi": 0 = Yes
+wire  [1:0] mt32_info_sel = status[54:53];    // No / Yes / LCD on / LCD auto
+wire  [7:0] mt32_mode, mt32_rom, mt32_sf;
+wire        mt32_newmode, mt32_available;
+wire        mt32_lcd_en, mt32_lcd_pix, mt32_lcd_update;
+wire  [7:0] R_mt, G_mt, B_mt;
+logic [1:0] mt32_av_s = 2'b00;                // mt32_available, into clk21m
+wire        mt32_avail_s = mt32_av_s[1];
 wire      [10:0] ps2_key;
 wire      [24:0] ps2_mouse;
 // hps_io delivers up to 32 buttons, but only the low 16 are worth taking: the
@@ -379,6 +401,26 @@ localparam CONF_STR = {
    //  a device that always answers E8h-EFh changes what MIDI-aware software
    //  does, which is right when the user plugged one in and wrong otherwise.
    "O[24],MIDI,Off,On;",
+   //  MT32-pi page, shown only while one answers on the USER port (menumask 'F' =
+   //  mt32_available; "h" = hide while the bit is 0, H/h BEFORE P -- see the OPL4
+   //  note).  Layout and option lists follow the X68000 core.  Bits: 25 and 54:53
+   //  are holes whose saved value on the user's MSX1.CFG is 0; 120-126 are ABOVE
+   //  the highest bit this core had used (119) -- hps_io and the firmware carry
+   //  128, but that range has not been seen working on the board here yet.  The
+   //  free holes below 119 (49, 50, 55, 59) hold stale 1s in that CFG, and the
+   //  MT32-pi reads Synth/ROM/SoundFont continuously, so a stale 1 there would
+   //  silently reconfigure the user's synth on every boot.
+   "hFP5,MT32-pi;",
+   "hFP5-;",
+   "hFP5O[25],Use MT32-pi,Yes,No;",
+   "hFP5O[54:53],Show Info,No,Yes,LCD-On(non-FB),LCD-Auto(non-FB);",
+   "hFP5-;",
+   "hFP5-,Default Config:;",
+   "hFP5O[120],Synth,Munt,FluidSynth;",
+   "hFP5O[122:121],Munt ROM,MT-32 v1,MT-32 v2,CM-32L;",
+   "hFP5O[125:123],SoundFont,0,1,2,3,4,5,6,7;",
+   "hFP5-;",
+   "hFP5R[126],Reset Hanging Notes;",
    "-;",
    "O[16:15],JoyMega Pad,Off,Port A,Port B,Both;",
    "O[43],Pause on OSD,No,Yes;",
@@ -509,14 +551,18 @@ localparam CONF_STR = {
    //  no branch for I, but picks the selected one with a loop that counts every token
    //  whose first letter is >= 'A' -- so an I in the middle shifts every row below it
    //  by one (20260920d: Enter on "Reset" toggled "Debug overlay").
-   "I,CPU: Z80,CPU: R800;",
+   "I,CPU: Z80,CPU: R800,",
+   //  3..14: the MT32-pi's mode after it changes (Show Info = Yes)
+   "MT32-pi: SoundFont #0,MT32-pi: SoundFont #1,MT32-pi: SoundFont #2,MT32-pi: SoundFont #3,",
+   "MT32-pi: SoundFont #4,MT32-pi: SoundFont #5,MT32-pi: SoundFont #6,MT32-pi: SoundFont #7,",
+   "MT32-pi: MT-32 v1,MT32-pi: MT-32 v2,MT32-pi: CM-32L,MT32-pi: Unknown mode;",
    "V,v",`BUILD_DATE 
 };
 
 //  hps_io takes 16 and all sixteen are live (menu.cpp reads hdmask through
 //  spi_uio_cmd16), so 13/14/15 are free -- see the note on the OPL4 rows for why
 //  the one attempt at 13 failed.  [12:7] = expanded-slot menu masks (H7..HC).
-wire [14:0] status_menumask;
+wire [15:0] status_menumask;
 wire [1:0] sdram_size;
 assign status_menumask[0] = msxConfig.cas_audio_src == CAS_AUDIO_ADC;
 assign status_menumask[1] = fdc_enabled;
@@ -537,6 +583,7 @@ assign status_menumask[11] = mapper_A_hide;        // 'B': no ROM sub-slot -> Ma
 assign status_menumask[12] = mapper_B_hide;        // 'C'
 assign status_menumask[13] = (status[119:118] == 2'd2);   // 'D': Force R800 -> hide the Z80 ladder
 assign status_menumask[14] = (status[119:118] == 2'd1);   // 'E': Force Z80  -> hide the R800 ladder
+assign status_menumask[15] = mt32_avail_s;                 // 'F': an MT32-pi answers -> show its page
 //  Auto shows BOTH: the two ladders are independent knobs and in Auto both are live,
 //  each applying while its own core has the bus.
 assign status_menumask[6] = (lookup_SRAM[0].size + lookup_SRAM[1].size + lookup_SRAM[2].size + lookup_SRAM[3].size == 0)
@@ -751,6 +798,13 @@ logic        info_req = 1'b0;
 logic  [7:0] info;
 logic        cpu_seen = 1'b0;
 logic [24:0] cpu_hold = 25'd0;
+//  Two sources share the one info channel: the CPU notifier and the MT32-pi's mode
+//  change.  Each raises a pending flag and a single sender pulses info_req with at
+//  least one low clock between pulses -- hps_io latches `info` on the rising edge.
+logic        cpu_pend = 1'b0, mt32_pend = 1'b0;
+logic  [7:0] cpu_info;
+logic  [1:0] mt32_nm_s = 2'b00;
+logic        mt32_nm_q = 1'b0;
 always @(posedge clk21m) begin
    info_req <= 1'b0;
    if (use_nz != cpu_seen) begin            // still moving: restart the timer
@@ -759,11 +813,145 @@ always @(posedge clk21m) begin
    end else if (~&cpu_hold) begin
       cpu_hold <= cpu_hold + 25'd1;
       if (&cpu_hold[24:1] & ~cpu_hold[0]) begin   // one pulse, ~1.5 s after settling
-         info     <= use_nz ? 8'd2 : 8'd1;        // "I," field 2 = R800, 1 = Z80
-         info_req <= 1'b1;
+         cpu_info <= use_nz ? 8'd2 : 8'd1;        // "I," field 2 = R800, 1 = Z80
+         cpu_pend <= 1'b1;
+      end
+   end
+
+   //  mt32_newmode / mt32_available live in CLK_AUDIO (mt32pi's I2C slave).
+   //  mode/rom/sf are written on the same edge as the toggle and are stable by
+   //  the time the toggle has crossed two flops.
+   mt32_nm_s <= {mt32_nm_s[0], mt32_newmode};
+   mt32_av_s <= {mt32_av_s[0], mt32_available};
+   mt32_nm_q <= mt32_nm_s[1];
+   if ((mt32_nm_s[1] ^ mt32_nm_q) && mt32_info_sel == 2'd1) mt32_pend <= 1'b1;
+
+   if (~info_req) begin
+      if (cpu_pend) begin
+         info <= cpu_info; info_req <= 1'b1; cpu_pend <= 1'b0;
+      end else if (mt32_pend) begin
+         info <= (mt32_mode == 8'hA2)                      ? 8'd3 + {5'd0, mt32_sf[2:0]} :
+                 (mt32_mode == 8'hA1 && mt32_rom == 8'd0)  ? 8'd11 :
+                 (mt32_mode == 8'hA1 && mt32_rom == 8'd1)  ? 8'd12 :
+                 (mt32_mode == 8'hA1 && mt32_rom == 8'd2)  ? 8'd13 : 8'd14;
+         info_req <= 1'b1; mt32_pend <= 1'b0;
       end
    end
 end
+
+//  -----------------------------------------------------------------------------
+//  -- MT32-pi on the USER port (sys/mt32pi.sv, after the X68000 core)
+//  -----------------------------------------------------------------------------
+//  "Use MT32-pi = No" holds its MIDI line idle rather than disconnecting it, so the
+//  synth stays detected and the page stays in the menu.  With no MT32-pi at all the
+//  mute is 0 and pin 1 is the plain MIDI OUT it always was.
+wire mt32_mute  = mt32_available & mt32_use_n;
+wire mt32_reset = status[126] | reset;        // "Reset Hanging Notes", or the machine's
+
+//  Hanging notes after a machine reset: the MT32-pi keeps sounding whatever was
+//  on when the MSX went away.  ~50 ms after reset is released, bit-bang All Sound
+//  Off (CC 78h) and All Notes Off (CC 7Bh) on all 16 channels into the MT32-pi's
+//  line only.  8N1 at 31250 baud = 687 clk21m per bit (+0.04 %).
+reg        inj_act = 1'b0;
+reg        inj_txd = 1'b1;
+reg  [6:0] inj_idx;
+reg  [3:0] inj_bitn;
+reg  [9:0] inj_div;
+reg [20:0] inj_dly = 21'd0;
+wire [7:0] inj_byte = (inj_idx[2:0] == 3'd0) ? {4'hB, inj_idx[6:3]} :
+                      (inj_idx[2:0] == 3'd1) ? 8'h78 :
+                      (inj_idx[2:0] == 3'd2) ? 8'h00 :
+                      (inj_idx[2:0] == 3'd3) ? {4'hB, inj_idx[6:3]} :
+                      (inj_idx[2:0] == 3'd4) ? 8'h7B :
+                                               8'h00;
+always @(posedge clk21m) begin : mt32_quiet
+   reg old_r;
+   old_r <= reset;
+   if (reset) begin
+      inj_act <= 1'b0;
+      inj_txd <= 1'b1;
+      inj_dly <= 21'd0;
+   end else begin
+      if (old_r) inj_dly <= 21'd1073864;            // 50 ms
+      if (|inj_dly) begin
+         inj_dly <= inj_dly - 1'd1;
+         if (inj_dly == 21'd1) begin
+            inj_act <= 1'b1; inj_idx <= 7'd0; inj_bitn <= 4'd0; inj_div <= 10'd0; inj_txd <= 1'b1;
+         end
+      end
+      if (inj_act) begin
+         if (inj_idx[2:0] >= 3'd6) begin             // 6 bytes per channel, skip 6 and 7
+            inj_idx <= inj_idx + 1'd1;
+            if (&inj_idx) inj_act <= 1'b0;
+         end else begin
+            inj_div <= inj_div + 1'd1;
+            if (inj_div == 10'd686) begin
+               inj_div <= 10'd0;
+               case (inj_bitn)
+                  4'd0:    inj_txd <= 1'b0;
+                  4'd9:    inj_txd <= 1'b1;
+                  default: inj_txd <= inj_byte[inj_bitn - 1'd1];
+               endcase
+               if (inj_bitn == 4'd9) begin
+                  inj_bitn <= 4'd0;
+                  inj_idx  <= inj_idx + 1'd1;
+                  if (&inj_idx) inj_act <= 1'b0;
+               end else inj_bitn <= inj_bitn + 1'd1;
+            end
+         end
+      end else if (!(|inj_dly)) inj_txd <= 1'b1;
+   end
+end
+
+mt32pi mt32pi
+(
+   .CLK_AUDIO(CLK_AUDIO),
+   .CLK_VIDEO(CLK_VIDEO),
+   .CE_PIXEL(CE_PIXEL),
+   .VGA_VS(VGA_VS),
+   .VGA_DE(VGA_DE),
+   .USER_IN(USER_IN),
+   .USER_OUT(USER_OUT),
+   .reset(mt32_reset),
+   .midi_tx((inj_act ? inj_txd : midi_tx) | mt32_mute),
+   .midi_rx(mt32_midi_rx),
+   .mt32_i2s_r(mt32_i2s_r),
+   .mt32_i2s_l(mt32_i2s_l),
+   .mt32_available(mt32_available),
+   .mt32_mode_req(status[120]),
+   .mt32_rom_req(status[122:121]),
+   .mt32_sf_req({5'd0, status[125:123]}),
+   .mt32_mode(mt32_mode),
+   .mt32_rom(mt32_rom),
+   .mt32_sf(mt32_sf),
+   .mt32_newmode(mt32_newmode),
+   .mt32_lcd_en(mt32_lcd_en),
+   .mt32_lcd_pix(mt32_lcd_pix),
+   .mt32_lcd_update(mt32_lcd_update)
+);
+
+//  LCD overlay: always on (Show Info = LCD-On), or for 2 s after each LCD update
+//  (LCD-Auto).  Drawn before video_mixer, so like the X68000's it is meant for
+//  the direct video path ("non-FB").
+reg        mt32_lcd_on = 1'b0;
+reg [25:0] mt32_lcd_to = 26'd0;
+always @(posedge CLK_VIDEO) begin
+   reg old_update;
+   old_update <= mt32_lcd_update;
+   if (|mt32_lcd_to) mt32_lcd_to <= mt32_lcd_to - 1'd1;
+   if (mt32_info_sel == 2'd2)      mt32_lcd_on <= 1'b1;
+   else if (mt32_info_sel != 2'd3) mt32_lcd_on <= 1'b0;
+   else begin
+      if (~|mt32_lcd_to) mt32_lcd_on <= 1'b0;
+      if (old_update ^ mt32_lcd_update) begin
+         mt32_lcd_on <= 1'b1;
+         mt32_lcd_to <= 26'd42954544;            // 2 s of clk21m
+      end
+   end
+end
+wire mt32_lcd = mt32_lcd_on & mt32_lcd_en;
+assign {R_mt, G_mt, B_mt} = mt32_lcd ? {{2{mt32_lcd_pix}}, R_ovl[7:2], {2{mt32_lcd_pix}}, G_ovl[7:2], {2{mt32_lcd_pix}}, B_ovl[7:2]}
+                                     : {R_ovl, G_ovl, B_ovl};
 
 wire [1:0] cpu_sel = status[119:118];        // 0 Auto, 1 Force Z80, 2 Force R800
 reg  [1:0] cpu_applied = 2'd0;
@@ -1195,9 +1383,9 @@ video_mixer #(.GAMMA(0)) video_mixer
    .scandoubler(scandoubler),
    .gamma_bus(gamma_bus),
    .ce_pix(ce_pix),
-   .R(R_ovl),
-   .G(G_ovl),
-   .B(B_ovl),
+   .R(R_mt),
+   .G(G_mt),
+   .B(B_mt),
    .HSync(hsync),
    .VSync(vsync),
    

@@ -1,6 +1,10 @@
 # TODO — MT32-pi on the USER port
 
-Registered 2026-09-27 at the user's request.  Not started.
+Registered 2026-09-27 at the user's request.  **Implemented the same day** (MSX1.sv,
+build 20260927a_mt32pi) -- not yet run on the board.  Open risks: status bits
+120-126 are above the highest this core had used (119), and menumask 'F' is new;
+if either does not take, the page does not show or the Synth/ROM/SoundFont
+requests stay 0 (Munt, MT-32 v1).
 
 ## What it is
 
