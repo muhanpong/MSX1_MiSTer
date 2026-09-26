@@ -10,8 +10,8 @@ cd "$(dirname "$0")/.."
 OUT=${OUT:-/tmp/staleflash_sim}; mkdir -p "$OUT"
 env -u FIX python3 sim/mk_uphold_dut.py > "$OUT/uphold_dut.sv" || exit 1
 verilator --binary --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-DECLFILENAME \
-   -Wno-ENUMVALUE -Wno-UNUSEDSIGNAL -Wno-TIMESCALEMOD -Wno-ASCRANGE -Wno-UNDRIVEN \
-   -Wno-PINMISSING -Wno-CASEINCOMPLETE \
+   -Wno-ENUMVALUE -Wno-UNUSEDSIGNAL -Wno-TIMESCALEMOD -Wno-ASCRANGE \
+   -Wno-CASEINCOMPLETE \
    --top-module tb_staleflash -o tbsf -Mdir "$OUT/v" \
    rtl/package.sv "$OUT/uphold_dut.sv" rtl/flash_dirtysave.sv sim/tb_staleflash.sv \
    > "$OUT/build.log" 2>&1 \
