@@ -9,7 +9,7 @@ XML_DIR_COMP = 'Computer'
 XML_DIR_FW = 'Extension'
 EXTENSIONS  =  ["NONE"          , "ROM"           , "RAM"          , "FDC"              , 
                 "FM_PAC"        , "MEGA_FLASH_ROM", "GM2"          , "EMPTY"            ,
-                "MOONSOUND"     ]
+                "MOONSOUND"     , "MU_PACK"       ]   # index == data_ID_t (rtl/package.sv); append only
 
 MEM_DEVICE  =  ["NONE"          , "ROM"           , "RAM"          , "FDC"               ]
 

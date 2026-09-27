@@ -1,12 +1,16 @@
 typedef enum logic [1:0] {AUTO,PAL,NTSC} video_mode_t;
 typedef enum logic {CAS_AUDIO_FILE,CAS_AUDIO_ADC} cas_audio_src_t;
 typedef enum logic [3:0] {CONFIG_NONE, CONFIG_FDC, CONFIG_SLOT_A, CONFIG_SLOT_B, CONFIG_SLOT_INTERNAL, CONFIG_KBD_LAYOUT, CONFIG_CONFIG, CONFIG_DEVICE} config_typ_t;
-typedef enum logic [2:0] {CART_TYP_ROM, CART_TYP_SCC, CART_TYP_SCC2, CART_TYP_FM_PAC, CART_TYP_MFRSD, CART_TYP_GM2, CART_TYP_FDC, CART_TYP_EMPTY } cart_typ_t;
-typedef enum logic [4:0] {MAPPER_UNUSED, MAPPER_RAM, MAPPER_AUTO, MAPPER_NONE, MAPPER_ASCII8, MAPPER_ASCII16, MAPPER_KONAMI, MAPPER_KONAMI_SCC, MAPPER_KOEI, MAPPER_LINEAR, MAPPER_RTYPE, MAPPER_WIZARDY, /*NEXT INTERNAL*/ MAPPER_FMPAC,MAPPER_OFFSET, MAPPER_MFRSD1,MAPPER_MFRSD2, MAPPER_MFRSD3, MAPPER_GM2, MAPPER_HALNOTE, MAPPER_ASCII16X, MAPPER_YAMANOOTO, MAPPER_NEO8, MAPPER_NEO16, MAPPER_MSXDOS2, MAPPER_TRFDC, MAPPER_PANASONIC} mapper_typ_t;
+//  4 bits since MU-PACK: the 3-bit type was full.  New values go at the END so the
+//  existing ones keep their numbers.
+typedef enum logic [3:0] {CART_TYP_ROM, CART_TYP_SCC, CART_TYP_SCC2, CART_TYP_FM_PAC, CART_TYP_MFRSD, CART_TYP_GM2, CART_TYP_FDC, CART_TYP_EMPTY, CART_TYP_MUPACK } cart_typ_t;
+typedef enum logic [4:0] {MAPPER_UNUSED, MAPPER_RAM, MAPPER_AUTO, MAPPER_NONE, MAPPER_ASCII8, MAPPER_ASCII16, MAPPER_KONAMI, MAPPER_KONAMI_SCC, MAPPER_KOEI, MAPPER_LINEAR, MAPPER_RTYPE, MAPPER_WIZARDY, /*NEXT INTERNAL*/ MAPPER_FMPAC,MAPPER_OFFSET, MAPPER_MFRSD1,MAPPER_MFRSD2, MAPPER_MFRSD3, MAPPER_GM2, MAPPER_HALNOTE, MAPPER_ASCII16X, MAPPER_YAMANOOTO, MAPPER_NEO8, MAPPER_NEO16, MAPPER_MSXDOS2, MAPPER_TRFDC, MAPPER_PANASONIC, MAPPER_MUPACK} mapper_typ_t;
 typedef enum logic [3:0] {DEVICE_NONE, DEVICE_ROM, DEVICE_RAM, DEVICE_FDC,  DEVICE_MFRSD0} device_typ_t;
 // What the user put in one subslot of an EXPANDED cart slot (OSD "Sub-slot n").
 typedef enum logic [2:0] {SUB_NONE, SUB_ROM, SUB_SCC, SUB_SCC2, SUB_FMPAC, SUB_GM2} subslot_dev_t;
-typedef enum logic [3:0] {ROM_NONE, ROM_ROM, ROM_RAM, ROM_FDC, ROM_FMPAC, ROM_MFRSD, ROM_GM2, ROM_EMPTY, ROM_MOONSOUND } data_ID_t;
+//  data_ID_t IS the FW pack's block ID: createMSXpack.py EXTENSIONS lists the same
+//  names in the same order.  Append only.
+typedef enum logic [3:0] {ROM_NONE, ROM_ROM, ROM_RAM, ROM_FDC, ROM_FMPAC, ROM_MFRSD, ROM_GM2, ROM_EMPTY, ROM_MOONSOUND, ROM_MUPACK } data_ID_t;
 typedef enum logic {MSX1,MSX2} MSX_typ_t;
 
 typedef logic [15:0] dev_typ_t;
@@ -26,6 +30,7 @@ parameter DEV_SCC2           = dev_typ_t'(1 << 9);
 parameter DEV_MFRSD2         = dev_typ_t'(1 << 10);
 parameter DEV_FLASH          = dev_typ_t'(1 << 11);
 parameter DEV_PSG            = dev_typ_t'(1 << 12);
+parameter DEV_MUPACK_RAM     = dev_typ_t'(1 << 13);  // MU-PACK subslot 1: its own 256kB memory mapper
 
 package MSX;
     

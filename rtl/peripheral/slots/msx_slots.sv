@@ -217,6 +217,7 @@ wire [26:0] mapper_addr_raw =
                           mapper == MAPPER_FMPAC      ? 27'(fmpac_addr)             :
                           mapper == MAPPER_MFRSD1     ? 27'(mapper_mfrsd1_addr)     :
                           mapper == MAPPER_MFRSD2     ? 27'(mapper_mfrsd2_addr)     :
+                          mapper == MAPPER_MUPACK     ? 27'(mapper_mupack_addr)     :
                           mapper == MAPPER_MFRSD3     ? 27'(mapper_mfrsd3_addr)     :
                           mapper == MAPPER_MSXDOS2    ? 27'(mapper_msxdos2_addr)    :
                           mapper == MAPPER_TRFDC      ? 27'(mapper_msxdos2_addr)    :   // turbo R disk ROM: same banked page 1, WD2793 regs alongside
@@ -233,6 +234,7 @@ wire [26:0] mapper_addr_raw =
 
 assign cpu_din          = mapper_ram_dout                        //IO
                         & mapper_mfrsd2_dout                     //IO
+                        & mapper_mupack_dout                     //IO
                         & slot_mapper_dout                       //UNMAPPED
                         & mapper_mfrsd3_dout                     //UNMAPPED
                         & fm_pac_dout                            //UNMAPPED
@@ -453,6 +455,23 @@ mapper_mfrsd3 mfrsd3
    .flash_rq(mapper_mfrsd3_flash_rq),
    .sd_hold(sd_hold),
    .sd_txdata(d_to_sd),
+   .*
+);
+
+//  MU-PACK's 256kB memory mapper.  Its own instance, not mfrsd2's: every mapper sees
+//  every FCh-FFh write (they are I/O), so sharing registers is not the problem -- the
+//  SIZE is.  mfrsd2 is 512kB (32 blocks) and would send segments 16-31 outside a 256kB
+//  region, where the real cartridge decodes 4 bits and wraps 16 to 0; the read-back's
+//  upper bits (| ~(count-1)) differ as well.  Read-back is enabled wherever the pack
+//  put the cartridge, and ANDs with the others like every mapper here.
+wire [21:0] mapper_mupack_addr;
+wire  [7:0] mapper_mupack_dout;
+msx2_ram_mapper mupack_ram_mapper
+(
+   .en(|((cart_device[0] | cart_device[1]) & DEV_MUPACK_RAM)),
+   .ram_block_count(8'd16),
+   .mapper_dout(mapper_mupack_dout),
+   .mapper_addr(mapper_mupack_addr),
    .*
 );
 
@@ -777,16 +796,23 @@ dev_reset_status dev_reset_status
 );
 
 wire [7:0] d_to_cpu_midi;
+wire midi_gt  = |(msx_device & DEV_MIDI);
+wire midi_mu  = |((cart_device[0] | cart_device[1]) & DEV_MIDI_EXT);
+wire midi_ext = |(msx_device & DEV_MIDI_EXT);
 dev_midi dev_midi
 (
    .cpu_addr(cpu_addr[7:0]),
-   //  Three ways in: the GT's built-in device (pack), the OSD toggle, and the
-   //  E2h-controlled cartridge (pack).  The first two are always on at E8h-EFh;
-   //  only the cartridge alone is the `external` variant.  If a pack declares
-   //  the cartridge AND the user turns MIDI on, the always-on kind wins -- the
-   //  user asked for a device that is there, not one that waits for E2h.
-   .cs(|(msx_device & (DEV_MIDI | DEV_MIDI_EXT)) | midi_io_en),
-   .external(|(msx_device & DEV_MIDI_EXT) & ~|(msx_device & DEV_MIDI) & ~midi_io_en),
+   //  Four ways in, one device (there is one MIDI OUT):
+   //    GT     the FS-A1GT's built-in device (pack DEV_MIDI), always at E8h-EFh;
+   //    MU     MU-PACK in a cart slot (subslot 2 carries DEV_MIDI_EXT): E2h-controlled;
+   //    EXT    an E2h-controlled cartridge the machine pack declares;
+   //    OSD    "MIDI" in the OSD, always at E8h-EFh (MIDI Interface 3).
+   //  GT beats everything: a GT with MU-PACK chosen keeps its own device and E2h
+   //  writes go nowhere.  MU-PACK beats the OSD row, which the menu hides while
+   //  MU-PACK or GT is active.  EXT vs OSD is unchanged: the user asked for a
+   //  device that is there, not one that waits for E2h.
+   .cs(midi_gt | midi_mu | midi_ext | midi_io_en),
+   .external(~midi_gt & (midi_mu | (midi_ext & ~midi_io_en))),
    .dout(d_to_cpu_midi),
    .int_n(midi_int_n),
    .midi_rx(midi_rx),

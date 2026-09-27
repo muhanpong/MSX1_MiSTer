@@ -400,7 +400,12 @@ localparam CONF_STR = {
    //  is declared by its machine pack and does not need this.  Off by default:
    //  a device that always answers E8h-EFh changes what MIDI-aware software
    //  does, which is right when the user plugged one in and wrong otherwise.
-   "O[24],MIDI,Off,On;",
+   //  Hidden while the MIDI is fixed by the machine (menumask 9): the FS-A1GT's
+   //  built-in device (10) or MU-PACK in slot B.  The line that replaces it says
+   //  which, so the row does not just vanish.
+   "H9O[24],MIDI,Off,On;",
+   "h9HA-,MIDI: MU-PACK (Slot B) active;",
+   "hA-,MIDI: FS-A1GT built-in active;",
    //  MT32-pi page, shown only while one answers on the USER port (menumask 'F' =
    //  mt32_available; "h" = hide while the bit is 0, H/h BEFORE P -- see the OPL4
    //  note).  Layout and option lists follow the X68000 core.  Bits: 25 and 54:53
@@ -469,7 +474,7 @@ localparam CONF_STR = {
    // and only THEN looks at 'P' -- there is no second H/D pass afterwards.  The
    // attempt wrote "P2HDO[46]", so p[0] was 'P', the mask loop never ran, and the
    // leftover "HD" corrupted the option parse.  Every working hide in this core puts
-   // H first: "H2P1O[12]", "H9HBP3O[23:20]", "H7H3FS3".  Written "HDP2O[46]" it
+   // H first: "H2P1O[12]", "h7HBP3O[23:20]", "H7H3FS3".  Written "HDP2O[46]" it
    // would work, and menumask 13/14/15 are all still free.
    "P2O[46], OPL4 PCM Mute,Off,On;",
    "P2O[47], OPL4 FM Mute,Off,On;",
@@ -577,8 +582,9 @@ assign status_menumask[5] = sram_A_select_hide;
 // newly-wired flash write path is unreachable from the UI.
 assign status_menumask[7]  = slotA_classic_hide;   // slot A expanded -> hide its one-device line
 assign status_menumask[8]  = slotB_classic_hide;
-assign status_menumask[9]  = subA_page_hide;       // slot A not expanded -> hide "SLOT A sub-slots" page
-assign status_menumask[10] = subB_page_hide;       // 'A' in CONF_STR
+//  9/10 used to be subA/subB_page_hide, which are only ever ~7/~8; the sub-slot
+//  pages now test h7/h8 and these two carry the MIDI rows (assigned below, next to
+//  msx_device).
 assign status_menumask[11] = mapper_A_hide;        // 'B': no ROM sub-slot -> Mapper/SRAM entries hidden
 assign status_menumask[12] = mapper_B_hide;        // 'C'
 assign status_menumask[13] = (status[119:118] == 2'd2);   // 'D': Force R800 -> hide the Z80 ladder
@@ -1049,6 +1055,12 @@ wire  [7:0] d_to_sd, d_from_sd;
 
 dev_typ_t    cart_device[2];
 dev_typ_t    msx_device;
+//  menumask 10 ('A'): the machine pack is an FS-A1GT (declares the built-in MSX-MIDI).
+//  menumask  9 ('9'): the MIDI is fixed by the machine -- GT, or MU-PACK chosen in a
+//  classic (non-expanded) slot B, which is what msx_slots gives the MIDI to.
+wire midi_pack_gt = |(msx_device & DEV_MIDI);
+assign status_menumask[10] = midi_pack_gt;
+assign status_menumask[9]  = midi_pack_gt | (status[31:29] == 3'd5 & ~status[72]);
 wire   [3:0] msx_dev_ref_ram[8];
 mapper_typ_t selected_mapper[2];
 assign selected_mapper[0] = cart_conf[0].selected_mapper;

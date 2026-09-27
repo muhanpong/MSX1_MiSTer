@@ -23,4 +23,10 @@
     <filename>yrw801.rom</filename>
     <SHA1>32760893ce06dbe3930627755ba065cc3d8ec6ca</SHA1>
   </fw>
+  <fw name="MU_PACK">
+    <!-- Bit2/ASCII BM-117 MSX-MIDI ROM, 16kB at 4000h in subslot 2 (openMSX
+         extensions/mu-PACK.xml, sha1 "Confirmed by Retrofan") -->
+    <filename>mu-pack.rom</filename>
+    <SHA1>e88ca790ab58e7709cd99cbbb23ff7d33631b71f</SHA1>
+  </fw>
 </fwConfig>

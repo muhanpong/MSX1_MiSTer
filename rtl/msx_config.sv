@@ -2,17 +2,26 @@ parameter CONF_STR_SLOT_A = {
     "H7H2O[19:17],SLOT A,ROM,SCC,SCC+,FM-PAC,MegaFlashROM SCC+ SD,GameMaster2,FDC,Empty;",
     "H7h2O[19:17],SLOT A,ROM,SCC,SCC+,FM-PAC,MegaFlashROM SCC+ SD,GameMaster2,Empty;"
 };
+//  MU-PACK is entry 5, after Empty, so saved values 0-4 keep their meaning.  Two
+//  lines on the same bits, like slot A's FDC pair: menumask 10 ('A') = the machine
+//  pack is an FS-A1GT, whose built-in MSX-MIDI makes MU-PACK pointless -- there
+//  the entry is not offered at all.  (A 5 saved on an ST and then loaded on a GT
+//  still selects MU-PACK; msx_slots gives the MIDI to the GT's own device and E2h
+//  goes nowhere.)
 parameter CONF_STR_SLOT_B = {
-    "H8O[31:29],SLOT B,ROM,SCC,SCC+,FM-PAC,Empty;"
+    "HAH8O[31:29],SLOT B,ROM,SCC,SCC+,FM-PAC,Empty,MU-PACK;",
+    "hAH8O[31:29],SLOT B,ROM,SCC,SCC+,FM-PAC,Empty;"
 };
 // ---- expanded cart slots -----------------------------------------------------
 // "SLOT x sub-slots: On" turns that cart slot into an EXPANDED slot.  Its classic
 // one-device line above is then hidden (H7 / H8) and a sub-menu page (P3 / P4,
-// shown via H9 / HA) lets the user put a device in each of the four subslots.
+// shown via h7 / h8) lets the user put a device in each of the four subslots.
 // The machinery already existed -- MFRSD fills all four subslots of a cart slot
 // the same way -- only the menu was missing.  Per-slot, independent.
 //
-// Every page ENTRY carries its page's hide mask (H9/HA), not just the page title.
+// Every page ENTRY carries its page's hide mask (h7/h8), not just the page title.
+// Those were H9/HA until MU-PACK: menumask 9/10 were only ever ~7/~8, so the same
+// test reads h7/h8 and bits 9/10 became free for the MIDI rows (MSX1.sv).
 // The firmware's flat mode (backtick key) bypasses the page rule that would
 // otherwise hide them at root (menu.cpp:1976), so an unmasked item leaks to
 // depth 0 for a slot that is not expanded.
@@ -42,25 +51,25 @@ parameter CONF_STR_MAPPER_A    = { "H7HBO[23:20],", MAPPER_LIST };
 parameter CONF_STR_MAPPER_B    = { "H8HCO[35:32],", MAPPER_LIST };
 parameter CONF_STR_SRAM_SIZE_A = { "H7H5O[28:26],", SRAM_SIZE_LIST };
 parameter CONF_STR_SUBSLOT_A = {
-    "H9P3,SLOT A sub-slots;",
-    "H9P3O[75:73],Sub-slot 0,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
-    "H9P3O[78:76],Sub-slot 1,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
-    "H9P3O[81:79],Sub-slot 2,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
-    "H9P3O[84:82],Sub-slot 3,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
-    "H9P3-;",
-    "H9H3P3FS3,ROM,Load,30C00000;",
-    "H9HBP3O[23:20],", MAPPER_LIST,
-    "H9H5P3O[28:26],", SRAM_SIZE_LIST
+    "h7P3,SLOT A sub-slots;",
+    "h7P3O[75:73],Sub-slot 0,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
+    "h7P3O[78:76],Sub-slot 1,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
+    "h7P3O[81:79],Sub-slot 2,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
+    "h7P3O[84:82],Sub-slot 3,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
+    "h7P3-;",
+    "h7H3P3FS3,ROM,Load,30C00000;",
+    "h7HBP3O[23:20],", MAPPER_LIST,
+    "h7H5P3O[28:26],", SRAM_SIZE_LIST
 };
 parameter CONF_STR_SUBSLOT_B = {
-    "HAP4,SLOT B sub-slots;",
-    "HAP4O[87:85],Sub-slot 0,None,ROM,SCC,SCC+,FM-PAC;",
-    "HAP4O[90:88],Sub-slot 1,None,ROM,SCC,SCC+,FM-PAC;",
-    "HAP4O[93:91],Sub-slot 2,None,ROM,SCC,SCC+,FM-PAC;",
-    "HAP4O[96:94],Sub-slot 3,None,ROM,SCC,SCC+,FM-PAC;",
-    "HAP4-;",
-    "HAH4P4F4,ROM,Load,33000000;",       // F not FS -- see the note in MSX1.sv
-    "HAHCP4O[35:32],", MAPPER_LIST
+    "h8P4,SLOT B sub-slots;",
+    "h8P4O[87:85],Sub-slot 0,None,ROM,SCC,SCC+,FM-PAC;",
+    "h8P4O[90:88],Sub-slot 1,None,ROM,SCC,SCC+,FM-PAC;",
+    "h8P4O[93:91],Sub-slot 2,None,ROM,SCC,SCC+,FM-PAC;",
+    "h8P4O[96:94],Sub-slot 3,None,ROM,SCC,SCC+,FM-PAC;",
+    "h8P4-;",
+    "h8H4P4F4,ROM,Load,33000000;",       // F not FS -- see the note in MSX1.sv
+    "h8HCP4O[35:32],", MAPPER_LIST
 };
 
 module msx_config
@@ -106,13 +115,14 @@ assign subB_raw[2] = HPS_status[93:91];
 assign subB_raw[3] = HPS_status[96:94];
 
 cart_typ_t typ_A;
-assign typ_A = cart_typ_t'(slot_A_select < CART_TYP_FDC  ? slot_A_select   :
+assign typ_A = cart_typ_t'(slot_A_select < CART_TYP_FDC  ? 4'(slot_A_select) :
                            bios_config.use_FDC           ? CART_TYP_EMPTY  :
                            slot_A_select == CART_TYP_FDC ? CART_TYP_FDC    :
                                                            CART_TYP_EMPTY );
 
 assign cart_conf[0].typ                = typ_A;
-assign cart_conf[1].typ                = slot_B_select < CART_TYP_MFRSD ? cart_typ_t'(slot_B_select) : CART_TYP_EMPTY;
+assign cart_conf[1].typ                = slot_B_select < 3'd4 ? cart_typ_t'(slot_B_select) :
+                                         slot_B_select == 3'd5 ? CART_TYP_MUPACK      : CART_TYP_EMPTY;
 
 // ---- sub-slot device selection, with the rules the RTL needs ---------------------
 // Walk subslots 0..3; the FIRST occurrence wins, later conflicting ones become None:
@@ -211,8 +221,8 @@ assign sram_A_select_hide = ~romA_present | mapper_A_select == 4'd0 | mapper_A_s
 assign fdc_enabled = bios_config.use_FDC | (~expanded_A & cart_conf[0].typ == CART_TYP_FDC);
 
 
-logic  [44:0] lastConfig;
-wire [44:0] act_config = {cart_conf[1].typ, cart_conf[0].typ, cart_conf[0].selected_mapper, cart_conf[1].selected_mapper, sram_A_select,
+logic  [46:0] lastConfig;
+wire [46:0] act_config = {cart_conf[1].typ, cart_conf[0].typ, cart_conf[0].selected_mapper, cart_conf[1].selected_mapper, sram_A_select,
                           expanded_A, expanded_B, subA[0], subA[1], subA[2], subA[3], subB[0], subB[1], subB[2], subB[3]};
 
 always @(posedge clk) begin
