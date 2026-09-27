@@ -33,6 +33,7 @@ with discriminating evidence, a harness proven to have run, and a stated scope.
 
 origin/nextz80 = fb6995a (pushed).  origin/mupack = 8443c50 (not merged).
 origin/pcm-mlab = msx1-audit's PCM MLAB work (not merged, not cross-checked here).
+*(Superseded later the same day -- see §7.)*
 
 ## 2. MIDI — what is known
 
@@ -105,3 +106,32 @@ origin/pcm-mlab = msx1-audit's PCM MLAB work (not merged, not cross-checked here
 * "MULUB/MULUW and SendUserFile findings": waiting to push 23 local commits incl. a72ed9e;
   their fullsys/tb_msx.sv edits and msx1-handoff's uncommitted tb_msx.sv/stubs.sv overlap
   e6ea084.
+
+## 7. Update, later on 2026-09-27 (stable_Turbo-R, after the handover)
+
+* **Merged and pushed to nextz80**: mupack (fast-forward, feeecdc), then the
+  review doc (b0af284), `sim/run_reset_width.sh` (846586e: rst_hold must stay in
+  6..63 clk21m -- the MLAB sweep's 24 clk_sdram from below, the save benches'
+  63 from above; `--selftest` makes two wrong copies fail), then **pcm-mlab as a
+  merge commit f9294c8**.  pcm-mlab was re-run on this PC first: golden 8/8,
+  lockstep 64/64, `run_stress.sh` PASS (193 logs, mutants 4x32/32 fail,
+  reset_len=8 fails, event counts equal to the README's).  Not built yet.
+* **The MLAB engine did reach hardware once**: `MSX1_20260926_v2b.rbf` (built on
+  msx1-audit's machine, md5 e1310957, copy in `~/Downloads`), sent by SendUserFile
+  and later deleted from the board by the user.  That tree still had `midi_int_n`
+  undriven and USER_IN[0] read as MIDI IN; the user reports nothing wrong beyond
+  MIDI-IN.  Board identity rests on the Downloads md5, so: hardware observation,
+  not an A/B.
+* **Hardware confirmed by the user (27c_mupack, 27a_mt32pi)**: GT pack shows
+  "FS-A1GT built-in active" and slot B cannot take MU-PACK (§3 item, review plan
+  #9); every MT32-pi page function (status bits 120-126, LCD overlay, info popup,
+  hanging-note quiet); the remaining MIDI note loss was in MidiLink's mt32d and
+  the user has fixed it there (details not recorded here).
+* **msx1-audit handed over to msx1-audit2** (pcm-mlab, mupack, S3 flash save,
+  reset-width guard).  Read "msx1-audit" in §4/§6 as msx1-audit2.  They own the
+  `run_neg.sh` defect (no compile step; mutants m1-m3 no longer build against the
+  new TB) and `tb_mapper16.sv`; both wait on their user's push approval.
+* Still open: review plan #1/#7/#8/#10 on the board; full build of f9294c8 (on
+  the user's "해"); the uncommitted `docs/aso_bgm_opl2_alias_20260915.md` edit
+  left by the previous session.
+

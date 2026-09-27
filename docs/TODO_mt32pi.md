@@ -1,7 +1,9 @@
 # TODO — MT32-pi on the USER port
 
 Registered 2026-09-27 at the user's request.  **Implemented the same day** (MSX1.sv,
-build 20260927a_mt32pi) -- not yet run on the board.  Open risks: status bits
+build 20260927a_mt32pi).  **Confirmed on the board by the user, later on 2026-09-27:**
+the page shows, status bits 120-126 reach the Pi, LCD overlay, info popup and the
+hanging-note quiet all work.  What follows is the record as it was written.  Open risks: status bits
 120-126 are above the highest this core had used (119), and menumask 'F' is new;
 if either does not take, the page does not show or the Synth/ROM/SoundFont
 requests stay 0 (Munt, MT-32 v1).
