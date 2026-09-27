@@ -73,3 +73,8 @@ openMSX `YMF262.cc` 전수 대조 → 차이 후보를 **양쪽 실측**(RTL=ver
 `MSX1_20260916a_opl2alias.rbf` (dedaa2a, md5 7b9684bfdc51, buildgate PASS setup +0.402 / hold +0.089, ALM 32,327 · M10K 396):
 **ASO BGM 출력 확인**(사용자). 회귀 확인(사용자): GoFigure 3.58 정상 · Neon Horizon 고클럭 OPL4 FM/PCM 정상 · Z80BENCH 터보 정상 · vgmplay OPL4 정상.
 별건(회귀 아님, 기존 터보 코어에서도 동일): **GoFigure 고클럭에서 OPL4 음이 듬성듬성**, 피치는 정상.
+
+## openMSX 파형 대조 (20260916, `research/aso_bgm/wavecmp/REPORT.md`)
+수정본: 레지스터 0/40 불일치, 빠진 음 없음, 채널 env 상관 0.95–1.00. 수정 전: ch7–9 소실(대조군 분리).
+잔여: **FM 음높이 +7 cents** — RTL OPL3 레이트 14.318M/288=49716 Hz vs openMSX YMF278 33.8688M/684=49516 Hz(YMF262.cc:1436).
+FB=7·CNT=0 채널 DC 차이(원인 미확정), 레벨 −3.5 dB 일정(보고만).
