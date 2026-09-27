@@ -57,7 +57,11 @@ verilator --binary --timing --public-flat-rw \
    "+incdir+$GEN" $FILES "$GEN/sdram_sim.sv" sim/fullsys/tb_msx.sv \
    > "$OUT/build.log" 2>&1 || { echo "RESULT FAIL: build"; grep -E '%Error' "$OUT/build.log" | head; exit 1; }
 
-ST="$PACKS/Panasonic FS-A1ST.MSX"; GT="$PACKS/Panasonic FS-A1GT.MSX"
+#  The DOS2 packs: the DOS1 turbo R packs were retired in 0295165 (NotWorking/),
+#  so a freshly built pack tree no longer has "Panasonic FS-A1ST.MSX".  Nothing
+#  below looks at slot 3 (where DOS2 lives): the checks are slot 2 and the MIDI.
+ST="$PACKS/Panasonic FS-A1ST DOS2.MSX"; GT="$PACKS/Panasonic FS-A1GT DOS2.MSX"
+for f in "$ST" "$GT"; do [ -s "$f" ] || { echo "RESULT FAIL: pack missing: $f"; exit 2; }; done
 "$OUT/v/tbmsx" "+pack=$ST" +fwpack="$OUT/fw_mu.bin"   +slotb=8 +ms=1 > "$OUT/S1.log" 2>&1 &
 "$OUT/v/tbmsx" "+pack=$ST" +fwpack="$OUT/fw_mu.bin"   +slotb=0 +ms=1 > "$OUT/S2.log" 2>&1 &
 "$OUT/v/tbmsx" "+pack=$ST" +fwpack="$OUT/fw_nomu.bin" +slotb=8 +ms=1 > "$OUT/S3.log" 2>&1 &
