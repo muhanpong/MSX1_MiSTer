@@ -23,6 +23,7 @@
 import ymf278_pcm_alu_pkg::*;
 import ymf278_pcm_eg_pkg::*;
 
+// MUTANT nopend: a CPU write colliding with a backfill to another slot is dropped
 module ymf278_pcm_engine2 #(
     parameter int CLK_HZ       = 85909090,
     parameter int SDRAM_RD_LAT = 6
@@ -1105,7 +1106,7 @@ wire cpu_col = wr_slot_reg && bf_we[wr_field];
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) pend_v <= 1'b0;
     else begin
-        pend_v <= cpu_col && (wr_snum != hf_cur_slot);
+        pend_v <= 1'b0;   // MUTANT
         pend_f <= wr_field;
         pend_s <= wr_snum;
         pend_d <= enc_byte(wr_field, reg_data);

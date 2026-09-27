@@ -23,6 +23,7 @@
 import ymf278_pcm_alu_pkg::*;
 import ymf278_pcm_eg_pkg::*;
 
+// MUTANT noclr: reset sweep writes nothing
 module ymf278_pcm_engine2 #(
     parameter int CLK_HZ       = 85909090,
     parameter int SDRAM_RD_LAT = 6
@@ -1123,7 +1124,7 @@ always_comb begin
         fwa[k] = wr_snum;
         fwd[k] = enc_byte(4'(k), reg_data);
         if (clr_run) begin
-            fwe[k] = 1'b1; fwa[k] = clr_idx; fwd[k] = 8'd0;
+            fwe[k] = 1'b0; fwa[k] = clr_idx; fwd[k] = 8'd0;   // MUTANT
         end else if (bf_we[k]) begin
             fwe[k] = 1'b1; fwa[k] = hf_cur_slot; fwd[k] = hf_buf[k + 2];
         end else if (pend_v && pend_f == 4'(k)) begin

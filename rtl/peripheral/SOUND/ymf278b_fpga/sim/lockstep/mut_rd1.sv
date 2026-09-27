@@ -23,6 +23,7 @@
 import ymf278_pcm_alu_pkg::*;
 import ymf278_pcm_eg_pkg::*;
 
+// MUTANT rd1: register-file read one cycle late
 module ymf278_pcm_engine2 #(
     parameter int CLK_HZ       = 85909090,
     parameter int SDRAM_RD_LAT = 6
@@ -1396,6 +1397,8 @@ module pcm_mlab24 #(parameter int W = 8) (
 );
     logic [W-1:0] m [0:23] /* synthesis ramstyle = "MLAB, no_rw_check" */;
     always_ff @(posedge clk) if (we) m[wa] <= wd;
-    assign rd = m[ra];
+    logic [4:0] ra_q;
+    always_ff @(posedge clk) ra_q <= ra;
+    assign rd = m[ra_q];   // MUTANT
 endmodule
 `default_nettype wire

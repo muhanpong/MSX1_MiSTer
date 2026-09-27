@@ -215,13 +215,13 @@ module tb_lockstep_pcm;
 
     // ── lockstep: every engine output, every cycle ──
     longint cyc = 0, mism = 0, hdr_path = 0, dyn_wr = 0, resets = 0;
-    int reset_at = -1, reset_len = 7;
-    initial void'($value$plusargs("reset_at=%d", reset_at));
+    int reset_at = -1, reset_len = 256, reset_every = 0;   // hardware holds reset_ms >= 252 clk
+    initial begin void'($value$plusargs("reset_at=%d", reset_at)); void'($value$plusargs("reset_len=%d", reset_len)); end
     always @(posedge clk) cyc <= cyc + 1;
     logic ls_run = 0;
     always @(posedge clk) if (rst_n) ls_run <= 1;
     always @(negedge clk) if (rst_n && ls_run) begin
-        if ({n_cpu_mem_rd_data, n_cpu_mem_busy, n_reg02_readback, n_mem_addr, n_mem_rd_en, n_mem_wr_en, n_mem_wr_data, n_pcm_left, n_pcm_right, n_pcm_valid, n_dbg_wavetblhdr, n_dbg_hf_pending, n_dbg_slot0_wave, n_dbg_slot0_fn, n_dbg_slot0_oct, n_dbg_slot0_prvb, n_dbg_slot0_keyon, n_dbg_slot0_damp, n_dbg_slot0_pan, n_dbg_slot0_ar, n_dbg_slot0_d1r, n_dbg_slot5_wave, n_dbg_slot23_wave, n_dbg_slot0_hdr_start, n_dbg_slot0_hdr_loop, n_dbg_slot0_hdr_end, n_fm_mix_l_o, n_fm_mix_r_o, n_dbg_slot0_hdr_bits, n_dbg_slot0_dyn_pos, n_dbg_slot0_dyn_stepPtr, n_dbg_slot0_dyn_env_vol, n_dbg_slot0_dyn_env_state, n_dbg_stage_b_bytes_done, n_dbg_stage_advance, n_dbg_stage_b_valid, n_dbg_slot_keyon, n_dbg_slot_active, n_dbg_slot_envlive} !== {r_cpu_mem_rd_data, r_cpu_mem_busy, r_reg02_readback, r_mem_addr, r_mem_rd_en, r_mem_wr_en, r_mem_wr_data, r_pcm_left, r_pcm_right, r_pcm_valid, r_dbg_wavetblhdr, r_dbg_hf_pending, r_dbg_slot0_wave, r_dbg_slot0_fn, r_dbg_slot0_oct, r_dbg_slot0_prvb, r_dbg_slot0_keyon, r_dbg_slot0_damp, r_dbg_slot0_pan, r_dbg_slot0_ar, r_dbg_slot0_d1r, r_dbg_slot5_wave, r_dbg_slot23_wave, r_dbg_slot0_hdr_start, r_dbg_slot0_hdr_loop, r_dbg_slot0_hdr_end, r_fm_mix_l_o, r_fm_mix_r_o, r_dbg_slot0_hdr_bits, r_dbg_slot0_dyn_pos, r_dbg_slot0_dyn_stepPtr, r_dbg_slot0_dyn_env_vol, r_dbg_slot0_dyn_env_state, r_dbg_stage_b_bytes_done, r_dbg_stage_advance, r_dbg_stage_b_valid, r_dbg_slot_keyon, r_dbg_slot_active, r_dbg_slot_envlive}) begin
+        if ({n_cpu_mem_rd_data, n_cpu_mem_busy, n_reg02_readback, n_mem_addr, n_mem_rd_en, n_mem_wr_en, n_mem_wr_data, n_pcm_left, n_pcm_right, n_pcm_valid, n_dbg_wavetblhdr, n_dbg_hf_pending, n_fm_mix_l_o, n_fm_mix_r_o, n_dbg_stage_b_bytes_done, n_dbg_stage_advance, n_dbg_stage_b_valid, n_dbg_slot_keyon, n_dbg_slot_active, n_dbg_slot_envlive} !== {r_cpu_mem_rd_data, r_cpu_mem_busy, r_reg02_readback, r_mem_addr, r_mem_rd_en, r_mem_wr_en, r_mem_wr_data, r_pcm_left, r_pcm_right, r_pcm_valid, r_dbg_wavetblhdr, r_dbg_hf_pending, r_fm_mix_l_o, r_fm_mix_r_o, r_dbg_stage_b_bytes_done, r_dbg_stage_advance, r_dbg_stage_b_valid, r_dbg_slot_keyon, r_dbg_slot_active, r_dbg_slot_envlive}) begin
             mism = mism + 1;
             if (mism <= 8) begin
                 $display("MISMATCH cyc=%0d", cyc);
@@ -276,13 +276,37 @@ module tb_lockstep_pcm;
     end
     // warm reset mid-run
     initial begin
+        void'($value$plusargs("reset_every=%d", reset_every));
         if (reset_at > 0) begin
             wait (cyc == reset_at);
-            @(negedge clk); rst_n = 0; resets++;
-            repeat (reset_len) @(negedge clk);
-            rst_n = 1;
+            do begin
+                @(negedge clk); rst_n = 0; resets++;
+                repeat (reset_len) @(negedge clk);
+                rst_n = 1;
+                if (reset_every > 0) repeat (reset_every) @(negedge clk);
+            end while (reset_every > 0);
         end
     end
+
+    // coverage: slot-register write vs dispatch read of the SAME slot
+    longint raw_same = 0, raw_win = 0, raw_act = 0, wr_inflight = 0, n_pend = 0, n_col_same = 0, n_wr = 0;
+    logic [4:0] lw_slot = 0; longint lw_cyc = -100;
+    always @(posedge clk) if (rst_n) begin
+        if (dut.wr_slot_reg) begin
+            n_wr <= n_wr + 1;
+            lw_slot <= dut.wr_snum; lw_cyc <= cyc;
+            if (dut.sl_state != dut.SL_IDLE && dut.w_slot == dut.wr_snum) wr_inflight <= wr_inflight + 1;
+        end
+        if (dut.wr_slot_reg && dut.dispatch_now && dut.wr_snum == dut.ld_slot) raw_same <= raw_same + 1;
+        if (dut.dispatch_now && dut.ld_slot == lw_slot && cyc - lw_cyc >= 1 && cyc - lw_cyc <= 4) begin
+            raw_win <= raw_win + 1;
+            if (dut.ld_run) raw_act <= raw_act + 1;
+        end
+        if (dut.pend_v) n_pend <= n_pend + 1;
+        if (dut.cpu_col && dut.wr_snum == dut.hf_cur_slot) n_col_same <= n_col_same + 1;
+    end
+    final $display("COVERAGE slot_wr=%0d wr_same_cycle_as_dispatch=%0d dispatch_1to4_after_wr=%0d of_which_active=%0d wr_to_inflight_slot=%0d deferred_cpu_wr=%0d col_same_slot=%0d", n_wr, raw_same, raw_win, raw_act, wr_inflight, n_pend, n_col_same);
+
     final $display("LOCKSTEP cycles=%0d mismatches=%0d hdr_store_then_stall_read=%0d dyn_writes=%0d resets=%0d", cyc, mism, hdr_path, dyn_wr, resets);
 
 
@@ -323,7 +347,7 @@ module tb_lockstep_pcm;
 
         fd_out = $fopen(out_f, "w");
 
-        repeat (8) @(negedge clk);
+        repeat (300) @(negedge clk);   // power-on: reset_ms is held >= 252 clk
         rst_n = 1;
         repeat (8) @(negedge clk);
     end
@@ -346,10 +370,14 @@ module tb_lockstep_pcm;
         end
     end
 
+    bit wr_lock = 0;
     task automatic do_write(input [7:0] a, input [7:0] d);
+        while (wr_lock) @(negedge clk);
+        wr_lock = 1;
         @(negedge clk); reg_addr = a; reg_data = d; reg_wr = 1;
         @(negedge clk); reg_wr = 0;
         @(negedge clk);
+        wr_lock = 0;
     endtask
 
     // frame-0 writes: apply before the engine leaves reset-adjacent frame 0
@@ -362,6 +390,69 @@ module tb_lockstep_pcm;
         end
     end
 
+    // ── directed stress: slot-register writes aimed at the read/write races ──
+    int stress = 0, st_seed = 1;
+    longint st_a = 0, st_b = 0, st_c_same = 0, st_c_other = 0, st_wave = 0;
+    initial begin void'($value$plusargs("stress=%d", stress)); void'($value$plusargs("seed=%d", st_seed)); void'($urandom(st_seed)); end
+    function automatic [7:0] sreg(input int f, input int sl); return 8'(8 + 24*f + sl); endfunction
+    always @(negedge clk) if (stress != 0 && running && !wr_lock && cur_frame >= 20) begin
+        int r, f, sl;
+        r = $urandom % 1000;
+        // C: header backfill is being written this cycle -> collide on fields 5..9
+        if (dut.hf_store_now && r < 700) begin
+            f  = 5 + ($urandom % 5);
+            sl = (r < 350) ? int'(dut.hf_cur_slot) : (int'(dut.hf_cur_slot) + 1 + $urandom % 23) % 24;
+            reg_addr = sreg(f, sl); reg_data = $urandom; reg_wr = 1; wr_lock = 1;
+            if (sl == dut.hf_cur_slot) st_c_same++; else st_c_other++;
+            @(negedge clk); reg_wr = 0; wr_lock = 0;
+        end
+        // A: dispatch reads cur_slot at the coming edge -> write the same slot now
+        else if (dut.sl_state == dut.SL_IDLE && dut.cur_slot < 24 && r < 8) begin
+            f  = 1 + ($urandom % 9);
+            if (f == 4) f = 3;                     // keep keyon mostly stable
+            reg_addr = sreg(f, dut.cur_slot); reg_data = $urandom; reg_wr = 1; wr_lock = 1; st_a++;
+            @(negedge clk); reg_wr = 0; wr_lock = 0;
+        end
+        // B: the NEXT slot to dispatch, a few cycles ahead
+        else if (dut.sl_state != dut.SL_IDLE && dut.cur_slot < 23 && r < 4) begin
+            f  = 1 + ($urandom % 9);
+            if (f == 4) f = 6;
+            reg_addr = sreg(f, dut.cur_slot); reg_data = $urandom; reg_wr = 1; wr_lock = 1; st_b++;
+            @(negedge clk); reg_wr = 0; wr_lock = 0;
+        end
+        // occasional wave-number write (+keyon) to keep header fetches coming
+        else if (r >= 995 && ($urandom % 8) == 0) begin
+            sl = $urandom % 24;
+            reg_addr = sreg(0, sl); reg_data = $urandom % 64; reg_wr = 1; wr_lock = 1; st_wave++;
+            @(negedge clk); reg_wr = 0;
+            @(negedge clk); reg_addr = sreg(6, sl); reg_data = 8'hF4; reg_wr = 1;   // fast attack
+            @(negedge clk); reg_wr = 0;
+            @(negedge clk); reg_addr = sreg(4, sl); reg_data = 8'h80 | ($urandom % 16); reg_wr = 1;  // key on
+            @(negedge clk); reg_wr = 0; wr_lock = 0;
+        end
+    end
+    // E: burst of writes right after a (warm) reset releases
+    longint st_e = 0, act_at_reset = 0, n_resets_active = 0;
+    logic rst_q = 0; longint rel_cyc = -1000;
+    logic [23:0] act_prev = 0;
+    always @(posedge clk) begin
+        rst_q <= rst_n;
+        if (rst_n) act_prev <= dut.dbg_slot_active;
+        if (rst_q && !rst_n && resets > 0) begin
+            act_at_reset += $countones(act_prev);
+            if (act_prev != 0) n_resets_active++;
+        end
+        if (!rst_q && rst_n) rel_cyc = cyc;
+    end
+    always @(negedge clk) if (stress != 0 && rst_n && !wr_lock && resets > 0
+                              && cyc - rel_cyc >= 1 && cyc - rel_cyc <= 40 && ($urandom % 3) == 0) begin
+        int f, sl;
+        f = 1 + ($urandom % 9); sl = $urandom % 24;
+        reg_addr = sreg(f, sl); reg_data = (f == 4) ? (8'h80 | $urandom % 16) : $urandom; reg_wr = 1; wr_lock = 1; st_e++;
+        @(negedge clk); reg_wr = 0; wr_lock = 0;
+    end
+    final if (stress != 0) $display("RESETCOV resets=%0d resets_with_active_slots=%0d active_slots_at_reset=%0d E_writes_after_release=%0d", resets, n_resets_active, act_at_reset, st_e);
+    final if (stress != 0) $display("STRESS A_same_edge=%0d B_ahead=%0d C_bf_same=%0d C_bf_other=%0d wave=%0d", st_a, st_b, st_c_same, st_c_other, st_wave);
 `ifdef DBG_XTRACE
     // X-origin tracer: dump slot pipeline values while the accumulator is X
     always @(posedge clk) begin

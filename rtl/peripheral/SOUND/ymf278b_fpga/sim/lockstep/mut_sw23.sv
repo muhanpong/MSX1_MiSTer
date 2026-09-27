@@ -23,6 +23,7 @@
 import ymf278_pcm_alu_pkg::*;
 import ymf278_pcm_eg_pkg::*;
 
+// MUTANT sw23: reset sweep wraps at 22, slot 23 never cleared
 module ymf278_pcm_engine2 #(
     parameter int CLK_HZ       = 85909090,
     parameter int SDRAM_RD_LAT = 6
@@ -1082,7 +1083,7 @@ end
 // checks both sides: +reset_len=256 must match, +reset_len=8 must MISMATCH.
 assign clr_run = ~rst_n;
 logic [4:0] clr_idx = 5'd0;
-always_ff @(posedge clk) clr_idx <= (clr_idx == 5'd23) ? 5'd0 : clr_idx + 5'd1;
+always_ff @(posedge clk) clr_idx <= (clr_idx == 5'd22) ? 5'd0 : clr_idx + 5'd1;   // MUTANT
 
 // Backfill (header bytes 7..11 -> fields 5..9) and a CPU write can hit the same
 // field memory in the same cycle.  Same slot: backfill wins (as before).

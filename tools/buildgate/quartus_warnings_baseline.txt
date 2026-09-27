@@ -118,5 +118,3 @@ PORT sys_umuldiv:ar_muldiv :: remainder
 PORT sysmem_lite:sysmem :: reset_hps_warm_req
 W10030 Net "flash_total_sectors" at nvram_backup.sv has no driver or initial value, using a default initial value '0'
 W10034 Output port "dbg_pcm_base_set" at ymf278b_top.sv has no driver
-W10999 Verilog HDL warning at ymf278_pcm_engine2.sv: can't infer memory for variable 'ram_dyn_m' with attribute '"MLAB, no_rw_check"'.
-W10999 Verilog HDL warning at ymf278_pcm_engine2.sv: can't infer memory for variable 'ram_header_m' with attribute '"MLAB, no_rw_check"'.
