@@ -808,7 +808,10 @@ assign                                        {mapper             , mem_device  
    // 256kB memory mapper (16 blocks; the mapper keeps only the low 4 segment bits), subslot 2
    // is mu-pack.rom at 4000h from the FW pack plus the E2h-controlled MSX-MIDI.  Subslots 0
    // and 3 stay empty; an occupied subslot != 0 is what expands the slot (see the walk).
-   typ == CART_TYP_MUPACK & subslot == 2'd1 ? {MAPPER_MUPACK      , DEVICE_NONE   , ROM_RAM            , 8'hAA , 8'h00 , 8'd0               , 8'd16   ,   DEV_MUPACK_RAM       } :
+   // DEV_MIDI_EXT is on BOTH rows: the ROM row is dropped when the FW pack has no
+   // MU_PACK, and the MIDI must survive that -- MIDRY /I5 drives the 8251 through E2h
+   // with no ROM at all.  The mapper row always loads (RAM, no firmware needed).
+   typ == CART_TYP_MUPACK & subslot == 2'd1 ? {MAPPER_MUPACK      , DEVICE_NONE   , ROM_RAM            , 8'hAA , 8'h00 , 8'd0               , 8'd16   ,   DEV_MUPACK_RAM | DEV_MIDI_EXT } :
    typ == CART_TYP_MUPACK & subslot == 2'd2 ? {MAPPER_NONE        , DEVICE_NONE   , ROM_MUPACK         , 8'h08 , 8'h00 , 8'd0               , 8'd0    ,   DEV_MIDI_EXT         } :
    /*typ == CART_TYP_EMPTY*/                  {MAPPER_UNUSED      , DEVICE_NONE   , ROM_NONE           , 8'h00 , 8'h00 , 8'd0               , 8'd0    ,   DEV_NONE             } ;
 

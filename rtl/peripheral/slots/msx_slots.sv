@@ -808,7 +808,12 @@ dev_midi dev_midi
    //    EXT    an E2h-controlled cartridge the machine pack declares;
    //    OSD    "MIDI" in the OSD, always at E8h-EFh (MIDI Interface 3).
    //  GT beats everything: a GT with MU-PACK chosen keeps its own device and E2h
-   //  writes go nowhere.  MU-PACK beats the OSD row, which the menu hides while
+   //  writes go nowhere.  Slot B still carries MU-PACK's ROM and mapper then (a 5
+   //  saved on an ST, loaded on a GT; the menu cannot pick it on a GT).  Emptying
+   //  slot B instead is not possible in one upload: the pack walks its SLOT records
+   //  before its DEVICE records, so when slot B is filled the upload does not yet
+   //  know the machine is a GT, and msx_device clears at every upload start --
+   //  driving a second upload from it reloads forever.  Accepted as is.  MU-PACK beats the OSD row, which the menu hides while
    //  MU-PACK or GT is active.  EXT vs OSD is unchanged: the user asked for a
    //  device that is there, not one that waits for E2h.
    .cs(midi_gt | midi_mu | midi_ext | midi_io_en),

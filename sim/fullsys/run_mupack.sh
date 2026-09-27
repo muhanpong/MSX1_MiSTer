@@ -14,6 +14,8 @@
 #    S2  slot 2 not expanded and empty; no MIDI device
 #    S3  2-1 mapper present, 2-2 empty, the pack otherwise identical to S1 outside
 #        slot 2 (no silent loss of later records), MSX_typ=MSX2, .sav requested
+#        -- and the MIDI is still there (cs=1, E2h-controlled, closed): MIDRY /I5
+#        needs no ROM
 #    S4  MIDI is the GT's built-in one (external=0) even with MU-PACK chosen
 #
 #  The mu-pack.rom used here is SYNTHETIC (16 kB, "AB" with INIT=0, "BIT2MIDI" at
@@ -82,6 +84,7 @@ ck "S3 2-2 empty (no MU_PACK in the FW pack)"     "has S3 '(slot 2-2 page 1 empt
 ck "S1 loaded the pack outside slot 2 (>= 8 entries)" "[ \$(outside2 S1 | wc -l) -ge 8 ]"
 ck "S3 rest of the pack = S1 outside slot 2"      "diff <(outside2 S1) <(outside2 S3) > /dev/null"
 ck "S3 CONFIG parsed and .sav requested"          "has S3 'MSX_typ=1' && has S3 'load_sram issued=1'"
+ck "S3 MIDI survives the missing ROM"             "has S3 '-> cs=1 external=1 ext_ctl=81'"
 ck "S4 GT's own MIDI wins (external=0)"           "has S4 'gt=1' && has S4 '-> cs=1 external=0'"
 echo "════════════════════════════════"
 [ $FAIL -eq 0 ] && echo "MU-PACK FULLSYS: PASS" || echo "RESULT FAIL: MU-PACK FULLSYS"
