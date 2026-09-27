@@ -131,7 +131,12 @@ origin/pcm-mlab = msx1-audit's PCM MLAB work (not merged, not cross-checked here
   reset-width guard).  Read "msx1-audit" in §4/§6 as msx1-audit2.  They own the
   `run_neg.sh` defect (no compile step; mutants m1-m3 no longer build against the
   new TB) and `tb_mapper16.sv`; both wait on their user's push approval.
-* Still open: review plan #1/#7/#8/#10 on the board; full build of f9294c8 (on
-  the user's "해"); the uncommitted `docs/aso_bgm_opl2_alias_20260915.md` edit
-  left by the previous session.
+* **20260927d_pcmmlab** (a1026c8 = f9294c8 + the GT slot-B line listing
+  "MU-PACK (RAM/ROM only)"): BUILDGATE PASS, 30,101 ALM (72 %, was 32,304),
+  u_pcm 2,662, map.rpt 10999 = 0, fit.rpt RAM summary: all 11 pcm_mlab24 in
+  MLAB, worst slack all positive (slow setup +0.090).  md5 d70bcf5bf616.
+  **Hardware (user)**: GT label shows as intended; OPL4/PCM plays; save
+  auto-load and save both work.  The MLAB engine is closed on hardware.
+* Still open: review plan #1/#7/#8/#10 on the board; the uncommitted
+  `docs/aso_bgm_opl2_alias_20260915.md` edit left by the previous session.
 
