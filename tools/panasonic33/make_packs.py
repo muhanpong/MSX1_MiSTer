@@ -26,9 +26,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PACK = os.path.join(HERE, '..', 'CreateMSXpack')
 
 JOBS = [
-    ('Panasonic FS-A1ST.xml', 'PANASONIC16', 'fs-a1st_firmware.rom',
+    ('Panasonic FS-A1ST DOS1.xml', 'PANASONIC16', 'fs-a1st_firmware.rom',
      'c212b11fda13f83dafed688c54d098e7e47ab225', 128),
-    ('Panasonic FS-A1GT.xml', 'PANASONIC32', 'fs-a1gt_firmware.rom',
+    ('Panasonic FS-A1GT DOS1.xml', 'PANASONIC32', 'fs-a1gt_firmware.rom',
      'e779c338eb91a7dea3ff75f3fde76b8af22c4a3a', 256),
 ]
 
@@ -64,7 +64,7 @@ def main():
         shutil.copytree(os.path.join(PACK, 'ROM'), rom_dst)
         print(f'ROM store copied to {rom_dst}')
     for src, typ, rom, sha, count in JOBS:
-        with open(os.path.join(PACK, 'Computer', 'Panasonic', src), encoding='utf-8') as f:
+        with open(os.path.join(PACK, 'NotWorking', 'Panasonic', src), encoding='utf-8') as f:
             text = f.read()
         name = src.replace('.xml', ' 3-3.xml')
         with open(os.path.join(out, 'Computer', 'Panasonic', name), 'w', encoding='utf-8') as f:
