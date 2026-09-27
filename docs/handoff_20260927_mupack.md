@@ -137,6 +137,9 @@ origin/pcm-mlab = msx1-audit's PCM MLAB work (not merged, not cross-checked here
   MLAB, worst slack all positive (slow setup +0.090).  md5 d70bcf5bf616.
   **Hardware (user)**: GT label shows as intended; OPL4/PCM plays; save
   auto-load and save both work.  The MLAB engine is closed on hardware.
-* Still open: review plan #1/#7/#8/#10 on the board; the uncommitted
-  `docs/aso_bgm_opl2_alias_20260915.md` edit left by the previous session.
+* Review plan closed: #10's sub-slot pages show after the h7/h8 change (user,
+  27d); #1 is implied by #3/#4 matching openMSX's absolute values; #7 was seen
+  during the old-FW-pack chase (no ROM, no menu); #8 is covered by fullsys
+  S1/S3 and no board pack lacks MU_PACK.  Only the uncommitted
+  `docs/aso_bgm_opl2_alias_20260915.md` edit from the previous session remains.
 
