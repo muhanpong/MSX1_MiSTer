@@ -64,6 +64,27 @@ module tb;
       $display("pack: %0d bytes from %s", pack_bytes, pack_file);
    end
 
+   //  ── optional FW pack (+fwpack=<file>), staged as ioctl index 2 ─────────────
+   //  memory_upload looks firmware up at DDR3 0x2000000 (MSX1.sv "FW PACK,32000000"),
+   //  so the model serves it from there.  Without it a pack that wants firmware
+   //  (MoonSound yrw801, FM-PAC, MU-PACK ...) finds an empty store.
+   localparam int FWSZ = 1 << 24;
+   logic [7:0] fwmem [FWSZ];
+   int         fw_bytes = 0;
+   initial begin
+      string fw_file; int fd, c, i;
+      if ($value$plusargs("fwpack=%s", fw_file)) begin
+         fd = $fopen(fw_file, "rb");
+         if (fd == 0) begin $display("FATAL: cannot open %s", fw_file); $finish; end
+         i = 0; c = $fgetc(fd);
+         while (c >= 0 && i < FWSZ) begin fwmem[i] = 8'(c); i++; c = $fgetc(fd); end
+         if (c >= 0) begin $display("FATAL: %s is larger than %0d bytes", fw_file, FWSZ); $finish; end
+         $fclose(fd);
+         fw_bytes = i;
+         $display("fwpack: %0d bytes from %s", fw_bytes, fw_file);
+      end
+   end
+
    //  ── DDR3 model: memory_upload reads the staged file back byte at a time ──
    //  The HPS puts the file in DDR3 on real hardware; nothing arrives through
    //  ioctl_dout.  `ready` is the arbiter's periodic grant, as in
@@ -99,7 +120,9 @@ module tb;
    //  machine reading FFh everywhere.
    always @(posedge clk21m)
       if (ddr3_ready & ddr3_rd)
-         ddr3_dout <= (ddr3_addr < 28'(pack_bytes)) ? packmem[ddr3_addr] : 8'hFF;
+         ddr3_dout <= (ddr3_addr >= 28'h2000000 && ddr3_addr < 28'h2000000 + 28'(fw_bytes))
+                                                    ? fwmem[ddr3_addr - 28'h2000000]    :
+                      (ddr3_addr < 28'(pack_bytes)) ? packmem[ddr3_addr]               : 8'hFF;
 
    //  ioctl_download/index/addr are msx ports too: declared in msx_ports.svh.
 
@@ -113,6 +136,9 @@ module tb;
 
    initial begin
       for (int i = 0; i < 2; i++) cart_conf[i] = '{default:'0};
+      //  +slotb=<n>: slot B's cart type as the OSD would set it (cart_typ_t value,
+      //  e.g. 8 = CART_TYP_MUPACK).  Default 0 = ROM with no file = empty.
+      begin int sb; if ($value$plusargs("slotb=%d", sb)) cart_conf[1].typ = cart_typ_t'(sb); end
    end
 
    memory_upload u_upload
@@ -496,6 +522,18 @@ module tb;
       //  The firmware mounts <rom>.sav around the ROM load.  Both orders happen
       //  in the field, and the late one is what used to lose the auto-load.
       if (sav_bytes > 0 && !sav_late) mount_sav();
+      //  stage the FW pack first (index 2), the way it sits in DDR3 on a board where
+      //  one was loaded once and left there.  Its own load pulse runs an empty walk.
+      if (fw_bytes > 0) begin
+         ioctl_index = 16'd2; ioctl_download = 1'b1;
+         repeat (32) @(posedge clk21m);
+         ioctl_addr = 27'(fw_bytes);
+         ioctl_download = 1'b0;
+         for (int t = 0; t < 1_000_000; t++) begin @(posedge clk21m); if (reset_rq) break; end
+         for (int t = 0; t < 10_000_000; t++) begin @(posedge clk21m); if (!reset_rq) break; end
+         repeat (64) @(posedge clk21m);
+         $display("fwpack: staged as index 2");
+      end
       //  stage the machine pack (index 1), exactly as hps_io's falling edge does
       ioctl_index = 16'd1; ioctl_download = 1'b1;
       repeat (32) @(posedge clk21m);
@@ -521,8 +559,9 @@ module tb;
          int nz = 0;
          for (int i = 0; i < 64; i++) if (slot_layout[i].mapper != MAPPER_UNUSED) begin
             nz++;
-            if (nz <= 6) $display("upload: slot_layout[%0d] (slot %0d-%0d page %0d) mapper=%0d ref_sram=%0d",
-                                  i, i>>4, (i>>2)&3, i&3, slot_layout[i].mapper, slot_layout[i].ref_sram);
+            $display("upload: slot_layout[%0d] (slot %0d-%0d page %0d) mapper=%0d device=%0d ref_ram=%0d ref_sram=%0d",
+                     i, i>>4, (i>>2)&3, i&3, slot_layout[i].mapper, slot_layout[i].device,
+                     slot_layout[i].ref_ram, slot_layout[i].ref_sram);
          end
          $display("upload: %0d of 64 layout entries populated", nz);
       end
@@ -536,6 +575,7 @@ module tb;
                int'(bios_config.MSX_typ), msx_device, load_sram_seen);
       if (sav_bytes > 0 && !load_sram_seen)
          $display("WARNING: a .sav is mounted but the upload never asked for it");
+      mupack_report();
       if (sav_bytes > 0 && sav_late) begin
          repeat (200) @(posedge clk21m);      // the request is already out by now
          mount_sav();
@@ -586,6 +626,33 @@ module tb;
       $finish;
    end
 
+
+   //  ── MU-PACK checks ──────────────────────────────────────────────────────
+   //  Every SDRAM byte the upload writes at offset 18h-1Fh of a 16 kB block is
+   //  kept, so the ROM behind slot 2-2 page 1 can be read back by its base.  If
+   //  that base is not 16 kB aligned the lookup says so instead of passing.
+   byte unsigned rom_tail [int];
+   always @(posedge clk21m)
+      if (upl_ce & upl_sdram_rq & ((upl_addr & 27'h3FFF) >= 27'h18) & ((upl_addr & 27'h3FFF) <= 27'h1F))
+         rom_tail[int'(upl_addr)] = upl_din;
+   task automatic mupack_report();
+      int b, bad = 0;
+      string sig = "";
+      $display("mupack: slot B typ=%0d expander_en=%b (slot 2 expanded=%0d)",
+               int'(cart_conf[1].typ), bios_config.slot_expander_en, bios_config.slot_expander_en[2]);
+      for (int p = 0; p < 4; p++)
+         $display("mupack: 2-1 page %0d mapper=%0d ref_ram=%0d size=%0d x16kB   2-2 page %0d mapper=%0d ref_ram=%0d",
+                  p, slot_layout[36+p].mapper, slot_layout[36+p].ref_ram, lookup_RAM[slot_layout[36+p].ref_ram].size,
+                  p, slot_layout[40+p].mapper, slot_layout[40+p].ref_ram);
+      b = int'(lookup_RAM[slot_layout[41].ref_ram].addr);
+      if (slot_layout[41].mapper == MAPPER_UNUSED) sig = "(slot 2-2 page 1 empty)";
+      else if ((b & 32'h3FFF) != 0) sig = $sformatf("(base %07x not 16kB aligned: not checked)", b);
+      else for (int k = 8'h18; k <= 8'h1F; k++) sig = {sig, rom_tail.exists(b + k) ? string'(rom_tail[b + k]) : "?"};
+      $display("mupack: ROM at slot 2-2 page 1, base %07x, bytes 18h-1Fh = \"%s\"", b, sig);
+      $display("mupack: MIDI gt=%0d mu=%0d ext=%0d osd=%0d -> cs=%0d external=%0d ext_ctl=%02x",
+               MSX.msx_slots.midi_gt, MSX.msx_slots.midi_mu, MSX.msx_slots.midi_ext, MSX.msx_slots.midi_io_en,
+               MSX.msx_slots.dev_midi.cs, MSX.msx_slots.dev_midi.external, MSX.msx_slots.dev_midi.ext_ctl);
+   endtask
 endmodule
 
 //  32 MB behavioural SDRAM: {BA, row, col} = 24 bits of 16-bit words.  The one
