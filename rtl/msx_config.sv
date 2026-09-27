@@ -10,7 +10,11 @@ parameter CONF_STR_SLOT_A = {
 //  goes nowhere.)
 parameter CONF_STR_SLOT_B = {
     "HAH8O[31:29],SLOT B,ROM,SCC,SCC+,FM-PAC,Empty,MU-PACK;",
-    "hAH8O[31:29],SLOT B,ROM,SCC,SCC+,FM-PAC,Empty;"
+    //  The GT line keeps all six entries: a 5 saved on another machine is still
+    //  applied (the upload fills slot B before it knows the machine -- 8443c50),
+    //  so the label says what the slot really holds.  With five entries the
+    //  firmware showed that saved 5 as "ROM" (board, 2026-09-27).
+    "hAH8O[31:29],SLOT B,ROM,SCC,SCC+,FM-PAC,Empty,MU-PACK (RAM/ROM only);"
 };
 // ---- expanded cart slots -----------------------------------------------------
 // "SLOT x sub-slots: On" turns that cart slot into an EXPANDED slot.  Its classic
