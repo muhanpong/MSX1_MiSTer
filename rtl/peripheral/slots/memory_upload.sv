@@ -430,7 +430,21 @@ module memory_upload
                         $display("        FILL FW ROM size:%X", {fw_conf[5][2:0], fw_conf[6],14'h0});
                      end else begin          
                         if ((ddr3_addr - 28'h2000000 + (28'({fw_conf[5],fw_conf[6]}) << 14) + 28'd8) >= 28'(ioctl_size[1])) begin
-                           ddr3_addr <= save_addr;
+                           ddr3_addr <= save_addr - 28'd1;
+                           save_addr <= 28'd0;   // Leave the excursion.  Two things have to
+                                                 // happen here, and neither did before:
+                                                 //  - clear the flag, because STATE_READ_CONF's
+                                                 //    end-of-pack test, and the load_sram pulse
+                                                 //    inside it, are gated on save_addr == 0;
+                                                 //  - restore one byte LOW, because this path
+                                                 //    re-enters STATE_READ_CONF directly while
+                                                 //    the success path comes back through
+                                                 //    STATE_FILL_RAM, which spends one prefetch.
+                                                 //    Without the -1 the next record is read
+                                                 //    from save_addr+1, the "MSX" magic misses
+                                                 //    and STATE_CHECK_CONFIG drops to IDLE.
+                                                 //    Same one-deep pipeline as the FW header
+                                                 //    skip being +7 and not +8, above.
                            state <= STATE_READ_CONF;                                                           //not find skip load
                         end else begin
                            ddr3_addr <= ddr3_addr + (28'({fw_conf[5],fw_conf[6]}) << 14) + 28'd8;              //not usable next header
@@ -438,7 +452,13 @@ module memory_upload
                      end
                   end else begin
                      // Havarie. sem jsme se dostali chybou
-                     ddr3_addr <= save_addr;
+                     ddr3_addr <= save_addr - 28'd1;
+                     save_addr <= 28'd0;   // As above.  This is the path a machine with no
+                                           // firmware pack loaded takes: an empty store has
+                                           // no magic where a header was expected.  Without
+                                           // the two corrections every record after the
+                                           // device was silently dropped -- no CONFIG, so
+                                           // the VDP stayed MSX1, and no .sav auto-load.
                      state <= STATE_READ_CONF;
                   end
                end
