@@ -143,3 +143,34 @@ origin/pcm-mlab = msx1-audit's PCM MLAB work (not merged, not cross-checked here
   S1/S3 and no board pack lacks MU_PACK.  Only the uncommitted
   `docs/aso_bgm_opl2_alias_20260915.md` edit from the previous session remains.
 
+
+## 8. 2026-09-28: one OPLL, a boot failure that was not the OPLL, and an SDC hole
+
+* **365ef58** merges the three IKAOPLL instances into one (user decision: the
+  YM2413 is an I/O device at 7C/7D, one per machine).  −1,262 ALM.  Bench
+  `sim/opll_single/` (6 scenarios + mutant), landmine row `opll`.
+* **28a_opll1 did not boot** (logo, then nothing, on GT and on a Daewoo with no
+  OPLL).  27d booted.  Debug overlay vs a 27d baseline: RST38 spin 0→17 (0038
+  read as FF), "C3 seen at 0038" 1→0, rampage origin 5FE7→BFFF, jump-to-0000
+  from 4170→FD9A (H.KEYI), one reboot.  Everything else identical: memory bytes
+  were being misread.
+* **Cause** (msx1-audit2 reproduced the same placement on their machine):
+  `MSX1.sdc:47 set_multicycle_path -end 6 -to {*sdram*ch2_*}` has no `-from`,
+  so it also relaxed the read cache's stage-2 paths in sdram.sv (cmem →
+  ch2_saved_data and six siblings), which are true single-cycle clk_sdram paths
+  that the file's own comment says must stay outside the exception.  Quartus
+  never tried to meet them; 27d's placement happened to (+), 28a's did not
+  (−4.206 ns at 1 cycle, +54 under the exception).
+* **Fix, 28b_ch2mc** (msx1-audit2, their machine): two SDC lines
+  `-from {*sdram:sdram|*} -to {*sdram*ch2_*}` setup -end 1 / hold -end 0, and a
+  REL row `SD_int_to_ch2` (11.641 ns) in relations.tcl.  All seven targets
+  close (+2.38 .. +3.49), signoff all positive (slow setup +0.462).  Negative
+  control: the same fit with the HEAD SDC makes the new REL row FAIL
+  (69.846 vs 11.641).  **Hardware (user, 19:06): boots, RST38 spin 0, no
+  reboot, no jump to 0000; the single OPLL plays (listened, same day).**
+  Commit/push by msx1-audit2.
+* Lesson for the landmines: a `-to`-only wildcard multicycle relaxes every
+  same-named internal path too.  Assert the intended relationship with a REL
+  row so signoff fails when the exception swallows something new.
+* Not measured: the same path's slack on the 27d fit (the comparison fit was
+  stopped); the twelve M10K that moved outside the OPLL between 27d and 28a.
