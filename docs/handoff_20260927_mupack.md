@@ -174,3 +174,39 @@ origin/pcm-mlab = msx1-audit's PCM MLAB work (not merged, not cross-checked here
   row so signoff fails when the exception swallows something new.
 * Not measured: the same path's slack on the 27d fit (the comparison fit was
   stopped); the twelve M10K that moved outside the OPLL between 27d and 28a.
+
+## 9. 2026-09-28/29: turbo R follows the pack, a CPU page, MIDI IN cut
+
+* **Symptom**: an FS-A1F told Z80BENCH it was a turbo R.  "Turbo R features"
+  (status 117) was OSD-global; with it On, turbor.sv overlaid BIOS byte 002Dh
+  with 03 on any machine.  User: now that real turbo R packs run, the MSX2+
+  masquerade has no use.
+* **e46accc**: memory_upload latches byte 002Dh of the ROM that lands in slot
+  0-0 page 0 into `bios_config.ver` (0/1/2/3 = MSX1/2/2+/turbo R; FF until
+  read; first record wins).  `turbor_en = (ver == 3)`.  The 40h/41h Panasonic
+  turbo request stays gated on ~turbor_en.  OSD: the four CPU rows become page
+  P6 "CPU", masked by 'D' = pack is turbo R (plain MSX: Z80 Speed only; turbo
+  R: CPU Auto/Force, both ladders, R800 VDP access wait moved from Video).
+  Status bits unchanged; masks D/E (hide the unused ladder) retired, E free.
+  turbor.sv untouched.  Bench `sim/fullsys/run_packver.sh`: ST DOS2 -> 03,
+  Daewoo CPC-300 -> 01, Sony HB-F1XV -> 02, ST with 002Dh patched to 01 -> 01
+  (negative control), one latch each.  Landmine row `turbor_pack`.  The sample
+  packs live in `sim/fullsys/packs/` (gitignored, d8d36d6) so the gate can run it.
+* **ad7db57 MIDI IN disconnected**: hot-plugging the MT32-pi under Illusion
+  City (MIDI mode) froze the machine -- overlay RST38 spin saturated at 0038.
+  Until detection, mt32pi.sv hands USER_IN[0] (the Pi's I2C SDA) to the 8251
+  as MIDI IN; the game has RTS on and never reads E8h, so one stray byte is a
+  permanent RxRDY interrupt.  Nothing needs MIDI IN today, so MSX1.sv holds
+  `midi_rx` at 1.  Bringing it back needs a settle time after any source change.
+* **29a_cpupage** (ad7db57+d8d36d6): BUILDGATE PASS, 28,943 ALM, M10K 436, slow
+  setup +0.372, REL SD_int_to_ch2 +2.374, no new warnings.  Two gate stumbles
+  worth remembering: the new bench looked for packs outside the tree (fixed by
+  the cache), and `--expect 'rec_bios'` gave a false FAIL because --expect
+  matches fit.rpt instance names, not registers (the 0923 note said so); the
+  latch was confirmed by `bios_config.ver[..]` in fit.rpt, then
+  `--signoff-only` re-ran timing for a PASS log.
+* **Hardware (user, 03:25)**: non-turbo R machine: Z80BENCH "MSX2", no F2
+  TurboR item; OSD CPU page shows "Z80 SPEED 3.58MHZ" + BACK.  Still to see: the
+  four rows on a GT pack, MT32-pi hot-plug not freezing, saved CPU settings.
+* Also noted: the board's `Daewoo/Daewoo_CPC-400S.MSX` (2026-05-24) is an older
+  "MSx" file the upload FSM rejects at the first header.
