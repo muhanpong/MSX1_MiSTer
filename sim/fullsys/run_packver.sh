@@ -4,7 +4,13 @@
 #  3 turbo R) into bios_config.ver.  MSX1.sv keys the turbo R hardware and the
 #  CPU menu rows on ver == 3.
 #
-#      PACKS=<dir with the .MSX packs> sim/fullsys/run_packver.sh
+#      sim/fullsys/run_packver.sh                 # packs from the first dir that has them:
+#      PACKS=<dir> sim/fullsys/run_packver.sh     #   $PACKS, sim/fullsys/packs (local cache,
+#                                                 #   gitignored), tools/CreateMSXpack/MSX here,
+#                                                 #   then the main checkout's.
+#  The .MSX packs are build products, not in git.  To refill the local cache from the
+#  board:  scp root@<board>:/media/fat/games/MSX1/MSX/{Panasonic/"Panasonic FS-A1ST DOS2.MSX",
+#          Daewoo/Daewoo_CPC-300.MSX,Sony/Sony_HB-F1XV.MSX} into sim/fullsys/packs/<maker>/.
 #
 #  PASS needs all three:
 #    T   FS-A1ST DOS2 pack            -> bios_ver=03
@@ -18,8 +24,13 @@
 set -u
 cd "$(dirname "$0")/../.."
 ROOT=$PWD; GEN=$ROOT/sim/fullsys/gen; OUT=${OUT:-/tmp/fullsys_packver}
-PACKS=${PACKS:-$ROOT/tools/CreateMSXpack/MSX}
 [ -s "$GEN/filelist.txt" ] || { echo "run_packver: sim/fullsys/prep.sh first"; exit 2; }
+if [ -z "${PACKS:-}" ]; then
+   for d in "$ROOT/sim/fullsys/packs" "$ROOT/tools/CreateMSXpack/MSX" "$HOME/Documents/github/MSX1_MiSTer/tools/CreateMSXpack/MSX"; do
+      [ -s "$d/Panasonic/Panasonic FS-A1ST DOS2.MSX" ] && { PACKS=$d; break; }
+   done
+   PACKS=${PACKS:-$ROOT/sim/fullsys/packs}
+fi
 ST="$PACKS/Panasonic/Panasonic FS-A1ST DOS2.MSX"; DW="$PACKS/Daewoo/Daewoo_CPC-300.MSX"; SY="$PACKS/Sony/Sony_HB-F1XV.MSX"
 #  (The board's Daewoo_CPC-400S.MSX of 2026-05-24 is an older "MSx" file the
 #  upload FSM rejects at the first header; it is not a usable sample.)

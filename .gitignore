@@ -99,3 +99,4 @@ tools/sccch5/*.COM
 tools/sccch5/*.DSK
 tools/audio_fp/*.wav
 sim/fullsys/gen/
+sim/fullsys/packs/
