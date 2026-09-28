@@ -19,6 +19,7 @@ set EXPECT [list \
   [list NZ_to_SCC_fall $c21     $c21     "*IKASCC_player_memory_s*"         69.849 "NextZ80 -> SCC wave RAM falling edge, -end 2" "*msx:MSX|NextZ80:NZ|*"] \
   [list NZ_to_ctl_exc  $c21     $c21     "*msx:MSX|cpuswap_ctl:CPUSWAP|*"   46.566 "exception: SWAPPT -> controller single-cycle" "*msx:MSX|NextZ80:NZ|*"] \
   [list NZ_to_cheat_exc $c21    $c21     "*msx:MSX|a_q[*]"                  46.566 "exception: cheat address register single-cycle" "*msx:MSX|NextZ80:NZ|*"] \
+  [list SD_int_to_ch2  $csd     $csd     "*sdram*ch2_*"                     11.641 "sdram-internal -> ch2_* single-cycle (read-cache stage 2, FSM); the generic -end 6 must not cover it" "*sdram:sdram|*"] \
   [list T80_to_NZ      $c21     $c21     "*msx:MSX|NextZ80:NZ|*"            93.132 "T80s REG -> NextZ80 LOAD, -end 2" "*msx:MSX|T80s:T80|*"] ]
 set fail 0
 foreach e $EXPECT {

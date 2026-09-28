@@ -47,6 +47,18 @@ set_false_path -from [get_clocks {pll_audio|pll_audio_inst|altera_pll_i|*|divclk
 set_multicycle_path -setup -end 6 -to [get_registers {*sdram*ch2_*}]
 set_multicycle_path -hold  -end 5 -to [get_registers {*sdram*ch2_*}]
 
+# ...but only for sources OUTSIDE the sdram module.  The pattern above is by name,
+# so it also swallowed sdram-internal clk_sdram -> clk_sdram paths into ch2_*:
+# the read cache's stage 2 (cmem/c_rdata/ch2_caddr/c_pend2 -> ch2_saved_data,
+# _saved_a0, _ready, _hit_r, _rq, _rnw_1, _addr_1; sdram.sv:171-174 says these
+# must stay single-cycle) and the FSM's own ch2_rq/ch2_rdtog bookkeeping.  With
+# those relaxed to 6 the fitter never tried to close them: 20260928a_opll1 had
+# cmem -> ch2_saved_data at -4.2 ns single-cycle, signoff PASS, and read wrong
+# bytes on the board.  -from and -to both given outranks -to alone, so this
+# restores one cycle for internal sources and leaves the T80/NextZ80 hop at 6.
+set_multicycle_path -setup -end 1 -from [get_registers {*sdram:sdram|*}] -to [get_registers {*sdram*ch2_*}]
+set_multicycle_path -hold  -end 0 -from [get_registers {*sdram:sdram|*}] -to [get_registers {*sdram*ch2_*}]
+
 # OPL4 CPU register write path (opl4latch → pcm_engine decode registers).
 # CPU writes the OPL4 latch on ce_3m58_p ticks; address decode goes through
 # a deep chain (Add + Divider op_5..op_8 + Decoder + reg_upd + hf_upd) before
