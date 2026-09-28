@@ -573,6 +573,7 @@ module tb;
       //  (Plain numbers: a ternary between two string literals prints nothing.)
       $display("upload: MSX_typ=%0d (0=MSX1 1=MSX2)  msx_device=%b  load_sram issued=%0d",
                int'(bios_config.MSX_typ), msx_device, load_sram_seen);
+      $display("upload: bios_ver=%02x (002Dh: 0 MSX1 1 MSX2 2 MSX2+ 3 turbo R, ff = not read)", bios_config.ver);
       if (sav_bytes > 0 && !load_sram_seen)
          $display("WARNING: a .sav is mounted but the upload never asked for it");
       mupack_report();

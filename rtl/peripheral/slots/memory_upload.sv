@@ -146,6 +146,8 @@ module memory_upload
       logic [7:0]  mode;
       logic [7:0]  param;
       logic [3:0]  slotSubslot;
+      logic [26:0] rec_base;      // ram_addr of the current ROM record's first byte
+      logic        rec_bios;      // that record is slot 0-0 and maps page 0: the main BIOS
       logic        refAdd;
       logic [26:0] sram_addr;
       logic [26:0] save_ram_addr;
@@ -498,6 +500,14 @@ module memory_upload
                            ddr3_rd                  <= 1'd1;       //Prefetch
                         end
                      endcase
+                     //  The machine class comes from the BIOS itself, not from the pack
+                     //  header: byte 002Dh of the ROM that lands in slot 0-0 page 0
+                     //  (0 MSX1, 1 MSX2, 2 MSX2+, 3 turbo R).  MSX1.sv keys the turbo R
+                     //  hardware (S1990, E6h timer, PCM) and the CPU menu on it.  First
+                     //  such record wins; a mirror or a later page-0 record cannot
+                     //  overwrite it.  mode[1:0] != 0 = this record is mapped at page 0.
+                     rec_base <= curr_ram_addr;
+                     rec_bios <= (slotSubslot == 4'd0) && (mode[1:0] != 2'd0) && (bios_config.ver == 8'hFF);
                      sdram_rq                 <= sdram_size != 0;
                      bram_rq                  <= sdram_size == 0;
                   end else 
@@ -519,6 +529,10 @@ module memory_upload
                if (sdram_ready & ~ram_ce) begin
                   data_size  <= data_size - 25'd1;
                   ram_ce     <= 1;
+                  if (rec_bios && bios_config.ver == 8'hFF && (ram_addr - rec_base) == 27'h2D) begin
+                     bios_config.ver <= ram_din;      // the byte going to memory at 002Dh
+                     $display("           BIOS 002Dh = %02x (0 MSX1 1 MSX2 2 MSX2+ 3 turbo R)", ram_din);
+                  end
                   if (data_size == 25'd1 && data_id == ROM_MOONSOUND && ~ms_zerofill_active) begin
                      // yrw801 ROM just finished.  Fill the 2MB custom-wave RAM with
                      // 0x00 so empty/unloaded custom slots read as silence — matching
@@ -694,6 +708,8 @@ module memory_upload
          msx_device            <= '0;
          bios_config.ram_size  <= 8'h00;
          bios_config.use_FDC   <= 1'b0;
+         bios_config.ver       <= 8'hFF;   // unknown until the BIOS record is read
+         rec_bios              <= 1'b0;
          lookup_SRAM[0].size   <= 16'd0;
          lookup_SRAM[1].size   <= 16'd0;
          lookup_SRAM[2].size   <= 16'd0;

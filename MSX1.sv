@@ -311,8 +311,8 @@ wire      [64:0] rtc;
 //[72]    SLOT B sub-slots On/Off
 //[84:73] SLOT A sub-slot 0..3 device, 3 bits each (None,ROM,SCC,SCC+,FM-PAC,GameMaster2)
 //[96:85] SLOT B sub-slot 0..3 device, 3 bits each (GameMaster2 never on B)
-//[117]   Turbo R features: S1990 E4h/E5h + BIOS CHGCPU/GETCPU overlay, E6h timer,
-//        A4h/A5h PCM, A7h pause (rtl/peripheral/turbor)
+//[117]   retired 2026-09-28 (was "Turbo R features", OSD-global).  The turbo R
+//        hardware now follows the loaded pack: bios_config.ver == 3.
 `include "build_id.v" 
 localparam CONF_STR = {
    "MSX1;",
@@ -392,7 +392,7 @@ localparam CONF_STR = {
    //  one click away.  Bits 75-77 have never been assigned (board .CFG reads them
    //  0, so entry 0 it is).
    //  T80s is unaffected: it keeps the 32 clk21m spacing and loses nothing.
-   "P1O[77:75],R800 VDP wait,8.66us (real),10.1us,9.3us,7.5us,6.0us,10.8us,11.8us,4.7us;",
+   //  "R800 VDP wait" moved to the CPU page (P6) on 2026-09-28; bits 77:75 unchanged.
    "-;",
    //  MIDI: an I/O-only MSX-MIDI (the "MIDI Interface 3" kind -- no ROM, no
    //  memory slot) at E8h-EFh, on any machine.  An I/O device, so it sits with
@@ -431,33 +431,30 @@ localparam CONF_STR = {
    "O[43],Pause on OSD,No,Yes;",
    "T[44],Pause;",
    "-;",
-   // Two speed ladders in one slot, exclusive: the row for the CPU that is not
-   // driving the machine is hidden, so the menu never offers a speed that does
-   // nothing.  Prefix pairs are <action><index>, and
-   // the action loop runs before anything else with no second pass (see the note
-   // by the OPL4 rows), so the prefix comes FIRST: "HD" is hide(H) on mask index
-   // 'D' = 13, "HE" is hide on index 'E' = 14.
-   //   [13] = R800 selected -> hide the Z80 ladder
-   //   [14] = Z80 selected  -> hide the R800 ladder
-   // Hardware-confirmed on 20260919a.  Swapping H for D greys the row instead of
-   // hiding it (same decoder), but D has no precedent in this core.
-   "HDO[58:56],Z80 Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz,21.5MHz;",
-   // The R800's own clock is 7.159 MHz, which is clk21m/3 exactly, so entry 0 is
-   // the real thing and entry 1 is NextZ80 let loose (what every build before this
-   // one did).  Entry 0 is the default: bit 70 has never been assigned, so a saved
-   // .CFG reads it as 0.  NOTE: at 7.16 MHz the CLOCK matches an R800, the
-   // THROUGHPUT does not -- NextZ80 does more per cycle, so it benches ~920% where
-   // a real turbo R benches 575% (openMSX FS-A1ST, Z80BENCH 1.4.2).
-   "HEO[70],R800 Speed,7.16MHz,21.5MHz;",   // directly under the Z80 ladder
-   // Bit 117 has never been assigned, so every saved .CFG reads it as 0 = Off.
-   "O[117],Turbo R features (MSX2+),Off,On;",
-   //  Auto is what a real turbo R does: it powers up as a Z80 and the firmware or
-   //  the game moves it with CHGCPU.  We used to force the CPU from the OSD bit at
-   //  every boot (the saved .CFG has 118 set), which pushes a machine into R800
-   //  before its own BIOS has decided to -- wrong for the FS-A1GT/ST packs, whose
-   //  BIOS runs that sequence itself.  Force Z80 / Force R800 stay for packs that
-   //  are NOT turbo R, where nothing in software ever calls CHGCPU.
-   "O[119:118],CPU (turbo R),Auto,Force Z80,Force R800;",
+   // Mask prefixes are <action><index> and the action loop runs before anything
+   // else with no second pass (see the note by the OPL4 rows), so the prefix comes
+   // FIRST and before the page letter: "HDP6O[..]" is hide(H) on mask 'D' = 13,
+   // inside page 6.  "hD" shows the row only while the mask bit is 1.  The mask
+   // decoder is hardware-confirmed (20260919a with D/E, 20260927 with h7/h8/hF).
+   //  CPU page (P6; P1-P5 are taken).  The rows differ by PACK through mask 'D' =
+   //  the loaded BIOS is a turbo R (memory_upload latches byte 002Dh of the slot
+   //  0-0 page-0 ROM): a plain MSX gets the Z80 ladder only; a turbo R gets the
+   //  CPU choice, both ladders and the R800 VDP access wait.  Same status bits as
+   //  before (58:56, 70, 119:118, 77:75), so a saved CFG keeps its meaning.
+   //  Retired here: the OSD-global "Turbo R features" (117), which on an FS-A1F
+   //  overlaid 002Dh with 03 and made Z80BENCH call it a turbo R (2026-09-28); and
+   //  masks D/E that hid the unused ladder under Force Z80/R800 -- all 16 mask bits
+   //  were taken and the pack-class bit matters more.  An unused ladder now just
+   //  shows.  The R800 entries: 7.16 MHz is clk21m/3 = the real R800 clock (the
+   //  THROUGHPUT is still NextZ80's, ~920% vs a real 575%); 21.5 is NextZ80 let
+   //  loose.  Auto is what a real turbo R does (powers up as a Z80, the BIOS or
+   //  the game moves it with CHGCPU); Force Z80/R800 stay for hand tests.
+   "P6,CPU;",
+   "HDP6O[58:56],Z80 Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz,21.5MHz;",
+   "hDP6O[119:118],CPU (turbo R),Auto,Force Z80,Force R800;",
+   "hDP6O[58:56],Z80 Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz,21.5MHz;",
+   "hDP6O[70],R800 Speed,7.16MHz,21.5MHz;",
+   "hDP6O[77:75],R800 VDP access wait,8.66us (real),10.1us,9.3us,7.5us,6.0us,10.8us,11.8us,4.7us;",
    "-;",
    "P2,Audio settings;",
    "P2O[45],MoonSound,Off,On;",
@@ -587,8 +584,8 @@ assign status_menumask[8]  = slotB_classic_hide;
 //  msx_device).
 assign status_menumask[11] = mapper_A_hide;        // 'B': no ROM sub-slot -> Mapper/SRAM entries hidden
 assign status_menumask[12] = mapper_B_hide;        // 'C'
-assign status_menumask[13] = (status[119:118] == 2'd2);   // 'D': Force R800 -> hide the Z80 ladder
-assign status_menumask[14] = (status[119:118] == 2'd1);   // 'E': Force Z80  -> hide the R800 ladder
+assign status_menumask[13] = pack_turbor;                  // 'D': the loaded pack is a turbo R (CPU page rows)
+assign status_menumask[14] = 1'b0;                         // 'E': free since 2026-09-28 (was: Force Z80 hides the R800 ladder)
 assign status_menumask[15] = mt32_avail_s;                 // 'F': an MT32-pi answers -> show its page
 //  Auto shows BOTH: the two ladders are independent knobs and in Auto both are live,
 //  each applying while its own core has the bus.
@@ -694,7 +691,13 @@ wire  [2:0] cpu_speed_sel = (status[58:56] > 3'd4) ? 3'd4 : status[58:56];
 //  request and Z80BENCH measured a GT pack's Z80 at 5.36 MHz with the OSD set to
 //  3.58 (board, 2026-09-20).  Gate the request on turbo R features being off, so
 //  an MSX2+ Panasonic pack keeps the port turbo and a turbo R pack does not.
-wire        turbor_en    = status[117];
+//  turbo R hardware (S1990 E4h/E5h, BIOS CHGCPU/GETCPU overlay, E6h timer, A4h/A5h
+//  PCM, A7h pause -- rtl/peripheral/turbor) follows the PACK, not an OSD switch:
+//  memory_upload reads byte 002Dh of the BIOS that lands in slot 0-0 page 0, and 3
+//  is a turbo R.  Until 2026-09-28 this was status[117], OSD-global, and with it On
+//  an FS-A1F reported itself as a turbo R to Z80BENCH (002Dh overlaid with 03).
+wire        pack_turbor  = (bios_config.ver == 8'h03);
+wire        turbor_en    = pack_turbor;
 wire  [2:0] cpu_speed_osd = (msx_turbo_req & ~turbor_en & cpu_speed_sel == 3'd0) ? 3'd1 : cpu_speed_sel;
 
 //  Two CPUs, one bus, no reset between them (rtl/cpu/cpuswap, msx.sv): T80s at

@@ -50,6 +50,8 @@ package MSX;
         MSX_typ_t       MSX_typ;
         logic     [7:0] ram_size;
         logic           use_FDC;
+        logic     [7:0] ver;        // BIOS byte 002Dh of the slot 0-0 page-0 ROM: 0 MSX1, 1 MSX2,
+                                    // 2 MSX2+, 3 turbo R; FFh until a pack has been read
     } bios_config_t;    
     
     typedef struct {
