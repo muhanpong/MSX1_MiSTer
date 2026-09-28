@@ -194,7 +194,19 @@ assign ADC_BUS  = 'Z;
 //  (UART_TXD used to be tied to 0, which holds the line in a permanent break.)
 wire midi_tx, midi_rx, mt32_midi_rx;
 assign UART_TXD = midi_tx;
-assign midi_rx  = UART_RXD & mt32_midi_rx;
+//  MIDI IN is DISCONNECTED (2026-09-28, user decision): nothing on this core
+//  needs to receive MIDI today, and the only thing the receiver has ever done
+//  on hardware is stop the machine.  Twice: MT32-pi attached at boot (pin 0 =
+//  its I2C SDA read as MIDI IN until detection, 2026-09-27) and MT32-pi hot-
+//  plugged while Illusion City ran (same window, plus contact bounce, 2026-09-28,
+//  overlay: RST38 spin saturated at 0038).  The game had RTS on (command 37h)
+//  and never reads E8h, so one stray byte is a permanent RxRDY interrupt.  The
+//  8251 receiver in midi.sv stays; its line is held idle-high here.  To bring
+//  MIDI IN back, restore `UART_RXD & mt32_midi_rx` AND add a settle time after
+//  any source change, or the hot-plug freeze comes back with it.
+assign midi_rx  = 1'b1;
+//  (was: assign midi_rx = UART_RXD & mt32_midi_rx;  -- both idle high, AND passes
+//   a start bit from whichever is connected)
 assign {UART_RTS, UART_DTR} = 0;
 
 assign VGA_F1 = 0;
