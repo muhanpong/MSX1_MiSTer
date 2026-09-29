@@ -149,12 +149,61 @@ typedef enum logic [3:0] {
    STATE_FLASH_WR_WAIT,    // Wait for SDRAM write completion
    STATE_CHECK_SIZE,
    STATE_FORMAT,
-   STATE_NEXT
+   STATE_NEXT,
+   STATE_HDR_RD,           // VD1..3: read the entry header sector (load: verify; save: fetch the counter)
+   STATE_HDR_WR            // VD1..3: write the entry header sector, then the data
 } state_t;
 
 logic [20:0] block_count;
 logic [31:0] lba_start;
 logic        done = 1'b0;
+
+//  ---------------------------------------------------------------- image layout
+//  VD0 is the slot A ROM's companion .sav: raw SRAM from LBA 0, as it always was.
+//  VD1..VD3 are the firmware's boot1..3.vhd (auto-mounted at core start) and hold
+//  one 64 kB entry per DEVICE KIND, so an FM-PAC and a GameMaster2 that both land
+//  on VD1, or an FS-A1ST (16 kB) and an FS-A1GT (32 kB) that both land on VD3, do
+//  not overwrite each other.  Entry n: header sector at LBA 128n (4 kB reserved,
+//  one sector used), data from LBA 128n + 8, up to 60 kB.  docs/sram_images.md.
+//  A load is skipped -- not retried -- when the header does not match this bank's
+//  kind and size; a save always rewrites the header, so a zero-filled file works
+//  from the first save.
+localparam [7:0] HDR_VER = 8'd1;
+function automatic logic [31:0] entry_of(input logic [7:0] kind);
+   case (kind)
+      MSX::SRAM_KIND_GM2:   entry_of = 32'd1;   // VD1: FM-PAC 0, GM2 1
+      MSX::SRAM_KIND_PAN16: entry_of = 32'd1;   // VD3: Halnote 0, ST 1, GT 2
+      MSX::SRAM_KIND_PAN32: entry_of = 32'd2;
+      default:              entry_of = 32'd0;
+   endcase
+endfunction
+wire        layout    = (num != 2'd0);
+wire [31:0] lba_base  = entry_of(lookup_SRAM[num].kind) << 7;   // * 128 sectors
+wire [31:0] data_base = layout ? lba_base + 32'd8 : 32'd0;
+logic [20:0] sec = 21'd0;                                        // sector within the data area
+logic  [7:0] hdr[16];                                            // header bytes read back
+logic [31:0] hdr_cnt = 32'd0;                                    // save counter to write
+wire         hdr_ok  = hdr[0] == "M" && hdr[1] == "S" && hdr[2] == "X" && hdr[3] == "1" &&
+                       hdr[4] == "S" && hdr[5] == "R" && hdr[6] == "A" && hdr[7] == "M" &&
+                       hdr[8] == HDR_VER && hdr[9] == lookup_SRAM[num].kind &&
+                       {hdr[11], hdr[10]} == lookup_SRAM[num].size;
+function automatic logic [7:0] hdr_byte(input logic [8:0] i);
+   case (i)
+      9'd0: hdr_byte = "M"; 9'd1: hdr_byte = "S"; 9'd2: hdr_byte = "X"; 9'd3: hdr_byte = "1";
+      9'd4: hdr_byte = "S"; 9'd5: hdr_byte = "R"; 9'd6: hdr_byte = "A"; 9'd7: hdr_byte = "M";
+      9'd8:  hdr_byte = HDR_VER;
+      9'd9:  hdr_byte = lookup_SRAM[num].kind;
+      9'd10: hdr_byte = lookup_SRAM[num].size[7:0];
+      9'd11: hdr_byte = lookup_SRAM[num].size[15:8];
+      9'd12: hdr_byte = hdr_cnt[7:0];
+      9'd13: hdr_byte = hdr_cnt[15:8];
+      9'd14: hdr_byte = hdr_cnt[23:16];
+      9'd15: hdr_byte = hdr_cnt[31:24];
+      default: hdr_byte = 8'h00;
+   endcase
+endfunction
+//  bytes the image must hold for this bank: data end, in bytes
+wire [63:0] need_bytes = 64'(data_base + 32'(lookup_SRAM[num].size) * 2) << 9;
 logic        unserved = 1'b0;   // looked at, cannot act yet -- keep the request
 
 // Flash DMA state
@@ -165,12 +214,14 @@ logic  [7:0] sector_buf[512];
 logic  [6:0] sdram_wait;
 logic [26:0] sd_wr_timeout;
 
-assign ram_we         = rd & sd_ack[num] & ~sd_buff_addr[9];
-assign ram_addr       = lookup_SRAM[num].addr + 18'({sd_lba[num],sd_buff_addr[8:0]});
+//  Only DATA sectors touch the BRAM: a header sector being read must not land in
+//  the SRAM, so ram_we is qualified on STATE_PROCESS.
+assign ram_we         = rd & sd_ack[num] & ~sd_buff_addr[9] & (state == STATE_PROCESS);
+assign ram_addr       = lookup_SRAM[num].addr + 18'({sec, sd_buff_addr[8:0]});
 assign sd_buff_din[0] = (state == STATE_FLASH_SD_WR) ? sector_buf[sd_buff_addr[8:0]] : ram_dout;
-assign sd_buff_din[1] = ram_dout;
-assign sd_buff_din[2] = ram_dout;
-assign sd_buff_din[3] = ram_dout;
+assign sd_buff_din[1] = (state == STATE_HDR_WR) ? hdr_byte(sd_buff_addr[8:0]) : ram_dout;
+assign sd_buff_din[2] = (state == STATE_HDR_WR) ? hdr_byte(sd_buff_addr[8:0]) : ram_dout;
+assign sd_buff_din[3] = (state == STATE_HDR_WR) ? hdr_byte(sd_buff_addr[8:0]) : ram_dout;
 
 logic last_ack = 1'b0;
 state_t state = STATE_SLEEP;
@@ -216,15 +267,32 @@ always @(posedge clk) begin
                   sd_rd[0] <= 1'b1;
                   state    <= STATE_FLASH_SD_RD;
                end
-            end else if (lookup_SRAM[num].size > 16'h00 & image_mounted[num]
+            end else if (~layout & lookup_SRAM[num].size > 16'h00 & image_mounted[num]
                          & (wr ? ~image_ro[num] : (image_size[num] > 0))) begin
-               // Existing BRAM path
+               // VD0: raw SRAM from LBA 0
+               sec         <= 21'd0;
                sd_lba[num] <= 0;
                block_count <= 21'(lookup_SRAM[num].size) << 1;
                sd_wr[num]  <= wr;
                sd_rd[num]  <= rd;
                state       <= STATE_PROCESS;
                $display("START %d", num);
+            end else if (layout & lookup_SRAM[num].size > 16'h00 & image_mounted[num]
+                         & (wr ? ~image_ro[num] : 1'b1)) begin
+               // VD1..3: an entry per kind.  Too small a file cannot be grown by
+               // the core (the firmware only creates VD0's .sav), so that is a
+               // skip with a message, not a pending request.
+               if (image_size[num] < need_bytes) begin
+                  $display("SRAM image %0d too small: %0d < %0d bytes (kind %0d, entry %0d)",
+                           num, image_size[num], need_bytes, lookup_SRAM[num].kind, lba_base >> 7);
+                  done <= 1'b1;
+               end else begin
+                  block_count <= 21'(lookup_SRAM[num].size) << 1;
+                  sd_lba[num] <= lba_base;
+                  sd_rd[num]  <= 1'b1;             // load and save both read the header first
+                  state       <= STATE_HDR_RD;
+                  $display("START %0d kind %0d entry %0d (%s)", num, lookup_SRAM[num].kind, lba_base >> 7, wr ? "save" : "load");
+               end
             end else begin
                //  Not done -- just not now.  `done` here would clear the
                //  request and the auto-load would never happen.
@@ -237,15 +305,51 @@ always @(posedge clk) begin
       // Existing BRAM save/load
       STATE_PROCESS: begin
          if (~sd_ack[num] & last_ack) begin
-            if (sd_lba[num][20:0] < (block_count - 21'd1)) begin
-               sd_lba[num] <= sd_lba[num] + 1'b1;
+            if (sec < (block_count - 21'd1)) begin
+               sec         <= sec + 1'b1;
+               sd_lba[num] <= data_base + 32'(sec) + 32'd1;
             end else begin
                sd_wr[num]     <= 1'b0;
                sd_rd[num]     <= 1'b0;
                done           <= 1'b1;
-               store_new_size <= wr;
+               store_new_size <= wr & ~layout;   // VD0's image is exactly the SRAM
                state          <= STATE_SLEEP;
             end
+         end
+      end
+
+      // -----------------------------------------------------------------------
+      // VD1..3 entry header.  Read first in both directions: a load needs it to
+      // match, a save needs the counter it carries.
+      STATE_HDR_RD: begin
+         if (sd_ack[num] & ~sd_buff_addr[9] & sd_buff_addr[8:4] == 5'd0)
+            hdr[sd_buff_addr[3:0]] <= sd_buff_dout;
+         if (~sd_ack[num] & last_ack) begin
+            sd_rd[num] <= 1'b0;
+            if (wr) begin
+               hdr_cnt     <= hdr_ok ? {hdr[15], hdr[14], hdr[13], hdr[12]} + 32'd1 : 32'd1;
+               sd_lba[num] <= lba_base;
+               sd_wr[num]  <= 1'b1;
+               state       <= STATE_HDR_WR;
+            end else if (hdr_ok) begin
+               sec         <= 21'd0;
+               sd_lba[num] <= data_base;
+               sd_rd[num]  <= 1'b1;
+               state       <= STATE_PROCESS;
+            end else begin
+               $display("SRAM image %0d entry %0d: no matching header (kind %0d size %0d kB) -- not loaded",
+                        num, lba_base >> 7, lookup_SRAM[num].kind, lookup_SRAM[num].size);
+               done  <= 1'b1;
+               state <= STATE_SLEEP;
+            end
+         end
+      end
+
+      STATE_HDR_WR: begin
+         if (~sd_ack[num] & last_ack) begin
+            sec         <= 21'd0;
+            sd_lba[num] <= data_base;
+            state       <= STATE_PROCESS;   // sd_wr stays high for the data sectors
          end
       end
 

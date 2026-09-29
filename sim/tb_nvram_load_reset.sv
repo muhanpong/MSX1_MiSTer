@@ -34,7 +34,7 @@ wire   [7:0] sdram_din;
 wire         dma_active, dma_save;
 
 lookup_SRAM_t lut[4];
-initial for (int i = 0; i < 4; i++) lut[i] = '{addr: 18'd0, size: 16'd8};
+initial for (int i = 0; i < 4; i++) lut[i] = '{addr: 18'd0, size: 16'd8, kind: 8'd0};
 
 nvram_backup dut
 (

@@ -514,6 +514,15 @@ module memory_upload
                      if (sram_size != 25'd0) begin
                         lookup_SRAM[ref_sram].addr <= 18'(sram_addr);
                         lookup_SRAM[ref_sram].size <= 16'(sram_size[24:10]);
+                        //  Which device this SRAM is, for the image layout (package.sv
+                        //  SRAM_KIND_*).  Bank 0 is the slot A ROM cart and stays raw.
+                        lookup_SRAM[ref_sram].kind <= (ref_sram == 2'd0)              ? MSX::SRAM_KIND_RAW     :
+                                                      (mapper == MAPPER_FMPAC)         ? MSX::SRAM_KIND_FMPAC   :
+                                                      (mapper == MAPPER_GM2)           ? MSX::SRAM_KIND_GM2     :
+                                                      (mapper == MAPPER_HALNOTE)       ? MSX::SRAM_KIND_HALNOTE :
+                                                      (mapper == MAPPER_PANASONIC && sram_size[24:10] == 15'd32) ? MSX::SRAM_KIND_PAN32 :
+                                                      (mapper == MAPPER_PANASONIC)     ? MSX::SRAM_KIND_PAN16   :
+                                                                                         MSX::SRAM_KIND_RAW;
                         pattern       <= 3'd1; 
                         data_size     <= sram_size;
                         sram_size     <= 25'd0;
@@ -714,6 +723,10 @@ module memory_upload
          lookup_SRAM[1].size   <= 16'd0;
          lookup_SRAM[2].size   <= 16'd0;
          lookup_SRAM[3].size   <= 16'd0;
+         lookup_SRAM[0].kind   <= MSX::SRAM_KIND_RAW;
+         lookup_SRAM[1].kind   <= MSX::SRAM_KIND_RAW;
+         lookup_SRAM[2].kind   <= MSX::SRAM_KIND_RAW;
+         lookup_SRAM[3].kind   <= MSX::SRAM_KIND_RAW;
          pcm_rom_base          <= 27'h1800000;  // default, overwritten when yrw801.rom is loaded
          ms_reserve_pending    <= 1'b0;
          ms_zerofill_active    <= 1'b0;
