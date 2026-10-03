@@ -210,3 +210,62 @@ origin/pcm-mlab = msx1-audit's PCM MLAB work (not merged, not cross-checked here
   four rows on a GT pack, MT32-pi hot-plug not freezing, saved CPU settings.
 * Also noted: the board's `Daewoo/Daewoo_CPC-400S.MSX` (2026-05-24) is an older
   "MSx" file the upload FSM rejects at the first header.
+
+## 10. 2026-09-30 .. 10-03: Illusion City collaboration, SRAM images, a dead end
+
+* **Illusion City (illucity-hd-2f session) -- core verdicts, no core changes**:
+  the missing title logo turned out to be the game's own preload outrunning the
+  fade on this core's faster R800 throughput + instant disk, not a core defect
+  (user: cosmetic, closed). The cart's flash save failing on both mappers was a
+  missing feature on OUR side, not theirs: neither `yamanooto.sv` nor
+  `ascii16x.sv` nor `flash.sv` implement JEDEC write-to-buffer (25h..29h), only
+  byte-program (A0h) and sector erase. Confirmed from their cart source
+  (hdtool/cart/cart.asm `prog32`) and from openMSX's `AmdFlash.cc`, which does
+  support buffer program. **Fixed on their side** (cart now uses A0h, the 4 MB
+  ASCII16X build carries the `"ASCII16X"` signature at file offset 0x10 so
+  `mapper_detect.sv`/openMSX both pick ASCII16X regardless of size) --
+  hardware-confirmed both mappers save and reload after a power cycle. Core
+  buffer-program support is parked as a backlog item (`[[project-flash-buffer-program]]`
+  in memory), not started.
+* Documented the `.sav` (MFX16XDB) binary format for their PC-side save
+  converter: header sector (magic, mode=2, 128-bit dirty bitmap at 0x10..0x1F,
+  one bit per 64 kB ROM block), then the dirty blocks in ascending order, 64 kB
+  each, from sector 1. See `project_ascii16x_flash.md` for the full writeup;
+  `flash_dirtysave.sv:177-235` is the source of truth.
+* **SRAM images for VD1..VD3** (`14e9f2d`, local when written, now on
+  `origin/nextz80`): FM-PAC PAC, GameMaster2 and the machine's own SRAM
+  (Halnote, turbo R firmware mapper) had nvram_backup banks but no image to
+  persist to -- the firmware auto-mounts `games/MSX1/boot1..3.vhd` on VD1..3 at
+  core start, so the files just never existed. Laid out as one 64 kB entry per
+  SRAM kind with a header sector (`docs/sram_images.md`); bench
+  `sim/run_nvram_layout.sh` (10 cases + a one-sector-off mutant), wired into the
+  `saveload` landmine row. **Not built, not hardware-tested, the board does not
+  have boot1..3.vhd yet** (`tools/sramimg/mk_sram_images.sh` makes them, zero-
+  filled, on request). Known limit: the 64 kB SRAM BRAM budget has no headroom
+  once a GT firmware SRAM (32 kB) is added on top of a full slot A cart (32) +
+  FM-PAC A/B (8+8) -- revisit before any pack carries the turbo R firmware block
+  (none does; no firmware ROM in the ROM store).
+* A side investigation into HRA!'s (Takayuki Hara, `github.com/hra1129/FPGA_MSXtR`)
+  "cr800" R800 core found it is byte-identical to that project's own Z80 core
+  (`cz80_*.v`) except for module names, clocked 12x faster with no R800-exclusive
+  instructions or pipelining modeled -- not a reference worth adopting. No
+  action; noted in `reference_z80_core_candidates.md`.
+* Repo rename, unrelated to the core: `Illucity_HD` -> `Illusion_City_MSXDOS2`
+  (`github.com/muhanpong/Illusion_City_MSXDOS2`).
+
+### Open as of 2026-10-03
+1. CPU page (`29a_cpupage`) hardware confirmation on a turbo R pack: the four
+   P6 rows, R800 boot/switch, and that a saved pre-29a CPU speed setting still
+   reads back correctly.
+2. MT32-pi hot-plug under a running game, with MIDI IN now disconnected --
+   confirm it no longer freezes (the fix should already cover it; not reverified
+   since the MIDI IN change).
+3. `boot1.vhd`/`boot2.vhd`/`boot3.vhd` on the board, then a build, then an
+   FM-PAC PAC save/reload test.
+4. Flash buffer-program (25h/29h) in `yamanooto.sv`/`ascii16x.sv` -- user said
+   "구현 순위권" (put it on the list), scope and a verification plan are in
+   `project_flash_buffer_program.md`; not started.
+5. `tools/turbor_diskrom/nxrun.pid` and a handful of untracked scratch files at
+   the worktree root (`holdfast.txt`, `rec.txt`, `docs/cpu_force_level_20260920.patch`,
+   `research/` -- 4.3 GB) are leftovers from earlier sessions; not cleaned up,
+   not reviewed for whether anything in them is worth keeping.
