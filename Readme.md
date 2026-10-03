@@ -54,6 +54,16 @@ Full OPL4 emulation — OPL3-compatible FM plus the PCM wavetable engine.
 - 2MB sample RAM in addition to the wavetable ROM
 - Menu: `MoonSound On/Off`, `PCM Mute`, `FM Mute`, `PCM Volume`, `FM Volume` (2 dB steps), `Debug Overlay`
 - Requires the `yrw801.rom` wavetable — supplied through the **FW PACK** (see below)
+- The wavetable is loaded **only when the machine pack carries a `MOONSOUND` device record**
+  (`<device typ="MOONSOUND" ...>` in the pack's XML). The OSD `MoonSound` switch alone does not
+  load it: on a pack without the record the FM side plays but the PCM side reads an empty wave
+  ROM, so PCM sound effects are missing or very weak. The debug overlay shows it — row 0
+  (`ROM Base Set`) stays red.
+  - Packs for the MSX2+ and turbo R machines (FS-A1FX / WX / GT / ST, HB-F1XV) already carry the record.
+  - Plain MSX2 packs do not. `Computer/Panasonic/Panasonic FS-A1F basic MoonSound.xml` and
+    `Computer/Sony/Sony_HB-F1XDmk2_MoonSound.xml` are the stock packs plus that one record;
+    for any other pack, add the same `<device>` line to its XML and rebuild with `createMSXpack.py`.
+  - The record occupies no slot (it sits outside `<primary>`): slot A and B stay free for cartridges.
 
 The PCM engine is validated against a bit-exact golden harness derived from the openMSX
 `YMF278.cc` model, and the FM side against Nuked-OPL3.
