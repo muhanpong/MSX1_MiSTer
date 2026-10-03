@@ -156,6 +156,8 @@ module memory_upload
       logic        ms_reserve_pending;   // (legacy, unused) — replaced by ms_zerofill_active below
       logic        ms_zerofill_active;   // after yrw801, fill the 2MB custom-wave RAM with 0x00 (match openMSX clearRam: empty slots = silent, not garbage)
       logic        ms_zerofill_jump;     // one-shot: snap ram_addr to the FIXED custom-RAM base (pcm_rom_base+0x200000) before zero-filling, regardless of where the yrw801 fill ended
+      logic        x16_pat_pending;     // switch `pattern` to 0xFF on the NEXT pass: ram_din follows `pattern` combinationally, so switching it in the pass that issues the last image byte writes 0xFF over that byte
+      logic        x16_done;            // this ROM's 8MB padding has been (or need not be) started: stops the end-of-fill from owing it twice
       logic [24:0] x16_pad;             // ASCII16X: bytes of 0xFF padding still owed so the cart occupies a FULL 8MB flash chip (an image shorter than the chip must still be erasable/programmable in its top sectors)
       ddr3_wr   <= 1'b0;
       load_sram <= 1'b0;
@@ -231,6 +233,8 @@ module memory_upload
                external  <= 1'd0;
                if ({conf[0],conf[1],conf[2]} == {"M","S","X"}) begin
                   state <= STATE_FILL_RAM;
+                  x16_done <= 1'b0;
+                  x16_pat_pending <= 1'b0;
                   slotSubslot <= conf[3][3:0];
                   $display("CONF slot: %d subslot: %d (expand subslot: %d) mem_dev:%02X ram_size:%04X device:%02X mapper:%02X mode:%0x-%x-%x-%x param:%x-%x-%x-%x pattern:%02X", conf[3][3:2], conf[3][1:0], subslot, conf[4], {conf[6],conf[5]}, conf[7], conf[8], conf[9][7:6],conf[9][5:4],conf[9][3:2],conf[9][1:0], conf[10][7:6],conf[10][5:4],conf[10][3:2],conf[10][1:0],conf[11]);
                   case(curr_conf)
@@ -538,6 +542,10 @@ module memory_upload
                if (sdram_ready & ~ram_ce) begin
                   data_size  <= data_size - 25'd1;
                   ram_ce     <= 1;
+                  if (x16_pat_pending) begin       // this pass issues the first padding byte
+                     pattern         <= 3'd1;
+                     x16_pat_pending <= 1'b0;
+                  end
                   if (rec_bios && bios_config.ver == 8'hFF && (ram_addr - rec_base) == 27'h2D) begin
                      bios_config.ver <= ram_din;      // the byte going to memory at 002Dh
                      $display("           BIOS 002Dh = %02x (0 MSX1 1 MSX2 2 MSX2+ 3 turbo R)", ram_din);
@@ -567,9 +575,22 @@ module memory_upload
                      // 0xFF up to the full 8MB chip.  data_id<=ROM_RAM stops the ddr3
                      // prefetch (line ~463) exactly like the MoonSound zero-fill does.
                      data_size <= x16_pad;
-                     pattern   <= 3'd1;      // 0xFF = erased flash
+                     x16_pat_pending <= 1'b1;    // 0xFF = erased flash, from the next byte on
                      data_id   <= ROM_RAM;
                      x16_pad   <= 25'd0;
+                     x16_done  <= 1'b1;
+                  end else if (data_size == 25'd1 && x16_late_pad != 25'd0 && ~x16_done) begin
+                     // The same padding, owed LATE: mapper_detect has only now seen the
+                     // whole header, and it says ASCII16X for an image that the menu (or
+                     // the size) had resolved to plain ASCII16 -- the OSD "ASCII16X"
+                     // entry on a <= 4MB cart.  The early decision above ran before the
+                     // first byte was written and could not know.  Same fill, same
+                     // 0xFF, and the recorded size grows to the full chip.
+                     data_size                <= x16_late_pad;
+                     x16_pat_pending          <= 1'b1;
+                     data_id                  <= ROM_RAM;
+                     x16_done                 <= 1'b1;
+                     lookup_RAM[ref_ram].size <= 16'((x16_cur_size + x16_late_pad) >> 14);
                   end else if (data_size == 25'd1) begin
                      // End of fill (a normal ROM/RAM fill, or the custom-RAM zero-fill).
                      state    <= STATE_FILL_RAM;
@@ -732,6 +753,8 @@ module memory_upload
          ms_zerofill_active    <= 1'b0;
          ms_zerofill_jump      <= 1'b0;
          x16_pad               <= 25'd0;
+         x16_done              <= 1'b0;
+         x16_pat_pending       <= 1'b0;
       end
    end
 
@@ -756,6 +779,12 @@ device_typ_t cart_mem_device;
 dev_typ_t    conf_device;
 data_ID_t    cart_rom_id;
 logic  [7:0] cart_sram_size, cart_mode, cart_param, cart_ram_size;
+// ASCII16X padding owed once the header is known (see the end-of-fill branch).
+wire [24:0] x16_cur_size = ioctl_size[curr_conf == CONFIG_SLOT_A ? 2'd2 : 2'd3][24:0];
+wire        x16_late     = (curr_conf == CONFIG_SLOT_A | curr_conf == CONFIG_SLOT_B)
+                         & cart_rom_id == ROM_ROM & cart_mapper == MAPPER_ASCII16X
+                         & x16_cur_size != 25'd0 & x16_cur_size < 25'h800000;
+wire [24:0] x16_late_pad = x16_late ? 25'h800000 - x16_cur_size : 25'd0;
 
 cart_confDecoder cart_decoder
 (
@@ -799,7 +828,12 @@ module cart_confDecoder
 mapper_typ_t rom_mapper;
 dev_typ_t rom_device;
 
-assign rom_mapper = selected_mapper  == MAPPER_AUTO ? detected_mapper : selected_mapper;
+// The OSD "ASCII16X" entry resolves to plain ASCII16 for a ROM of 4MB or less (the size
+// rule in msx_config.sv), so a cart whose header says ASCII16X would be read as the
+// 8-bit-bank, SRAM-capable mapper with no flash behind it.  The header wins over that
+// one resolved choice -- and only over it: every other selection is the user's.
+wire promote_x16 = selected_mapper == MAPPER_ASCII16 && detected_mapper == MAPPER_ASCII16X;
+assign rom_mapper = (selected_mapper == MAPPER_AUTO || promote_x16) ? detected_mapper : selected_mapper;
 
 // Yamanooto is a flat primary-slot cartridge (no subslot expander chip on the real
 // board): one 8MB flash the user loads a ROM image into, plus an SCC-I and a PSG.

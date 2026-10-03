@@ -161,6 +161,31 @@ module tb_subslot_dev;
       drive(CART_TYP_ROM, 1'b1, 2'd2, SUB_ROM);      expect_row("expanded ss2 ROM w/ Yamanooto", MAPPER_YAMANOOTO, ROM_ROM);
       selected_mapper = MAPPER_ASCII8;
 
+      // ============ decoder: a header that says ASCII16X beats ONE resolved choice ==========
+      //  The OSD "ASCII16X" entry resolves to plain ASCII16 for a ROM of 4MB or less
+      //  (msx_config.sv), so selected_mapper == ASCII16 is exactly "the user picked that
+      //  entry".  When mapper_detect then reads an ASCII16X header the cart is ASCII16X.
+      //  Nothing else is overridden: every other selection is the user's own.
+      selected_mapper = MAPPER_ASCII16;  detected_mapper = MAPPER_ASCII16X;
+      drive(CART_TYP_ROM, 1'b0, 2'd0, SUB_NONE);  expect_row("classic: ASCII16 entry + ASCII16X header -> ASCII16X", MAPPER_ASCII16X, ROM_ROM);
+      drive(CART_TYP_ROM, 1'b1, 2'd1, SUB_ROM);   expect_row("expanded ss1: ASCII16 entry + ASCII16X header",       MAPPER_ASCII16X, ROM_ROM);
+      detected_mapper = MAPPER_ASCII16;
+      drive(CART_TYP_ROM, 1'b0, 2'd0, SUB_NONE);  expect_row("classic: ASCII16 entry, no header -> stays ASCII16",  MAPPER_ASCII16,  ROM_ROM);
+      detected_mapper = MAPPER_ASCII8;
+      drive(CART_TYP_ROM, 1'b0, 2'd0, SUB_NONE);  expect_row("classic: ASCII16 entry, heuristic says ASCII8 -> user wins", MAPPER_ASCII16, ROM_ROM);
+      detected_mapper = MAPPER_ASCII16X;
+      selected_mapper = MAPPER_ASCII8;
+      drive(CART_TYP_ROM, 1'b0, 2'd0, SUB_NONE);  expect_row("ASCII8 chosen + ASCII16X header -> ASCII8 (not promoted)", MAPPER_ASCII8, ROM_ROM);
+      selected_mapper = MAPPER_RTYPE;
+      drive(CART_TYP_ROM, 1'b0, 2'd0, SUB_NONE);  expect_row("R-TYPE chosen + ASCII16X header -> R-TYPE",            MAPPER_RTYPE,    ROM_ROM);
+      selected_mapper = MAPPER_YAMANOOTO;
+      drive(CART_TYP_ROM, 1'b0, 2'd0, SUB_NONE);  expect_row("Yamanooto chosen + ASCII16X header -> Yamanooto",      MAPPER_YAMANOOTO, ROM_ROM);
+      selected_mapper = MAPPER_NEO16;
+      drive(CART_TYP_ROM, 1'b0, 2'd0, SUB_NONE);  expect_row("NEO-16 chosen + ASCII16X header -> NEO-16",            MAPPER_NEO16,    ROM_ROM);
+      selected_mapper = MAPPER_AUTO;
+      drive(CART_TYP_ROM, 1'b0, 2'd0, SUB_NONE);  expect_row("AUTO + ASCII16X header -> ASCII16X (unchanged)",       MAPPER_ASCII16X, ROM_ROM);
+      selected_mapper = MAPPER_ASCII8;  detected_mapper = MAPPER_KONAMI;
+
       // =================== msx_config: per-slot On/Off and hide masks ============
       hps_status = '0;                       // both slots = ROM type, both Off
       set_subA(0, SUB_ROM); set_subA(1, SUB_FMPAC); set_subA(2, SUB_SCC2); set_subA(3, SUB_NONE);

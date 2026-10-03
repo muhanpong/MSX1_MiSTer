@@ -180,6 +180,11 @@ Several timing and behaviour fixes measured against real hardware and openMSX:
 - Support two cartridges
 - Automatic cartridge mapper detection
 - Manual select mapper: `none, ASCII8, ASCII16X, Konami, KonamiSCC, KOEI, linear64, R-TYPE, WIZARDRY, Yamanooto, NEO-8, NEO-16`
+  - The `ASCII16X` entry is one menu item for two mappers: a ROM of 4MB or less is read as plain
+    **ASCII16** (8-bit banks, optional SRAM); a ROM above 4MB, or any ROM whose header carries the
+    `ASCII16X` signature (file offset 0x10), is read as **ASCII16X** (12-bit banks, flash chip, no SRAM).
+    An ASCII16X cart is always laid out as a full 8MB flash chip, whatever the image size.
+    Automatic detection honours the same signature at any size; `NEO-8`/`NEO-16` carry theirs too.
 - Joystick.
 - FDD support (VY0010). Use DSK image
 - Cassette support: analog input or CAS emulation
@@ -206,6 +211,11 @@ Load them manually from the menu
   - Either slot can instead be expanded into four sub-slots (see *Expanded slots* above)
 - Automatic cartridge mapper detection
 - Manual select mapper: `none, ASCII8, ASCII16X, Konami, KonamiSCC, KOEI, linear64, R-TYPE, WIZARDRY, Yamanooto, NEO-8, NEO-16`
+  - The `ASCII16X` entry is one menu item for two mappers: a ROM of 4MB or less is read as plain
+    **ASCII16** (8-bit banks, optional SRAM); a ROM above 4MB, or any ROM whose header carries the
+    `ASCII16X` signature (file offset 0x10), is read as **ASCII16X** (12-bit banks, flash chip, no SRAM).
+    An ASCII16X cart is always laid out as a full 8MB flash chip, whatever the image size.
+    Automatic detection honours the same signature at any size; `NEO-8`/`NEO-16` carry theirs too.
 - Selectable SRAM size (auto, 1kB-32kB, none)
 - Joystick.
 - FDD support.

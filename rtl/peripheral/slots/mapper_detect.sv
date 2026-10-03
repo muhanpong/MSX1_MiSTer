@@ -36,6 +36,11 @@ logic [7:0] a0,a1,a2;
         a1    <= 0;
         a2    <= 0;
         addr  <= 27'd0;
+        // The signature bytes are written lazily (bytes 0..7 clear them, bytes 16..23
+        // fill them), so without this the PREVIOUS ROM's signature is still what
+        // `mapper` reports until the new ROM's header arrives -- exactly when
+        // memory_upload makes its up-front decisions (8MB padding, first mapper latch).
+        for (int i = 0; i < 8; i++) head3[i] <= 8'h00;
     end else
         if (wr) begin
             addr <= addr + 27'd1;
