@@ -1,9 +1,9 @@
 # MSX1/MSX2 for [MiSTer Board](https://github.com/MiSTer-devel/Main_MiSTer/wiki)
 
 A fork of [MiSTer-devel/MSX1_MiSTer](https://github.com/MiSTer-devel/MSX1_MiSTer) that adds
-MoonSound (YMF278B/OPL4), a Z80 turbo, IKASCC-based SCC+, the ASCII16-X and NEO-8/16
-mappers, expanded slots, standard OSD cheats, extended saves, and a number of VDP
-accuracy fixes.
+MoonSound (YMF278B/OPL4), turbo R machines with an R800, a Z80 turbo, MSX-MIDI with
+MT32-pi support, IKASCC-based SCC+, the ASCII16-X and NEO-8/16 mappers, expanded slots,
+standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
 
 ---
 
@@ -13,8 +13,14 @@ accuracy fixes.
 
 - **MoonSound (OPL4)** — YMF278B FM + PCM 웨이브테이블 엔진, 2MB 샘플 RAM
   *YMF278B FM plus the PCM wavetable engine, with 2MB of sample RAM.*
-- **Z80 터보 / Z80 turbo** — 3.58 기본에 5.37 / 7.16 / 10.7 MHz 추가. 파나소닉 MSX2+ 방식 포트 토글도 지원
-  *5.37 / 7.16 / 10.7 MHz on top of the stock 3.58, plus the Panasonic MSX2+ port toggle.*
+- **turbo R** — FS-A1GT / FS-A1ST 기계 팩, R800과 Z80 실행 중 전환(소프트웨어 또는 OSD), R800 7.16 / 21.5 MHz
+  *FS-A1GT / FS-A1ST machine packs; the R800 and the Z80 switch at run time (by software or the OSD); R800 at 7.16 / 21.5 MHz.*
+- **Z80 터보 / Z80 turbo** — 3.58 기본에 5.37 / 7.16 / 10.7 / 21.5 MHz 추가. 파나소닉 MSX2+ 방식 포트 토글도 지원
+  *5.37 / 7.16 / 10.7 / 21.5 MHz on top of the stock 3.58, plus the Panasonic MSX2+ port toggle.*
+- **turbo R 디스크 ROM 합성 / disk ROM synthesis** — MSX-DOS 2.30/2.31 커널과 WD2793 드라이버를 사용자 덤프에서 합성
+  *The turbo R disk ROM (MSX-DOS 2.30/2.31 kernel + WD2793 driver), synthesized from your own dumps.*
+- **MIDI / MT32-pi** — E8h-EFh MSX-MIDI(어느 기계에나), FS-A1GT 내장 MIDI, 슬롯 B의 μ·PACK, USER 포트 MT32-pi
+  *An MSX-MIDI at E8h-EFh on any machine, the FS-A1GT's built-in one, μ·PACK in slot B, and an MT32-pi on the USER port.*
 - **SCC+ 정상화 / SCC+ done right** — IKASCC 기반, ch4/ch5 별도 파형. 듀얼 SCC+ 연주 가능
   *IKASCC-based, separate ch4/ch5 waveforms; two SCC+ can play at once.*
 - **NEO-8 / NEO-16 매퍼 / mappers** — 최대 64MB, 시그니처 자동 인식 + OSD 수동 선택
@@ -23,8 +29,8 @@ accuracy fixes.
   *Sub-slots on/off per primary slot, each sub-slot's device chosen in the menu.*
 - **치트 / Cheats** — .gg 형식, 자동/수동 로딩
   *.gg format, automatic and manual loading.*
-- **세이브 확장 / Extended saves** — ASCII16X와 Yamanooto 매퍼 세이브 지원. ASCII16은 ASCII16X로 통합
-  *Save support for the ASCII16X and Yamanooto mappers; ASCII16 folded into ASCII16X.*
+- **세이브 확장 / Extended saves** — ASCII16X와 Yamanooto 매퍼 세이브 지원. OSD의 ASCII16X 항목은 4MB 이하면 ASCII16, 4MB 초과나 ASCII16X 헤더면 ASCII16X. FM-PAC 등 나머지 SRAM 저장은 작업 중
+  *Save support for the ASCII16X and Yamanooto mappers. The OSD's ASCII16X entry is plain ASCII16 up to 4MB, ASCII16X above 4MB or with an ASCII16X header. Saving FM-PAC and other SRAM is work in progress.*
 - **AUDIO SETTINGS** — 음원별 게인 ±8dB, 뮤트, SCC 채널별 뮤트
   *Per-source gain (±8dB), mute, and per-channel SCC mute.*
 - **일시정지 / Pause** — OSD 열림 또는 단축키, 화면에 ⏸ 표시
@@ -33,6 +39,8 @@ accuracy fixes.
   *A 6-button Mega Drive pad on the MSX joystick port, on the same pin-8 phase protocol openMSX uses.*
 - **패드 버튼 / Pad buttons** — 남는 버튼으로 Space·Return·F1을 누르거나 일시정지
   *Spare pad buttons press Space, Return or F1, or pause the machine.*
+- **Reset on ROM change** — 롬을 바꿀 때 리셋 대신 기계를 멈춰 두는 선택
+  *Hold the machine instead of resetting it while a ROM is swapped.*
 
 **곁들여 고친 것 / Also fixed**
 
@@ -40,6 +48,12 @@ accuracy fixes.
   *Two VDP bugs: Zanac EX title corruption, Putty Camiyon floating sprites.*
 - OPL4·ASCII16X 쪽 수정으로 *Go Figure* 플레이 가능
   *OPL4 and ASCII16X fixes make Go Figure playable.*
+- VDP 커맨드 엔진 타이밍을 실측 슬롯 맵으로 교체 (7개 명령 평균 오차 19.4% → 2.8%)
+  *VDP command-engine timing replaced with a measured access-slot map (mean error over seven commands 19.4% → 2.8%).*
+- MoonSound FM 음정을 YMF278B 샘플레이트로 (+7센트 어긋남 해소)
+  *MoonSound FM at the YMF278B sample rate, removing a +7 cent detune.*
+- 롬 로드 때 세이브 자동 로드가 리셋에 묻혀 안 되던 문제
+  *The .sav auto-load on ROM load no longer gets lost inside the machine reset.*
 
 아래는 항목별 상세 / Details below.
 
@@ -69,12 +83,54 @@ The PCM engine is validated against a bit-exact golden harness derived from the 
 `YMF278.cc` model, and the FM side against Nuked-OPL3.
 
 ### Z80 turbo
-CPU speed selectable in the OSD: `3.58MHz` (stock), `5.37MHz (Panasonic)`, `7.16MHz`, `10.7MHz`.
+`Z80 Speed` on the OSD's `CPU` page: `3.58MHz` (stock), `5.37MHz (Panasonic)`, `7.16MHz`,
+`10.7MHz`, `21.5MHz`. The Z80 is T80s on a single clock enable, so `21.5MHz` is one T-state
+per `clk21m`.
 
 - The Panasonic step also answers the switched I/O ports `0x40/0x41` a real Panasonic MSX2+
-  uses, so software that probes for it sees the faster clock
-- 10.7 MHz is the structural ceiling (the T80 CE toggles every `clk21m`, i.e. /2)
+  uses, so software that probes for it sees the faster clock (not on a turbo R pack, whose
+  own speed control is the R800)
 - SCC and OPLL are paced so they stay correct at the higher clocks
+
+### turbo R
+A machine pack whose BIOS says turbo R (byte `002Dh` = 3) brings up the turbo R hardware:
+the S1990 with its CPU switch (`E4h`/`E5h`), the `E6h` timer, the PCM, and the R800.
+Any other pack gets none of it, whatever the OSD says.
+
+- **CPU switching.** The Z80 (T80s) and the R800 (NextZ80) share the bus and hand over at
+  run time, the way the S1990 does it: by software (`OUT E5h`, the BIOS `CHGCPU`) or from
+  the OSD's `CPU (turbo R)`: `Auto` (software decides), `Force Z80`, `Force R800`. The OSD
+  choice is applied when the menu closes. A popup says which CPU the machine has settled on.
+- `R800 Speed`: `7.16MHz` or `21.5MHz`. `R800 VDP access wait` spaces R800 writes to the VDP
+  the way a real turbo R does (`8.66us`, the default) -- without it R800 software that writes
+  the VDP back to back drops data.
+- The R800 is NextZ80 run at the R800's clock: fast, but not cycle-exact R800 timing.
+- The `CPU` page shows the R800 rows only on a turbo R pack, and only the Z80 ladder on any
+  other machine.
+
+#### Machine packs
+Packs are built from your own ROM dumps with `tools/CreateMSXpack/createMSXpack.py`, or in a
+browser with the offline pack builder: [`tools/CreateMSXpack/packbuilder.html`](tools/CreateMSXpack/packbuilder.html)
+(hosted at <https://muhanpong.github.io/MiSTer/packbuilder.html>; see
+[`PACKBUILDER.md`](tools/CreateMSXpack/PACKBUILDER.md)). The page reads a ROM folder or a
+collection `.zip`, lists which ROMs each pack still needs, and makes no network request.
+
+- `Panasonic FS-A1GT DOS2` (512KB, and 1/2/4MB RAM variants), `Panasonic FS-A1ST DOS2`
+  (256KB, and 512KB/1/2/4MB variants), `Panasonic FS-A1GT DOS2-ILLUK` (the GT with the
+  Korean *Illusion City* kanji font)
+- The MSX-MIDI of the FS-A1GT and its Opening ROM are part of its pack
+
+#### MSX-DOS 2 and the synthesized disk ROM
+This core's floppy controller is a WD2793. The turbo R, like the Panasonic FS-A1 models
+with a disk drive, uses a TC8566AF, so its own disk ROM cannot drive it. The turbo R packs
+(all ten) carry a disk ROM synthesized from the machine's firmware -- its MSX-DOS
+2.30/2.31 kernel -- and the WD2793 driver of a Sony HB-F1XD disk ROM:
+`tools/turbor_diskrom/synth_diskrom.py`, also built inside the pack builder page. No ROM
+content is in this repository; the tools patch your dumps and check the result's SHA-1.
+
+The pack format also has an `MSXDOS2` block for the ASCII MSX-DOS 2.20 ROM, but no pack
+uses it any more: with 2.20 active, *SD Snatcher* never runs its boot sector and *Illusion
+City* corrupts its stack, so it was taken out of the 30 packs that carried it.
 
 ### SCC / SCC+ (IKASCC)
 The SCC sound path is the die-shot-based IKASCC core, with the SCC+ extensions added.
@@ -91,10 +147,12 @@ Each cartridge slot can be expanded into four sub-slots, each holding its own de
 - `SLOT A/B sub-slots` pages in the OSD select each sub-slot's device
 
 ### ASCII16-X mapper (large flash carts)
-One `ASCII16X` menu entry covers both variants and dispatches on ROM size:
+One `ASCII16X` menu entry covers both variants:
 
-- ROM ≤ 4MB → classic ASCII16 behaviour (SRAM, plain banking)
-- ROM > 4MB → ASCII16-X flash mapper with an 8MB chip, JEDEC/CFI command set
+- ROM ≤ 4MB without an ASCII16X header → classic ASCII16 behaviour (SRAM, plain banking)
+- ROM > 4MB, or any ROM with the `ASCII16X` signature at file offset 0x10 → ASCII16-X flash
+  mapper laid out as a full 8MB chip, JEDEC/CFI command set (byte program and erase;
+  buffer program `25h..29h` is not implemented)
 
 This is what MSXdev entries such as *GoFigure* need.
 
@@ -146,15 +204,42 @@ never been through it falls back to a sensible A/B/X/Start/L/Y/R/Select layout.
 For anything past this list -- a different key, a two-button chord, autofire --
 the firmware's own `Advanced` button map does it without a core change.
 
+### MIDI and MT32-pi
+- `MIDI` (`On`/`Off`): an I/O-only MSX-MIDI (8251 + 8254) at `E8h-EFh` on any machine.
+  The FS-A1GT's built-in MSX-MIDI comes from its pack, and `SLOT B` → `MU-PACK` puts a
+  μ·PACK (Bit2) in slot B with its own MSX-MIDI; the menu says which one is active.
+- MIDI OUT goes to the MiSTer's MIDI link (`UART`) and to the USER port at the same time.
+  MIDI IN is not connected at present.
+- An **MT32-pi** on the USER port gets its own `MT32-pi` page while it is detected:
+  `Use MT32-pi`, `Show Info` (its LCD as an overlay), the default `Synth` (Munt /
+  FluidSynth), `Munt ROM`, `SoundFont`, and `Reset Hanging Notes`. A popup shows the
+  synth's mode when it changes, and notes still sounding after a machine reset are
+  silenced.
+
+### Reset on ROM change
+`Reset on ROM change` (`Yes` by default). With `No` the machine is held, not reset, while a
+new ROM is staged, so a mapper or ROM can be swapped under a running program. The slot,
+sub-slot and mapper bank registers keep their old values across such a swap, which is why
+`Yes` is the default; a flash cartridge (ASCII16X / Yamanooto) is always reset.
+
 ### Storage & saves
 - `MegaFlashROM SCC+ SD` cartridge in slot A, with `Load SD card` mounting a `.VHD` image
   (Nextor-compatible FAT16, multi-partition images supported)
 - `SRAM Save` / `SRAM Load`
 - Flash saves for the ASCII16X and Yamanooto mappers: what the game programs into flash is
   persisted to a `.sav` (dirty-block tracking, so only changed 64KB blocks are written)
-- `SRAM Autosave on OSD` — save automatically when the OSD is opened
-- A blinking on-screen icon while a save is being written; reset and ROM load are held off
-  until it finishes so a save is never truncated
+- `SRAM Autosave on OSD` — save automatically when the OSD is opened. A save happens only
+  then or on `SRAM Save`: switching off without either loses what changed since
+- A blinking on-screen icon while a flash save is being written; a reset or a ROM load waits
+  until any save has finished, so a save is never cut short
+- A ROM cartridge in slot B has no SRAM; carts that save to SRAM belong in slot A
+
+#### SRAM of other devices (work in progress)
+The FM-PAC's PAC memory, GameMaster2, and machine SRAM (Halnote, the turbo R firmware
+SRAM) are kept while the core runs but are **not yet saved to SD**. An image format for
+them exists ([`docs/sram_images.md`](docs/sram_images.md)) and the save engine handles it,
+but it has not been through a hardware test, and how the image is mounted (fixed
+`boot1..3.vhd` names or an OSD file entry) is still being decided.
 
 ### Audio settings
 A per-source mixer in the OSD, all on one 2 dB ladder (`0` .. `±8 dB`).
