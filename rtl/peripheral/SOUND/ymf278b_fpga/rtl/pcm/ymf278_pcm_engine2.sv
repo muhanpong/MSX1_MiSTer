@@ -40,7 +40,7 @@ module ymf278_pcm_engine2 #(
     output logic [7:0] reg02_readback,
     //  Readback of every other wave register at reg_addr (the latched 7Eh number),
     //  as openMSX peekReg: the stored byte, header-loaded values included.  The
-    //  top answers reg 2 and reg 6 itself.  Combinational from reg_addr.
+    //  top answers reg 2 and reg 6 itself.  Registered: valid 2 clk after reg_addr.
     output logic [7:0] reg_rd_data,
 
     // SDRAM Direct Port (msx.sv ch4 bridge: edge-detected req, blocking)
@@ -1146,7 +1146,7 @@ generate
         //  Third read port, for the CPU: the same writes (CPU, header backfill,
         //  reset sweep), read at the slot reg_addr names.
         pcm_mlab24 #(.W(8)) u_mc (.clk(clk), .we(fwe[gk]), .wa(fwa[gk]), .wd(fwd[gk]),
-                                  .ra(wr_snum), .rd(frc[gk]));
+                                  .ra(rd_snum_q), .rd(frc[gk]));
         if (gk < 2) begin : g_h
             pcm_mlab24 #(.W(8)) u_mh (.clk(clk), .we(fwe[gk]), .wa(fwa[gk]), .wd(fwd[gk]),
                                       .ra(hf_pick), .rd(frh[gk]));
@@ -1164,9 +1164,25 @@ endgenerate
 // wrote 40h and lost the pan.  Field 4 is stored with bit 5 inverted (enc_byte).
 // The other registers (00h-07h, F8h-FFh) are a plain shadow; reg 3 keeps 6 bits
 // as openMSX does.  Reg 2 and reg 6 are answered by the top.
+//
+// TIMING: registered twice.  Done combinationally (reg_addr -> -8 / %24 / 24 ->
+// MLAB -> mux -> the top's io_data_out) it was 12.7 ns against an 11.64 ns
+// clk_sdram period (-1.355 ns, build 50e246d).  The 2-clk latency is invisible:
+// reg_addr is opl4latch, which changes only on a 7Eh write, and the CPU's 7Fh
+// read comes >= ~86 clk later (R800 OUT->IN), behind WAVE_REG_SELECT_DELAY too.
 logic [7:0] ns_reg [0:15];    // 00h-07h -> 0..7, F8h-FFh -> 8..15
 wire        ns_hit = (reg_addr <= 8'h07) || (reg_addr >= 8'hF8);
 wire [3:0]  ns_idx = {reg_addr[7], reg_addr[2:0]};
+logic [4:0] rd_snum_q  = '0;
+logic [3:0] rd_field_q = '0;
+logic       rd_ns_q    = 1'b0;
+logic [3:0] rd_nsidx_q = '0;
+always_ff @(posedge clk) begin
+    rd_snum_q  <= wr_snum;
+    rd_field_q <= wr_field;
+    rd_ns_q    <= ns_hit;
+    rd_nsidx_q <= ns_idx;
+end
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         for (int i = 0; i < 16; i++) ns_reg[i] <= 8'h00;
@@ -1174,10 +1190,10 @@ always_ff @(posedge clk or negedge rst_n) begin
         ns_reg[ns_idx] <= (reg_addr == 8'h03) ? {2'b00, reg_data[5:0]} : reg_data;
     end
 end
-always_comb begin
-    if (ns_hit)                  reg_rd_data = ns_reg[ns_idx];
-    else if (wr_field == 4'd4)   reg_rd_data = enc_byte(4'd4, frc[4]);   // undo the bit-5 inversion
-    else                         reg_rd_data = frc[wr_field];
+always_ff @(posedge clk) begin
+    if (rd_ns_q)                 reg_rd_data <= ns_reg[rd_nsidx_q];
+    else if (rd_field_q == 4'd4) reg_rd_data <= enc_byte(4'd4, frc[4]);   // undo the bit-5 inversion
+    else                         reg_rd_data <= frc[rd_field_q];
 end
 
 function automatic slot_regs_t dec_regs(input logic [9:0][7:0] f, input logic kon);

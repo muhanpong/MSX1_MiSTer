@@ -16,9 +16,9 @@ mutate() {
    sed -e "$2" "$SRC" > "$OUT/mut_$1.sv"
    cmp -s "$SRC" "$OUT/mut_$1.sv" && { echo "RESULT FAIL: mutant $1 identical to source"; exit 1; }
 }
-mutate zero     "s/    else                         reg_rd_data = frc\[wr_field\];/    else                         reg_rd_data = 8'h00;/"
-mutate nodecode "s/reg_rd_data = enc_byte(4'd4, frc\[4\]);/reg_rd_data = frc[4];/"
-mutate ldport   "s/\.ra(wr_snum), \.rd(frc\[gk\]));/.ra(ld_slot), .rd(frc[gk]));/"
+mutate zero     "s/    else                         reg_rd_data <= frc\[rd_field_q\];/    else                         reg_rd_data <= 8'h00;/"
+mutate nodecode "s/reg_rd_data <= enc_byte(4'd4, frc\[4\]);/reg_rd_data <= frc[4];/"
+mutate ldport   "s/\.ra(rd_snum_q), \.rd(frc\[gk\]));/.ra(ld_slot), .rd(frc[gk]));/"
 build() {
    verilator --binary --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-TIMESCALEMOD \
       -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-CASEINCOMPLETE -Wno-PINMISSING -Wno-UNDRIVEN \

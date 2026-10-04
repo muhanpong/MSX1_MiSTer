@@ -78,8 +78,10 @@ module tb_pcm_regread;
         @(negedge clk); reg_wr = 1'b0;
         repeat (3) @(negedge clk);
     endtask
+    //  reg_rd_data is registered twice: sample 3 clk after reg_addr changes (the
+    //  CPU's 7Fh read comes far later than that on the real bus).
     task read_reg(input [7:0] a, output [7:0] d);
-        @(negedge clk); reg_addr = a; @(negedge clk); d = reg_rd_data;
+        @(negedge clk); reg_addr = a; repeat (3) @(negedge clk); d = reg_rd_data;
     endtask
 
     initial begin
