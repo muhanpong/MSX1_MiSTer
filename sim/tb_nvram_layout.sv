@@ -10,7 +10,7 @@
 //  T2  VD1 FM-PAC load: header at LBA 0 verified, data from LBA 8
 //  T3  VD1 GameMaster2 load: entry 1 -> header LBA 128, data from LBA 136
 //  T4  VD3 FS-A1GT (32 kB) load: entry 2 -> header LBA 256, data from 264, 64 sectors
-//  T5  bad magic: no data sectors are read, nothing lands in BRAM, request completes
+//  T5  wrong magic: no data sectors are read, nothing lands in BRAM, request completes
 //  T6  wrong kind in a valid header: same
 //  T7  image too small for the entry: skipped, request completes, no reads
 //  T8  save VD1 GM2: header written at LBA 128 with counter = old + 1, then data
@@ -176,12 +176,12 @@ initial begin
    check(rd_log[3].size() == 65 && rd_log[3][0] == 256 && rd_log[3][1] == 264 && rd_log[3][64] == 327, "T4 VD3 GT: header 256, data 264..327");
    check(data_ok(3, 264, 32768, 18'h4000), "T4 VD3 GT: 32 kB landed");
 
-   //  T5 bad magic
+   //  T5 wrong magic
    clear_all(); put_hdr(3, 2, SRAM_KIND_PAN32, 32, 7); img[3][256*512] = "X"; fill_data(3, 264, 64, 8'h50); mount(3, 192*1024);
    pulse_load(); settle(400000);
-   check(rd_log[3].size() == 1, "T5 bad magic: only the header was read");
-   check(bram[18'h4000] == 8'h55, "T5 bad magic: BRAM untouched");
-   check(dut.request_load[3] == 1'b0, "T5 bad magic: bank 3 request completed, not left pending");
+   check(rd_log[3].size() == 1, "T5 wrong magic: only the header was read");
+   check(bram[18'h4000] == 8'h55, "T5 wrong magic: BRAM untouched");
+   check(dut.request_load[3] == 1'b0, "T5 wrong magic: bank 3 request completed, not left pending");
 
    //  T6 wrong kind
    clear_all(); put_hdr(3, 2, SRAM_KIND_PAN16, 32, 7); fill_data(3, 264, 64, 8'h60); mount(3, 192*1024);
