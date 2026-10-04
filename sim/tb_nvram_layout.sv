@@ -36,7 +36,7 @@ wire   [7:0] sd_buff_din[4];
 wire  [17:0] ram_addr; wire ram_we; logic [7:0] ram_dout;
 
 nvram_backup dut (
-   .clk(clk), .reset(reset), .lookup_SRAM(lut), .load_req(load_req), .save_req(save_req),
+   .clk(clk), .reset(reset), .lookup_SRAM(lut), .load_req(load_req), .save_req(save_req), .upload_busy(1'b0),
    .img_mounted(img_mounted), .img_readonly(img_readonly), .img_size(img_size),
    .sd_lba(sd_lba), .sd_rd(sd_rd), .sd_wr(sd_wr), .sd_ack(sd_ack),
    .sd_buff_addr(sd_buff_addr), .sd_buff_dout(sd_buff_dout), .sd_buff_din(sd_buff_din),
@@ -109,6 +109,14 @@ endtask
 task automatic mount(input int n, input longint bytes);
    @(negedge clk); img_size = bytes; img_mounted = 4'(1 << n);
    @(negedge clk); img_mounted = 0;
+endtask
+//  Mounting an image now READS it (nvram_backup, 2026-10-04: the firmware mounts
+//  without asking, and an image that was never read got the previous data saved
+//  into it).  A save test therefore mounts first, lets that load finish, and only
+//  then puts its pattern in the BRAM -- the order a real session has.
+task automatic mount_settled(input int n, input longint bytes);
+   mount(n, bytes); settle(400000);
+   for (int k = 0; k < 4; k++) begin rd_log[k].delete(); wr_log[k].delete(); end
 endtask
 task automatic pulse_load;
    @(negedge clk); load_req = 1; @(negedge clk); load_req = 0;
@@ -188,8 +196,8 @@ initial begin
 
    //  T8 save VD1 GM2 with an existing header (counter 5)
    clear_all(); lut[1] = '{addr: 18'h2000, size: 16'd8, kind: SRAM_KIND_GM2};
+   put_hdr(1, 1, SRAM_KIND_GM2, 8, 5); mount_settled(1, 128*1024);
    for (int i = 0; i < 8192; i++) bram[18'h2000 + i] = 8'(8'hA0 + i);
-   put_hdr(1, 1, SRAM_KIND_GM2, 8, 5); mount(1, 128*1024);
    pulse_save(); settle(200000);
    check(rd_log[1].size() == 1 && rd_log[1][0] == 128, "T8 save: header read first (for the counter)");
    check(wr_log[1].size() == 17 && wr_log[1][0] == 128 && wr_log[1][1] == 136 && wr_log[1][16] == 151, "T8 save: header 128 then data 136..151");
@@ -199,8 +207,8 @@ initial begin
    check(img[1][8*512] == 8'h00, "T8 save: entry 0 (FM-PAC) untouched");
 
    //  T9 save on a zero-filled image
-   clear_all(); for (int i = 0; i < 8192; i++) bram[18'h2000 + i] = 8'(8'hB0 + i);
-   mount(1, 128*1024);
+   clear_all(); mount_settled(1, 128*1024);
+   for (int i = 0; i < 8192; i++) bram[18'h2000 + i] = 8'(8'hB0 + i);
    pulse_save(); settle(200000);
    check(wr_log[1].size() == 17 && {img[1][128*512+15],img[1][128*512+14],img[1][128*512+13],img[1][128*512+12]} == 32'd1, "T9 save on blank image: header written with counter 1");
    check(img_eq_bram(1, 136, 8192, 18'h2000), "T9 save on blank image: data written");
@@ -208,8 +216,8 @@ initial begin
 
    //  T10 VD0 save stays raw
    clear_all(); lut[0] = '{addr: 18'h0000, size: 16'd8, kind: SRAM_KIND_RAW};
+   mount_settled(0, 8192);
    for (int i = 0; i < 8192; i++) bram[i] = 8'(8'hC0 + i);
-   mount(0, 8192);
    pulse_save(); settle(200000);
    check(wr_log[0].size() == 16 && wr_log[0][0] == 0 && rd_log[0].size() == 0, "T10 VD0 save: raw sectors 0..15, no header read");
    check(img_eq_bram(0, 0, 8192, 0), "T10 VD0 save: data written");

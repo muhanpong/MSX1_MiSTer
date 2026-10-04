@@ -56,6 +56,23 @@ Header sector (little-endian, unused bytes 0):
   a file; only VD0's .sav is created on write by the firmware).
 * VD0 keeps the raw format so existing .sav files stay valid.
 
+### Order of transfers (2026-10-04, `sim/run_nvram_order.sh`)
+
+* **A mounted image is read.**  The firmware mounts without asking the core (core
+  start, every ROM load for VD0's .sav, an OSD pick), so `img_mounted` now raises a
+  load for that bank.  Before, only the OSD button or the upload's own request read
+  an image, and an image mounted mid-session got the previous data saved into it.
+* **Load before save.**  After an upload the BRAM holds the fill pattern until the
+  load has run, so a pending load is served before a save of the same bank.
+* **Nothing during an upload.**  While memory_upload rebuilds the layout
+  (`upload_busy` = its `reset_rq`) no transfer starts and save requests are
+  dropped; the upload's end raises the load.
+* **save_guard covers SRAM saves.**  nvram_backup's `guard` (a transfer in flight,
+  or a servable save waiting) is part of `saving` in MSX1.sv, so a reset button or
+  a ROM upload waits for it.  Before, `saving` was only the flash paths.
+* A save is still taken only on the OSD's SRAM Save or, with "SRAM Autosave on OSD",
+  when the OSD opens.  Switching off without either loses what changed since.
+
 The data area is a raw copy of the SRAM, so it exchanges 1:1 with openMSX's
 `.SRAM` files once the 4 kB header is stripped or prepended.
 

@@ -40,7 +40,7 @@ nvram_backup dut
 (
    .clk(clk), .reset(reset),
    .lookup_SRAM(lut),
-   .load_req(load_req), .save_req(save_req),
+   .load_req(load_req), .save_req(save_req), .upload_busy(1'b0),
    .img_mounted(img_mounted), .img_readonly(img_readonly), .img_size(img_size),
    .sd_lba(sd_lba), .sd_rd(sd_rd), .sd_wr(sd_wr), .sd_ack(sd_ack),
    .sd_buff_addr(14'd0), .sd_buff_dout(8'h00), .sd_buff_din(sd_buff_din),

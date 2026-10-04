@@ -259,7 +259,7 @@ module tb;
    (
       .clk(clk21m), .reset(reset),
       .lookup_SRAM(lookup_SRAM),
-      .load_req(upl_load_sram), .save_req(1'b0),
+      .load_req(upl_load_sram), .save_req(1'b0), .upload_busy(reset_rq),
       .img_mounted(nv_img_mounted), .img_readonly(nv_img_ro), .img_size(nv_img_size),
       .sd_lba(nv_sd_lba), .sd_rd(nv_sd_rd), .sd_wr(nv_sd_wr), .sd_ack(nv_sd_ack),
       .sd_buff_addr(nv_buff_addr), .sd_buff_dout(nv_buff_dout), .sd_buff_din(nv_buff_din),

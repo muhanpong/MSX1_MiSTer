@@ -5,6 +5,10 @@ module nvram_backup
    input MSX::lookup_SRAM_t   lookup_SRAM[4],
    input                      load_req,
    input                      save_req,
+   //  memory_upload is rebuilding the slot layout and the SRAM BRAM (its reset_rq).
+   //  No transfer starts and no save is kept while it is high -- see the request
+   //  block below.
+   input                      upload_busy,
    // SD config
    input                [3:0] img_mounted,
    input                      img_readonly,
@@ -34,7 +38,10 @@ module nvram_backup
    input                      sdram_ready,
    // Hold CPU via WAIT_n while flash DMA uses SDRAM ch1
    output                     dma_active,
-   output                     dma_save     // dma_active AND the operation is a save (icon only)
+   output                     dma_save,    // dma_active AND the operation is a save (icon only)
+   //  A transfer is in flight, or a save is waiting that can be served.  For
+   //  save_guard: a reset button or a ROM upload must wait for it (MSX1.sv).
+   output                     guard
 );
 
 logic [63:0] image_size[4], new_size;
@@ -54,6 +61,16 @@ always @(posedge clk) begin
    //  large; harmless only because image_size is compared against zero and never
    //  used as a length.  Fixed here rather than left for whoever does use it.
    if (store_new_size) image_size[num] <= (64'(lookup_SRAM[num].size)) << 10;
+end
+
+//  Which banks could be served right now -- the same conditions STATE_SLEEP checks
+//  below, as vectors, so the request block can choose before it commits.
+logic [3:0] can_load, can_save;
+always_comb begin
+   for (int n = 0; n < 4; n++) begin
+      can_save[n] = (lookup_SRAM[n].size != 16'h00) & image_mounted[n] & ~image_ro[n];
+      can_load[n] = (lookup_SRAM[n].size != 16'h00) & image_mounted[n] & ((n != 0) | (image_size[n] != 64'd0));
+   end
 end
 
 logic [3:0] request_load = 4'b0, request_save = 4'b0;
@@ -96,6 +113,17 @@ always @(posedge clk) begin
    end
    if (~last_load_req & load_req) rl = 4'b1111;
    if (~last_save_req & save_req) rs = 4'b1111;
+   //  A newly mounted image is read.  The firmware mounts an image without asking
+   //  the core (core start for boot<n>.vhd, every ROM load for VD0's .sav, an OSD
+   //  pick for an S entry), and until now only load_req ever read one -- so an
+   //  image picked mid-session was never read, and the next save wrote the BRAM's
+   //  old contents into it.
+   rl = rl | img_mounted;
+   //  While memory_upload rebuilds the layout the BRAM is being refilled; a save
+   //  taken now would write that into the image.  Requests that arrive during it
+   //  are dropped; a save asked for BEFORE it started has already run, because
+   //  save_guard (guard, below) holds the upload until it has.
+   if (upload_busy) rs = 4'b0;
    request_load <= rl;
    request_save <= rs;
 
@@ -125,11 +153,16 @@ always @(posedge clk) begin
          //  is retried on the next pass.
          if (unserved) num <= (num == 2'd3) ? 2'd0 : num + 2'd1;
       end
-      if (~wr & ~rd) begin
-         if (request_save[num]) begin
-            wr <= 1'b1;
-         end else if (request_load[num]) begin
+      //  Load before save.  After an upload the BRAM holds the fill pattern until
+      //  the load has run, so a save served first wrote 0xFF over the image -- the
+      //  load would then read that back.  Only start what can be served; a bank
+      //  with nothing servable is passed over and its pending load retried on the
+      //  next pass (the round-robin must keep moving, see above).
+      if (~wr & ~rd & ~upload_busy) begin
+         if (request_load[num] & can_load[num]) begin
             rd <= 1'b1;
+         end else if (request_save[num] & can_save[num]) begin
+            wr <= 1'b1;
          end else begin
             if (num == 3) num <= 0;
             else num <= num + 2'b1;
@@ -230,6 +263,7 @@ state_t state = STATE_SLEEP;
 // wr/rd is which way the CURRENT slot is moving; the overlay shows a save icon
 // only for saves, so a boot-time .sav auto-LOAD does not flash it (2026-09-09).
 assign dma_save   = dma_active & wr;
+assign guard      = (state != STATE_SLEEP) | wr | rd | |(request_save & can_save);
 assign dma_active = (state == STATE_FLASH_PREFETCH)
                   | (state == STATE_FLASH_RD_WAIT)
                   | (state == STATE_FLASH_SD_WR)

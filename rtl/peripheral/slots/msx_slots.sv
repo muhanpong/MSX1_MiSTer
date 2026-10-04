@@ -193,7 +193,16 @@ wire         [26:0] base_ram   = lookup_RAM[ref_ram].addr;
 wire         [15:0] size       = lookup_RAM[ref_ram].size;  //16kB * size
 wire                ram_ro     = lookup_RAM[ref_ram].ro;
 wire         [17:0] base_sram  = lookup_SRAM[ref_sram].addr;
-wire         [15:0] size_sram  = lookup_SRAM[ref_sram].size;
+//  A ROM cart in slot B has no SRAM (memory_upload gives one only to slot A's ROM,
+//  because both slots' ROM carts would otherwise share bank 0).  But memory_upload
+//  does not ASSIGN slot B's ROM a ref_sram either, so its blocks inherit whatever
+//  the previous record left there -- slot A's FM-PAC (1) or the machine's own SRAM
+//  (3) -- and an ASCII8/16 game in slot B that enables "its" SRAM reads and writes
+//  that device's instead.  No bank is free to point it at (an expanded slot B can
+//  hold an FM-PAC in another sub-slot, on bank 2), so the rule is applied here,
+//  where the size is used: in slot B only FM-PAC and GameMaster2 see an SRAM.
+wire                sram_denied = external & cart_num & (mapper != MAPPER_FMPAC) & (mapper != MAPPER_GM2);
+wire         [15:0] size_sram  = sram_denied ? 16'd0 : lookup_SRAM[ref_sram].size;
 
 assign ram_addr   = device_kanji_ram_ce ? device_kanji_addr                                   :
                                           (sram_cs ? 27'(base_sram) : base_ram) + mapper_addr ;

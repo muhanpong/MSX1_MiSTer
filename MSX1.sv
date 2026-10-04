@@ -768,7 +768,12 @@ wire reset_ms = reset | upload_hold;
 
 // ---- a save in progress outranks the reset buttons (2026-09-08) ----------------
 // See rtl/save_guard.sv for why, and sim/tb_save_guard.sv for the cases it holds.
-wire saving = nvbak_dma_active | dump_active;   // declared further down, as msx_pause does
+//  nvbak_guard: the BRAM SRAM saves (slot A cart .sav, FM-PAC, GM2, machine SRAM).
+//  nvbak_dma_active covers only nvram_backup's flash path, which is disabled
+//  (`1'b0 &` in nvram_backup.sv), so until 2026-10-04 no SRAM save was guarded:
+//  a reset or an upload could cut one half-written, and an upload could start
+//  with a save still queued and turn it into a write of the fresh fill pattern.
+wire saving = nvbak_dma_active | dump_active | nvbak_guard;   // declared further down, as msx_pause does
 wire reset_now, hold_load;
 // One pulse when the OSD opens (option O[52]).  nvram_backup saves its small
 // SRAM images every time; flash_dirtysave gates itself on dirty_new.
@@ -1448,6 +1453,7 @@ ltc2308_tape #(.ADC_RATE(120000), .CLK_RATE(21477272)) tape
 
 wire upload_ram_ce, upload_sdram_rq, upload_bram_rq, upload_ram_ready, reset_rq;
 wire nvbak_dma_active;
+wire nvbak_guard;
 
 wire  [7:0] upload_ram_din, config_msx;
 wire [26:0] upload_ram_addr;
@@ -1663,6 +1669,7 @@ nvram_backup nvram_backup
    .lookup_SRAM(lookup_SRAM),
    .load_req(status[39] | load_sram),
    .save_req(status[38] | autosave),
+   .upload_busy(reset_rq),
    .img_mounted(img_mounted[3:0]),
    .img_readonly(img_readonly),
    .img_size(img_size),
@@ -1686,7 +1693,8 @@ nvram_backup nvram_backup
    .sdram_dout(nvbak_sdram_dout),
    .sdram_ready(upload_ram_ready),
    .dma_active(nvbak_dma_active),
-   .dma_save(nvbak_dma_save)
+   .dma_save(nvbak_dma_save),
+   .guard(nvbak_guard)
 );
 
 // ---- ASCII16X DIRTY-BLOCK engine (64KB dirty bitmap -> dump dirty blocks -> VD0 .sav) ----
