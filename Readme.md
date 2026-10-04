@@ -29,8 +29,8 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *Sub-slots on/off per primary slot, each sub-slot's device chosen in the menu.*
 - **치트 / Cheats** — .gg 형식, 자동/수동 로딩
   *.gg format, automatic and manual loading.*
-- **세이브 확장 / Extended saves** — ASCII16X와 Yamanooto 매퍼 세이브 지원. OSD의 ASCII16X 항목은 4MB 이하면 ASCII16, 4MB 초과나 ASCII16X 헤더면 ASCII16X. FM-PAC·GameMaster2·Halnote·turbo R 펌웨어 SRAM·RTC 설정은 **SRAM.NVR 파일 하나**에 저장 — **SRAM.NVR은 팩에 들어 있지 않으니 직접 한 번 복사**하고 OSD `SRAM File`에서 고를 것. SRAM은 쓰기가 멈추면 자동 저장(`SRAM Autosave`)
-  *Save support for the ASCII16X and Yamanooto mappers. The OSD's ASCII16X entry is plain ASCII16 up to 4MB, ASCII16X above 4MB or with an ASCII16X header. FM-PAC, GameMaster2, Halnote, turbo R firmware SRAM and the RTC settings are saved in **one file, SRAM.NVR** — **it is not part of the packs: copy it once yourself** and pick it in the OSD under `SRAM File`. SRAM is saved automatically once writes stop (`SRAM Autosave`).*
+- **세이브 확장 / Extended saves** — ASCII16X와 Yamanooto 매퍼 세이브 지원. OSD의 ASCII16X 항목은 4MB 이하면 ASCII16, 4MB 초과나 ASCII16X 헤더면 ASCII16X. FM-PAC·GameMaster2·Halnote·turbo R 펌웨어 SRAM·RTC 설정은 **SRAM.NVR 파일 하나**에 저장 — **SRAM.NVR은 팩에 들어 있지 않으니 직접 한 번 복사**하고 OSD `SRAM(PAC/Turbo-R/...)`에서 고를 것. SRAM은 쓰기가 멈추면 자동 저장(`SRAM Autosave`)
+  *Save support for the ASCII16X and Yamanooto mappers. The OSD's ASCII16X entry is plain ASCII16 up to 4MB, ASCII16X above 4MB or with an ASCII16X header. FM-PAC, GameMaster2, Halnote, turbo R firmware SRAM and the RTC settings are saved in **one file, SRAM.NVR** — **it is not part of the packs: copy it once yourself** and pick it in the OSD under `SRAM(PAC/Turbo-R/...)`. SRAM is saved automatically once writes stop (`SRAM Autosave`).*
 - **AUDIO SETTINGS** — 음원별 게인 ±8dB, 뮤트, SCC 채널별 뮤트
   *Per-source gain (±8dB), mute, and per-channel SCC mute.*
 - **일시정지 / Pause** — OSD 열림 또는 단축키, 화면에 ⏸ 표시
@@ -239,7 +239,7 @@ sub-slot and mapper bank registers keep their old values across such a swap, whi
 
 #### SRAM.NVR — FM-PAC, GameMaster2, machine SRAM, RTC settings
 > **SRAM.NVR is NOT inside the machine / FW packs. Copy it to the board ONCE, by hand,
-> then select it in the OSD under `SRAM File`.**
+> then select it in the OSD under `SRAM(PAC/Turbo-R/...)`.**
 > **Never copy a blank SRAM.NVR over one you already use — that erases your saves.**
 
 - One 2 MB file holds the FM-PAC's PAC memory, GameMaster2, Halnote, the Panasonic
@@ -248,7 +248,7 @@ sub-slot and mapper bank registers keep their old values across such a swap, whi
 - Get an empty one from `createMSXpack.py` (written as `SRAM.NVR` next to the `MSX/` folder,
   deliberately not inside it), from the pack builder's **빈 SRAM.NVR 받기** button, or with
   `tools/sramimg/mk_sram_images.sh <dir>`. Put it anywhere on the SD card, e.g. `games/MSX1/`.
-- Pick it once in the OSD: `SRAM File`. The firmware remembers the choice
+- Pick it once in the OSD: `SRAM(PAC/Turbo-R/...)`. The firmware remembers the choice
   (`config/MSX1.s1`) and mounts it at every core start. The firmware does not create or
   grow this file, so it has to be the full-size one.
 - The save follows the device, not the slot: an FM-PAC saves to the same entry in slot A or
@@ -340,7 +340,7 @@ Copy bios files to Games/MSX1 folder or load them manually from the menu
 - The generated `.MSX` files will be located in the `tools/CreateMSXPack/MSX` directory.
 - **`SRAM.NVR` (the save file for FM-PAC / GameMaster2 / machine SRAM / RTC) is written next
   to `MSX/`, not inside it. Copy it to the board once yourself and select it with
-  `SRAM File` in the OSD — see [SRAM.NVR](#sramnvr--fm-pac-gamemaster2-machine-sram-rtc-settings).**
+  `SRAM(PAC/Turbo-R/...)` in the OSD — see [SRAM.NVR](#sramnvr--fm-pac-gamemaster2-machine-sram-rtc-settings).**
 
 ### FW PACK (cartridge / extension firmware)
 `Load FW PACK` supplies the firmware images used by the emulated cartridges — FM-PAC,

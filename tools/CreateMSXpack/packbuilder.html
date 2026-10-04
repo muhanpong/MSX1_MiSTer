@@ -169,7 +169,7 @@ header.top .spacer{flex:1}
         <b>SRAM.NVR은 팩 zip에 들어 있지 않습니다 — 직접 한 번 복사하세요.</b>
         FM-PAC·GameMaster2·Halnote·Panasonic SRAM·RTC 설정의 세이브 파일입니다.
         <b>「빈 SRAM.NVR 받기」</b>로 받아 보드의 <code>games/MSX1/</code>(어디든 됨)에 넣고,
-        OSD의 <b>SRAM File</b>에서 고르면 코어가 기억합니다.
+        OSD의 <b>SRAM(PAC/Turbo-R/...)</b>에서 고르면 코어가 기억합니다.
         <b>이미 쓰던 SRAM.NVR 위에 덮어쓰지 마세요 — 세이브가 지워집니다.</b>
       </p>
       <p class="note">
@@ -766,7 +766,7 @@ async function buildOne(m){
   }catch(e){ log(`${m.name}: ${e.message}`,true); }
 }
 /* SRAM 파일(FM-PAC·GM2·Halnote·Panasonic SRAM·RTC 설정, docs/sram_images.md).
-   코어가 OSD "SRAM File"(SC1)로 붙이고, 펌웨어는 SC 이미지를 만들거나 늘리지 않으므로
+   코어가 OSD "SRAM(PAC/Turbo-R/...)"(SC1)로 붙이고, 펌웨어는 SC 이미지를 만들거나 늘리지 않으므로
    2 MB 그대로 있어야 합니다(64 kB 칸 32개, 6개 사용).  팩 zip에는 일부러 넣지 않습니다: MSX 폴더를 덮어 풀면
    세이브가 든 SRAM.NVR이 빈 파일로 바뀌기 때문입니다.  사용자가 한 번만 직접 복사합니다. */
 async function buildSram(){
@@ -774,7 +774,7 @@ async function buildSram(){
   const bytes=new Uint8Array(32*64*1024);
   if(d) await offer("SRAM.NVR.zip", zip([{name:"SRAM.NVR",data:bytes}]));
   else  await offer("SRAM.NVR", bytes);
-  log("빈 SRAM.NVR -- 보드에 한 번만 복사하고 OSD의 SRAM File에서 고르세요. 세이브가 든 SRAM.NVR 위에 덮어쓰지 마세요.", true);
+  log("빈 SRAM.NVR -- 보드에 한 번만 복사하고 OSD의 SRAM(PAC/Turbo-R/...)에서 고르세요. 세이브가 든 SRAM.NVR 위에 덮어쓰지 마세요.", true);
 }
 async function buildAll(){
   const ready=DATA.machines.filter(m=>state(m).k!=="blocked");

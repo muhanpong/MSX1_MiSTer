@@ -8,7 +8,7 @@ so it works with the network off. Type is set in system fonts for that reason.
 > **SRAM.NVR is not in the pack zip.** It is the save file for FM-PAC, GameMaster2,
 > Halnote, Panasonic firmware SRAM and the RTC settings (2 MB, `docs/sram_images.md`).
 > Get it with the separate **빈 SRAM.NVR 받기** button, copy it to the board **once**,
-> and pick it in the OSD under `SRAM File`. It is kept out of the zip on purpose:
+> and pick it in the OSD under `SRAM(PAC/Turbo-R/...)`. It is kept out of the zip on purpose:
 > unpacking the zip over the board's folder would otherwise replace an SRAM.NVR that
 > holds saves with a blank one.
 

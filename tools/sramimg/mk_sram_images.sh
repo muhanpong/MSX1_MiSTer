@@ -2,7 +2,7 @@
 #  The blank SRAM file for the MSX1 core (docs/sram_images.md): SRAM.NVR, 2 MB of
 #  zeros = 32 entries of 64 kB: six in use (FM-PAC, GameMaster2, Halnote, Panasonic 16 kB,
 #  Panasonic 32 kB, RTC settings).  The core mounts it on VD1 through the OSD
-#  "SRAM File" entry (SC1); the firmware opens an SC image without creating or
+#  "SRAM(PAC/Turbo-R/...)" entry (SC1); the firmware opens an SC image without creating or
 #  growing it, so it must exist at full size.  The core writes an entry header on
 #  the first save, so zeros are all that is needed.  createMSXpack.py (next to
 #  MSX/, never inside it) and packbuilder.html (its own button) make the same file.

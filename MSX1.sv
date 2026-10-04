@@ -384,7 +384,12 @@ localparam CONF_STR = {
    // tools make an empty one next to the machine packs; the firmware remembers
    // the pick in config/MSX1.s1 and mounts it at every core start.  An SC mount
    // is opened without O_CREAT and never grows, so the file must already exist.
-   "SC1,NVR,SRAM File;",
+   // Label width: the row prints as " <label> *.NVR" and an OSD row holds 29
+   // characters (256 px - 22 px title stripe, 8 px font; Main_MiSTer osd.cpp /
+   // menu.cpp) -- this one is 28.  "...FILE" did not fit: the extension was cut.
+   // No commas inside a label: substrcpy (user_io.cpp) splits fields on every
+   // ',', so "SRAM(PAC,Turbo-R,...)" would have shown as "SRAM(PAC".
+   "SC1,NVR,SRAM(PAC/Turbo-R/...);",
    "-;",
    "O[8],Tape Input,File,ADC;",
    "H0F5,CAS,Cas File,31600000;",

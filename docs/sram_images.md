@@ -14,7 +14,7 @@ hard-coded to 0 in user_io.cpp).  Every other SRAM the core allocates -- FM-PAC
 PAC, GameMaster2, the machine's own SRAM (Halnote, the Panasonic firmware
 mapper) -- and the RTC's settings memory lived only while the core ran.
 
-They now share ONE file, the SRAM file, on VD1.  The OSD entry "SRAM File"
+They now share ONE file, the SRAM file, on VD1.  The OSD entry "SRAM(PAC/Turbo-R/...)"
 (`SC1,NVR`) picks it; the firmware remembers the pick in `config/MSX1.s1` and
 mounts it at every core start (user_io.cpp, the `SC` restore).  An SC image is
 opened without O_CREAT and never grows, so the file must exist at full size.
