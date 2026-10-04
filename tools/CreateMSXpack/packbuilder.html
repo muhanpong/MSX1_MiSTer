@@ -165,6 +165,13 @@ header.top .spacer{flex:1}
           <div class="log" id="log"></div>
         </div>
       </div>
+      <p class="note" style="border-left:3px solid currentColor;padding-left:8px">
+        <b>SRAM.NVR은 팩 zip에 들어 있지 않습니다 — 직접 한 번 복사하세요.</b>
+        FM-PAC·GameMaster2·Halnote·Panasonic SRAM·RTC 설정의 세이브 파일입니다.
+        <b>「빈 SRAM.NVR 받기」</b>로 받아 보드의 <code>games/MSX1/</code>(어디든 됨)에 넣고,
+        OSD의 <b>SRAM File</b>에서 고르면 코어가 기억합니다.
+        <b>이미 쓰던 SRAM.NVR 위에 덮어쓰지 마세요 — 세이브가 지워집니다.</b>
+      </p>
       <p class="note">
         ROM은 파일명이 아니라 <b>SHA-1</b>로 찾습니다. 이름이 달라도 내용이 맞으면 인식합니다.
         <b>ZIP</b>과 <b>.gz</b>는 그대로 넣어도 됩니다. 안에서 풀어 읽고, 어느 팩에도 쓰이지 않는 파일은 버립니다.
@@ -183,6 +190,7 @@ header.top .spacer{flex:1}
           <button id="fReady" aria-pressed="false">빌드 가능만</button>
         </div>
         <button class="btn btn-primary btn-sm" id="buildAll" disabled>가능한 팩 전부 받기</button>
+        <button class="btn btn-ghost btn-sm" id="buildSram" title="FM-PAC·GM2·Halnote·Panasonic SRAM·RTC 설정 세이브 파일 (384 kB, 비어 있음)">빈 SRAM.NVR 받기</button>
       </div>
       <div id="list"></div>
     </main>
@@ -757,6 +765,17 @@ async function buildOne(m){
     else  await offer(m.name+".MSX", bytes);
   }catch(e){ log(`${m.name}: ${e.message}`,true); }
 }
+/* SRAM 파일(FM-PAC·GM2·Halnote·Panasonic SRAM·RTC 설정, docs/sram_images.md).
+   코어가 OSD "SRAM File"(SC1)로 붙이고, 펌웨어는 SC 이미지를 만들거나 늘리지 않으므로
+   384 kB 그대로 있어야 합니다.  팩 zip에는 일부러 넣지 않습니다: MSX 폴더를 덮어 풀면
+   세이브가 든 SRAM.NVR이 빈 파일로 바뀌기 때문입니다.  사용자가 한 번만 직접 복사합니다. */
+async function buildSram(){
+  const d=await downloader();
+  const bytes=new Uint8Array(6*64*1024);
+  if(d) await offer("SRAM.NVR.zip", zip([{name:"SRAM.NVR",data:bytes}]));
+  else  await offer("SRAM.NVR", bytes);
+  log("빈 SRAM.NVR -- 보드에 한 번만 복사하고 OSD의 SRAM File에서 고르세요. 세이브가 든 SRAM.NVR 위에 덮어쓰지 마세요.", true);
+}
 async function buildAll(){
   const ready=DATA.machines.filter(m=>state(m).k!=="blocked");
   if(!ready.length) return;
@@ -952,6 +971,7 @@ $("fAll").addEventListener("click",()=>{onlyReady=false;$("fAll").setAttribute("
 $("fReady").addEventListener("click",()=>{onlyReady=true;$("fReady").setAttribute("aria-pressed","true");
   $("fAll").setAttribute("aria-pressed","false");render();});
 $("buildAll").addEventListener("click",buildAll);
+$("buildSram").addEventListener("click",buildSram);
 $("theme").addEventListener("click",()=>{
   const cur=document.documentElement.getAttribute("data-theme");
   const dark=cur?cur==="dark":matchMedia("(prefers-color-scheme: dark)").matches;

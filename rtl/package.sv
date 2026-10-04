@@ -71,15 +71,16 @@ package MSX;
     } lookup_RAM_t;
     
     //  What device the SRAM belongs to.  nvram_backup keys the image layout on it:
-    //  VD0 (slot A ROM .sav) stays raw; VD1..VD3 hold one 64 kB entry per kind
-    //  (docs/sram_images.md).  memory_upload derives it from the record's mapper
-    //  and SRAM size.
+    //  VD0 (slot A ROM .sav) stays raw; the SRAM file on VD1 holds one 64 kB entry
+    //  per kind, entry = kind - 1 (docs/sram_images.md).  memory_upload derives it
+    //  from the record's mapper and SRAM size; RTC is nvram_backup's own bank 4.
     parameter logic [7:0] SRAM_KIND_RAW    = 8'd0;   // slot A ROM cart (VD0), or unknown
     parameter logic [7:0] SRAM_KIND_FMPAC  = 8'd1;   // FM-PAC PAC, 8 kB
     parameter logic [7:0] SRAM_KIND_GM2    = 8'd2;   // GameMaster2, 8 kB
     parameter logic [7:0] SRAM_KIND_HALNOTE= 8'd3;   // Sony HB-F1XV Halnote, 16 kB
     parameter logic [7:0] SRAM_KIND_PAN16  = 8'd4;   // Panasonic firmware mapper, 16 kB (FS-A1ST)
     parameter logic [7:0] SRAM_KIND_PAN32  = 8'd5;   // Panasonic firmware mapper, 32 kB (FS-A1GT)
+    parameter logic [7:0] SRAM_KIND_RTC    = 8'd6;   // RP5C01 settings memory (blocks 2-3), 1 kB entry
 
     typedef struct {
         logic [17:0] addr;

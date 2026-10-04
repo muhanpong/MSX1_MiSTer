@@ -339,6 +339,20 @@ for dirpath, dirnames, filenames in os.walk(ROM_DIR):
 parseDir(XML_DIR_COMP)
 parseDir(XML_DIR_FW)
 
-            
-
-                
+# The SRAM file: FM-PAC, GameMaster2, Halnote, Panasonic firmware SRAM and the RTC
+# settings, one 64 kB entry each (docs/sram_images.md).  The core mounts it on VD1
+# through the OSD "SRAM File" entry (SC1), and the firmware opens an SC image
+# without creating or growing it -- so it has to exist, at full size, before the
+# first save.  Zero-filled is valid: an entry without a header loads nothing and
+# the first save writes it.
+# It is made NEXT TO MSX/, not inside it, on purpose: copying MSX/ over the
+# board's folder must never replace an SRAM.NVR that holds saves.  The user
+# copies it once, by hand.  Made only when missing.
+SRAM_FILE      = "SRAM.NVR"
+SRAM_FILE_SIZE = 6 * 64 * 1024
+if not os.path.exists(SRAM_FILE):
+    with open(SRAM_FILE, "wb") as f:
+        f.write(bytes(SRAM_FILE_SIZE))
+    print(SRAM_FILE + " (new, empty)")
+print("*** " + SRAM_FILE + " is NOT in MSX/.  Copy it ONCE to the board (e.g. games/MSX1/),")
+print("*** then pick it in the OSD: SRAM File.  Never copy it over one that holds saves.")

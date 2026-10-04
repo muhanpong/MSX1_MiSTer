@@ -1,9 +1,10 @@
 //  tb_nvram_order -- nvram_backup must never write the wrong BRAM contents into an
 //  image: not the fill pattern of an upload, not the previous image's data.
 //
-//  Same SD model as tb_nvram_layout (four in-memory images served with the hps_io
+//  Same SD model as tb_nvram_layout (two in-memory images served with the hps_io
 //  handshake) and a BRAM behind ram_addr/ram_we.  One SRAM: bank 1, FM-PAC, 8 kB,
-//  VD1 entry 0 (header LBA 0, data LBA 8..23).
+//  SRAM file (VD1) entry 0 (header LBA 0, data LBA 8..23).  The RTC bank (4) is
+//  always there too; its entry is blank, so it loads nothing and saves 3 sectors.
 //
 //  O1  load before save.  After an upload the BRAM holds the fill pattern until the
 //      load has run.  A load and a save asked for together (SRAM Save, or an OSD
@@ -30,21 +31,22 @@ logic clk = 0; always #23.3 clk = ~clk;
 logic reset = 1;
 lookup_SRAM_t lut[4];
 logic load_req = 0, save_req = 0, upload_busy = 0;
-logic  [3:0] img_mounted = 0;
+logic  [1:0] img_mounted = 0;
 logic        img_readonly = 0;
 logic [63:0] img_size = 0;
-wire  [31:0] sd_lba[4];
-wire   [3:0] sd_rd, sd_wr;
-logic  [3:0] sd_ack = 0;
+wire  [31:0] sd_lba[2];
+wire   [1:0] sd_rd, sd_wr;
+logic  [1:0] sd_ack = 0;
 logic [13:0] sd_buff_addr = 0;
 logic  [7:0] sd_buff_dout = 0;
-wire   [7:0] sd_buff_din[4];
+wire   [7:0] sd_buff_din[2];
 wire  [17:0] ram_addr; wire ram_we; logic [7:0] ram_dout;
 wire         guard;
 
 nvram_backup dut (
    .clk(clk), .reset(reset), .lookup_SRAM(lut), .load_req(load_req), .save_req(save_req),
    .upload_busy(upload_busy),
+   .autosave_en(1'b0), .cpu_wr(1'b0), .cpu_wr_addr(18'd0), .rtc_dirty(1'b0), .flush(1'b0),
    .img_mounted(img_mounted), .img_readonly(img_readonly), .img_size(img_size),
    .sd_lba(sd_lba), .sd_rd(sd_rd), .sd_wr(sd_wr), .sd_ack(sd_ack),
    .sd_buff_addr(sd_buff_addr), .sd_buff_dout(sd_buff_dout), .sd_buff_din(sd_buff_din),
@@ -53,13 +55,13 @@ nvram_backup dut (
    .sdram_dout(8'h00), .sdram_ready(1'b1), .guard(guard));
 
 //  ---- models (as tb_nvram_layout)
-logic [7:0] bram [0:65535];
-always @(posedge clk) if (ram_we) bram[ram_addr[15:0]] <= sd_buff_dout;
-assign ram_dout = bram[ram_addr[15:0]];
+logic [7:0] bram [0:262143];
+always @(posedge clk) if (ram_we) bram[ram_addr] <= sd_buff_dout;
+assign ram_dout = bram[ram_addr];
 
-localparam IMG_SECTORS = 512;
-logic [7:0] img [4][IMG_SECTORS*512];
-int rd_log[4][$], wr_log[4][$];
+localparam IMG_SECTORS = 768;
+logic [7:0] img [2][IMG_SECTORS*512];
+int rd_log[2][$], wr_log[2][$];
 int busy = 0;
 
 task automatic serve(input int n, input bit is_wr);
@@ -79,7 +81,7 @@ endtask
 
 always @(posedge clk) begin
    if (!busy) begin
-      for (int n = 0; n < 4; n++) begin
+      for (int n = 0; n < 2; n++) begin
          if (sd_rd[n] && !busy) serve(n, 0);
          else if (sd_wr[n] && !busy) serve(n, 1);
       end
@@ -117,10 +119,10 @@ function automatic bit img_all(input int n, input int first_lba, input int bytes
    return 1;
 endfunction
 task automatic clear_logs;
-   for (int k = 0; k < 4; k++) begin rd_log[k].delete(); wr_log[k].delete(); end
+   for (int k = 0; k < 2; k++) begin rd_log[k].delete(); wr_log[k].delete(); end
 endtask
 task automatic mount(input int n, input longint bytes);
-   @(negedge clk); img_size = bytes; img_mounted = 4'(1 << n);
+   @(negedge clk); img_size = bytes; img_mounted = 2'(1 << n);
    @(negedge clk); img_mounted = 0;
 endtask
 //  idle = nothing in flight and nothing servable pending; bounded
@@ -134,23 +136,24 @@ task automatic settle(input int max_cycles);
    repeat (20) @(posedge clk);
 endtask
 task automatic reset_engine;
-   @(negedge clk); dut.request_load = 4'b0; dut.request_save = 4'b0; dut.pend_age = '0;
+   @(negedge clk); dut.request_load = '0; dut.request_save = '0; dut.pend_age = '0;
    @(negedge clk);
 endtask
 
 localparam int B1 = 18'h2000, SZ = 8192, DATA_LBA = 8;
+localparam longint FILE_BYTES = 384*1024;
 
 initial begin
    for (int i = 0; i < 4; i++) lut[i] = '{addr: 18'd0, size: 16'd0, kind: SRAM_KIND_RAW};
-   for (int n = 0; n < 4; n++) for (int i = 0; i < IMG_SECTORS*512; i++) img[n][i] = 8'h00;
-   for (int i = 0; i < 65536; i++) bram[i] = 8'h55;
+   for (int n = 0; n < 2; n++) for (int i = 0; i < IMG_SECTORS*512; i++) img[n][i] = 8'h00;
+   for (int i = 0; i < 262144; i++) bram[i] = 8'h55;
    repeat (5) @(negedge clk); reset = 0; repeat (5) @(negedge clk);
    reset_engine();
    lut[1] = '{addr: B1, size: 16'd8, kind: SRAM_KIND_FMPAC};
 
    //  ---- O1 load before save
    put_hdr(1, 0, SRAM_KIND_FMPAC, 8); fill_img(1, DATA_LBA, SZ, 8'h31);
-   mount(1, 256*1024); settle(800000);
+   mount(1, FILE_BYTES); settle(800000);
    check(bram_is(B1, SZ, 8'h31), "O1 setup: mounting VD1 loaded its data");
    //  an upload rebuilds the BRAM: fill pattern, then its own load request
    @(negedge clk); upload_busy = 1; fill_bram(B1, SZ, 8'hFF);
@@ -178,7 +181,7 @@ initial begin
    reset_engine(); clear_logs();
    fill_bram(B1, SZ, 8'h00); for (int i = 0; i < SZ; i++) bram[B1 + i] = 8'(8'h71 + i);   // X, from an earlier image
    put_hdr(1, 0, SRAM_KIND_FMPAC, 8); fill_img(1, DATA_LBA, SZ, 8'hA5);                 // Y, the file picked now
-   mount(1, 256*1024); settle(800000);
+   mount(1, FILE_BYTES); settle(800000);
    check(bram_is(B1, SZ, 8'hA5), "O3 mounting image Y loads Y into the BRAM");
    @(negedge clk); save_req = 1; @(negedge clk); save_req = 0; settle(800000);
    check(img_is(1, DATA_LBA, SZ, 8'hA5), "O3 the next save writes Y's data back, not the earlier X");
@@ -186,15 +189,15 @@ initial begin
    //  ---- O4 guard spans the whole save, across banks
    reset_engine(); clear_logs();
    lut[3] = '{addr: 18'h8000, size: 16'd16, kind: SRAM_KIND_HALNOTE};
-   put_hdr(3, 0, SRAM_KIND_HALNOTE, 16); mount(3, 256*1024); settle(800000);
+   put_hdr(1, 2, SRAM_KIND_HALNOTE, 16); mount(1, FILE_BYTES); settle(800000);
    clear_logs();
    begin
       int gaps, highs, w; bit seen_done;
       gaps = 0; highs = 0; w = 0;
       @(negedge clk); save_req = 1; @(negedge clk); save_req = 0;
       @(posedge clk); @(posedge clk);
-      //  until both banks have written their data (header + data sectors)
-      while (!(wr_log[1].size() >= 1 + 16 && wr_log[3].size() >= 1 + 32) && w < 2000000) begin
+      //  until all three banks (FM-PAC, Halnote, RTC) have written header + data
+      while (!(wr_log[1].size() >= (1 + 16) + (1 + 32) + (1 + 2)) && w < 2000000) begin
          @(posedge clk); w++;
          if (guard) highs++; else gaps++;
       end

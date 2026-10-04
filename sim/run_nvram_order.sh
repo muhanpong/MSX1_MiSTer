@@ -25,9 +25,9 @@ mut("savefirst", [("""         if (request_load[num] & can_load[num]) begin
             wr <= 1'b1;
          end else if (request_load[num] & can_load[num]) begin
             rd <= 1'b1;""")])
-mut("nobusy", [("   if (upload_busy) rs = 4'b0;\n",""), ("if (~wr & ~rd & ~upload_busy) begin","if (~wr & ~rd) begin")])
-mut("nomountload", [("   rl = rl | img_mounted;\n","")])
-mut("guardgap", [("assign guard      = (state != STATE_SLEEP) | wr | rd | |(request_save & can_save);","assign guard      = (state != STATE_SLEEP);")])
+mut("nobusy", [("   if (upload_busy) rs = '0;\n",""), ("if (~wr & ~rd & ~upload_busy) begin","if (~wr & ~rd) begin")])
+mut("nomountload", [("   rl = rl | {{(NB-1){img_mounted[1]}}, img_mounted[0]};\n","")])
+mut("guardgap", [("assign guard      = (state != STATE_SLEEP) | wr | rd | |(request_save & can_save)\n                  | (autosave_en & ~flush & |(dirty & can_save));","assign guard      = (state != STATE_SLEEP);")])
 PY
 [ $? -eq 0 ] || { echo "RESULT FAIL: a mutation anchor is missing"; exit 1; }
 build() {

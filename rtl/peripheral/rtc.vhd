@@ -48,7 +48,19 @@ entity rtc is
         wrt         : in    std_logic;
         adr         : in    std_logic_vector( 15 downto 0 );
         dbi         : out   std_logic_vector(  7 downto 0 );
-        dbo         : in    std_logic_vector(  7 downto 0 )
+        dbo         : in    std_logic_vector(  7 downto 0 );
+
+        -- backup memory, second port: the SRAM file engine (nvram_backup) reads it
+        -- for a save and writes it on a load.  Address = mode(1:0) & reg_ptr, the
+        -- same index the CPU side uses; only the low nibble is a register.
+        nv_adr      : in    std_logic_vector(  5 downto 0 );
+        nv_we       : in    std_logic;
+        nv_dbo      : in    std_logic_vector(  7 downto 0 );
+        nv_dbi      : out   std_logic_vector(  7 downto 0 );
+        -- one clock per CPU write to block 2 or 3 registers 0..12 (the settings
+        -- memory), for the autosave.  Mode/test/reset writes (13..15) and the
+        -- clock blocks do not count: the BIOS writes those on every access.
+        mem_dirty   : out   std_logic
  );
 end rtc;
 
@@ -84,6 +96,9 @@ architecture rtl of rtc is
     signal w_mem_we     : std_logic;
     signal w_mem_addr   : std_logic_vector(  7 downto 0 );
     signal w_mem_q      : std_logic_vector(  7 downto 0 );
+    type mem_t is array( 0 to 63 ) of std_logic_vector( 3 downto 0 );
+    signal mem_blk      : mem_t;
+    signal mem_iadr     : std_logic_vector(  5 downto 0 );
     signal w_1sec       : std_logic;
     signal w_10sec      : std_logic;
     signal w_60sec      : std_logic;
@@ -585,14 +600,28 @@ begin
     w_mem_addr  <= "00" & reg_mode(1 downto 0) & reg_ptr;
     w_mem_we    <=  '1' when( w_wrt = '1' and adr(0) = '1' )else
                 '0';
+    mem_dirty   <=  '1' when( w_mem_we = '1' and reg_mode(1) = '1' and reg_ptr <= "1100" )else
+                '0';
 
-    u_mem: work.ram
-    port map (
-        adr     => w_mem_addr   ,
-        clk     => clk21m       ,
-        we      => w_mem_we     ,
-        dbo     => dbo          ,
-        dbi     => w_mem_q
-    );
+    -- Was work.ram (256 x 8, one port).  Two ports now so the SRAM file can
+    -- carry SET SCREEN / SET BEEP / the title across power-off.  64 entries is
+    -- every address w_mem_addr can form, and only the low nibble is ever read
+    -- back (dbi above), so 64 x 4.  The CPU side keeps work.ram's timing:
+    -- address registered, data read through it.  The CPU write wins a
+    -- same-address collision (a load racing a program write).
+    process( clk21m )
+    begin
+        if( rising_edge(clk21m) )then
+            if( w_mem_we = '1' )then
+                mem_blk( conv_integer(w_mem_addr(5 downto 0)) ) <= dbo(3 downto 0);
+            end if;
+            if( nv_we = '1' and not (w_mem_we = '1' and w_mem_addr(5 downto 0) = nv_adr) )then
+                mem_blk( conv_integer(nv_adr) ) <= nv_dbo(3 downto 0);
+            end if;
+            mem_iadr <= w_mem_addr(5 downto 0);
+            nv_dbi   <= "0000" & mem_blk( conv_integer(nv_adr) );
+        end if;
+    end process;
+    w_mem_q <= "0000" & mem_blk( conv_integer(mem_iadr) );
 
 end rtl;

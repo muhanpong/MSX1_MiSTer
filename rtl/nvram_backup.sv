@@ -1,4 +1,11 @@
 module nvram_backup
+#(
+   //  Autosave timing; benches shrink these.  2^(QUIET_BITS-1) clocks of no
+   //  writes (~0.78 s at 21.48 MHz), or 2^(AGE_BITS-1) clocks after the first
+   //  write (~12.5 s) if they never stop.
+   parameter int QUIET_BITS = 25,
+   parameter int AGE_BITS   = 29
+)
 (
    input                      clk,
    input                      reset,
@@ -9,19 +16,29 @@ module nvram_backup
    //  No transfer starts and no save is kept while it is high -- see the request
    //  block below.
    input                      upload_busy,
-   // SD config
-   input                [3:0] img_mounted,
+   //  Autosave on write (status[52]): a bank whose SRAM the CPU wrote is saved once
+   //  writes have been quiet for ~0.8 s, or ~12 s after the first write if they
+   //  never stop, or at once when `flush` rises (a file download or a reset button
+   //  -- something that is about to replace or reset what the SRAM holds).
+   input                      autosave_en,
+   input                      cpu_wr,          // CPU write into the SRAM BRAM (port A, not the upload)
+   input               [17:0] cpu_wr_addr,
+   input                      rtc_dirty,       // CPU write into the RTC settings memory
+   input                      flush,
+   // SD config.  VD0 = slot A ROM's .sav, VD1 = the SRAM file (OSD SC1).
+   input                [1:0] img_mounted,
    input                      img_readonly,
    input               [63:0] img_size,
    // SD block level access
-   output              [31:0] sd_lba[4],
-   output logic         [3:0] sd_rd = 4'd0,
-   output logic         [3:0] sd_wr = 4'd0,
-   input                [3:0] sd_ack,
+   output              [31:0] sd_lba[2],
+   output logic         [1:0] sd_rd = 2'd0,
+   output logic         [1:0] sd_wr = 2'd0,
+   input                [1:0] sd_ack,
    input               [13:0] sd_buff_addr,
    input                [7:0] sd_buff_dout,
-   output               [7:0] sd_buff_din[4],
-   // BRAM access
+   output               [7:0] sd_buff_din[2],
+   // BRAM access.  Bank 4 (RTC) is addressed at 18'h20000: bit 17 is beyond the
+   // 64 kB SRAM BRAM, and MSX1.sv routes that range to the RTC's second port.
    output              [17:0] ram_addr,
    output                     ram_we,
    input                [7:0] ram_dout,
@@ -44,37 +61,96 @@ module nvram_backup
    output                     guard
 );
 
-logic [63:0] image_size[4], new_size;
-logic  [3:0] image_mounted;
-logic  [3:0] image_ro = 4'b0;
+//  ---------------------------------------------------------------- banks
+//  0     slot A ROM cart          -> VD0 .sav, raw from LBA 0
+//  1     slot A FM-PAC / GM2      -> VD1 entry kind-1
+//  2     slot B FM-PAC / GM2      -> VD1 entry kind-1, unless bank 1 has the same kind
+//  3     machine SRAM (Halnote, Panasonic firmware mapper) -> VD1 entry kind-1
+//  4     RTC settings memory      -> VD1 entry 5
+//  Banks 1..4 share ONE file, so two banks of the same kind would write the same
+//  entry: the lower bank wins and the other is not saved or loaded (slot A over
+//  slot B, user decision 2026-10-04).
+localparam int NB = 5;
+logic [17:0] bk_addr[NB];
+logic [15:0] bk_size[NB];
+logic  [7:0] bk_kind[NB];
+always_comb begin
+   for (int n = 0; n < 4; n++) begin
+      bk_addr[n] = lookup_SRAM[n].addr;
+      bk_size[n] = lookup_SRAM[n].size;
+      bk_kind[n] = lookup_SRAM[n].kind;
+   end
+   bk_addr[4] = 18'h20000;
+   bk_size[4] = 16'd1;                 // 1 kB; the RTC has 64 nibbles, the rest is copies
+   bk_kind[4] = MSX::SRAM_KIND_RTC;
+end
+
+logic [63:0] image_size[2];
+logic  [1:0] image_mounted = 2'b0;
+logic  [1:0] image_ro = 2'b0;
 logic        store_new_size = 1'b0;
 
 always @(posedge clk) begin
    //  Read-only is a reason not to WRITE the image, not a reason to refuse to
    //  read it.  Folding it into image_mounted made a read-only .sav skip its
    //  auto-load silently, which looks exactly like the .sav not being there.
-   if (img_mounted[0]) begin image_mounted[0] <= 1'b1; image_ro[0] <= img_readonly; image_size[0] <= img_size; end //ROM
-   if (img_mounted[1]) begin image_mounted[1] <= 1'b1; image_ro[1] <= img_readonly; image_size[1] <= img_size; end //Extension A
-   if (img_mounted[2]) begin image_mounted[2] <= 1'b1; image_ro[2] <= img_readonly; image_size[2] <= img_size; end //Extension B
-   if (img_mounted[3]) begin image_mounted[3] <= 1'b1; image_ro[3] <= img_readonly; image_size[3] <= img_size; end //Computer CMOS
-   //  size is in kB, so bytes is << 10.  It was << 13, which is eight times too
-   //  large; harmless only because image_size is compared against zero and never
-   //  used as a length.  Fixed here rather than left for whoever does use it.
-   if (store_new_size) image_size[num] <= (64'(lookup_SRAM[num].size)) << 10;
+   if (img_mounted[0]) begin image_mounted[0] <= 1'b1; image_ro[0] <= img_readonly; image_size[0] <= img_size; end //ROM .sav
+   if (img_mounted[1]) begin image_mounted[1] <= 1'b1; image_ro[1] <= img_readonly; image_size[1] <= img_size; end //SRAM file
+   //  size is in kB, so bytes is << 10.  Only VD0's image is exactly the SRAM.
+   if (store_new_size) image_size[0] <= (64'(bk_size[0])) << 10;
 end
 
 //  Which banks could be served right now -- the same conditions STATE_SLEEP checks
 //  below, as vectors, so the request block can choose before it commits.
-logic [3:0] can_load, can_save;
+logic [NB-1:0] eligible, can_load, can_save;
 always_comb begin
-   for (int n = 0; n < 4; n++) begin
-      can_save[n] = (lookup_SRAM[n].size != 16'h00) & image_mounted[n] & ~image_ro[n];
-      can_load[n] = (lookup_SRAM[n].size != 16'h00) & image_mounted[n] & ((n != 0) | (image_size[n] != 64'd0));
+   eligible[0] = bk_size[0] != 16'h00;
+   for (int n = 1; n < NB; n++) begin
+      eligible[n] = (bk_size[n] != 16'h00) & (bk_kind[n] >= MSX::SRAM_KIND_FMPAC) & (bk_kind[n] <= MSX::SRAM_KIND_RTC);
+      for (int m = 1; m < n; m++)
+         if ((bk_size[m] != 16'h00) & (bk_kind[m] == bk_kind[n])) eligible[n] = 1'b0;
+   end
+   for (int n = 0; n < NB; n++) begin
+      can_save[n] = eligible[n] & image_mounted[n != 0] & ~image_ro[n != 0];
+      can_load[n] = eligible[n] & image_mounted[n != 0] & ((n != 0) | (image_size[0] != 64'd0));
    end
 end
 
-logic [3:0] request_load = 4'b0, request_save = 4'b0;
-logic [1:0] num          = 2'd0;
+//  ---------------------------------------------------------------- autosave
+logic [NB-1:0]         dirty = '0;
+logic [QUIET_BITS-1:0] quiet = '0;
+logic [AGE_BITS-1:0]   age   = '0;
+logic                  flush_q = 1'b0;
+logic [NB-1:0]         wr_hit;
+always_comb begin
+   for (int n = 0; n < 4; n++)
+      wr_hit[n] = cpu_wr & (bk_size[n] != 16'h00) & (cpu_wr_addr >= bk_addr[n]) &
+                  ({1'b0, cpu_wr_addr} < {1'b0, bk_addr[n]} + {3'b0, bk_size[n]} * 19'd1024);
+   wr_hit[4] = rtc_dirty;
+end
+wire autosave_fire = autosave_en & (|dirty) &
+                     (quiet[QUIET_BITS-1] | age[AGE_BITS-1] | (flush & ~flush_q));
+
+always @(posedge clk) begin
+   flush_q <= flush;
+   //  A write during the upload is the upload's own (memory_upload refills the
+   //  BRAM), and what was dirty before it belongs to the layout it replaced.
+   if (upload_busy | ~autosave_en) begin
+      dirty <= '0;
+      quiet <= '0;
+      age   <= '0;
+   end else begin
+      dirty <= (autosave_fire ? '0 : dirty) | wr_hit;
+      if (|wr_hit)                       quiet <= '0;
+      else if (~quiet[QUIET_BITS-1])     quiet <= quiet + 1'b1;
+      if ((dirty == '0) | autosave_fire) age <= '0;
+      else if (~age[AGE_BITS-1])         age <= age + 1'b1;
+   end
+end
+
+logic [NB-1:0] request_load = '0, request_save = '0;
+logic    [2:0] num          = 3'd0;
+wire           v            = (num != 3'd0);   // which VD this bank lives on
 logic       wr           = 1'b0, rd = 1'b0;
 
 logic last_load_req = 1'b0;
@@ -99,11 +175,11 @@ logic [PEND_BITS-1:0] pend_age = '0;
 wire                  pend_expired = pend_age[PEND_BITS-1];
 
 always @(posedge clk) begin
-   logic [3:0] rl, rs;
+   logic [NB-1:0] rl, rs;
    rl = request_load;
    rs = request_save;
 
-   //  Completion clears the bank it served; an arriving request sets all four.
+   //  Completion clears the bank it served; an arriving request sets all of them.
    //  Doing both on the same edge used to lose one bank, because the bit write
    //  came after the vector write and won.  Setting last means a request is
    //  never lost -- at worst a bank is served twice, which is harmless.
@@ -111,19 +187,20 @@ always @(posedge clk) begin
       if (wr) rs[num] = 1'b0;
       if (rd) rl[num] = 1'b0;
    end
-   if (~last_load_req & load_req) rl = 4'b1111;
-   if (~last_save_req & save_req) rs = 4'b1111;
+   if (~last_load_req & load_req) rl = '1;
+   if (~last_save_req & save_req) rs = '1;
+   if (autosave_fire)             rs = rs | dirty;
    //  A newly mounted image is read.  The firmware mounts an image without asking
    //  the core (core start for boot<n>.vhd, every ROM load for VD0's .sav, an OSD
    //  pick for an S entry), and until now only load_req ever read one -- so an
    //  image picked mid-session was never read, and the next save wrote the BRAM's
    //  old contents into it.
-   rl = rl | img_mounted;
+   rl = rl | {{(NB-1){img_mounted[1]}}, img_mounted[0]};
    //  While memory_upload rebuilds the layout the BRAM is being refilled; a save
    //  taken now would write that into the image.  Requests that arrive during it
    //  are dropped; a save asked for BEFORE it started has already run, because
    //  save_guard (guard, below) holds the upload until it has.
-   if (upload_busy) rs = 4'b0;
+   if (upload_busy) rs = '0;
    request_load <= rl;
    request_save <= rs;
 
@@ -131,17 +208,17 @@ always @(posedge clk) begin
    last_save_req <= save_req;
 
    //  Age only while something is pending and nothing is in flight.
-   if ((rl | rs) == 4'b0 | done)  pend_age <= '0;
+   if ((rl | rs) == '0 | done)    pend_age <= '0;
    else if (~pend_expired)        pend_age <= pend_age + 1'b1;
    if (pend_expired) begin
-      request_load <= 4'b0;
-      request_save <= 4'b0;
+      request_load <= '0;
+      request_save <= '0;
    end
 
    if (reset) begin
       wr             <= 1'b0;
       rd             <= 1'b0;
-      num            <= 2'd0;
+      num            <= 3'd0;
    end else begin
       if (done | unserved) begin
          wr <= 1'b0;
@@ -151,7 +228,7 @@ always @(posedge clk) begin
          //  never reaches the one that IS ready.  That livelock is the reported
          //  symptom again, so the round-robin advances here and the pending bank
          //  is retried on the next pass.
-         if (unserved) num <= (num == 2'd3) ? 2'd0 : num + 2'd1;
+         if (unserved) num <= (num == 3'(NB-1)) ? 3'd0 : num + 3'd1;
       end
       //  Load before save.  After an upload the BRAM holds the fill pattern until
       //  the load has run, so a save served first wrote 0xFF over the image -- the
@@ -164,8 +241,8 @@ always @(posedge clk) begin
          end else if (request_save[num] & can_save[num]) begin
             wr <= 1'b1;
          end else begin
-            if (num == 3) num <= 0;
-            else num <= num + 2'b1;
+            if (num == 3'(NB-1)) num <= 3'd0;
+            else num <= num + 3'd1;
          end
       end
    end
@@ -183,8 +260,8 @@ typedef enum logic [3:0] {
    STATE_CHECK_SIZE,
    STATE_FORMAT,
    STATE_NEXT,
-   STATE_HDR_RD,           // VD1..3: read the entry header sector (load: verify; save: fetch the counter)
-   STATE_HDR_WR            // VD1..3: write the entry header sector, then the data
+   STATE_HDR_RD,           // VD1: read the entry header sector (load: verify; save: fetch the counter)
+   STATE_HDR_WR            // VD1: write the entry header sector, then the data
 } state_t;
 
 logic [20:0] block_count;
@@ -193,50 +270,42 @@ logic        done = 1'b0;
 
 //  ---------------------------------------------------------------- image layout
 //  VD0 is the slot A ROM's companion .sav: raw SRAM from LBA 0, as it always was.
-//  VD1..VD3 are the firmware's boot1..3.vhd (auto-mounted at core start) and hold
-//  one 64 kB entry per DEVICE KIND, so an FM-PAC and a GameMaster2 that both land
-//  on VD1, or an FS-A1ST (16 kB) and an FS-A1GT (32 kB) that both land on VD3, do
-//  not overwrite each other.  Entry n: header sector at LBA 128n (4 kB reserved,
-//  one sector used), data from LBA 128n + 8, up to 60 kB.  docs/sram_images.md.
-//  A load is skipped -- not retried -- when the header does not match this bank's
-//  kind and size; a save always rewrites the header, so a zero-filled file works
-//  from the first save.
+//  VD1 is the SRAM file (OSD SC1, remembered in config/MSX1.s1) and holds one
+//  64 kB entry per DEVICE KIND, entry = kind - 1: FM-PAC 0, GM2 1, Halnote 2,
+//  Panasonic 16 kB 3, Panasonic 32 kB 4, RTC 5 -- 384 kB in all.  Entry n: header
+//  sector at LBA 128n (4 kB reserved, one sector used), data from LBA 128n + 8, up
+//  to 60 kB.  docs/sram_images.md.  A load is skipped -- not retried -- when the
+//  header does not match this bank's kind and size; a save always rewrites the
+//  header, so a zero-filled file works from the first save.
 localparam [7:0] HDR_VER = 8'd1;
-function automatic logic [31:0] entry_of(input logic [7:0] kind);
-   case (kind)
-      MSX::SRAM_KIND_GM2:   entry_of = 32'd1;   // VD1: FM-PAC 0, GM2 1
-      MSX::SRAM_KIND_PAN16: entry_of = 32'd1;   // VD3: Halnote 0, ST 1, GT 2
-      MSX::SRAM_KIND_PAN32: entry_of = 32'd2;
-      default:              entry_of = 32'd0;
-   endcase
-endfunction
-wire        layout    = (num != 2'd0);
-wire [31:0] lba_base  = entry_of(lookup_SRAM[num].kind) << 7;   // * 128 sectors
+wire        layout    = v;
+wire [31:0] lba_base  = 32'(bk_kind[num] - 8'd1) << 7;           // * 128 sectors
 wire [31:0] data_base = layout ? lba_base + 32'd8 : 32'd0;
 logic [20:0] sec = 21'd0;                                        // sector within the data area
 logic  [7:0] hdr[16];                                            // header bytes read back
 logic [31:0] hdr_cnt = 32'd0;                                    // save counter to write
 wire         hdr_ok  = hdr[0] == "M" && hdr[1] == "S" && hdr[2] == "X" && hdr[3] == "1" &&
                        hdr[4] == "S" && hdr[5] == "R" && hdr[6] == "A" && hdr[7] == "M" &&
-                       hdr[8] == HDR_VER && hdr[9] == lookup_SRAM[num].kind &&
-                       {hdr[11], hdr[10]} == lookup_SRAM[num].size;
-function automatic logic [7:0] hdr_byte(input logic [8:0] i);
+                       hdr[8] == HDR_VER && hdr[9] == bk_kind[num] &&
+                       {hdr[11], hdr[10]} == bk_size[num];
+function automatic logic [7:0] hdr_byte(input logic [8:0] i, input logic [7:0] kind,
+                                        input logic [15:0] size, input logic [31:0] cnt);
    case (i)
       9'd0: hdr_byte = "M"; 9'd1: hdr_byte = "S"; 9'd2: hdr_byte = "X"; 9'd3: hdr_byte = "1";
       9'd4: hdr_byte = "S"; 9'd5: hdr_byte = "R"; 9'd6: hdr_byte = "A"; 9'd7: hdr_byte = "M";
       9'd8:  hdr_byte = HDR_VER;
-      9'd9:  hdr_byte = lookup_SRAM[num].kind;
-      9'd10: hdr_byte = lookup_SRAM[num].size[7:0];
-      9'd11: hdr_byte = lookup_SRAM[num].size[15:8];
-      9'd12: hdr_byte = hdr_cnt[7:0];
-      9'd13: hdr_byte = hdr_cnt[15:8];
-      9'd14: hdr_byte = hdr_cnt[23:16];
-      9'd15: hdr_byte = hdr_cnt[31:24];
+      9'd9:  hdr_byte = kind;
+      9'd10: hdr_byte = size[7:0];
+      9'd11: hdr_byte = size[15:8];
+      9'd12: hdr_byte = cnt[7:0];
+      9'd13: hdr_byte = cnt[15:8];
+      9'd14: hdr_byte = cnt[23:16];
+      9'd15: hdr_byte = cnt[31:24];
       default: hdr_byte = 8'h00;
    endcase
 endfunction
 //  bytes the image must hold for this bank: data end, in bytes
-wire [63:0] need_bytes = 64'(data_base + 32'(lookup_SRAM[num].size) * 2) << 9;
+wire [63:0] need_bytes = 64'(data_base + 32'(bk_size[num]) * 2) << 9;
 logic        unserved = 1'b0;   // looked at, cannot act yet -- keep the request
 
 // Flash DMA state
@@ -249,12 +318,10 @@ logic [26:0] sd_wr_timeout;
 
 //  Only DATA sectors touch the BRAM: a header sector being read must not land in
 //  the SRAM, so ram_we is qualified on STATE_PROCESS.
-assign ram_we         = rd & sd_ack[num] & ~sd_buff_addr[9] & (state == STATE_PROCESS);
-assign ram_addr       = lookup_SRAM[num].addr + 18'({sec, sd_buff_addr[8:0]});
+assign ram_we         = rd & sd_ack[v] & ~sd_buff_addr[9] & (state == STATE_PROCESS);
+assign ram_addr       = bk_addr[num] + 18'({sec, sd_buff_addr[8:0]});
 assign sd_buff_din[0] = (state == STATE_FLASH_SD_WR) ? sector_buf[sd_buff_addr[8:0]] : ram_dout;
-assign sd_buff_din[1] = (state == STATE_HDR_WR) ? hdr_byte(sd_buff_addr[8:0]) : ram_dout;
-assign sd_buff_din[2] = (state == STATE_HDR_WR) ? hdr_byte(sd_buff_addr[8:0]) : ram_dout;
-assign sd_buff_din[3] = (state == STATE_HDR_WR) ? hdr_byte(sd_buff_addr[8:0]) : ram_dout;
+assign sd_buff_din[1] = (state == STATE_HDR_WR) ? hdr_byte(sd_buff_addr[8:0], bk_kind[num], bk_size[num], hdr_cnt) : ram_dout;
 
 logic last_ack = 1'b0;
 state_t state = STATE_SLEEP;
@@ -263,7 +330,12 @@ state_t state = STATE_SLEEP;
 // wr/rd is which way the CURRENT slot is moving; the overlay shows a save icon
 // only for saves, so a boot-time .sav auto-LOAD does not flash it (2026-09-09).
 assign dma_save   = dma_active & wr;
-assign guard      = (state != STATE_SLEEP) | wr | rd | |(request_save & can_save);
+//  A dirty bank counts as a save waiting -- a load or a reset button arriving
+//  before the quiet timer runs out waits for it, and `flush` (which they raise)
+//  turns it into a save at once.  While flush is held the dirty term is dropped,
+//  or a game that writes its SRAM every frame would hold an upload off for good.
+assign guard      = (state != STATE_SLEEP) | wr | rd | |(request_save & can_save)
+                  | (autosave_en & ~flush & |(dirty & can_save));
 assign dma_active = (state == STATE_FLASH_PREFETCH)
                   | (state == STATE_FLASH_RD_WAIT)
                   | (state == STATE_FLASH_SD_WR)
@@ -278,8 +350,8 @@ always @(posedge clk) begin
 
    if (reset) begin
       state     <= STATE_SLEEP;
-      sd_rd     <= 4'b0;
-      sd_wr     <= 4'b0;
+      sd_rd     <= 2'b0;
+      sd_wr     <= 2'b0;
       sdram_req <= 1'b0;
    end else
    case (state)
@@ -288,7 +360,7 @@ always @(posedge clk) begin
          if ((rd | wr) & ~done & ~unserved) begin
             // ASCII16X flash save DISABLED: SDRAM ch1 DMA corrupts SDRAM controller
             // after sustained read traffic. Requires future Flash FSM + BRAM mirror.
-            if (1'b0 & num == 2'd0 & flash16x_active & image_mounted[0]
+            if (1'b0 & num == 3'd0 & flash16x_active & image_mounted[0]
                 & (wr | (rd & (image_size[0] > 0)))) begin
                // ASCII16X flash: use SDRAM DMA path via VD0 (Slot A ROM companion)
                flash_sector        <= 16'd0;
@@ -301,32 +373,34 @@ always @(posedge clk) begin
                   sd_rd[0] <= 1'b1;
                   state    <= STATE_FLASH_SD_RD;
                end
-            end else if (~layout & lookup_SRAM[num].size > 16'h00 & image_mounted[num]
-                         & (wr ? ~image_ro[num] : (image_size[num] > 0))) begin
+            end else if (~layout & (wr ? can_save[0] : can_load[0])) begin
                // VD0: raw SRAM from LBA 0
                sec         <= 21'd0;
-               sd_lba[num] <= 0;
-               block_count <= 21'(lookup_SRAM[num].size) << 1;
-               sd_wr[num]  <= wr;
-               sd_rd[num]  <= rd;
+               sd_lba[0]   <= 0;
+               block_count <= 21'(bk_size[0]) << 1;
+               sd_wr[0]    <= wr;
+               sd_rd[0]    <= rd;
                state       <= STATE_PROCESS;
                $display("START %d", num);
-            end else if (layout & lookup_SRAM[num].size > 16'h00 & image_mounted[num]
-                         & (wr ? ~image_ro[num] : 1'b1)) begin
-               // VD1..3: an entry per kind.  Too small a file cannot be grown by
-               // the core (the firmware only creates VD0's .sav), so that is a
-               // skip with a message, not a pending request.
-               if (image_size[num] < need_bytes) begin
-                  $display("SRAM image %0d too small: %0d < %0d bytes (kind %0d, entry %0d)",
-                           num, image_size[num], need_bytes, lookup_SRAM[num].kind, lba_base >> 7);
+            end else if (layout & (wr ? can_save[num] : can_load[num])) begin
+               // VD1: an entry per kind.  Too small a file cannot be grown by the
+               // core (an SC mount is opened without O_CREAT and cannot grow), so
+               // that is a skip with a message, not a pending request.
+               if (image_size[1] < need_bytes) begin
+                  $display("SRAM file too small: %0d < %0d bytes (bank %0d kind %0d, entry %0d)",
+                           image_size[1], need_bytes, num, bk_kind[num], lba_base >> 7);
                   done <= 1'b1;
                end else begin
-                  block_count <= 21'(lookup_SRAM[num].size) << 1;
-                  sd_lba[num] <= lba_base;
-                  sd_rd[num]  <= 1'b1;             // load and save both read the header first
+                  block_count <= 21'(bk_size[num]) << 1;
+                  sd_lba[1]   <= lba_base;
+                  sd_rd[1]    <= 1'b1;             // load and save both read the header first
                   state       <= STATE_HDR_RD;
-                  $display("START %0d kind %0d entry %0d (%s)", num, lookup_SRAM[num].kind, lba_base >> 7, wr ? "save" : "load");
+                  $display("START %0d kind %0d entry %0d (%s)", num, bk_kind[num], lba_base >> 7, wr ? "save" : "load");
                end
+            end else if (layout & ~eligible[num]) begin
+               // Nothing to do for this bank: no SRAM, an unknown kind, or another
+               // bank of the same kind owns the entry.  Not pending -- it never will be.
+               done <= 1'b1;
             end else begin
                //  Not done -- just not now.  `done` here would clear the
                //  request and the auto-load would never happen.
@@ -338,13 +412,13 @@ always @(posedge clk) begin
       // -----------------------------------------------------------------------
       // Existing BRAM save/load
       STATE_PROCESS: begin
-         if (~sd_ack[num] & last_ack) begin
+         if (~sd_ack[v] & last_ack) begin
             if (sec < (block_count - 21'd1)) begin
                sec         <= sec + 1'b1;
-               sd_lba[num] <= data_base + 32'(sec) + 32'd1;
+               sd_lba[v]   <= data_base + 32'(sec) + 32'd1;
             end else begin
-               sd_wr[num]     <= 1'b0;
-               sd_rd[num]     <= 1'b0;
+               sd_wr[v]       <= 1'b0;
+               sd_rd[v]       <= 1'b0;
                done           <= 1'b1;
                store_new_size <= wr & ~layout;   // VD0's image is exactly the SRAM
                state          <= STATE_SLEEP;
@@ -353,26 +427,26 @@ always @(posedge clk) begin
       end
 
       // -----------------------------------------------------------------------
-      // VD1..3 entry header.  Read first in both directions: a load needs it to
+      // VD1 entry header.  Read first in both directions: a load needs it to
       // match, a save needs the counter it carries.
       STATE_HDR_RD: begin
-         if (sd_ack[num] & ~sd_buff_addr[9] & sd_buff_addr[8:4] == 5'd0)
+         if (sd_ack[1] & ~sd_buff_addr[9] & sd_buff_addr[8:4] == 5'd0)
             hdr[sd_buff_addr[3:0]] <= sd_buff_dout;
-         if (~sd_ack[num] & last_ack) begin
-            sd_rd[num] <= 1'b0;
+         if (~sd_ack[v] & last_ack) begin
+            sd_rd[1] <= 1'b0;
             if (wr) begin
                hdr_cnt     <= hdr_ok ? {hdr[15], hdr[14], hdr[13], hdr[12]} + 32'd1 : 32'd1;
-               sd_lba[num] <= lba_base;
-               sd_wr[num]  <= 1'b1;
+               sd_lba[1]   <= lba_base;
+               sd_wr[1]    <= 1'b1;
                state       <= STATE_HDR_WR;
             end else if (hdr_ok) begin
                sec         <= 21'd0;
-               sd_lba[num] <= data_base;
-               sd_rd[num]  <= 1'b1;
+               sd_lba[1]   <= data_base;
+               sd_rd[1]    <= 1'b1;
                state       <= STATE_PROCESS;
             end else begin
-               $display("SRAM image %0d entry %0d: no matching header (kind %0d size %0d kB) -- not loaded",
-                        num, lba_base >> 7, lookup_SRAM[num].kind, lookup_SRAM[num].size);
+               $display("SRAM file entry %0d: no matching header (bank %0d kind %0d size %0d kB) -- not loaded",
+                        lba_base >> 7, num, bk_kind[num], bk_size[num]);
                done  <= 1'b1;
                state <= STATE_SLEEP;
             end
@@ -380,9 +454,9 @@ always @(posedge clk) begin
       end
 
       STATE_HDR_WR: begin
-         if (~sd_ack[num] & last_ack) begin
+         if (~sd_ack[v] & last_ack) begin
             sec         <= 21'd0;
-            sd_lba[num] <= data_base;
+            sd_lba[1]   <= data_base;
             state       <= STATE_PROCESS;   // sd_wr stays high for the data sectors
          end
       end
@@ -481,7 +555,7 @@ always @(posedge clk) begin
       default: ;
    endcase
 
-   last_ack <= sd_ack[num];
+   last_ack <= sd_ack[v];
 end
 
 endmodule

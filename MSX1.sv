@@ -364,12 +364,14 @@ localparam CONF_STR = {
    "H6-;",
    "H6R[38],SRAM Save;",
    "H6R[39],SRAM Load;",
-   // Opening the OSD is the last moment before the destructive choices inside it
-   // (Load ROM, Reset, machine swap), so that is when the autosave fires.  The
-   // flash engine only acts when something was programmed since the last save
-   // (dirty_new), so browsing the menu does not rewrite the .sav every time.
+   // Autosave.  SRAM (the slot A .sav and the SRAM file) is saved when the CPU's
+   // writes to it go quiet, or at once before a download or a reset button
+   // (nvram_backup, 2026-10-04) -- opening the OSD to switch this Off no longer
+   // saves first.  Flash carts (ASCII16X / Yamanooto) still save when the OSD
+   // opens: flash_dirtysave acts only when something was programmed since the
+   // last save (dirty_new), so browsing the menu does not rewrite the .sav.
    // Default Off; bit 52 measured zero in the shipped MSX1.CFG (2026-09-05 audit).
-   "H6O[52],SRAM Autosave on OSD,Off,On;",
+   "H6O[52],SRAM Autosave,Off,On;",
    "-;",
    "C,Cheats;",
    "FC7,GG,Load Cheat;",
@@ -377,6 +379,12 @@ localparam CONF_STR = {
    "h1-;",
    "h1S5,DSK,Mount Drive A:;",
    "SC4,VHD,Load SD card;",
+   // The SRAM file (VD1): FM-PAC, GameMaster2, Halnote, Panasonic firmware SRAM
+   // and the RTC settings, one 64 kB entry each (docs/sram_images.md).  The pack
+   // tools make an empty one next to the machine packs; the firmware remembers
+   // the pick in config/MSX1.s1 and mounts it at every core start.  An SC mount
+   // is opened without O_CREAT and never grows, so the file must already exist.
+   "SC1,NVR,SRAM File;",
    "-;",
    "O[8],Tape Input,File,ADC;",
    "H0F5,CAS,Cas File,31600000;",
@@ -775,8 +783,8 @@ wire reset_ms = reset | upload_hold;
 //  with a save still queued and turn it into a write of the fresh fill pattern.
 wire saving = nvbak_dma_active | dump_active | nvbak_guard;   // declared further down, as msx_pause does
 wire reset_now, hold_load;
-// One pulse when the OSD opens (option O[52]).  nvram_backup saves its small
-// SRAM images every time; flash_dirtysave gates itself on dirty_new.
+// One pulse when the OSD opens (option O[52]), for flash_dirtysave only (it gates
+// itself on dirty_new).  The SRAM saves are written on write since 2026-10-04.
 reg autosave_osd_q;
 always @(posedge clk21m) autosave_osd_q <= OSD_STATUS;
 wire autosave = status[52] & OSD_STATUS & ~autosave_osd_q;
@@ -1110,6 +1118,20 @@ wire [15:0] probe_frame;
 wire turbor_pause;   // turbo R hardware pause: A7h bit 1 + the Pause key (rtl/peripheral/turbor)
 wire msx_pause = nvbak_dma_active | dump_active | (status[43] & OSD_STATUS) | pause_toggle | upload_hold | turbor_pause;
 
+wire [17:0] sram_addr;
+wire  [7:0] sram_dout;
+wire        sram_we;
+//  nvram_backup bank 4 is the RTC settings memory, addressed at 18'h20000 (bit 17
+//  is beyond the 64 kB SRAM BRAM).  Its 1 kB entry holds the 64 nibbles once and
+//  copies after that; only the first 64 bytes of a load are written.
+wire  [7:0] sram_bram_dout, rtc_nv_dout;
+wire        rtc_mem_dirty;
+wire  [5:0] rtc_nv_addr = sram_addr[5:0];
+wire        rtc_nv_we   = sram_we & sram_addr[17] & (sram_addr[9:6] == 4'd0);
+reg         sram_rtc_q;
+always @(posedge clk21m) sram_rtc_q <= sram_addr[17];      // both ports answer one clock later
+assign      sram_dout   = sram_rtc_q ? rtc_nv_dout : sram_bram_dout;
+
 msx MSX
 (
    .midi_tx(midi_tx),
@@ -1152,6 +1174,11 @@ msx MSX
    .cas_motor(motor),
    .cas_audio_in(msxConfig.cas_audio_src == CAS_AUDIO_FILE  ? CAS_dout : tape_in),
    .rtc_time(rtc),
+   .rtc_nv_addr(rtc_nv_addr),
+   .rtc_nv_we(rtc_nv_we),
+   .rtc_nv_din(sd_buff_dout),
+   .rtc_nv_dout(rtc_nv_dout),
+   .rtc_mem_dirty(rtc_mem_dirty),
    .dma_active(nvbak_dma_active),
    .sram_save(status[38]),
    .sram_load(status[39]),
@@ -1617,10 +1644,10 @@ dpram #(.addr_width(16)) systemRAM
    .wren_a( upload_bram_rq ? upload_ram_ce         : bram_ce & ~ram_rnw ),
    .data_a( upload_bram_rq ? upload_ram_din        : ram_din            ),
    .q_a(bram_dout),
-   .address_b(18'(sram_addr)),
-   .wren_b(sram_we),
+   .address_b(sram_addr),
+   .wren_b(sram_we & ~sram_addr[17]),
    .data_b(sd_buff_dout),
-   .q_b(sram_dout)
+   .q_b(sram_bram_dout)
 );
 
 ///////////////// NVRAM BACKUP ////////////////
@@ -1635,32 +1662,31 @@ wire        flash16x_sel = flash16x_active[1] & ~flash16x_active[0];
 wire [26:0] flash16x_base[2];
 wire [15:0] flash16x_size[2];
 
-wire [26:0] sram_addr;
-wire  [7:0] sram_dout;
-wire        sram_we;
 
 // EXPERIMENT: VD0 (auto-mounted <rom>.sav) is muxed between nvram_backup and the
 // flash_dump_test module. nvram drives nv_sd_*; dump drives dump_sd_*; dump wins
-// while dump_active. VD1-3 pass through nvram unchanged.
-wire [31:0] nv_sd_lba[0:3];
-wire  [3:0] nv_sd_rd, nv_sd_wr;
-wire  [7:0] nv_sd_buff_din[0:3];
+// while dump_active.  VD1 (the SRAM file, SC1) passes through nvram unchanged.
+// VD2/VD3 are unused since 2026-10-04: every SRAM but slot A's ROM .sav lives in
+// the one SRAM file on VD1 (docs/sram_images.md).
+wire [31:0] nv_sd_lba[0:1];
+wire  [1:0] nv_sd_rd, nv_sd_wr;
+wire  [7:0] nv_sd_buff_din[0:1];
 wire [31:0] dump_sd_lba;
 wire        dump_sd_wr, dump_sd_rd;
 wire  [7:0] dump_sd_buff_din;
 
 assign sd_lba[0]      = dump_active ? dump_sd_lba      : nv_sd_lba[0];
 assign sd_lba[1]      = nv_sd_lba[1];
-assign sd_lba[2]      = nv_sd_lba[2];
-assign sd_lba[3]      = nv_sd_lba[3];
-assign sd_rd[3:1]     = nv_sd_rd[3:1];
+assign sd_lba[2]      = 32'd0;
+assign sd_lba[3]      = 32'd0;
+assign sd_rd[3:1]     = {2'b00, nv_sd_rd[1]};
 assign sd_rd[0]       = dump_active ? dump_sd_rd       : nv_sd_rd[0];
-assign sd_wr[3:1]     = nv_sd_wr[3:1];
+assign sd_wr[3:1]     = {2'b00, nv_sd_wr[1]};
 assign sd_wr[0]       = dump_active ? dump_sd_wr       : nv_sd_wr[0];
 assign sd_buff_din[0] = dump_active ? dump_sd_buff_din : nv_sd_buff_din[0];
 assign sd_buff_din[1] = nv_sd_buff_din[1];
-assign sd_buff_din[2] = nv_sd_buff_din[2];
-assign sd_buff_din[3] = nv_sd_buff_din[3];
+assign sd_buff_din[2] = 8'h00;
+assign sd_buff_din[3] = 8'h00;
 
 nvram_backup nvram_backup
 (
@@ -1668,15 +1694,23 @@ nvram_backup nvram_backup
    .reset(reset),
    .lookup_SRAM(lookup_SRAM),
    .load_req(status[39] | load_sram),
-   .save_req(status[38] | autosave),
+   .save_req(status[38]),
    .upload_busy(reset_rq),
-   .img_mounted(img_mounted[3:0]),
+   //  Autosave on write.  `flush`: a file download (a ROM / pack about to replace
+   //  the layout) or a reset button -- save what is dirty now, and save_guard
+   //  holds the load or the reset until it is written (nvram_backup `guard`).
+   .autosave_en(status[52]),
+   .cpu_wr(bram_ce & ~ram_rnw & ~upload_bram_rq),
+   .cpu_wr_addr(ram_addr[17:0]),
+   .rtc_dirty(rtc_mem_dirty),
+   .flush(ioctl_download | status[0] | status[10]),
+   .img_mounted(img_mounted[1:0]),
    .img_readonly(img_readonly),
    .img_size(img_size),
    .sd_lba(nv_sd_lba),
    .sd_rd(nv_sd_rd),
    .sd_wr(nv_sd_wr),
-   .sd_ack(sd_ack[3:0]),
+   .sd_ack(sd_ack[1:0]),
    .sd_buff_addr(sd_buff_addr),
    .sd_buff_dout(sd_buff_dout),
    .sd_buff_din(nv_sd_buff_din),

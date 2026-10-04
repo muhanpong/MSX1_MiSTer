@@ -1,18 +1,21 @@
 #!/usr/bin/env bash
-#  Blank SRAM images for the MSX1 core (docs/sram_images.md).  The MiSTer
-#  firmware auto-mounts games/MSX1/boot1.vhd .. boot3.vhd on VD1..VD3 at core
-#  start; the core writes an entry header on the first save, so zero-filled
-#  files are all that is needed.  boot0.vhd is deliberately NOT made: VD0 is
-#  the slot A ROM's companion .sav, which the firmware creates itself.
+#  The blank SRAM file for the MSX1 core (docs/sram_images.md): SRAM.NVR, 384 kB
+#  of zeros = six 64 kB entries (FM-PAC, GameMaster2, Halnote, Panasonic 16 kB,
+#  Panasonic 32 kB, RTC settings).  The core mounts it on VD1 through the OSD
+#  "SRAM File" entry (SC1); the firmware opens an SC image without creating or
+#  growing it, so it must exist at full size.  The core writes an entry header on
+#  the first save, so zeros are all that is needed.  createMSXpack.py (next to
+#  MSX/, never inside it) and packbuilder.html (its own button) make the same file.
 #
-#      tools/sramimg/mk_sram_images.sh <dir>      # e.g. /media/fat/games/MSX1 (via sshfs) or a scratch dir
+#      tools/sramimg/mk_sram_images.sh <dir>      # e.g. /media/fat/games/MSX1/MSX (via sshfs) or a scratch dir
 #
-#  Sizes = entries x 64 kB:  VD1 2 entries (FM-PAC, GameMaster2) 128 kB,
-#  VD2 1 entry (FM-PAC) 64 kB, VD3 3 entries (Halnote, FS-A1ST, FS-A1GT) 192 kB.
-#  Existing files are left alone.
+#  An existing file is left alone -- it holds saves.  Do NOT make boot1.vhd: the
+#  firmware mounts boot<n>.vhd AFTER restoring the SC pick, so a boot1.vhd would
+#  take VD1 from the SRAM file (the 2026-09-30 layout used boot1..3.vhd; retired
+#  2026-10-04).
 set -eu
 DIR=${1:?usage: mk_sram_images.sh <dir>}
-mk() { if [ -e "$DIR/$1" ]; then echo "keep   $DIR/$1 (exists)"; else dd if=/dev/zero of="$DIR/$1" bs=1024 count="$2" status=none && echo "made   $DIR/$1 ($2 kB)"; fi; }
-mk boot1.vhd 128
-mk boot2.vhd 64
-mk boot3.vhd 192
+F="$DIR/SRAM.NVR"
+if [ -e "$F" ]; then echo "keep   $F (exists)"; else dd if=/dev/zero of="$F" bs=1024 count=384 status=none && echo "made   $F (384 kB)"; fi
+for n in 1 2 3; do [ -e "$DIR/boot$n.vhd" ] && echo "WARNING $DIR/boot$n.vhd exists -- the firmware mounts it on VD$n over the SC pick"; done
+exit 0

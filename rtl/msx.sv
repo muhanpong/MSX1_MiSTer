@@ -61,6 +61,12 @@ module msx
    input                    cas_audio_in,
    //MSX config
    input             [64:0] rtc_time,
+   //  RTC settings memory, second port, for the SRAM file (nvram_backup bank 4)
+   input              [5:0] rtc_nv_addr,
+   input                    rtc_nv_we,
+   input              [7:0] rtc_nv_din,
+   output             [7:0] rtc_nv_dout,
+   output                   rtc_mem_dirty,
    input MSX::bios_config_t bios_config,
    input MSX::user_config_t msxConfig,
    input  dev_typ_t         cart_device[2],
@@ -1185,7 +1191,12 @@ rtc rtc
    .wrt(~wr_n),
    .adr(a),
    .dbi(d_from_rtc),
-   .dbo(d_from_cpu)
+   .dbo(d_from_cpu),
+   .nv_adr(rtc_nv_addr),
+   .nv_we(rtc_nv_we),
+   .nv_dbo(rtc_nv_din),
+   .nv_dbi(rtc_nv_dout),
+   .mem_dirty(rtc_mem_dirty)
 );
 
 //  -----------------------------------------------------------------------------

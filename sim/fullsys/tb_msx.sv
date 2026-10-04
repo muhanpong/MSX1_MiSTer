@@ -242,16 +242,16 @@ module tb;
    string      sav_file;
    bit         sav_late  = 1'b0;
 
-   wire  [31:0] nv_sd_lba[4];
-   wire   [3:0] nv_sd_rd, nv_sd_wr;
-   logic  [3:0] nv_sd_ack    = 4'b0;
+   wire  [31:0] nv_sd_lba[2];
+   wire   [1:0] nv_sd_rd, nv_sd_wr;
+   logic  [1:0] nv_sd_ack    = 2'b0;
    logic [13:0] nv_buff_addr = 14'd0;
    logic  [7:0] nv_buff_dout = 8'd0;
-   wire   [7:0] nv_buff_din[4];
+   wire   [7:0] nv_buff_din[2];
    wire  [17:0] nv_ram_addr;
    wire         nv_ram_we;
    wire   [7:0] nv_ram_dout;
-   logic  [3:0] nv_img_mounted = 4'b0;
+   logic  [1:0] nv_img_mounted = 2'b0;
    logic [63:0] nv_img_size    = 64'd0;
    logic        nv_img_ro      = 1'b0;
 
@@ -260,6 +260,7 @@ module tb;
       .clk(clk21m), .reset(reset),
       .lookup_SRAM(lookup_SRAM),
       .load_req(upl_load_sram), .save_req(1'b0), .upload_busy(reset_rq),
+      .autosave_en(1'b0), .cpu_wr(1'b0), .cpu_wr_addr(18'd0), .rtc_dirty(1'b0), .flush(1'b0),
       .img_mounted(nv_img_mounted), .img_readonly(nv_img_ro), .img_size(nv_img_size),
       .sd_lba(nv_sd_lba), .sd_rd(nv_sd_rd), .sd_wr(nv_sd_wr), .sd_ack(nv_sd_ack),
       .sd_buff_addr(nv_buff_addr), .sd_buff_dout(nv_buff_dout), .sd_buff_din(nv_buff_din),
@@ -296,7 +297,7 @@ module tb;
          if (|nv_sd_rd | |nv_sd_wr) begin
             automatic int n = 0;
             automatic int base;
-            for (int k = 0; k < 4; k++) if (nv_sd_rd[k] | nv_sd_wr[k]) n = k;
+            for (int k = 0; k < 2; k++) if (nv_sd_rd[k] | nv_sd_wr[k]) n = k;
             sav_idx = n;
             base = int'(nv_sd_lba[n]) * 512;
             nv_sd_ack[n] <= 1'b1;
@@ -482,20 +483,18 @@ module tb;
    //  Which of the four images this pack's SRAM belongs to is the pack's choice,
    //  not ours: a machine's own battery SRAM is the Computer CMOS image, a cart's
    //  is the ROM one.  Take the first allocation the pack actually made.
-   //  Mount all four images.  Which one the pack's SRAM lands on is only known
-   //  after the upload has run, and the firmware mounts <rom>.sav around the ROM
-   //  load without knowing either; the engine walks the banks and uses the one
-   //  that has an allocation.  Picking an index up front needed the allocation to
-   //  exist already, which before the upload it never does -- that is what made
-   //  the first run report SKIP on a pack that allocates 16 kB perfectly well.
+   //  Mount the image on VD0, the slot A ROM's raw .sav.  Since 2026-10-04 every
+   //  other SRAM (FM-PAC, GM2, machine SRAM, RTC) lives in the SRAM file on VD1,
+   //  which has a header per entry (docs/sram_images.md), so a raw image can only
+   //  ever stand for bank 0; the entry format has its own bench (run_nvram_layout).
    int sav_idx = -1;                       // filled in by the SD model, on first use
    task mount_sav;
       begin
          nv_img_size    = 64'(sav_bytes);
-         nv_img_mounted = 4'b1111;
+         nv_img_mounted = 2'b01;
          @(posedge clk21m);
-         nv_img_mounted = 4'b0000;
-         $display("sav: mounted on all four images, %0d bytes", sav_bytes);
+         nv_img_mounted = 2'b00;
+         $display("sav: mounted on VD0, %0d bytes", sav_bytes);
       end
    endtask
 
