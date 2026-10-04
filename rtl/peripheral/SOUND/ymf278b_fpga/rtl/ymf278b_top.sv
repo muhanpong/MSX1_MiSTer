@@ -191,6 +191,7 @@ logic        pcm_reg_rd_done;
 wire [7:0] pcm_cpu_mem_rd_data_w;
 wire       pcm_cpu_mem_busy_w;
 wire [7:0] pcm_reg02_readback_w;
+wire [7:0] pcm_reg_rd_data_w;
 
 ymf278_pcm_engine2 #(
     .CLK_HZ (CLK_HZ)
@@ -206,6 +207,7 @@ ymf278_pcm_engine2 #(
     .cpu_mem_rd_data (pcm_cpu_mem_rd_data_w),
     .cpu_mem_busy    (pcm_cpu_mem_busy_w),
     .reg02_readback  (pcm_reg02_readback_w),
+    .reg_rd_data     (pcm_reg_rd_data_w),
 
     // SDRAM Direct Port
     .mem_addr        (mem_addr),
@@ -257,12 +259,15 @@ ymf278_pcm_engine2 #(
 //              writes those bits then reads back expecting them reflected
 //              (e.g. mem_type=1 → readback 0x22).
 //   reg 0x06 — PCM RAM/ROM byte prefetched by the engine.
-//   others   — return 0 (write-only by spec).
+//   others   — the stored register byte (engine reg_rd_data), as openMSX
+//              peekReg returns regs[reg]; header-loaded values included.  These
+//              read 0 until 2026-10-04 ("write-only by spec", which nothing
+//              backed) and Neon Horizon's read-modify-write of 68h-7Fh lost the pan.
 // pcm_reg_addr is stable (latched in opl4latch); pcm_reg_rd is a 1-cycle pulse
 // that doesn't line up with regs.sv's io_data_out capture, so don't gate on it.
 assign pcm_reg_dout    = (pcm_reg_addr == 8'h02) ? pcm_reg02_readback_w :
                          (pcm_reg_addr == 8'h06) ? pcm_cpu_mem_rd_data_w :
-                                                    8'h00;
+                                                    pcm_reg_rd_data_w;
 assign pcm_reg_rd_done = 1'b1; // Engine prefetches; CPU reads return immediately.
                                // Real chip uses BUSY status (D0) — TODO if needed.
 

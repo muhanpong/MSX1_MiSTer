@@ -38,6 +38,10 @@ module ymf278_pcm_engine2 #(
     output logic [7:0] cpu_mem_rd_data,
     output logic       cpu_mem_busy,
     output logic [7:0] reg02_readback,
+    //  Readback of every other wave register at reg_addr (the latched 7Eh number),
+    //  as openMSX peekReg: the stored byte, header-loaded values included.  The
+    //  top answers reg 2 and reg 6 itself.  Combinational from reg_addr.
+    output logic [7:0] reg_rd_data,
 
     // SDRAM Direct Port (msx.sv ch4 bridge: edge-detected req, blocking)
     output logic [21:0] mem_addr,
@@ -1117,6 +1121,7 @@ logic [9:0][4:0] fwa;
 logic [9:0][7:0] fwd;
 logic [9:0][7:0] frd;         // read at ld_slot
 logic [1:0][7:0] frh;         // fields 0/1 read at hf_pick (wave)
+logic [9:0][7:0] frc;         // read at wr_snum (CPU readback of reg_addr)
 always_comb begin
     for (int k = 0; k < 10; k++) begin
         fwe[k] = 1'b0;
@@ -1138,12 +1143,42 @@ generate
     for (gk = 0; gk < 10; gk++) begin : g_f
         pcm_mlab24 #(.W(8)) u_m (.clk(clk), .we(fwe[gk]), .wa(fwa[gk]), .wd(fwd[gk]),
                                  .ra(ld_slot), .rd(frd[gk]));
+        //  Third read port, for the CPU: the same writes (CPU, header backfill,
+        //  reset sweep), read at the slot reg_addr names.
+        pcm_mlab24 #(.W(8)) u_mc (.clk(clk), .we(fwe[gk]), .wa(fwa[gk]), .wd(fwd[gk]),
+                                  .ra(wr_snum), .rd(frc[gk]));
         if (gk < 2) begin : g_h
             pcm_mlab24 #(.W(8)) u_mh (.clk(clk), .we(fwe[gk]), .wa(fwa[gk]), .wd(fwd[gk]),
                                       .ra(hf_pick), .rd(frh[gk]));
         end
     end
 endgenerate
+
+// ── CPU readback (openMSX YMF278::peekReg: default -> regs[reg]) ─────────────
+// Slot registers 08h-F7h read the field memories above, so a header load's
+// backfill of fields 5..9 reads back as on the real chip ("Verified on real
+// YMF278: after tone loading, if you read these registers, their value actually
+// has changed", YMF278.cc).  Until 2026-10-04 every one of them read 0 ("write-
+// only by spec", no source), and Neon Horizon's stop routine reads 68h-7Fh, keeps
+// bits 5..0 (pan, CH, LFO reset) and writes back with key off + damp -- here it
+// wrote 40h and lost the pan.  Field 4 is stored with bit 5 inverted (enc_byte).
+// The other registers (00h-07h, F8h-FFh) are a plain shadow; reg 3 keeps 6 bits
+// as openMSX does.  Reg 2 and reg 6 are answered by the top.
+logic [7:0] ns_reg [0:15];    // 00h-07h -> 0..7, F8h-FFh -> 8..15
+wire        ns_hit = (reg_addr <= 8'h07) || (reg_addr >= 8'hF8);
+wire [3:0]  ns_idx = {reg_addr[7], reg_addr[2:0]};
+always_ff @(posedge clk or negedge rst_n) begin
+    if (!rst_n) begin
+        for (int i = 0; i < 16; i++) ns_reg[i] <= 8'h00;
+    end else if (reg_wr && ns_hit) begin
+        ns_reg[ns_idx] <= (reg_addr == 8'h03) ? {2'b00, reg_data[5:0]} : reg_data;
+    end
+end
+always_comb begin
+    if (ns_hit)                  reg_rd_data = ns_reg[ns_idx];
+    else if (wr_field == 4'd4)   reg_rd_data = enc_byte(4'd4, frc[4]);   // undo the bit-5 inversion
+    else                         reg_rd_data = frc[wr_field];
+end
 
 function automatic slot_regs_t dec_regs(input logic [9:0][7:0] f, input logic kon);
     slot_regs_t r;

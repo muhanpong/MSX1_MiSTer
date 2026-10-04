@@ -50,7 +50,17 @@ module ymf278b_regs #(
     input  wire        status_rd_notify
 );
 
-// Timing delays in clock cycles (at 33.8688 MHz)
+// Timing delays in clock cycles.  These counters run on clk_sdram (85.909 MHz),
+// NOT the chip's 33.8688 MHz master clock.  The values below except
+// MEM_WRITE_DELAY are openMSX's master-clock counts (YMF278B.cc) copied as is
+// since the first MoonSound integration (9981332), so BUSY / LD are visible
+// ~2.54x shorter than on openMSX: LOAD_DELAY 10000 = ~116 us, not ~295 us.
+// Left that way on purpose (2026-10-04): BUSY and LD are only status bits here
+// (busy / load_busy below) -- the CPU is held only for wave-memory writes, by
+// MEM_WRITE_DELAY, which IS in clk_sdram units -- and the engine accepts a
+// register write at once and holds a slot until its header is in, so a short
+// BUSY / LD has no audible effect.  To match openMSX's timing instead, scale
+// these by CLK_HZ / 33868800 (56 -> 142, 88 -> 223, 38 -> 96, 10000 -> 25365).
 localparam int FM_REG_SELECT_DELAY    = 56;
 localparam int FM_REG_WRITE_DELAY     = 56;
 localparam int WAVE_REG_SELECT_DELAY  = 88;
