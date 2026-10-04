@@ -74,6 +74,8 @@ package MSX;
     //  VD0 (slot A ROM .sav) stays raw; the SRAM file on VD1 holds one 64 kB entry
     //  per kind, entry = kind - 1 (docs/sram_images.md).  memory_upload derives it
     //  from the record's mapper and SRAM size; RTC is nvram_backup's own bank 4.
+    //  APPEND ONLY, never reuse a number: the kind is the entry's position in users'
+    //  SRAM.NVR files, and two devices with one kind overwrite each other's saves.
     parameter logic [7:0] SRAM_KIND_RAW    = 8'd0;   // slot A ROM cart (VD0), or unknown
     parameter logic [7:0] SRAM_KIND_FMPAC  = 8'd1;   // FM-PAC PAC, 8 kB
     parameter logic [7:0] SRAM_KIND_GM2    = 8'd2;   // GameMaster2, 8 kB

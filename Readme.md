@@ -242,7 +242,7 @@ sub-slot and mapper bank registers keep their old values across such a swap, whi
 > then select it in the OSD under `SRAM File`.**
 > **Never copy a blank SRAM.NVR over one you already use — that erases your saves.**
 
-- One 384 kB file holds the FM-PAC's PAC memory, GameMaster2, Halnote, the Panasonic
+- One 2 MB file holds the FM-PAC's PAC memory, GameMaster2, Halnote, the Panasonic
   (FS-A1ST / FS-A1GT) firmware SRAM and the RTC settings (SET SCREEN, SET BEEP, title, ...),
   one 64 kB entry each ([`docs/sram_images.md`](docs/sram_images.md)).
 - Get an empty one from `createMSXpack.py` (written as `SRAM.NVR` next to the `MSX/` folder,

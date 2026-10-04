@@ -272,7 +272,8 @@ logic        done = 1'b0;
 //  VD0 is the slot A ROM's companion .sav: raw SRAM from LBA 0, as it always was.
 //  VD1 is the SRAM file (OSD SC1, remembered in config/MSX1.s1) and holds one
 //  64 kB entry per DEVICE KIND, entry = kind - 1: FM-PAC 0, GM2 1, Halnote 2,
-//  Panasonic 16 kB 3, Panasonic 32 kB 4, RTC 5 -- 384 kB in all.  Entry n: header
+//  Panasonic 16 kB 3, Panasonic 32 kB 4, RTC 5; the blank file is 2 MB (32 entries,
+//  26 spare).  Entry n: header
 //  sector at LBA 128n (4 kB reserved, one sector used), data from LBA 128n + 8, up
 //  to 60 kB.  docs/sram_images.md.  A load is skipped -- not retried -- when the
 //  header does not match this bank's kind and size; a save always rewrites the

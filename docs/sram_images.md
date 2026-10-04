@@ -31,7 +31,7 @@ firmware code order, not tested; left to the user).  VD2 and VD3 are unused.
 | VD | file | content | size |
 |---|---|---|---|
 | 0 | `saves/MSX1/<rom>.sav` | slot A ROM cart SRAM, raw from LBA 0 (unchanged) | = SRAM |
-| 1 | `SRAM.NVR` (any name, picked with SC1) | one 64 kB entry per kind, below | 384 kB |
+| 1 | `SRAM.NVR` (any name, picked with SC1) | one 64 kB entry per kind, below | 2 MB (32 entries, 6 in use) |
 
 | entry | kind | device | data |
 |---|---|---|---|
@@ -46,6 +46,15 @@ Entry = kind - 1.  Entry n occupies LBA 128n .. 128n+127 (64 kB).  Its first
 sector is the header; the rest of the first 4 kB is reserved; data starts at LBA
 128n + 8 (byte offset 4 kB) and may be up to 60 kB.  A file may be larger than
 the table says; the surplus is ignored.
+
+The blank file is 2 MB, 32 entries, so 26 are spare for devices added later
+(Matsushita 2 kB SRAM, S1985 backup RAM, ...).  Each entry is checked against the
+file size on its own: an entry beyond the end of a smaller file is skipped (not
+read, not written) and the others work.  A smaller file is grown without losing
+anything by appending zeros (`truncate -s 2M SRAM.NVR`) -- never by replacing it
+with a new blank one.  Kind numbers are append-only and never reused: a new
+device reusing a kind shares that entry with the old one and they overwrite each
+other.  The engine addresses up to kind 255 (16 MB).
 
 The entry follows the DEVICE, not the slot: an FM-PAC saves to entry 0 whichever
 slot it is in.  When two banks have the same kind (an FM-PAC in slot A and in
@@ -117,7 +126,7 @@ The data area is a raw copy of the SRAM, so it exchanges 1:1 with openMSX's
 
     tools/sramimg/mk_sram_images.sh /path/to/games/MSX1/MSX
 
-writes a zero-filled SRAM.NVR (384 kB), leaves an existing one alone, and warns
+writes a zero-filled SRAM.NVR (2 MB), leaves an existing one alone, and warns
 if a boot1..3.vhd is there.  createMSXpack.py (next to `MSX/`) and
 packbuilder.html (its own button) make the same file.
 

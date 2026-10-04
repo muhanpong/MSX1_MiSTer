@@ -349,7 +349,7 @@ parseDir(XML_DIR_FW)
 # board's folder must never replace an SRAM.NVR that holds saves.  The user
 # copies it once, by hand.  Made only when missing.
 SRAM_FILE      = "SRAM.NVR"
-SRAM_FILE_SIZE = 6 * 64 * 1024
+SRAM_FILE_SIZE = 32 * 64 * 1024     # 2 MB: 6 entries in use, 26 spare
 if not os.path.exists(SRAM_FILE):
     with open(SRAM_FILE, "wb") as f:
         f.write(bytes(SRAM_FILE_SIZE))
