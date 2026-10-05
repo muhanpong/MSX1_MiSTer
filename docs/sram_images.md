@@ -83,7 +83,10 @@ Header sector (little-endian, unused bytes 0):
   otherwise skip that bank (a message on the simulation log) and complete the
   request.  A blank file therefore loads nothing and harms nothing.
 * Save (OSD "SRAM Save", or autosave): read the header (for the counter), write
-  the header with counter + 1, then the data.
+  the data, then the header with counter + 1 -- header LAST (2026-10-05), so a
+  power cut mid-save leaves the previous header instead of one that vouches for
+  half-written data.  The data area can still be half-new after such a cut;
+  catching that would need a second copy or a checksum, which this format lacks.
 * A file too small for the entry is skipped with a message (the core cannot grow
   a file; only VD0's .sav is created on write by the firmware).
 * VD0 keeps the raw format so existing .sav files stay valid.

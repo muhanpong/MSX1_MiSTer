@@ -16,8 +16,9 @@
 //  T5  wrong magic: no data sectors are read, nothing lands in BRAM, request completes
 //  T6  wrong kind in a valid header: same
 //  T7  file too small for the entry: skipped, request completes, no reads
-//  T8  save GM2: header written at LBA 128 with counter = old + 1, then data
-//      at 136.. from BRAM; T9 save on a zero-filled file writes counter 1
+//  T8  save GM2: data at 136.. from BRAM, THEN the header at LBA 128 with
+//      counter = old + 1 (header last, 2026-10-05); T9 save on a zero-filled
+//      file writes counter 1
 //  T10 VD0 save still raw at LBA 0 (no header sector)
 //  T11 RTC (bank 4): save -> entry 5 (header 640, kind 6, 1 kB), data from 20000h;
 //      load puts it back
@@ -249,6 +250,18 @@ initial begin
          && wr_log[1].find_index with (item == 151).size() == 1, "T8 save: header 128 then data 136..151");
    check({img[1][128*512+0],img[1][128*512+7]} == {"M","M"} && img[1][128*512+9] == SRAM_KIND_GM2 && img[1][128*512+10] == 8'd8, "T8 save: header magic/kind/size written");
    check(hdr_cnt(1, 1) == 6, "T8 save: counter 5 -> 6");
+   begin
+      //  Within the GM2 entry: every data sector (136..151) before the header (128).
+      //  The manual save also writes the RTC entry (640, 648, 649), so look only
+      //  at this entry's LBAs.
+      int ih[$], id_first[$], id_last[$];
+      ih       = wr_log[1].find_index with (item == 128);
+      id_first = wr_log[1].find_index with (item == 136);
+      id_last  = wr_log[1].find_index with (item == 151);
+      check(ih.size() == 1 && id_first.size() == 1 && id_last.size() == 1 &&
+            id_first[0] < id_last[0] && id_last[0] < ih[0],
+            "T8 save order: data sectors first (136..151), header sector LAST (128) -- a cut mid-save keeps the old header");
+   end
    check(data_ok(1, 136, 8192, 18'h2000), "T8 save: data written from BRAM");
    check(img[1][8*512] == 8'h00, "T8 save: entry 0 (FM-PAC) untouched");
 
@@ -272,7 +285,7 @@ initial begin
    clear_all(); mount_settled(1, FILE_BYTES);
    fill_bram(18'h20000, 1024, 8'h07);
    pulse_save(); settle(400000);
-   check(wr_log[1].size() == 3 && wr_log[1][0] == 640 && wr_log[1][1] == 648 && wr_log[1][2] == 649, "T11 RTC save: header 640, data 648..649");
+   check(wr_log[1].size() == 3 && wr_log[1][0] == 648 && wr_log[1][1] == 649 && wr_log[1][2] == 640, "T11 RTC save: data 648..649, then header 640");
    check(img[1][640*512+9] == SRAM_KIND_RTC && img[1][640*512+10] == 8'd1 && hdr_cnt(1, 5) == 1, "T11 RTC save: kind 6, 1 kB, counter 1");
    check(data_ok(1, 648, 1024, 18'h20000), "T11 RTC save: data from 20000h");
    for (int i = 0; i < 1024; i++) bram[18'h20000 + i] = 8'h55;
@@ -323,7 +336,7 @@ initial begin
    repeat (2000) @(negedge clk);
    check(wr_log[1].size() == 0, "A1 autosave: nothing written before the quiet time");
    settle_auto();
-   check(wr_log[1].size() == 17 && wr_log[1][0] == 0 && data_ok(1, 8, 8192, 18'h2000), "A1 autosave: FM-PAC written after the quiet time");
+   check(wr_log[1].size() == 17 && wr_log[1][16] == 0 && data_ok(1, 8, 8192, 18'h2000), "A1 autosave: FM-PAC written after the quiet time");
    check(wr_log[0].size() == 0, "A1 autosave: bank 0 (not written) not saved");
 
    //  A2 autosave off
@@ -368,7 +381,7 @@ initial begin
    autosave_en = 1;
    @(negedge clk); rtc_dirty = 1; @(negedge clk); rtc_dirty = 0;
    settle_auto();
-   check(wr_log[1].size() == 3 && wr_log[1][0] == 640, "A6 RTC write: bank 4 saved to entry 5");
+   check(wr_log[1].size() == 3 && wr_log[1][2] == 640, "A6 RTC write: bank 4 saved to entry 5");
 
    //  A7 a write outside every bank
    clear_all(); lut[1] = '{addr: 18'h2000, size: 16'd8, kind: SRAM_KIND_FMPAC};

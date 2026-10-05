@@ -13,6 +13,7 @@
 #     noquiet     autosave never fires on quiet (age and flush only)
 #     noflush     flush does not save at once
 #     nodrop      an upload does not drop what was dirty
+#     hdrfirst    the save writes the header BEFORE the data (the order until 2026-10-05)
 set -u
 cd "$(dirname "$0")/.."
 OUT=${OUT:-/tmp/nvram_layout}
@@ -27,6 +28,39 @@ mutate nopriority "s/(bk_kind\[m\] == bk_kind\[n\])) eligible\[n\] = 1'b0;/(bk_k
 mutate noquiet    "s/(quiet\[QUIET_BITS-1\] | age\[AGE_BITS-1\]/(1'b0 | age[AGE_BITS-1]/"
 mutate noflush    "s/| (flush \& ~flush_q));/| 1'b0);/"
 mutate nodrop     "s/if (upload_busy | ~autosave_en) begin/if (~autosave_en) begin/"
+#  hdrfirst: rebuild the pre-2026-10-05 order from the current source
+python3 - "$SRC" "$OUT/mut_hdrfirst.sv" <<'PY' || { echo "RESULT FAIL: hdrfirst anchors missing"; exit 1; }
+import sys
+s = open(sys.argv[1]).read()
+pairs = [
+ ("""            end else if (wr & layout) begin
+               // SRAM file save: the data is in, NOW the header (see STATE_HDR_RD).
+               sd_lba[1]      <= lba_base;
+               state          <= STATE_HDR_WR;   // sd_wr stays high for the header sector
+            end else begin""", "            end else begin"),
+ ("""               sec         <= 21'd0;
+               sd_lba[1]   <= data_base;
+               sd_wr[1]    <= 1'b1;
+               state       <= STATE_PROCESS;
+            end else if (hdr_ok) begin""", """               sd_lba[1]   <= lba_base;
+               sd_wr[1]    <= 1'b1;
+               state       <= STATE_HDR_WR;
+            end else if (hdr_ok) begin"""),
+ ("""            sd_wr[1]    <= 1'b0;
+            done        <= 1'b1;
+            state       <= STATE_SLEEP;
+         end
+      end""", """            sec         <= 21'd0;
+            sd_lba[1]   <= data_base;
+            state       <= STATE_PROCESS;
+         end
+      end"""),
+]
+for a, b in pairs:
+    assert s.count(a) == 1, a[:60]
+    s = s.replace(a, b)
+open(sys.argv[2], "w").write(s)
+PY
 build() {
    verilator --binary --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-TIMESCALEMOD \
       -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-CASEINCOMPLETE -Wno-BLKANDNBLK \
@@ -38,12 +72,12 @@ build() {
    [ -x "$OUT/v_$1/$1" ] || { echo "RESULT FAIL: no binary $1"; exit 1; }
 }
 build eng "$SRC"
-for m in data9 nopriority noquiet noflush nodrop; do build "$m" "$OUT/mut_$m.sv"; done
+for m in data9 nopriority noquiet noflush nodrop hdrfirst; do build "$m" "$OUT/mut_$m.sv"; done
 "$OUT/v_eng/eng" > "$OUT/eng.log" 2>&1
 grep -E '^(PASS|FAIL|RESULT)' "$OUT/eng.log"
 FAIL=0
 grep -q '^RESULT: 0 error' "$OUT/eng.log" || FAIL=1
-for m in data9 nopriority noquiet noflush nodrop; do
+for m in data9 nopriority noquiet noflush nodrop hdrfirst; do
    "$OUT/v_$m/$m" > "$OUT/$m.log" 2>&1
    if grep -q '^RESULT: 0 error' "$OUT/$m.log"; then
       echo "FAIL  mutant $m passed -- the bench cannot see that rule"; FAIL=1

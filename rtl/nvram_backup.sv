@@ -261,7 +261,7 @@ typedef enum logic [3:0] {
    STATE_FORMAT,
    STATE_NEXT,
    STATE_HDR_RD,           // VD1: read the entry header sector (load: verify; save: fetch the counter)
-   STATE_HDR_WR            // VD1: write the entry header sector, then the data
+   STATE_HDR_WR            // VD1: write the entry header sector, AFTER the data
 } state_t;
 
 logic [20:0] block_count;
@@ -417,6 +417,10 @@ always @(posedge clk) begin
             if (sec < (block_count - 21'd1)) begin
                sec         <= sec + 1'b1;
                sd_lba[v]   <= data_base + 32'(sec) + 32'd1;
+            end else if (wr & layout) begin
+               // SRAM file save: the data is in, NOW the header (see STATE_HDR_RD).
+               sd_lba[1]      <= lba_base;
+               state          <= STATE_HDR_WR;   // sd_wr stays high for the header sector
             end else begin
                sd_wr[v]       <= 1'b0;
                sd_rd[v]       <= 1'b0;
@@ -436,10 +440,19 @@ always @(posedge clk) begin
          if (~sd_ack[v] & last_ack) begin
             sd_rd[1] <= 1'b0;
             if (wr) begin
+               //  Data first, header LAST (2026-10-05).  The header -- magic, kind,
+               //  size, counter -- is what makes a load trust the entry, so it is
+               //  written only once the data sectors are all in.  Header-first, a
+               //  power cut during the data left a header saying "saved, counter+1"
+               //  over half-old data, and the next load took it.  Now a cut leaves
+               //  the previous header (or none, on a blank file).  The data area
+               //  itself can still be half-new then: catching that needs a second
+               //  copy or a checksum, which this format does not carry.
                hdr_cnt     <= hdr_ok ? {hdr[15], hdr[14], hdr[13], hdr[12]} + 32'd1 : 32'd1;
-               sd_lba[1]   <= lba_base;
+               sec         <= 21'd0;
+               sd_lba[1]   <= data_base;
                sd_wr[1]    <= 1'b1;
-               state       <= STATE_HDR_WR;
+               state       <= STATE_PROCESS;
             end else if (hdr_ok) begin
                sec         <= 21'd0;
                sd_lba[1]   <= data_base;
@@ -454,11 +467,11 @@ always @(posedge clk) begin
          end
       end
 
-      STATE_HDR_WR: begin
+      STATE_HDR_WR: begin                     // last sector of an SRAM file save
          if (~sd_ack[v] & last_ack) begin
-            sec         <= 21'd0;
-            sd_lba[1]   <= data_base;
-            state       <= STATE_PROCESS;   // sd_wr stays high for the data sectors
+            sd_wr[1]    <= 1'b0;
+            done        <= 1'b1;
+            state       <= STATE_SLEEP;
          end
       end
 
