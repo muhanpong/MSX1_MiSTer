@@ -256,7 +256,8 @@ sub-slot and mapper bank registers keep their old values across such a swap, whi
 - A `games/MSX1/boot1.vhd`, if present, is mounted on the same drive and takes precedence.
 
 ### Audio settings
-A per-source mixer in the OSD, all on one 2 dB ladder (`0` .. `±8 dB`).
+A per-source mixer in the OSD, all on one 2 dB ladder (`0` .. `±8 dB`). It is on the
+`Video & Audio settings` page, below the video rows.
 
 - Volume, mute and (for SCC) per-channel mute for PSG, MSX-MUSIC, SCC, and MoonSound PCM/FM
 - Labels are dB versus unity, so `+8dB` is a real +8 dB

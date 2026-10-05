@@ -405,7 +405,11 @@ localparam CONF_STR = {
    "H0F5,CAS,Cas File,31600000;",
    "H0T9,Tape Rewind;",
    "-;",
-   "P1,Video settings;",
+   //  One page for video and audio since 2026-10-05 (user request): the audio rows
+   //  below kept their status bits, only their page prefix moved P2 -> P1, so a
+   //  saved MSX1.CFG keeps every setting.  They follow the video rows in CONF_STR
+   //  order, after an "Audio:" label.  Page 2 is now unused.
+   "P1,Video & Audio settings;",
    "h2P1O[14:13],Video mode,AUTO,PAL,NTSC;",
    "H2P1O[12],Video mode,PAL,NTSC;",
    "P1O[2:1],Aspect ratio,Original,Full Screen,[ARC1],[ARC2];",
@@ -496,9 +500,9 @@ localparam CONF_STR = {
    "hDP6O[58:56],Z80 Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz,21.5MHz;",
    "hDP6O[70],R800 Speed,7.16MHz,21.5MHz;",
    "hDP6O[38:36],R800 VDP access wait,8.66us (real),10.1us,9.3us,7.5us,6.0us,10.8us,11.8us,4.7us;",
-   "-;",
-   "P2,Audio settings;",
-   "P2O[45],MoonSound,Off,On;",
+   "P1-;",
+   "P1-,Audio:;",
+   "P1O[45],MoonSound,Off,On;",
    // The OPL4 rows are indented and carry the OPL4 prefix because "FM" alone was
    // ambiguous: OPLL is what everyone calls FM sound, but fm_mute gates the
    // MoonSound OPL3 side and never touches the OPLL.
@@ -514,28 +518,28 @@ localparam CONF_STR = {
    // leftover "HD" corrupted the option parse.  Every working hide in this core puts
    // H first: "H2P1O[12]", "h7HBP3O[23:20]", "H7H3FS3".  Written "HDP2O[46]" it
    // would work, and menumask 13/14/15 are all still free.
-   "P2O[46], OPL4 PCM Mute,Off,On;",
-   "P2O[47], OPL4 FM Mute,Off,On;",
+   "P1O[46], OPL4 PCM Mute,Off,On;",
+   "P1O[47], OPL4 FM Mute,Off,On;",
    // Labels are dB VS UNITY, matching the PSG/OPLL/SCC menus below (0dB = no gain).
    // They used to be offsets from the shipping default, so "0dB" was really -3.98 dB
    // and "+8dB" was really +4.01.  Fixed by moving the VALUES to the names, not by
    // renaming the steps: FM "+8dB" is mul 322 = a real +8 dB.  Entry 0 = default.
-   "P2O[112:109], OPL4 PCM Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
-   "P2O[116:113], OPL4 FM Volume,+4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB;",
-   "P2-;",
+   "P1O[112:109], OPL4 PCM Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P1O[116:113], OPL4 FM Volume,+4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB;",
+   "P1-;",
    // Mutes are their own rows, not an 11th rung on the gain ladder.  The MoonSound
    // block above already works that way, mute is the most-used control on this page
    // (10 presses away at the end of a ladder), and a separate toggle keeps the trim
    // while muted.  SCC needs no Mute row of its own: both slots off IS SCC muted.
-   "P2O[62],PSG Mute,Off,On;",
-   "P2O[63],MSX-MUSIC Mute,Off,On;",
+   "P1O[62],PSG Mute,Off,On;",
+   "P1O[63],MSX-MUSIC Mute,Off,On;",
    // Per-cartridge SCC mute.  Applied to scc_sound's oe, which feeds only the
    // wave mix -- register access and chip state are untouched.
    // Worded as Mute/Off,On like every other row in this block.  As "SCC Slot A:
    // On,Off" it sat between two Mute rows with the polarity flipped, so a column
    // of Off,Off,On,On all meant "audible".  The bit is unchanged: 0 = audible.
-   "P2O[60],SCC Slot A Mute,Off,On;",
-   "P2O[61],SCC Slot B Mute,Off,On;",
+   "P1O[60],SCC Slot A Mute,Off,On;",
+   "P1O[61],SCC Slot B Mute,Off,On;",
    // ---- diagnostics (SCC_DIAG) --------------------------------------------
    // Per-CHANNEL mute, both cartridges at once; combine with the two slot rows
    // above to isolate any one voice ("slot A, ch3 only" = mute slot B and the
@@ -550,15 +554,15 @@ localparam CONF_STR = {
    // No menumask: index 13 is the next free one and it failed on hardware
    // (see the OPL4 note above), so these rows are never hidden.
    `ifdef SCC_DIAG
-   "P2O[65],SCC Ch1 Mute,Off,On;",
-   "P2O[66],SCC Ch2 Mute,Off,On;",
-   "P2O[67],SCC Ch3 Mute,Off,On;",
-   "P2O[68],SCC Ch4 Mute,Off,On;",
-   "P2O[69],SCC Ch5 Mute,Off,On;",
+   "P1O[65],SCC Ch1 Mute,Off,On;",
+   "P1O[66],SCC Ch2 Mute,Off,On;",
+   "P1O[67],SCC Ch3 Mute,Off,On;",
+   "P1O[68],SCC Ch4 Mute,Off,On;",
+   "P1O[69],SCC Ch5 Mute,Off,On;",
    `endif
-   "P2O[100:97],PSG Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
-   "P2O[104:101],MSX-MUSIC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
-   "P2O[108:105],SCC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P1O[100:97],PSG Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P1O[104:101],MSX-MUSIC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P1O[108:105],SCC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
    "-;",
    "O[64],Reset on ROM change,Yes,No;",
    "O[48],Debug Overlay,Off,On;",
