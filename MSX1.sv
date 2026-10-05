@@ -502,34 +502,9 @@ localparam CONF_STR = {
    "hDP6O[38:36],R800 VDP access wait,8.66us (real),10.1us,9.3us,7.5us,6.0us,10.8us,11.8us,4.7us;",
    "P1-;",
    "P1-,Audio:;",
-   "P1O[45],MoonSound,Off,On;",
-   // The OPL4 rows are indented and carry the OPL4 prefix because "FM" alone was
-   // ambiguous: OPLL is what everyone calls FM sound, but fm_mute gates the
-   // MoonSound OPL3 side and never touches the OPLL.
-   // They are NOT hidden when MoonSound is off, but the reason recorded here used
-   // to be wrong and is worth correcting.  An "HD" (menumask[13]) hide was tried in
-   // d504712, made all four vanish in BOTH states, and was blamed on index 13 being
-   // out of range.  It is not: menu.cpp's index decoder is user_io_status_bits(),
-   // which maps '0'-'9' to 0-9 and 'A'-'V' to 10-41, so 'D' is 13, and hdmask comes
-   // from spi_uio_cmd16 so bits 0-15 are all live.  The actual fault was the prefix
-   // ORDER.  menu.cpp:1960 runs `while (p[0]=='H'||'D'||'h'||'d') {...; p+=2;}`
-   // and only THEN looks at 'P' -- there is no second H/D pass afterwards.  The
-   // attempt wrote "P2HDO[46]", so p[0] was 'P', the mask loop never ran, and the
-   // leftover "HD" corrupted the option parse.  Every working hide in this core puts
-   // H first: "H2P1O[12]", "h7HBP3O[23:20]", "H7H3FS3".  Written "HDP2O[46]" it
-   // would work, and menumask 13/14/15 are all still free.
-   // Labels are dB VS UNITY, matching the PSG/OPLL/SCC menus below (0dB = no gain).
-   // They used to be offsets from the shipping default, so "0dB" was really -3.98 dB
-   // and "+8dB" was really +4.01.  Fixed by moving the VALUES to the names, not by
-   // renaming the steps: FM "+8dB" is mul 322 = a real +8 dB.  Entry 0 = default.
-   //  Each source's Mute sits right above its Volume (2026-10-05, user request);
-   //  before, the mutes were one block and the volumes another at the bottom.
-   //  Only the row order changed -- every status bit is the same.
-   "P1O[46], OPL4 PCM Mute,Off,On;",
-   "P1O[112:109], OPL4 PCM Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
-   "P1O[47], OPL4 FM Mute,Off,On;",
-   "P1O[116:113], OPL4 FM Volume,+4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB;",
-   "P1-;",
+   //  Audio order (2026-10-05, user request): PSG, MSX-MUSIC | SCC | MoonSound,
+   //  each source's Mute right above its Volume.  Row order only -- every status
+   //  bit is the same, so a saved MSX1.CFG keeps all settings.
    // Mutes are their own rows, not an 11th rung on the gain ladder: mute is the
    // most-used control on this page (10 presses away at the end of a ladder), and
    // a separate toggle keeps the trim while muted.  SCC needs no Mute row of its
@@ -538,6 +513,7 @@ localparam CONF_STR = {
    "P1O[100:97],PSG Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
    "P1O[63],MSX-MUSIC Mute,Off,On;",
    "P1O[104:101],MSX-MUSIC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P1-;",
    // Per-cartridge SCC mute.  Applied to scc_sound's oe, which feeds only the
    // wave mix -- register access and chip state are untouched.
    // Worded as Mute/Off,On like every other row in this block.  As "SCC Slot A:
@@ -558,17 +534,40 @@ localparam CONF_STR = {
    // audible on a machine that has never seen this build.  49/50/55/59 are free
    // in CONF_STR but carry stale 1s in that file and must not be reused.
    // No menumask: index 13 is the next free one and it failed on hardware
-   // (see the OPL4 note above), so these rows are never hidden.
-   //  At the bottom, after a separator, since 2026-10-05: a measurement tool, not
-   //  an everyday control.
+   // (see the OPL4 note below), so these rows are never hidden.
+   //  Kept with the SCC rows they qualify (2026-10-05).
    `ifdef SCC_DIAG
-   "P1-;",
    "P1O[65],SCC Ch1 Mute,Off,On;",
    "P1O[66],SCC Ch2 Mute,Off,On;",
    "P1O[67],SCC Ch3 Mute,Off,On;",
    "P1O[68],SCC Ch4 Mute,Off,On;",
    "P1O[69],SCC Ch5 Mute,Off,On;",
    `endif
+   "P1-;",
+   "P1O[45],MoonSound,Off,On;",
+   // The OPL4 rows are indented and carry the OPL4 prefix because "FM" alone was
+   // ambiguous: OPLL is what everyone calls FM sound, but fm_mute gates the
+   // MoonSound OPL3 side and never touches the OPLL.
+   // They are NOT hidden when MoonSound is off, but the reason recorded here used
+   // to be wrong and is worth correcting.  An "HD" (menumask[13]) hide was tried in
+   // d504712, made all four vanish in BOTH states, and was blamed on index 13 being
+   // out of range.  It is not: menu.cpp's index decoder is user_io_status_bits(),
+   // which maps '0'-'9' to 0-9 and 'A'-'V' to 10-41, so 'D' is 13, and hdmask comes
+   // from spi_uio_cmd16 so bits 0-15 are all live.  The actual fault was the prefix
+   // ORDER.  menu.cpp:1960 runs `while (p[0]=='H'||'D'||'h'||'d') {...; p+=2;}`
+   // and only THEN looks at 'P' -- there is no second H/D pass afterwards.  The
+   // attempt wrote "P2HDO[46]", so p[0] was 'P', the mask loop never ran, and the
+   // leftover "HD" corrupted the option parse.  Every working hide in this core puts
+   // H first: "H2P1O[12]", "h7HBP3O[23:20]", "H7H3FS3".  Written "HDP2O[46]" it
+   // would work, and menumask 13/14/15 are all still free.
+   // Labels are dB VS UNITY, matching the PSG/OPLL/SCC rows above (0dB = no gain).
+   // They used to be offsets from the shipping default, so "0dB" was really -3.98 dB
+   // and "+8dB" was really +4.01.  Fixed by moving the VALUES to the names, not by
+   // renaming the steps: FM "+8dB" is mul 322 = a real +8 dB.  Entry 0 = default.
+   "P1O[46], OPL4 PCM Mute,Off,On;",
+   "P1O[112:109], OPL4 PCM Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P1O[47], OPL4 FM Mute,Off,On;",
+   "P1O[116:113], OPL4 FM Volume,+4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB;",
    "-;",
    "O[64],Reset on ROM change,Yes,No;",
    "O[48],Debug Overlay,Off,On;",
