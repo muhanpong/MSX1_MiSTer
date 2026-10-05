@@ -44,7 +44,7 @@ module flash_dirtysave #(
     input               prog_we,        // validated ascii16x byte-program strobe
     input        [22:0] prog_addr,      // flash byte address of that program
 
-    input               save_req,       // status[38] -- manual: always saves
+    input               save_req,       // status[11] (SRAM Save) -- manual: always saves
     // Autosave pulse (OSD opened with the option on).  Only acts when something
     // was PROGRAMMED since the last completed save: `dirty` deliberately keeps
     // previously-saved blocks (the UNION that keeps a partial-dirty SAVE from

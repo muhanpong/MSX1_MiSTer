@@ -22,7 +22,7 @@ module flash_dump_test
     input        [15:0] flash16x_size,  // 16 KB units
 
     // triggers (OSD SRAM Save / Load) + staging gate
-    input               save_req,       // status[38]
+    input               save_req,       // status[11] (SRAM Save)
     input               load_req,       // status[39] | load_sram
     input               upload_active,   // ROM staging in progress
 

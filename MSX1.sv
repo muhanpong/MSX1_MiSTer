@@ -362,7 +362,11 @@ localparam CONF_STR = {
    "H8H4F4,ROM,Load,33000000;",        // slot-level copy; the sub-slot page has its own (msx_config.sv)
    CONF_STR_MAPPER_B,
    "H6-;",
-   "H6R[38],SRAM Save;",
+   //  SRAM Save moved 38 -> 11 on 2026-10-05 so that 38:36 is one free run for the
+   //  R800 VDP wait dial (below), which used to sit on 77:75 -- INSIDE slot A's
+   //  sub-slot fields [75:73]/[78:76] (msx_config.sv).  An R button stores 0, and
+   //  bit 11 had never been assigned (board MSX1.CFG reads 0).
+   "H6R[11],SRAM Save;",
    "H6R[39],SRAM Load;",
    // Autosave.  SRAM (the slot A .sav and the SRAM file) is saved when the CPU's
    // writes to it go quiet, or at once before a download or a reset button
@@ -415,9 +419,14 @@ localparam CONF_STR = {
    //  of a block that runs LONG (24 writes x 10.1 = 3.8 lines against the real
    //  3.4), so the honest value is also the likely right one.  10.1 is entry 1,
    //  one click away.  Bits 75-77 have never been assigned (board .CFG reads them
-   //  0, so entry 0 it is).
+   //  0, so entry 0 it is).  [2026-10-05: that was wrong -- 75:73/78:76 were slot A's
+   //  sub-slot 0/1 device fields since 2026-08-26, so the dial and the sub-slot
+   //  page wrote each other's bits (seen on hardware: Sub-slot 0 read 7 with the
+   //  dial at 10.8us).  The dial now lives on 38:36; see below.]
    //  T80s is unaffected: it keeps the 32 clk21m spacing and loses nothing.
-   //  "R800 VDP wait" moved to the CPU page (P6) on 2026-09-28; bits 77:75 unchanged.
+   //  "R800 VDP wait" moved to the CPU page (P6) on 2026-09-28, and to bits 38:36 on
+   //  2026-10-05 (out of the sub-slot fields).  36/37 were the CPU turbo dial before
+   //  bef9f91 moved it to 58:56, so an old CFG can start this dial at 1 or 2.
    "-;",
    //  MIDI: an I/O-only MSX-MIDI (the "MIDI Interface 3" kind -- no ROM, no
    //  memory slot) at E8h-EFh, on any machine.  An I/O device, so it sits with
@@ -465,7 +474,8 @@ localparam CONF_STR = {
    //  the loaded BIOS is a turbo R (memory_upload latches byte 002Dh of the slot
    //  0-0 page-0 ROM): a plain MSX gets the Z80 ladder only; a turbo R gets the
    //  CPU choice, both ladders and the R800 VDP access wait.  Same status bits as
-   //  before (58:56, 70, 119:118, 77:75), so a saved CFG keeps its meaning.
+   //  before (58:56, 70, 119:118; the VDP wait moved 77:75 -> 38:36 on 2026-10-05),
+   //  so a saved CFG keeps its meaning.
    //  Retired here: the OSD-global "Turbo R features" (117), which on an FS-A1F
    //  overlaid 002Dh with 03 and made Z80BENCH call it a turbo R (2026-09-28); and
    //  masks D/E that hid the unused ladder under Force Z80/R800 -- all 16 mask bits
@@ -479,7 +489,7 @@ localparam CONF_STR = {
    "hDP6O[119:118],CPU (turbo R),Auto,Force Z80,Force R800;",
    "hDP6O[58:56],Z80 Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz,21.5MHz;",
    "hDP6O[70],R800 Speed,7.16MHz,21.5MHz;",
-   "hDP6O[77:75],R800 VDP access wait,8.66us (real),10.1us,9.3us,7.5us,6.0us,10.8us,11.8us,4.7us;",
+   "hDP6O[38:36],R800 VDP access wait,8.66us (real),10.1us,9.3us,7.5us,6.0us,10.8us,11.8us,4.7us;",
    "-;",
    "P2,Audio settings;",
    "P2O[45],MoonSound,Off,On;",
@@ -690,7 +700,8 @@ msx_config msx_config
 /////////////////   CLOCKS   /////////////////
 wire clk21m, clk_sdram, locked_sdram;
 wire ce_10m7_p, ce_10m7_n, ce_5m39_p, ce_5m39_n, ce_3m58_p, ce_3m58_n, ce_10hz;
-// CPU turbo.  status[37:36]: 0 = 3.58MHz (stock), 1 = 7.16MHz, 2 = 10.74MHz.
+// CPU turbo (the old status[37:36] dial is gone: 58:56 since bef9f91, and 38:36
+// is the R800 VDP wait since 2026-10-05).
 // Bound by name into `clock clock (.*)` below.
 // Panasonic FS-A1FX/WX/WSX expose the turbo on I/O 40H/41H (dev_matsushita).
 // The port can only RAISE the speed: if the OSD already asks for something
@@ -1158,7 +1169,7 @@ msx MSX
    .r800_set_stb(r800_set_stb),
    .r800_set (cpu_sel == 2'd2),
    .r800_fast(status[70]),
-   .r800_vdpw(status[77:75]),
+   .r800_vdpw(status[38:36]),
    .use_nz   (use_nz),
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),
@@ -1185,7 +1196,7 @@ msx MSX
    .rtc_nv_dout(rtc_nv_dout),
    .rtc_mem_dirty(rtc_mem_dirty),
    .dma_active(nvbak_dma_active),
-   .sram_save(status[38]),
+   .sram_save(status[11]),
    .sram_load(status[39]),
    .ioctl_addr(ioctl_addr[26:0]),
    .img_mounted(img_mounted[5]),
@@ -1699,7 +1710,7 @@ nvram_backup nvram_backup
    .reset(reset),
    .lookup_SRAM(lookup_SRAM),
    .load_req(status[39] | load_sram),
-   .save_req(status[38]),
+   .save_req(status[11]),
    .upload_busy(reset_rq),
    //  Autosave on write.  `flush`: a file download (a ROM / pack about to replace
    //  the layout) or a reset button -- save what is dirty now, and save_guard
@@ -1737,7 +1748,7 @@ nvram_backup nvram_backup
 );
 
 // ---- ASCII16X DIRTY-BLOCK engine (64KB dirty bitmap -> dump dirty blocks -> VD0 .sav) ----
-// SAVE=status[38], LOAD=status[39]|load_sram. Gated on flash16x_active. Reuses the
+// SAVE=status[11], LOAD=status[39]|load_sram. Gated on flash16x_active. Reuses the
 // dump_* ch1/VD0 mux wires (cl_active==dump_active). Captures prog_we at 64KB
 // granularity (0 M10K bitmap); SAVE reads real data from SDRAM -> no overflow.
 flash_dirtysave flash_dirtysave
@@ -1749,7 +1760,7 @@ flash_dirtysave flash_dirtysave
    .flash16x_size(flash16x_size[flash16x_sel]),
    .prog_we(flash16x_prog_we),
    .prog_addr(flash16x_prog_addr),
-   .save_req(status[38]),
+   .save_req(status[11]),
    .save_req_auto(autosave),
    .load_req(status[39] | load_sram),
    .upload_active(upload_active),
