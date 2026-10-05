@@ -518,21 +518,26 @@ localparam CONF_STR = {
    // leftover "HD" corrupted the option parse.  Every working hide in this core puts
    // H first: "H2P1O[12]", "h7HBP3O[23:20]", "H7H3FS3".  Written "HDP2O[46]" it
    // would work, and menumask 13/14/15 are all still free.
-   "P1O[46], OPL4 PCM Mute,Off,On;",
-   "P1O[47], OPL4 FM Mute,Off,On;",
    // Labels are dB VS UNITY, matching the PSG/OPLL/SCC menus below (0dB = no gain).
    // They used to be offsets from the shipping default, so "0dB" was really -3.98 dB
    // and "+8dB" was really +4.01.  Fixed by moving the VALUES to the names, not by
    // renaming the steps: FM "+8dB" is mul 322 = a real +8 dB.  Entry 0 = default.
+   //  Each source's Mute sits right above its Volume (2026-10-05, user request);
+   //  before, the mutes were one block and the volumes another at the bottom.
+   //  Only the row order changed -- every status bit is the same.
+   "P1O[46], OPL4 PCM Mute,Off,On;",
    "P1O[112:109], OPL4 PCM Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P1O[47], OPL4 FM Mute,Off,On;",
    "P1O[116:113], OPL4 FM Volume,+4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB;",
    "P1-;",
-   // Mutes are their own rows, not an 11th rung on the gain ladder.  The MoonSound
-   // block above already works that way, mute is the most-used control on this page
-   // (10 presses away at the end of a ladder), and a separate toggle keeps the trim
-   // while muted.  SCC needs no Mute row of its own: both slots off IS SCC muted.
+   // Mutes are their own rows, not an 11th rung on the gain ladder: mute is the
+   // most-used control on this page (10 presses away at the end of a ladder), and
+   // a separate toggle keeps the trim while muted.  SCC needs no Mute row of its
+   // own: both slots off IS SCC muted.
    "P1O[62],PSG Mute,Off,On;",
+   "P1O[100:97],PSG Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
    "P1O[63],MSX-MUSIC Mute,Off,On;",
+   "P1O[104:101],MSX-MUSIC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
    // Per-cartridge SCC mute.  Applied to scc_sound's oe, which feeds only the
    // wave mix -- register access and chip state are untouched.
    // Worded as Mute/Off,On like every other row in this block.  As "SCC Slot A:
@@ -540,6 +545,7 @@ localparam CONF_STR = {
    // of Off,Off,On,On all meant "audible".  The bit is unchanged: 0 = audible.
    "P1O[60],SCC Slot A Mute,Off,On;",
    "P1O[61],SCC Slot B Mute,Off,On;",
+   "P1O[108:105],SCC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
    // ---- diagnostics (SCC_DIAG) --------------------------------------------
    // Per-CHANNEL mute, both cartridges at once; combine with the two slot rows
    // above to isolate any one voice ("slot A, ch3 only" = mute slot B and the
@@ -553,16 +559,16 @@ localparam CONF_STR = {
    // in CONF_STR but carry stale 1s in that file and must not be reused.
    // No menumask: index 13 is the next free one and it failed on hardware
    // (see the OPL4 note above), so these rows are never hidden.
+   //  At the bottom, after a separator, since 2026-10-05: a measurement tool, not
+   //  an everyday control.
    `ifdef SCC_DIAG
+   "P1-;",
    "P1O[65],SCC Ch1 Mute,Off,On;",
    "P1O[66],SCC Ch2 Mute,Off,On;",
    "P1O[67],SCC Ch3 Mute,Off,On;",
    "P1O[68],SCC Ch4 Mute,Off,On;",
    "P1O[69],SCC Ch5 Mute,Off,On;",
    `endif
-   "P1O[100:97],PSG Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
-   "P1O[104:101],MSX-MUSIC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
-   "P1O[108:105],SCC Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
    "-;",
    "O[64],Reset on ROM change,Yes,No;",
    "O[48],Debug Overlay,Off,On;",
