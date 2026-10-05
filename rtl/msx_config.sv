@@ -53,7 +53,12 @@ parameter SRAM_SIZE_LIST = "SRAM size,auto,1kB,2kB,4kB,8kB,16kB,32kB,none;";
 // staging (0xC00000 / 0x3000000) -- same literals as MSX1.sv's slot-level copy.
 parameter CONF_STR_MAPPER_A    = { "H7HBO[23:20],", MAPPER_LIST };
 parameter CONF_STR_MAPPER_B    = { "H8HCO[35:32],", MAPPER_LIST };
-parameter CONF_STR_SRAM_SIZE_A = { "H7H5O[28:26],", SRAM_SIZE_LIST };
+//  Mask 5 disables (D5) rather than hides since 2026-10-05: the SRAM size row sits
+//  just above SRAM Save, and whether it shows depended on the loaded ROM's size
+//  (rom_big), which an OSD driver cannot see -- a hidden row moved every row below
+//  it.  Greyed, it keeps its place and Enter on it does nothing.  H7 stays a hide:
+//  it follows the sub-slot setting, which MSX1.CFG states.
+parameter CONF_STR_SRAM_SIZE_A = { "H7D5O[28:26],", SRAM_SIZE_LIST };
 parameter CONF_STR_SUBSLOT_A = {
     "h7P3,SLOT A sub-slots;",
     "h7P3O[75:73],Sub-slot 0,None,ROM,SCC,SCC+,FM-PAC,GameMaster2;",
@@ -63,7 +68,7 @@ parameter CONF_STR_SUBSLOT_A = {
     "h7P3-;",
     "h7H3P3FS3,ROM,Load,30C00000;",
     "h7HBP3O[23:20],", MAPPER_LIST,
-    "h7H5P3O[28:26],", SRAM_SIZE_LIST
+    "h7D5P3O[28:26],", SRAM_SIZE_LIST
 };
 parameter CONF_STR_SUBSLOT_B = {
     "h8P4,SLOT B sub-slots;",

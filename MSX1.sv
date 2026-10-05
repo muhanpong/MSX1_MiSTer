@@ -361,13 +361,19 @@ localparam CONF_STR = {
    // answer, not a CONF_STR flag.
    "H8H4F4,ROM,Load,33000000;",        // slot-level copy; the sub-slot page has its own (msx_config.sv)
    CONF_STR_MAPPER_B,
-   "H6-;",
+   //  Disabled (D6), not hidden (H6), since 2026-10-05: with no SRAM the rows below
+   //  stay in place, greyed, and Enter on them does nothing (Main_MiSTer menu.cpp:
+   //  a D row keeps its menumask bit and acts only `if (p && !d)`).  Hidden, they
+   //  vanished and an OSD driver counting Down presses (misterclaw) could not know
+   //  where SRAM Save was without knowing mask 6 -- one row off is SRAM Load,
+   //  which overwrites the SRAM.  The separator is plain for the same layout.
+   "-;",
    //  SRAM Save moved 38 -> 11 on 2026-10-05 so that 38:36 is one free run for the
    //  R800 VDP wait dial (below), which used to sit on 77:75 -- INSIDE slot A's
    //  sub-slot fields [75:73]/[78:76] (msx_config.sv).  An R button stores 0, and
    //  bit 11 had never been assigned (board MSX1.CFG reads 0).
-   "H6R[11],SRAM Save;",
-   "H6R[39],SRAM Load;",
+   "D6R[11],SRAM Save;",
+   "D6R[39],SRAM Load;",
    // Autosave.  SRAM (the slot A .sav and the SRAM file) is saved when the CPU's
    // writes to it go quiet, or at once before a download or a reset button
    // (nvram_backup, 2026-10-04) -- opening the OSD to switch this Off no longer
@@ -375,7 +381,7 @@ localparam CONF_STR = {
    // opens: flash_dirtysave acts only when something was programmed since the
    // last save (dirty_new), so browsing the menu does not rewrite the .sav.
    // Default Off; bit 52 measured zero in the shipped MSX1.CFG (2026-09-05 audit).
-   "H6O[52],SRAM Autosave,Off,On;",
+   "D6O[52],SRAM Autosave,Off,On;",
    "-;",
    "C,Cheats;",
    "FC7,GG,Load Cheat;",
