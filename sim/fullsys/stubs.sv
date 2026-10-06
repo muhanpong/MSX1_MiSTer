@@ -14,15 +14,18 @@
 //      bench exists to find.
 `timescale 1ns/1ns
 
+//  Port defaults below are bram.vhd's.  msx.sv's VRAM and keyboard.sv's spram
+//  leave enable/cs unconnected and rely on them; without the defaults Verilator
+//  ties them to 0, and fullsys ran with VRAM never written and read as FFh.
 module spram #(parameter addr_width = 8, data_width = 8,
                parameter mem_init_file = " ", mem_name = "MEM")
 (input  wire                    clock,
  input  wire [addr_width-1:0]   address,
- input  wire [data_width-1:0]   data,
- input  wire                    enable,
- input  wire                    wren,
+ input  wire [data_width-1:0]   data = '0,
+ input  wire                    enable = 1'b1,
+ input  wire                    wren = 1'b0,
  output wire [data_width-1:0]   q,
- input  wire                    cs);
+ input  wire                    cs = 1'b1);
    reg [data_width-1:0] mem [0:(2**addr_width)-1];
    reg [data_width-1:0] q0;
    integer i;
@@ -39,17 +42,17 @@ module dpram_dif #(parameter addr_width_a = 8, data_width_a = 8,
                    parameter mem_init_file = " ")
 (input  wire                      clock,
  input  wire [addr_width_a-1:0]   address_a,
- input  wire [data_width_a-1:0]   data_a,
- input  wire                      enable_a,
- input  wire                      wren_a,
+ input  wire [data_width_a-1:0]   data_a = '0,
+ input  wire                      enable_a = 1'b1,
+ input  wire                      wren_a = 1'b0,
  output wire [data_width_a-1:0]   q_a,
- input  wire                      cs_a,
- input  wire [addr_width_b-1:0]   address_b,
- input  wire [data_width_b-1:0]   data_b,
- input  wire                      enable_b,
- input  wire                      wren_b,
+ input  wire                      cs_a = 1'b1,
+ input  wire [addr_width_b-1:0]   address_b = '0,
+ input  wire [data_width_b-1:0]   data_b = '0,
+ input  wire                      enable_b = 1'b1,
+ input  wire                      wren_b = 1'b0,
  output wire [data_width_b-1:0]   q_b,
- input  wire                      cs_b);
+ input  wire                      cs_b = 1'b1);
    localparam DEPTH = (2**addr_width_a);
    reg [data_width_a-1:0] mem [0:DEPTH-1];
    reg [data_width_a-1:0] qa0;
@@ -73,17 +76,17 @@ endmodule
 module dpram #(parameter addr_width = 8, data_width = 8, parameter mem_init_file = " ")
 (input  wire                  clock,
  input  wire [addr_width-1:0] address_a,
- input  wire [data_width-1:0] data_a,
- input  wire                  enable_a,
- input  wire                  wren_a,
+ input  wire [data_width-1:0] data_a = '0,
+ input  wire                  enable_a = 1'b1,
+ input  wire                  wren_a = 1'b0,
  output wire [data_width-1:0] q_a,
- input  wire                  cs_a,
- input  wire [addr_width-1:0] address_b,
- input  wire [data_width-1:0] data_b,
- input  wire                  enable_b,
- input  wire                  wren_b,
+ input  wire                  cs_a = 1'b1,
+ input  wire [addr_width-1:0] address_b = '0,
+ input  wire [data_width-1:0] data_b = '0,
+ input  wire                  enable_b = 1'b1,
+ input  wire                  wren_b = 1'b0,
  output wire [data_width-1:0] q_b,
- input  wire                  cs_b);
+ input  wire                  cs_b = 1'b1);
    dpram_dif #(addr_width, data_width, addr_width, data_width, mem_init_file) ram
      (clock, address_a, data_a, enable_a, wren_a, q_a, cs_a,
              address_b, data_b, enable_b, wren_b, q_b, cs_b);

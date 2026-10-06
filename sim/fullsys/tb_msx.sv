@@ -362,9 +362,32 @@ module tb;
    logic [7:0]  first_sram_data = 8'd0;
    logic        load_flight_q = 1'b0;
    event        sram_first_ev;
+   //  Reads count too: a firmware that READS its settings before the load has
+   //  landed acts on stale bytes without ever writing, and the guard under
+   //  design (msx_pause) stops reads as well as writes.  Counted per access
+   //  (rising edge of bram_ce), not per clock.
+   int      all_sram_reads = 0;
+   realtime t_first_sram_rd = -1;
+   logic [15:0] first_rd_pc = 16'd0;
+   logic [26:0] first_rd_addr = 27'd0;
+   logic        bram_ce_q = 1'b0;
    always @(posedge clk21m) begin
       load_flight_q <= load_flight;
       if (load_flight_q && !load_flight && t_load_end < 0) t_load_end = $realtime;
+      bram_ce_q <= bram_ce;
+      if (trace_on && bram_ce && !bram_ce_q && ram_rnw && sav_idx >= 0 && lookup_SRAM[sav_idx].size > 0
+          && ram_addr >= 27'(lookup_SRAM[sav_idx].addr)
+          && ram_addr <  27'(lookup_SRAM[sav_idx].addr) + 27'(lookup_SRAM[sav_idx].size) * 1024) begin
+         all_sram_reads <= all_sram_reads + 1;
+         if (t_first_sram_rd < 0) begin
+            t_first_sram_rd = $realtime;
+            first_rd_pc = last_fetch; first_rd_addr = ram_addr;
+            $display("sav: FIRST CPU read of the SRAM window at %0.3f ms after release, addr %0d, last fetch %04x, load in flight=%0d",
+                     (t_first_sram_rd - t_release) / 1e6, ram_addr, last_fetch, load_flight);
+            $fflush;
+            ->sram_first_ev;
+         end
+      end
       if (trace_on && bram_ce && !ram_rnw) begin
          all_bram_writes <= all_bram_writes + 1;
          if (t_first_bram < 0) t_first_bram = $realtime;
@@ -375,8 +398,8 @@ module tb;
             if (t_first_sram < 0) begin
                t_first_sram = $realtime;
                first_sram_pc = last_fetch; first_sram_addr = ram_addr; first_sram_data = ram_din;
-               $display("sav: FIRST CPU write into the SRAM window at %0.3f ms after release, addr %0d data %02x, last fetch %04x",
-                        (t_first_sram - t_release) / 1e6, ram_addr, ram_din, last_fetch);
+               $display("sav: FIRST CPU write into the SRAM window at %0.3f ms after release, addr %0d data %02x, last fetch %04x (load in flight=%0d)",
+                        (t_first_sram - t_release) / 1e6, ram_addr, ram_din, last_fetch, load_flight);
                $fflush;
                ->sram_first_ev;
             end
@@ -390,10 +413,219 @@ module tb;
       wait (trace_on);
       forever begin
          #50_000_000;
-         $display("hb: %0.0f ms after release, %0d branch events, BRAM writes %0d, SRAM window %0d, load in flight=%0d",
+         $display("hb: %0.0f ms after release, %0d branch events, BRAM writes %0d, SRAM window %0d, SRAM reads %0d, mapper SRAM %0d, load in flight=%0d",
                   ($realtime - t_release) / 1e6, nev, all_bram_writes, all_sram_writes,
-                  load_flight);
+                  all_sram_reads, n_slot_sram, load_flight);
          $fflush;
+      end
+   end
+
+   //  Who holds INT, and what the VDP was told.  A turbo R BIOS that ends in
+   //  an interrupt every 0.12 ms -- handler reads 99h, sees no frame flag,
+   //  leaves -- has an INT source it cannot clear.  Log which line is low at
+   //  each acknowledge, the VDP register writes that decide it (R#0 IE1,
+   //  R#1 IE0, R#15 status select, R#19 line), and what 99h reads return.
+   //  Bus level only: the DUT stays what the board builds.
+   wire       io_rd = ~MSX.iorq_n & ~MSX.rd_n & MSX.m1_n;
+   wire       io_wr = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n;
+   wire       inta  = ~MSX.iorq_n & ~MSX.m1_n;
+   logic      io_rd_q = 0, io_wr_q = 0, inta_q = 0;
+   logic      vdp_latch = 0;
+   logic [7:0] vdp_first = 0, rd99_last = 0;
+   int        n_inta = 0, n_inta_vdp = 0, n_inta_ms = 0, n_inta_midi = 0, n_inta_none = 0;
+   int        n_rd99 = 0, n_rd99_f = 0, n_regw = 0, n_wr9b = 0;
+   always @(posedge clk21m) if (trace_on) begin
+      io_rd_q <= io_rd; io_wr_q <= io_wr; inta_q <= inta;
+      if (io_rd) rd99_last <= MSX.d_to_cpu;
+      //  end of a 99h read: the byte the CPU took
+      if (io_rd_q && !io_rd && MSX.a[7:0] == 8'h99) begin
+         n_rd99++;
+         if (rd99_last[7]) n_rd99_f++;
+         vdp_latch = 0;                       // a status read resets the 2-byte latch
+      end
+      if (io_wr && !io_wr_q && MSX.a[7:0] == 8'h9B) n_wr9b++;
+      if (io_wr && !io_wr_q && MSX.a[7:0] == 8'h99) begin
+         if (!vdp_latch) begin vdp_first = MSX.d_from_cpu; vdp_latch = 1; end
+         else begin
+            vdp_latch = 0;
+            if (MSX.d_from_cpu[7:6] == 2'b10) begin
+               n_regw++;
+               if (n_regw <= 300 && (MSX.d_from_cpu[5:0] inside {0, 1, 15, 19}))
+                  $display("vdp: %0.3f ms  R#%0d <= %02x", ($realtime - t_release) / 1e6,
+                           MSX.d_from_cpu[5:0], vdp_first);
+            end
+         end
+      end
+      if (inta && !inta_q) begin
+         n_inta++;
+         if (!MSX.vdp_int_n)  n_inta_vdp++;
+         if (!MSX.ms_int_n)   n_inta_ms++;
+         if (!MSX.midi_int_n) n_inta_midi++;
+         if (MSX.vdp_int_n & MSX.ms_int_n & MSX.midi_int_n) n_inta_none++;
+         if (n_inta <= 3)
+            $display("int: dev_midi cs=%0d timer_irq=%0d rxrdy_irq=%0d  midi_io_en=%0d  msx_device=%b",
+                     MSX.msx_slots.dev_midi.cs, MSX.msx_slots.dev_midi.timer_irq,
+                     MSX.msx_slots.dev_midi.rxrdy_irq, MSX.msx_slots.midi_io_en, msx_device);
+         if (n_inta <= 5 || n_inta % 1000 == 0)
+            $display("int: %0.3f ms  #%0d  vdp_int_n=%b ms_int_n=%b midi_int_n=%b  last 99h read %02x",
+                     ($realtime - t_release) / 1e6, n_inta, MSX.vdp_int_n, MSX.ms_int_n,
+                     MSX.midi_int_n, rd99_last);
+      end
+   end
+
+   //  Upstream of bram_ce: a CPU access the MAPPER claims as SRAM
+   //  (msx_slots' sram_cs with a memory read or write), counted per access,
+   //  and how many of those the SRAM bound (sram_over) or any other
+   //  mem_unmaped term then suppressed.  bram_ce is gated by ~mem_unmaped, so a
+   //  bound that misjudges a pack's size would unmap every legitimate access
+   //  and the counters above would read 0 for that reason alone.
+   wire   slot_sram_acc = MSX.msx_slots.sram_cs & MSX.msx_slots.cpu_mreq
+                        & (MSX.msx_slots.cpu_rd | MSX.msx_slots.cpu_wr);
+   logic  slot_sram_acc_q = 1'b0;
+   int    n_slot_sram = 0, n_slot_sram_over = 0, n_slot_sram_unmapped = 0;
+   realtime t_first_slot_sram = -1;
+   always @(posedge clk21m) if (trace_on) begin
+      slot_sram_acc_q <= slot_sram_acc;
+      if (slot_sram_acc && !slot_sram_acc_q) begin
+         n_slot_sram++;
+         if (MSX.msx_slots.sram_over)   n_slot_sram_over++;
+         if (MSX.msx_slots.mem_unmaped) n_slot_sram_unmapped++;
+         if (t_first_slot_sram < 0) begin
+            t_first_slot_sram = $realtime;
+            $display("slot: FIRST CPU access the mapper claims as SRAM at %0.3f ms after release, rd=%0d wr=%0d sram_over=%0d mem_unmaped=%0d, last fetch %04x, load in flight=%0d",
+                     (t_first_slot_sram - t_release) / 1e6, MSX.msx_slots.cpu_rd, MSX.msx_slots.cpu_wr,
+                     MSX.msx_slots.sram_over, MSX.msx_slots.mem_unmaped, last_fetch, load_flight);
+            $fflush;
+            ->sram_first_ev;
+         end
+      end
+   end
+
+   //  Every change of the interrupt nets from release on (first 200), so a
+   //  source that asserts without being acknowledged -- or never asserts --
+   //  shows up with its time, not only at an INTA.
+   logic [5:0] irq_mon, irq_mon_q = 6'h3F;
+   int         n_irq_mon = 0;
+   assign irq_mon = {MSX.vdp_int_n, MSX.ms_int_n, MSX.midi_int_n,
+                     MSX.msx_slots.dev_midi.cs, MSX.msx_slots.dev_midi.timer_irq,
+                     MSX.msx_slots.dev_midi.rxrdy_irq};
+   always @(posedge clk21m) if (trace_on) begin
+      irq_mon_q <= irq_mon;
+      if (irq_mon != irq_mon_q && n_irq_mon < 200) begin
+         n_irq_mon++;
+         $display("irq: %0.3f ms  vdp_int_n=%b ms_int_n=%b midi_int_n=%b  midi cs=%b timer=%b rxrdy=%b",
+                  ($realtime - t_release) / 1e6, irq_mon[5], irq_mon[4], irq_mon[3],
+                  irq_mon[2], irq_mon[1], irq_mon[0]);
+      end
+   end
+
+   //  The CPU swap (turbo R CHGCPU): which core owns the bus, and whether the
+   //  swap state machine ever leaves RUN for good.
+   logic [4:0] swp, swp_q = 5'h1F;
+   int         n_swp = 0;
+   assign swp = {MSX.CPUSWAP.use_nz, MSX.CPUSWAP.want_nz, MSX.CPUSWAP.freeze, 2'(MSX.CPUSWAP.st)};
+   always @(posedge clk21m) if (trace_on) begin
+      swp_q <= swp;
+      if (swp != swp_q && n_swp < 200) begin
+         n_swp++;
+         $display("swap: %0.3f ms  use_nz=%b want_nz=%b freeze=%b st=%0d  pc~%04x",
+                  ($realtime - t_release) / 1e6, swp[4], swp[3], swp[2], swp[1:0], last_fetch);
+      end
+   end
+
+   //  +forcez80: keep T80s on the bus through CHGCPU.  A discriminator, not a
+   //  configuration: if the boot gets further with it, the stall is inside
+   //  NextZ80 rather than in the firmware or the VDP.
+   initial if ($test$plusargs("forcez80")) begin
+      $display("forcez80: tr_r800 held at 0, NextZ80 never takes the bus");
+      force MSX.tr_r800 = 1'b0;
+   end
+
+   //  What is actually executing in the post-CHGCPU loop: the opcode byte the
+   //  CPU fetched (d_to_cpu at the end of each M1 read) for PCs in 7B70-7B8F,
+   //  with the slot layout entry and SDRAM/BRAM address it came from.  The
+   //  ROM file alone cannot say, since the bank in page 1 is only known live.
+   logic m1rd, m1rd_q = 1'b0;
+   logic [7:0] m1_byte;
+   logic [15:0] m1_addr;
+   logic [5:0]  m1_lid;
+   logic [26:0] m1_raddr;
+   int   n_op = 0;
+   assign m1rd = ~MSX.m1_n & ~MSX.mreq_n & ~MSX.rd_n;
+   always @(posedge clk21m) if (trace_on) begin
+      m1rd_q <= m1rd;
+      if (m1rd) begin
+         m1_byte <= MSX.d_to_cpu; m1_addr <= fetch_a;
+         m1_lid <= MSX.msx_slots.layout_id; m1_raddr <= ram_addr;
+      end
+      if (m1rd_q && !m1rd && m1_addr >= 16'h7B70 && m1_addr <= 16'h7B8F && n_op < 60) begin
+         n_op++;
+         $display("op: %0.3f ms  %04x: %02x  layout_id=%0d mapper=%0d ram_addr=%07x  use_nz=%b nz_IFF1=%b",
+                  ($realtime - t_release) / 1e6, m1_addr, m1_byte,
+                  m1_lid, MSX.msx_slots.mapper, m1_raddr, use_nz, MSX.NZ.CPUStatus[6]);
+      end
+   end
+
+   //  IFF1 of both cores around the CPU swap: does the owning core have
+   //  interrupts enabled while the frame interrupt is pending?  NextZ80's
+   //  acceptance is SINT & CPUStatus[6] (nextz80cpu.v:206/225).
+   logic [2:0] ie, ie_q = 3'b111;
+   int         n_ie = 0;
+   assign ie = {MSX.T80.u0.inte_ff1, MSX.NZ.CPUStatus[6], use_nz};
+   always @(posedge clk21m) if (trace_on && ($realtime - t_release) > 590e6) begin
+      ie_q <= ie;
+      if (ie != ie_q && n_ie < 60) begin
+         n_ie++;
+         $display("iff: %0.3f ms  t80 IFF1=%b  nz IFF1=%b  use_nz=%b  vdp_int_n=%b  pc~%04x",
+                  ($realtime - t_release) / 1e6, ie[2], ie[1], ie[0], MSX.vdp_int_n, last_fetch);
+      end
+   end
+
+   //  S1990 (turbo R): every write to E4h/E5h and every change of its CPU/mode
+   //  register.  Reg 6 bits 6:5 = cpust: 11 Z80, 10 R800-ROM, 00 R800-DRAM
+   //  (docs/illusion_city_turbor_20260920.md:53).  tr_dram is read by nothing
+   //  functional in msx.sv, so a firmware that selects DRAM mode and checks it
+   //  would wait forever.
+   logic       s19_wr_q = 1'b0;
+   logic [1:0] cpust_q = 2'b11;
+   int         n_s19 = 0;
+   always @(posedge clk21m) if (trace_on) begin
+      s19_wr_q <= io_wr && (MSX.a[7:1] == 7'b1110_010);
+      if (io_wr && (MSX.a[7:1] == 7'b1110_010) && !s19_wr_q && n_s19 < 80) begin
+         n_s19++;
+         //  chg_arm decides how the byte reads: armed by the fetch at 0180h
+         //  (CHGCPU), turbor.sv:204 decodes din[1:0] (0 Z80, 1 R800-ROM,
+         //  2 R800-DRAM); otherwise reg 6 takes din[6:5].
+         $display("s1990: %0.3f ms  OUT (%02x),%02x  regsel=%0d  chg_arm=%0d  pc~%04x",
+                  ($realtime - t_release) / 1e6, MSX.a[7:0], MSX.d_from_cpu, MSX.turbor.regsel,
+                  MSX.turbor.chg_arm, last_fetch);
+      end
+      cpust_q <= MSX.turbor.cpust;
+      if (MSX.turbor.cpust != cpust_q)
+         $display("s1990: %0.3f ms  cpust %b -> %b  (r800=%b dram=%b)",
+                  ($realtime - t_release) / 1e6, cpust_q, MSX.turbor.cpust,
+                  ~MSX.turbor.cpust[0], ~MSX.turbor.cpust[1]);
+   end
+
+   //  Positive control for the read detector: +ctlread=<ms> forces one CPU-side
+   //  read of the SRAM window's first byte that long after release.  A run
+   //  with it must report FIRST CPU read at that time and stop +after later;
+   //  without it, "0 reads" and "the detector never fired" look the same.
+   //  It drives the bus, so it is a control run only, never a measurement.
+   initial begin
+      int ctl_ms;
+      if ($value$plusargs("ctlread=%d", ctl_ms)) begin
+         wait (trace_on);
+         #(ctl_ms * 1_000_000);
+         @(posedge clk21m);
+         while (bram_ce || sdram_ce) @(posedge clk21m);   // between real accesses
+         $display("ctl: forcing one read of the SRAM window at %0.3f ms after release",
+                  ($realtime - t_release) / 1e6);
+         force ram_addr = 27'(lookup_SRAM[sav_idx < 0 ? 3 : sav_idx].addr);
+         force ram_rnw  = 1'b1;
+         force bram_ce  = 1'b1;
+         repeat (2) @(posedge clk21m);
+         release bram_ce; release ram_rnw; release ram_addr;
       end
    end
 
@@ -425,7 +657,10 @@ module tb;
       .ce_5m39_p(), .ce_5m39_n(ce_5m39_n),
       .ce_3m58_p(ce_3m58_p), .ce_3m58_n(ce_3m58_n),
       .ce_10hz(ce_10hz),
-      .cpu_speed(3'd0), .cpu_bus_idle(cpu_bus_idle),
+      //  As MSX1.sv:637 -- NextZ80 (R800 mode) runs at full rate.  This was
+      //  3'd0, so after CHGCPU the bench ran the R800 at the Z80's enable,
+      //  about six times too slow, and SDRAM's guard kept the slow limit.
+      .cpu_speed(use_nz ? 3'd4 : 3'd0), .cpu_bus_idle(cpu_bus_idle),
       .ce_cpu(ce_cpu), .cpu_turbo(cpu_turbo), .cpu_speed_q(cpu_speed_q)
    );
 
@@ -564,36 +799,50 @@ module tb;
          end
          $display("upload: %0d of 64 layout entries populated", nz);
       end
-      //  An upload can also end early and quietly: a MOONSOUND device record with
-      //  no inline ROM looks for yrw801 in the FW pack, and with none staged the
-      //  walk stops before the CONFIG record and before load_sram.  MSX_typ then
-      //  stays MSX1, the TMS9918 model answers a turbo R BIOS, and the machine
-      //  sits in an interrupt it never clears.  Say so here, not an hour later.
-      //  (Plain numbers: a ternary between two string literals prints nothing.)
-      $display("upload: MSX_typ=%0d (0=MSX1 1=MSX2)  msx_device=%b  load_sram issued=%0d",
-               int'(bios_config.MSX_typ), msx_device, load_sram_seen);
-      $display("upload: bios_ver=%02x (002Dh: 0 MSX1 1 MSX2 2 MSX2+ 3 turbo R, ff = not read)", bios_config.ver);
-      if (sav_bytes > 0 && !load_sram_seen)
-         $display("WARNING: a .sav is mounted but the upload never asked for it");
-      mupack_report();
       if (sav_bytes > 0 && sav_late) begin
          repeat (200) @(posedge clk21m);      // the request is already out by now
          mount_sav();
       end
       repeat (64) @(posedge clk21m);
+      //  An upload can also end early and quietly: a MOONSOUND device record with
+      //  no inline ROM looks for yrw801 in the FW pack, and with none staged the
+      //  walk stops before the CONFIG record and before load_sram.  MSX_typ then
+      //  stays MSX1, the TMS9918 model answers a turbo R BIOS, and the machine
+      //  sits in an interrupt it never clears.  Say so here, not an hour later.
+      //  Sampled here, 64 clocks after reset_rq fell: load_sram pulses on that
+      //  same edge, so a check made there reads the flag before it is set.
+      //  (Plain numbers: a ternary between two string literals prints nothing.)
+      $display("upload: MSX_typ=%0d (0=MSX1 1=MSX2)  msx_device=%b  load_sram issued=%0d",
+               int'(bios_config.MSX_typ), msx_device, load_sram_seen);
+      $display("upload: bios_ver=%02x (002Dh: 0 MSX1 1 MSX2 2 MSX2+ 3 turbo R, ff = not read)", bios_config.ver);
+      //  A hard stop, not a warning: a tree without the firmware-search fix
+      //  (bbdf660) printed this WARNING and then ran for hours on a machine with no
+      //  CONFIG and no .sav.  $fatal, not $finish: $finish let the process run on
+      //  and exited 0.  (A late mount, +sav_late, still sees the request first.)
+      if (sav_bytes > 0 && !load_sram_seen)
+         $fatal(1, "a .sav is mounted but the upload never asked for it");
+      //  Loud but not fatal: run_packver and friends also boot real MSX1 packs.
+      if (int'(bios_config.MSX_typ) != 1 && !$test$plusargs("expect_msx1"))
+         $display("WARNING: the upload left MSX_typ at MSX1 (CONFIG not reached?); +expect_msx1 if intended");
+      mupack_report();
+      if (sav_bytes > 0 && sav_late) begin
+         repeat (200) @(posedge clk21m);      // the request is already out by now
+         mount_sav();
+      end
       reset = 1'b0; reset_ms = 1'b0;
       trace_on = 1;
       t_release = $realtime;
       $display("reset released at %0t", $time);
       $fflush;
-      //  Stop at the limit, or +after=<ms> past the first SRAM write (default
-      //  100) -- once T_first exists the rest of the boot is not the question.
+      //  Stop at the limit, or +after=<ms> past the first SRAM access, read or
+      //  write (default 500) -- once that exists the rest of the boot is not
+      //  the question.
       begin
          int after_ms;
-         if (!$value$plusargs("after=%d", after_ms)) after_ms = 100;
+         if (!$value$plusargs("after=%d", after_ms)) after_ms = 500;
          fork
-            #(limit_ms * 1_000_000);
-            begin @(sram_first_ev); #(after_ms * 1_000_000); end
+            #(longint'(limit_ms) * 64'd1_000_000);   // int overflowed past 2147 ms
+            begin @(sram_first_ev); #(longint'(after_ms) * 64'd1_000_000); end
          join_any
          disable fork;
       end
@@ -610,8 +859,16 @@ module tb;
          $display("sav: load ended at %0s after release", ms_since(t_load_end));
          $display("sav: CPU writes to BRAM since release: %0d, of which inside the SRAM window: %0d",
                   all_bram_writes, all_sram_writes);
+         $display("int: %0d acknowledged; low at the time: vdp %0d, moonsound %0d, midi %0d, none %0d",
+                  n_inta, n_inta_vdp, n_inta_ms, n_inta_midi, n_inta_none);
+         $display("int: 99h reads %0d, of which bit 7 set %0d; VDP register writes %0d; 9Bh writes %0d",
+                  n_rd99, n_rd99_f, n_regw, n_wr9b);
          $display("sav: first BRAM write %0s, first SRAM-window write %0s after release",
                   ms_since(t_first_bram), ms_since(t_first_sram));
+         $display("slot: CPU accesses the mapper claimed as SRAM: %0d, of which sram_over %0d, mem_unmaped %0d; first %0s",
+                  n_slot_sram, n_slot_sram_over, n_slot_sram_unmapped, ms_since(t_first_slot_sram));
+         $display("sav: CPU reads of the SRAM window since release: %0d; first %0s (addr %0d, last fetch %04x)",
+                  all_sram_reads, ms_since(t_first_sram_rd), first_rd_addr, first_rd_pc);
          if (t_first_sram >= 0)
             $display("sav: T_first = %0.3f ms (addr %0d, data %02x, last fetch %04x)",
                      (t_first_sram - t_release) / 1e6, first_sram_addr, first_sram_data, first_sram_pc);
