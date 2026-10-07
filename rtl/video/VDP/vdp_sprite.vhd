@@ -191,6 +191,7 @@ ENTITY VDP_SPRITE IS
 
         DOTCOUNTERX                 : IN    STD_LOGIC_VECTOR(  8 DOWNTO 0 );
         DOTCOUNTERYP                : IN    STD_LOGIC_VECTOR(  8 DOWNTO 0 );
+        SP_TARGET_Y                 : IN    STD_LOGIC_VECTOR(  8 DOWNTO 0 );   -- line this Y-test selects for (vdp_ssg)
         BWINDOW_Y                   : IN    STD_LOGIC;
         PREWINDOW_Y                 : IN    STD_LOGIC;     -- display window (bitmap on)
 
@@ -469,8 +470,11 @@ BEGIN
     BEGIN
         IF( CLK21M'EVENT AND CLK21M = '1' )THEN
             IF( (DOTSTATE = "01") AND (DOTCOUNTERX = 0) )THEN
-                --   +1 SHOULD BE NEEDED. BECAUSE IT WILL BE DRAWN IN THE NEXT LINE.
-                FF_CUR_Y <= DOTCOUNTERYP + ('0' & REG_R23_VSTART_LINE) + 1;
+                --   The line this Y-test selects for.  Was DOTCOUNTERYP + 1, which
+                --   is wrong across the line counter's jump at the end of vertical
+                --   blanking; vdp_ssg computes it (SP_TARGET_Y, 2026-10-07) and it
+                --   still equals DOTCOUNTERYP + 1 everywhere else.
+                FF_CUR_Y <= SP_TARGET_Y + ('0' & REG_R23_VSTART_LINE);
             END IF;
         END IF;
     END PROCESS;
@@ -554,11 +558,26 @@ BEGIN
     -- display and the real chip draws sprites on them; the YP range above
     -- blanked them.  PREWINDOW_Y is only ever 1 at negative YP in that case
     -- (it opens at YP 0 otherwise), so normal frames are unchanged.
+    -- (2026-10-07) The same overscan frame also needs the lines PAST the end
+    -- line: SPWINDOW_Y (below) only closes when YP EQUALS 192/212 under the LN
+    -- of that moment, so in a frame whose display never ended it is still 1 at
+    -- YP >= 192/212.  Without the last term the window closed there anyway:
+    --   * an LN 1->0 switch at YP 200 stopped every sprite from YP 201 on
+    --     (openMSX 21.0-545 keeps drawing them), and
+    --   * the line before the next frame's top border (YP ~245) was inactive,
+    --     so FF_SP_EN latched 0 there and the first three top-border lines had
+    --     no sprites -- km224.rom's top rows (GHDL, scratch ovs/tb_ovs.vhd,
+    --     against an openMSX table from the knightmare-v2 session).
+    -- In a normal frame SPWINDOW_Y has closed by YP 192/212, so the term is 0
+    -- there and the ghost-collision window above is untouched.
     W_ACTIVE        <=  BWINDOW_Y WHEN(
                             (DOTCOUNTERYP(8) = '1' AND DOTCOUNTERYP(7 DOWNTO 0) >= 254) OR
                             (DOTCOUNTERYP(8) = '1' AND PREWINDOW_Y = '1') OR
                             (DOTCOUNTERYP(8) = '0' AND REG_R9_Y_DOTS = '0' AND DOTCOUNTERYP(7 DOWNTO 0) <= 190) OR
-                            (DOTCOUNTERYP(8) = '0' AND REG_R9_Y_DOTS = '1' AND DOTCOUNTERYP(7 DOWNTO 0) <= 210) )ELSE
+                            (DOTCOUNTERYP(8) = '0' AND REG_R9_Y_DOTS = '1' AND DOTCOUNTERYP(7 DOWNTO 0) <= 210) OR
+                            (DOTCOUNTERYP(8) = '0' AND SPWINDOW_Y = '1' AND
+                               ((REG_R9_Y_DOTS = '0' AND DOTCOUNTERYP(7 DOWNTO 0) >= 192) OR
+                                (REG_R9_Y_DOTS = '1' AND DOTCOUNTERYP(7 DOWNTO 0) >= 212))) )ELSE
                         '0';
 
     -----------------------------------------------------------------------------

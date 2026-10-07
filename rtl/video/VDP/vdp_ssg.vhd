@@ -78,6 +78,8 @@ ENTITY VDP_SSG IS
         PREDOTCOUNTER_X         : OUT   STD_LOGIC_VECTOR(  8 DOWNTO 0 );
         PREDOTCOUNTER_Y         : OUT   STD_LOGIC_VECTOR(  8 DOWNTO 0 );
         PREDOTCOUNTER_YP        : OUT   STD_LOGIC_VECTOR(  8 DOWNTO 0 );
+        -- The line the sprite Y-test started now must select for (see FF_SP_TARGET_Y).
+        SP_TARGET_Y             : OUT   STD_LOGIC_VECTOR(  8 DOWNTO 0 );
         PREWINDOW_Y             : OUT   STD_LOGIC;
         PREWINDOW_Y_SP          : OUT   STD_LOGIC;
         -- '1' on the single line right before the display area (monitor -1);
@@ -156,6 +158,20 @@ ARCHITECTURE RTL OF VDP_SSG IS
     SIGNAL W_H_CNT                  : STD_LOGIC_VECTOR( 10 DOWNTO 0 );
     SIGNAL W_V_CNT_IN_FRAME         : STD_LOGIC_VECTOR( 10 DOWNTO 0 );
     SIGNAL W_V_CNT_IN_FIELD         : STD_LOGIC_VECTOR(  9 DOWNTO 0 );
+    -- (2026-10-07) The line the sprite Y-test started on this line selects
+    -- for.  The sprite pipeline Y-tests on line N, draws its line buffer on
+    -- N+1 and shows it on N+2, and the Y-test target is the line shown one
+    -- line later than its own number (the +1 that was hard-wired as
+    -- "DOTCOUNTERYP + 1").  That holds while the counter steps by one, but at
+    -- the end of vertical blanking it jumps to the top-border start (e.g.
+    -- 245 -> -16), so the two Y-tests before the jump selected for 245/246
+    -- instead of start-1/start.  In a normal frame the sprite window is closed
+    -- there and nothing changes; in an overscan frame (display never ended --
+    -- R#9 LN switched past the end line, km224.rom / ASO) the first top-border
+    -- lines showed the wrong sprites.  Elsewhere the target stays this line + 1.
+    SIGNAL FF_SP_TARGET_Y           : STD_LOGIC_VECTOR(  8 DOWNTO 0 );
+    SIGNAL W_V_BLANKING_END_NEXT    : STD_LOGIC;
+    SIGNAL W_V_BLANKING_END_NEXT2   : STD_LOGIC;
     SIGNAL W_FIELD                  : STD_LOGIC;
     SIGNAL W_H_BLANK                : STD_LOGIC;
     SIGNAL W_V_BLANK                : STD_LOGIC;
@@ -184,6 +200,7 @@ BEGIN
     PREDOTCOUNTER_Y     <= FF_PRE_Y_CNT;
     VD_LEAD             <= '1' WHEN( FF_MONITOR_LINE = "111111111" )ELSE '0';   -- monitor -1
     PREDOTCOUNTER_YP    <= FF_MONITOR_LINE;
+    SP_TARGET_Y         <= FF_SP_TARGET_Y;
     HD                  <= W_H_BLANK;
     VD                  <= W_V_BLANK;
     HSYNC               <= '1' WHEN( W_H_CNT(1 DOWNTO 0) = "10" AND FF_PRE_X_CNT = "111111111" )ELSE '0';
@@ -395,8 +412,11 @@ BEGIN
     PROCESS( CLK21M, RESET )
         VARIABLE PREDOTCOUNTER_YP_V     : STD_LOGIC_VECTOR(  8 DOWNTO 0 );
         VARIABLE PREDOTCOUNTERYPSTART   : STD_LOGIC_VECTOR(  8 DOWNTO 0 );
+        VARIABLE NEXTSTART              : STD_LOGIC_VECTOR(  8 DOWNTO 0 );
+        VARIABLE CUR_V                  : STD_LOGIC_VECTOR(  8 DOWNTO 0 );
     BEGIN
         IF (RESET = '1') THEN
+            FF_SP_TARGET_Y      <= (OTHERS =>'0');
             FF_PRE_Y_CNT        <= (OTHERS =>'0');
             FF_MONITOR_LINE     <= (OTHERS =>'0');
             FF_R23_LATCH        <= (OTHERS =>'0');
@@ -418,6 +438,7 @@ BEGIN
                     END IF;
                     FF_MONITOR_LINE <= PREDOTCOUNTERYPSTART + W_Y_ADJ;
                     PREWINDOW_Y_SP  <= '1';
+                    CUR_V := PREDOTCOUNTERYPSTART + W_Y_ADJ;
                 ELSE
                     IF( PREDOTCOUNTER_YP_V = 255 )THEN
                         PREDOTCOUNTER_YP_V := FF_MONITOR_LINE;
@@ -438,6 +459,20 @@ BEGIN
                         ENAHSYNC        <= '0';
                     END IF;
                     FF_MONITOR_LINE <= PREDOTCOUNTER_YP_V;
+                    CUR_V := PREDOTCOUNTER_YP_V;
+                END IF;
+                --  the top-border start the blanking-end HSYNC will load (as above)
+                IF(    REG_R9_Y_DOTS = '0' AND VDPR9PALMODE = '0' )THEN NEXTSTART := "111100110";
+                ELSIF( REG_R9_Y_DOTS = '1' AND VDPR9PALMODE = '0' )THEN NEXTSTART := "111110000";
+                ELSIF( REG_R9_Y_DOTS = '0' AND VDPR9PALMODE = '1' )THEN NEXTSTART := "111001011";
+                ELSE                                                     NEXTSTART := "111010101";
+                END IF;
+                IF( W_V_BLANKING_END_NEXT2 = '1' )THEN
+                    FF_SP_TARGET_Y <= NEXTSTART + W_Y_ADJ - 1;
+                ELSIF( W_V_BLANKING_END_NEXT = '1' )THEN
+                    FF_SP_TARGET_Y <= NEXTSTART + W_Y_ADJ;
+                ELSE
+                    FF_SP_TARGET_Y <= CUR_V + 1;
                 END IF;
             END IF;
 
@@ -457,6 +492,13 @@ BEGIN
         CONV_STD_LOGIC_VECTOR( V_BLANKING_START_212_PAL, 9 )    WHEN "11",
         (OTHERS => 'X')                                         WHEN OTHERS;
 
+    --  True one / two lines BEFORE W_V_BLANKING_END (V counts 2 per line, LSB = field).
+    W_V_BLANKING_END_NEXT2 <= '1' WHEN( ((W_V_CNT_IN_FIELD + 4) = ("00" & (OFFSET_Y + LED_TV_Y_NTSC) & (W_FIELD AND REG_R9_INTERLACE_MODE)) AND VDPR9PALMODE = '0') OR
+                                        ((W_V_CNT_IN_FIELD + 4) = ("00" & (OFFSET_Y + LED_TV_Y_PAL) & (W_FIELD AND REG_R9_INTERLACE_MODE)) AND VDPR9PALMODE = '1') )ELSE
+                              '0';
+    W_V_BLANKING_END_NEXT <= '1' WHEN( ((W_V_CNT_IN_FIELD + 2) = ("00" & (OFFSET_Y + LED_TV_Y_NTSC) & (W_FIELD AND REG_R9_INTERLACE_MODE)) AND VDPR9PALMODE = '0') OR
+                                       ((W_V_CNT_IN_FIELD + 2) = ("00" & (OFFSET_Y + LED_TV_Y_PAL) & (W_FIELD AND REG_R9_INTERLACE_MODE)) AND VDPR9PALMODE = '1') )ELSE
+                             '0';
     W_V_BLANKING_END    <=  '1' WHEN( (W_V_CNT_IN_FIELD = ("00" & (OFFSET_Y + LED_TV_Y_NTSC) & (W_FIELD AND REG_R9_INTERLACE_MODE)) AND VDPR9PALMODE = '0') OR
                                       (W_V_CNT_IN_FIELD = ("00" & (OFFSET_Y + LED_TV_Y_PAL) & (W_FIELD AND REG_R9_INTERLACE_MODE)) AND VDPR9PALMODE = '1') )ELSE
                             '0';

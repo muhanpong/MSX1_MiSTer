@@ -321,6 +321,7 @@ ARCHITECTURE RTL OF VDP IS
             PREDOTCOUNTER_X         : OUT   STD_LOGIC_VECTOR(  8 DOWNTO 0 );
             PREDOTCOUNTER_Y         : OUT   STD_LOGIC_VECTOR(  8 DOWNTO 0 );
             PREDOTCOUNTER_YP        : OUT   STD_LOGIC_VECTOR(  8 DOWNTO 0 );
+            SP_TARGET_Y             : OUT   STD_LOGIC_VECTOR(  8 DOWNTO 0 );
             PREWINDOW_Y             : OUT   STD_LOGIC;
             PREWINDOW_Y_SP          : OUT   STD_LOGIC;
             VD_LEAD                 : OUT   STD_LOGIC;
@@ -378,6 +379,7 @@ ARCHITECTURE RTL OF VDP IS
 
             DOTCOUNTERX                 : IN    STD_LOGIC_VECTOR(  8 DOWNTO 0 );
             DOTCOUNTERYP                : IN    STD_LOGIC_VECTOR(  8 DOWNTO 0 );
+            SP_TARGET_Y                 : IN    STD_LOGIC_VECTOR(  8 DOWNTO 0 );
             BWINDOW_Y                   : IN    STD_LOGIC;
             PREWINDOW_Y                 : IN    STD_LOGIC;
 
@@ -874,6 +876,7 @@ ARCHITECTURE RTL OF VDP IS
     SIGNAL PREDOTCOUNTER_Y              : STD_LOGIC_VECTOR(  8 DOWNTO 0 );
     -- Y COUNTERS INDEPENDENT OF VERTICAL SCROLL REGISTER
     SIGNAL PREDOTCOUNTER_YP             : STD_LOGIC_VECTOR(  8 DOWNTO 0 );
+    SIGNAL SP_TARGET_Y                  : STD_LOGIC_VECTOR(  8 DOWNTO 0 );
 
     -- VDP REGISTER ACCESS
     SIGNAL VDPVRAMACCESSADDR            : STD_LOGIC_VECTOR( 16 DOWNTO 0 );
@@ -1201,6 +1204,7 @@ BEGIN
         PREDOTCOUNTER_X         => PREDOTCOUNTER_X          ,
         PREDOTCOUNTER_Y         => PREDOTCOUNTER_Y          ,
         PREDOTCOUNTER_YP        => PREDOTCOUNTER_YP         ,
+        SP_TARGET_Y             => SP_TARGET_Y              ,
         PREWINDOW_Y             => PREWINDOW_Y              ,
         VD_LEAD                 => W_VD_LEAD                ,
         PREWINDOW_Y_SP          => PREWINDOW_Y_SP           ,
@@ -1787,6 +1791,7 @@ BEGIN
         EIGHTDOTSTATE               => EIGHTDOTSTATE,
         DOTCOUNTERX                 => PREDOTCOUNTER_X,
         DOTCOUNTERYP                => PREDOTCOUNTER_YP,
+        SP_TARGET_Y                 => SP_TARGET_Y,
         -- Sprite pipeline must follow the same Y window as the VRAM arbiter
         -- (PREWINDOW_Y_SP, top border..line 191). With BWINDOW_Y it kept
         -- running through the bottom border without VRAM grants, consuming
