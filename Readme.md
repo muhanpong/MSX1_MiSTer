@@ -31,8 +31,8 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *.gg format, automatic and manual loading.*
 - **세이브 확장 / Extended saves** — ASCII16X와 Yamanooto 매퍼 세이브 지원. OSD의 ASCII16X 항목은 4MB 이하면 ASCII16, 4MB 초과나 ASCII16X 헤더면 ASCII16X. FM-PAC·GameMaster2·Halnote·turbo R 펌웨어 SRAM·RTC 설정은 **SRAM.NVR 파일 하나**에 저장 — **SRAM.NVR은 팩에 들어 있지 않으니 직접 한 번 복사**하고 OSD `SRAM(PAC/Turbo-R/...)`에서 고를 것. SRAM은 쓰기가 멈추면 자동 저장(`SRAM Autosave`)
   *Save support for the ASCII16X and Yamanooto mappers. The OSD's ASCII16X entry is plain ASCII16 up to 4MB, ASCII16X above 4MB or with an ASCII16X header. FM-PAC, GameMaster2, Halnote, turbo R firmware SRAM and the RTC settings are saved in **one file, SRAM.NVR** — **it is not part of the packs: copy it once yourself** and pick it in the OSD under `SRAM(PAC/Turbo-R/...)`. SRAM is saved automatically once writes stop (`SRAM Autosave`).*
-- **AUDIO SETTINGS** — 음원별 게인 ±8dB, 뮤트, SCC 채널별 뮤트
-  *Per-source gain (±8dB), mute, and per-channel SCC mute.*
+- **Video & Audio settings** — 영상 설정과 같은 페이지에 음원별 게인 ±8dB, 뮤트, SCC 채널별 뮤트
+  *On the same OSD page as the video settings: per-source gain (±8dB), mute, and per-channel SCC mute.*
 - **일시정지 / Pause** — OSD 열림 또는 단축키, 화면에 ⏸ 표시
   *On OSD open or a hotkey, with an on-screen ⏸ indicator.*
 - **JoyMega 패드 / JoyMega pad** — MSX 조이스틱 포트에 메가드라이브 6버튼 패드, openMSX와 같은 핀 8 위상 프로토콜
@@ -54,6 +54,10 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *MoonSound FM at the YMF278B sample rate, removing a +7 cent detune.*
 - 롬 로드 때 세이브 자동 로드가 리셋에 묻혀 안 되던 문제
   *The .sav auto-load on ROM load no longer gets lost inside the machine reset.*
+- OPL4 웨이브 레지스터를 읽으면 쓴 값이 돌아옴 (전에는 reg 2·6 말고 0) — 읽고-고쳐-쓰는 곡 정지 루틴이 팬을 지우던 문제(*Neon Horizon*)
+  *OPL4 wave registers read back what was written (all but reg 2 and 6 used to read 0), so a read-modify-write stop routine no longer wipes the pan (Neon Horizon).*
+- R#9 LN 전환으로 화면이 끝나지 않는 프레임(오버스캔)에서도 스프라이트 표시 — 위 보더 첫 줄들, LN 1→0 전환 직후
+  *Sprites in frames where an R#9 LN switch keeps the display from ending (overscan): on the first top-border lines and right after an LN 1→0 switch.*
 
 아래는 항목별 상세 / Details below.
 
@@ -66,6 +70,8 @@ Full OPL4 emulation — OPL3-compatible FM plus the PCM wavetable engine.
 
 - Ports `0x7E/0x7F` (WAVE) and `0xC4-0xC7` (FM), `/WAIT` and `/INT` handled like the real cartridge
 - 2MB sample RAM in addition to the wavetable ROM
+- Wave registers read back what was written, as `regs[reg]` does in openMSX (software that
+  reads, modifies and writes back the pan / LFO registers keeps them)
 - Menu: `MoonSound On/Off`, `PCM Mute`, `FM Mute`, `PCM Volume`, `FM Volume` (2 dB steps), `Debug Overlay`
 - Requires the `yrw801.rom` wavetable — supplied through the **FW PACK** (see below)
 - The wavetable is loaded **only when the machine pack carries a `MOONSOUND` device record**
@@ -269,6 +275,9 @@ Several timing and behaviour fixes measured against real hardware and openMSX:
   made `ON SPRITE` traps fire continuously (sprites parked at Y=209 by `CLRSPR`)
 - Real-chip vblank IRQ position, per-scanline VDP command throttling, positional `VR` flag
 - `FH` flag armed only while `IE1` is enabled
+- Overscan frames — when an R#9 LN switch past the end line keeps the display from ending
+  (*km224*, *ASO*), the next frame's top-border lines and the lines after an LN 1→0 switch
+  show their sprites, matched line by line against an openMSX table
 - Optional V9958 mode
 
 ---
