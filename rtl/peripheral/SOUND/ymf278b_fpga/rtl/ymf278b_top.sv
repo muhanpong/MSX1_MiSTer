@@ -480,6 +480,19 @@ assign dbg_opl3_valid = opl3_sample_valid;
 assign dbg_pcm_level  = pcm_left_hold;
 assign dbg_new2       = new2;
 
+//  Stage 0 -- fm_mix_gain()'s x3 into a register.  The comment below used to
+//  say the multiply never chained onto it; it did, through opl3_l_eff, and at
+//  128.86 MHz that chain missed by 0.88 ns (sdram128 study, 7de0ebe).
+logic signed [16:0] opl3_l_q, opl3_r_q;
+logic               fm_v0_q;
+always_ff @(posedge clk) begin
+    fm_v0_q <= opl3_sample_valid;
+    if (opl3_sample_valid) begin
+        opl3_l_q <= opl3_l_eff;
+        opl3_r_q <= opl3_r_eff;
+    end
+end
+
 always_ff @(posedge clk) begin
     audio_valid <= 1'b0;
     gain_v_q    <= 1'b0;
@@ -487,11 +500,10 @@ always_ff @(posedge clk) begin
         pcm_left_hold  <= pcm_left;
         pcm_right_hold <= pcm_right;
     end
-    // Stage 1 — apply the per-path OSD gain.  Nothing else shares this cycle,
-    // so the multiply never chains onto fm_mix_gain()'s x3.
-    if (opl3_sample_valid) begin
-        fm_l_mul <= $signed(opl3_l_eff) * $signed({1'b0, fm_gain(fm_vol)});
-        fm_r_mul <= $signed(opl3_r_eff) * $signed({1'b0, fm_gain(fm_vol)});
+    // Stage 1 — apply the per-path OSD gain on the registered FM sample.
+    if (fm_v0_q) begin
+        fm_l_mul <= $signed(opl3_l_q) * $signed({1'b0, fm_gain(fm_vol)});
+        fm_r_mul <= $signed(opl3_r_q) * $signed({1'b0, fm_gain(fm_vol)});
         pc_l_mul <= (pcm_mute ? 30'sh0 : $signed({pcm_left_hold [15], pcm_left_hold })
                                          * $signed({1'b0, pcm_post(pcm_vol)}));
         pc_r_mul <= (pcm_mute ? 30'sh0 : $signed({pcm_right_hold[15], pcm_right_hold})

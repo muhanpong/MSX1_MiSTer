@@ -18,9 +18,9 @@
 // different banks (tRC); refresh takes a frame per chip (section 5).
 //
 // The chip samples on SDRAM_CLK rising = clk FALLING (inverted clock out).  Read
-// data is captured on clk falling (the chip edge three after the READ), then
-// moved to clk rising: word0 of a READ issued in cycle t is in dq_n at the
-// rising edge that ends cycle t+3.
+// data is taken on clk falling (dq_n, the chip edge three after the READ) and
+// moved to clk rising (dq_p): word0 of a READ issued in cycle t is in dq_p during
+// cycle t+4 -- V reads land at 7/8, G1 at 11, G2 at 3 of the next frame.
 //
 // This source file is free software under the GNU GPL v3 or later (sdram.sv,
 // Sorgelig, 2015-2019, which it is derived from).
@@ -117,8 +117,12 @@ assign {SDRAM_DQMH, SDRAM_DQML} = SDRAM_A[12:11];
 reg [15:0] dq_out;
 reg        dq_oe = 1'b0;
 assign SDRAM_DQ = dq_oe ? dq_out : 16'bz;
-reg [15:0] dq_n;
+reg [15:0] dq_n, dq_p;
 always @(negedge clk) dq_n <= SDRAM_DQ;
+//  falling -> rising is half a clock (3.88 ns); nothing but this register sits on
+//  it (the consumers were -2.5 ns behind it in 7de0ebe).  A word taken on the
+//  falling edge in cycle t is in dq_p during cycle t+1.
+always @(posedge clk) dq_p <= dq_n;
 
 // ─── address map ───────────────────────────────────────────────────────────
 //  32 MB (and 64 MB): bank = a[24:23], row = a[22:10], col = {a[25], a[9:1]},
@@ -143,8 +147,9 @@ function automatic loc_t map(input [26:0] a, input m);
 endfunction
 
 // ─── frame ─────────────────────────────────────────────────────────────────
-reg [3:0] ph = 4'd0;
-reg       run = 1'b0;            // init sequence done
+reg  [3:0] ph = 4'd0;            // the frame cycle (kept for benches)
+reg [11:0] ps = 12'd1;           // the same, one-hot: every decode below is one bit
+reg        run = 1'b0;           // init sequence done
 
 // ─── requests (as sdram.sv) and the ch2 read cache ─────────────────────────
 reg        ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1;
@@ -180,7 +185,9 @@ reg  [CW-1:0] c_waddr, c_waddr_d;
 reg  [LW-1:0] c_wdata;
 reg           c_flush = 1'b1;
 reg  [CW-1:0] c_flush_idx = '0;
-reg           ch2_cpend = 1'b0, c_pend2 = 1'b0;
+reg           ch2_cpend = 1'b0, c_pend2 = 1'b0, c_pend3 = 1'b0;
+reg           c_hit_q;           // stage 3: the compare, registered
+reg  [15:0]   c_word_q;
 reg  [26:0]   ch2_caddr;
 reg           ch2_hit_r = 1'b0;
 assign ch2_hit = ch2_hit_r;
@@ -246,34 +253,38 @@ function automatic logic ok(input loc_t l, input logic sens, input logic blk_c0,
 endfunction
 
 reg  [3:0] cand_ok;
-loc_t      cand_l [0:3];
-logic      c2_hold;
+loc_t      cand_l [0:3];         // registered: map() of each channel's held address
+reg  [3:0] rq_d;                 // the request was already up last cycle (cand_l is its)
+reg        c2_hold;              // registered CPU reservation
 loc_t      c2_l;
+always @(posedge clk) begin
+    cand_l[0] <= map(ch2_addr_1, mode128);
+    cand_l[1] <= map(ch1_addr_1, mode128);
+    cand_l[2] <= map(ch3_addr_1, mode128);
+    cand_l[3] <= map(ch4_addr_1, mode128);
+    rq_d      <= {ch4_rq, ch3_rq, ch1_rq, ch2_rq};
+    c2_hold   <= ch2_cpend | c_pend2 | c_pend3 | ch2_rq;
+    c2_l      <= map(ch2_rq ? ch2_addr_1 : ch2_caddr, mode128);
+end
 always_comb begin
     logic sens, b0, b1;
     // G1 (decided in cycle 2) is sensitive when V reads this frame; G2 (cycle 6)
     // when G1 reads.  The blocking set differs: G1 also sees rf_next.
 `ifndef TDM_MUT_SENS
-    sens = (ph == 4'd2) ? (vs_v && !vs_we) : (g1.v && g1.rnw);
+    sens = ps[2] ? (vs_v && !vs_we) : (g1.v && g1.rnw);
 `else           // negative control (sim/sdram_tdm): ignore DQM-sensitive ACTs
     sens = 1'b0;
 `endif
-    b0   = (ph == 4'd2) ? (rf_now[0] | rf_next[0]) : rf_now[0];
-    b1   = (ph == 4'd2) ? (rf_now[1] | rf_next[1]) : rf_now[1];
-    cand_l[0] = map(ch2_addr_1, mode128);
-    cand_l[1] = map(ch1_addr_1, mode128);
-    cand_l[2] = map(ch3_addr_1, mode128);
-    cand_l[3] = map(ch4_addr_1, mode128);
-    cand_ok[0] = ch2_rq & ok(cand_l[0], sens, b0, b1, prev_v, prev_c, prev_b, mode128);
+    b0   = ps[2] ? (rf_now[0] | rf_next[0]) : rf_now[0];
+    b1   = ps[2] ? (rf_now[1] | rf_next[1]) : rf_now[1];
+    cand_ok[0] = ch2_rq & rq_d[0] & ok(cand_l[0], sens, b0, b1, prev_v, prev_c, prev_b, mode128);
     //  CPU bank reservation: while a CPU read is being looked up or waits, the
     //  other channels may not take its bank -- the slot after would then be closed
     //  to it by tRC, and at stock speed the CPU has a fixed deadline.  (32 MB banks
     //  are 8 MB, so without this ch2 lost a slot to almost every other access.)
-    c2_hold = ch2_cpend | c_pend2 | ch2_rq;
-    c2_l    = map(ch2_rq ? ch2_addr_1 : ch2_caddr, mode128);
-    cand_ok[1] = ch1_rq & ok(cand_l[1], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(c2_hold & ~cand_ok[0] & cand_l[1].c == c2_l.c & cand_l[1].b == c2_l.b);
-    cand_ok[2] = ch3_rq & ok(cand_l[2], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(c2_hold & ~cand_ok[0] & cand_l[2].c == c2_l.c & cand_l[2].b == c2_l.b);
-    cand_ok[3] = ch4_rq & ok(cand_l[3], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(c2_hold & ~cand_ok[0] & cand_l[3].c == c2_l.c & cand_l[3].b == c2_l.b);
+    cand_ok[1] = ch1_rq & rq_d[1] & ok(cand_l[1], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(c2_hold & ~cand_ok[0] & cand_l[1].c == c2_l.c & cand_l[1].b == c2_l.b);
+    cand_ok[2] = ch3_rq & rq_d[2] & ok(cand_l[2], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(c2_hold & ~cand_ok[0] & cand_l[2].c == c2_l.c & cand_l[2].b == c2_l.b);
+    cand_ok[3] = ch4_rq & rq_d[3] & ok(cand_l[3], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(c2_hold & ~cand_ok[0] & cand_l[3].c == c2_l.c & cand_l[3].b == c2_l.b);
 end
 
 // ─── init ──────────────────────────────────────────────────────────────────
@@ -306,9 +317,16 @@ always @(posedge clk) begin
         ch2_cpend <= 0;
         c_pend2   <= 1;
     end else if (c_pend2) begin
-        c_pend2 <= 0;
-        if (~c_flush && ~ch2_rq && c_match && ~c_hazard) begin
-            ch2_saved_data <= c_rdata[15:0];
+        //  compare registered (RAM out -> tag compare -> ch2_saved_data was -1.2 ns);
+        //  a write to the index on this edge or the next still makes it a miss
+        c_pend2  <= 0;
+        c_pend3  <= 1;
+        c_hit_q  <= ~c_flush && c_match && ~c_hazard;
+        c_word_q <= c_rdata[15:0];
+    end else if (c_pend3) begin
+        c_pend3 <= 0;
+        if (c_hit_q && ~ch2_rq && ~(c_we && c_waddr == c_pidx)) begin
+            ch2_saved_data <= c_word_q;
             ch2_saved_a0   <= ch2_caddr[0];
             ch2_ready      <= 1;
             ch2_hit_r      <= 1;
@@ -340,7 +358,7 @@ always @(posedge clk) begin
         endcase
         chip <= (init_cnt < 16'd100);
         if (init_cnt == 0) begin
-            run <= 1'b1; ph <= 4'd0;
+            run <= 1'b1; ph <= 4'd0; ps <= 12'd1;
             ch1_ready <= 1; ch2_ready <= 1; ch3_ready <= 1; ch4_ready <= 1;
             g1.v <= 0; g2.v <= 0; prev_v <= 0; vs_v <= 0; v_grant <= 0;
             rf_due <= 0; rf_now <= 0; rf_next <= 0; rf_late <= 0;
@@ -350,6 +368,7 @@ always @(posedge clk) begin
         end
     end else begin
         ph <= (ph == 4'd11) ? 4'd0 : ph + 4'd1;
+        ps <= {ps[10:0], ps[11]};
 
         // refresh timers
         for (int c = 0; c < 2; c++) begin
@@ -361,9 +380,9 @@ always @(posedge clk) begin
         SDRAM_A[12:11] <= 2'b00;
         dq_oe <= 1'b0;
 
-        case (ph)
+        case (1'b1)
         // cycle 11 -> frame boundary: V decision, refresh frame start
-        4'd11: begin
+        ps[11]: begin
             //  one chip per refresh frame; the other stays due (a frame later
             //  is inside RFSH_EVERY's margin)
             //  A CPU read waiting (or being looked up) defers the refresh frame:
@@ -371,7 +390,7 @@ always @(posedge clk) begin
             //  it up to two slots.  rf_late bounds the deferral to three frames,
             //  inside RFSH_EVERY's 48-clock margin.
             rf_next <= rf_now;
-            if ((rf_due != 2'b00) && (ch2_rq | ch2_cpend | c_pend2) && rf_late != 2'd3) begin
+            if ((rf_due != 2'b00) && (ch2_rq | ch2_cpend | c_pend2 | c_pend3) && rf_late != 2'd3) begin
                 rf_now  <= 2'b00;
                 rf_late <= rf_late + 2'd1;
             end
@@ -386,33 +405,33 @@ always @(posedge clk) begin
                 command <= CMD_ACT; chip <= vl.c; SDRAM_BA <= vl.b; SDRAM_A <= vl.r;
             end
         end
-        4'd2: begin         // V READ (cycle 3) / G1 decision
+        ps[2]: begin         // V READ (cycle 3) / G1 decision
             if (vs_v && !vs_we) begin
                 command <= CMD_READ; chip <= vs_l.c; SDRAM_BA <= vs_l.b;
                 SDRAM_A <= {2'b00, 1'b1, vs_l.k};
             end
         end
-        4'd4: begin         // V WRITE (cycle 5): word0 with its byte mask
+        ps[4]: begin         // V WRITE (cycle 5): word0 with its byte mask
             if (vs_v && vs_we) begin
                 command <= CMD_WRITE; chip <= vs_l.c; SDRAM_BA <= vs_l.b;
                 SDRAM_A <= {~vs_be[1], ~vs_be[0], 1'b1, vs_l.k};
                 dq_out <= vs_wdata[15:0]; dq_oe <= 1'b1;
             end
         end
-        4'd5: begin         // cycle 6: V word1 (mask on A12:A11), or 00 for a V read's DQM
+        ps[5]: begin         // cycle 6: V word1 (mask on A12:A11), or 00 for a V read's DQM
             if (vs_v && vs_we) begin
                 SDRAM_A[12:11] <= {~vs_be[3], ~vs_be[2]};
                 dq_out <= vs_wdata[31:16]; dq_oe <= 1'b1;
             end
         end
-        4'd6: if (vs_v && !vs_we) v_rdata[15:0] <= dq_n;   // V word0
-        4'd7: if (vs_v && !vs_we) begin v_rdata[31:16] <= dq_n; v_rvalid <= 1'b1; end
+        ps[7]: if (vs_v && !vs_we) v_rdata[15:0] <= dq_p;   // V word0 (dq_p: one cycle after dq_n)
+        ps[8]: if (vs_v && !vs_we) begin v_rdata[31:16] <= dq_p; v_rvalid <= 1'b1; end
         default: ;
         endcase
 
         // ── G1: decide in cycle 2, ACT 4, READ 7 / WRITE 9, mask 10 ───────────
         // ── G2: decide in cycle 6, ACT 8, READ 11 / WRITE 1, mask 2 ───────────
-        if (ph == 4'd2 || ph == 4'd6) begin
+        if (ps[2] || ps[6]) begin
             pick = '0;
             if      (cand_ok[0]) begin pick.v = 1; pick.ch = 2'd1; pick.rnw = ch2_rnw_1; pick.a0 = ch2_addr_1[0];
                                        pick.din = ch2_din_1; pick.word = ch2_addr_1[26:1]; pick.l = cand_l[0]; end
@@ -430,31 +449,32 @@ always @(posedge clk) begin
                     2'd3: begin ch4_rq <= 0; ch4_ready <= 0; ch4_saved_a0 <= pick.a0; end
                 endcase
             end
-            if (ph == 4'd2) g1 <= pick; else g2 <= pick;
+            if (ps[2]) g1 <= pick; else g2 <= pick;
             prev_v <= pick.v;
             if (pick.v) begin prev_c <= pick.l.c; prev_b <= pick.l.b; end
+            //  a write drops its cache line now (by index, as sdram.sv); the fills
+            //  come in cycles 11 and 3, so the port is free here
+            if (pick.v && !pick.rnw) begin c_we <= 1; c_waddr <= pick.word[CW-1:0]; c_wdata <= '0; end
         end
 
         // ACT (cycles 4, 8) and the cache drop for a write (by index, as sdram.sv)
-        if (ph == 4'd3 && g1.v) begin
+        if (ps[3] && g1.v) begin
             command <= CMD_ACT; chip <= g1.l.c; SDRAM_BA <= g1.l.b; SDRAM_A <= g1.l.r;
-            if (!g1.rnw) begin c_we <= 1; c_waddr <= g1.word[CW-1:0]; c_wdata <= '0; end
         end
-        if (ph == 4'd7 && g2.v) begin
+        if (ps[7] && g2.v) begin
             command <= CMD_ACT; chip <= g2.l.c; SDRAM_BA <= g2.l.b; SDRAM_A <= g2.l.r;
-            if (!g2.rnw) begin c_we <= 1; c_waddr <= g2.word[CW-1:0]; c_wdata <= '0; end
         end
         // READ (cycles 7, 11)
-        if (ph == 4'd6 && g1.v && g1.rnw) begin
+        if (ps[6] && g1.v && g1.rnw) begin
             command <= CMD_READ; chip <= g1.l.c; SDRAM_BA <= g1.l.b; SDRAM_A <= {2'b00, 1'b1, g1.l.k};
         end
-        if (ph == 4'd10 && g2.v && g2.rnw) begin
+        if (ps[10] && g2.v && g2.rnw) begin
             command <= CMD_READ; chip <= g2.l.c; SDRAM_BA <= g2.l.b; SDRAM_A <= {2'b00, 1'b1, g2.l.k};
         end
         // WRITE (cycles 9, 1): one byte, the other byte and word1 masked
-        if ((ph == 4'd8 && g1.v && !g1.rnw) || (ph == 4'd0 && g2.v && !g2.rnw)) begin
+        if ((ps[8] && g1.v && !g1.rnw) || (ps[0] && g2.v && !g2.rnw)) begin
             gslot_t g;
-            g = (ph == 4'd8) ? g1 : g2;
+            g = ps[8] ? g1 : g2;
             command <= CMD_WRITE; chip <= g.l.c; SDRAM_BA <= g.l.b;
             SDRAM_A <= {~g.a0, g.a0, 1'b1, g.l.k};
             dq_out <= {g.din, g.din}; dq_oe <= 1'b1;
@@ -466,25 +486,25 @@ always @(posedge clk) begin
             endcase
         end
         // word1 mask (cycles 10, 2)
-        if ((ph == 4'd9 && g1.v && !g1.rnw) || (ph == 4'd1 && g2.v && !g2.rnw))
+        if ((ps[9] && g1.v && !g1.rnw) || (ps[1] && g2.v && !g2.rnw))
             SDRAM_A[12:11] <= 2'b11;
 
-        // read capture: G1 word0 at the edge ending cycle 10, G2 at cycle 2
+        // read capture from dq_p: G1 word0 at the edge ending cycle 11, G2 at cycle 3
 `ifndef TDM_MUT_CAP
-        if ((ph == 4'd10 && g1.v && g1.rnw) || (ph == 4'd2 && g2.v && g2.rnw)) begin
+        if ((ps[11] && g1.v && g1.rnw) || (ps[3] && g2.v && g2.rnw)) begin
 `else           // negative control: general read data taken one clock late
-        if ((ph == 4'd11 && g1.v && g1.rnw) || (ph == 4'd3 && g2.v && g2.rnw)) begin
+        if ((ps[0] && g1.v && g1.rnw) || (ps[4] && g2.v && g2.rnw)) begin
 `endif
             gslot_t g;
-            g = (ph >= 4'd10) ? g1 : g2;
+            g = (ps[11] | ps[0]) ? g1 : g2;
             case (g.ch)
-                2'd0: begin ch1_saved_data <= dq_n; ch1_ready <= 1; end
+                2'd0: begin ch1_saved_data <= dq_p; ch1_ready <= 1; end
                 2'd1: begin
-                    ch2_saved_data <= dq_n; ch2_ready <= 1; ch2_rdtog <= ~ch2_rdtog;
-                    c_we <= 1; c_waddr <= g.word[CW-1:0]; c_wdata <= {1'b1, g.word[25:CW], dq_n};
+                    ch2_saved_data <= dq_p; ch2_ready <= 1; ch2_rdtog <= ~ch2_rdtog;
+                    c_we <= 1; c_waddr <= g.word[CW-1:0]; c_wdata <= {1'b1, g.word[25:CW], dq_p};
                 end
-                2'd2: begin ch3_saved_data <= dq_n; ch3_ready <= 1; end
-                2'd3: begin ch4_saved_data <= dq_n; ch4_ready <= 1; end
+                2'd2: begin ch3_saved_data <= dq_p; ch3_ready <= 1; end
+                2'd3: begin ch4_saved_data <= dq_p; ch4_ready <= 1; end
             endcase
         end
 
@@ -493,7 +513,7 @@ always @(posedge clk) begin
         // REFRESH in cycle 10 of a refresh frame, on the chip it is for.  Cycle 10
         // may owe G1's word1 mask (11): the REFRESH carries it on A12:A11.
 `ifndef TDM_MUT_NOREF
-        if (ph == 4'd9 && rf_now != 2'b00) begin
+        if (ps[9] && rf_now != 2'b00) begin
 `else           // negative control: refresh frames are kept but nothing is refreshed
         if (1'b0) begin
 `endif
@@ -513,7 +533,7 @@ always @(posedge clk) begin
         run <= 1'b0;
         init_cnt <= INIT_CYCLES[15:0] + 16'd200;
         c_flush <= 1; c_flush_idx <= '0;
-        ch2_cpend <= 0; c_pend2 <= 0; ch2_hit_r <= 0;
+        ch2_cpend <= 0; c_pend2 <= 0; c_pend3 <= 0; ch2_hit_r <= 0;
         dq_oe <= 1'b0;
     end
 end
