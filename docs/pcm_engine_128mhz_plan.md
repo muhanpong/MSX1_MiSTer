@@ -116,3 +116,14 @@ ADV0, INTERP2/3, EGPRE, GAIN2, MUL1B/2B, PANB. 슬롯당 +8클록. 85.909 MHz에
 - `inv_idx` -> `cache_vld` 무효화 순회 (-1.53 ns)
 - `accum_r` -> `pcm_right` 출력 포화 (-1.39 ns)
 - `w_slot` 인덱스 읽기: `w_gain_t`(tl_cur), `w_word`(캐시 워드) (-1.1 ns)
+
+### 2단계 두 번째 묶음: 디스패치 스냅샷 (c126c6c)
+PIPE일 때 디스패치를 레지스터 스냅샷에서 한다. 직전 클록과 슬롯이 같고 변경 출처가 없었을
+때만 유효. 판정은 테스트벤치 SNAPCHK 단언(디스패치마다 스냅샷 = 그 클록의 비동기 읽기):
+64회 1,194,779 디스패치 위반 0, 변형 `SN_MUT_NOCHG` 64/64 검출.
+
+`msx.sv`가 MoonSound에 `CLK_HZ 85909090`을 고정으로 넘겨 d4f74ac 컴파일은 PIPE가 꺼진 채
+합성됐다(무효). 128863620으로 고쳤고 `tools/sdram128/check_timing.sh`가 이를 검사한다.
+
+c126c6c 측정: clk_sdram -1.882 ns, TNS -44.2, 실패 끝점 137 (26d85bb은 -2.739, -601, 782).
+PCM 최악은 `calc_attack_step`(EGPRE) -1.88, 나머지 PCM은 -0.4 ns 이내.
