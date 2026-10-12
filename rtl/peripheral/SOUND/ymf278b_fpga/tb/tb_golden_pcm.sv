@@ -16,9 +16,17 @@
 // worst-case real write timing (any hf_pending starves into frame N).
 `timescale 1ns/1ps
 
-module tb_golden_pcm;
+module tb_golden_pcm #(
+    //  The engine's clock.  Its frame, CPU reserve and header guard are derived
+    //  from this (ymf278_pcm_engine2.sv), and so are the clock period and the
+    //  script's write cycles below, so a run at 128.86 MHz must produce the same
+    //  samples as one at 85.909 MHz.
+    parameter int CLK_HZ = 85909090
+);
+    localparam int  CPF  = CLK_HZ / 44100;          // engine cycles per frame
+    localparam real HALF = 1.0e9 / (2.0 * CLK_HZ);  // ns
     logic clk = 0;
-    always #5.82 clk = ~clk;          // 85.909 MHz
+    always #(HALF) clk = ~clk;
     logic rst_n = 0;
 
     logic [7:0] reg_addr = 0, reg_data = 0;
@@ -66,7 +74,7 @@ module tb_golden_pcm;
         if (mem_wr_en) mem[mem_addr[21:0]] <= mem_wr_data;
     end
 
-    ymf278_pcm_engine2 dut (
+    ymf278_pcm_engine2 #(.CLK_HZ(CLK_HZ)) dut (
         .clk(clk), .rst_n(rst_n),
         .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr), .reg_rd(1'b0),
         .cpu_mem_rd_data(), .cpu_mem_busy(), .reg02_readback(),
@@ -113,13 +121,15 @@ module tb_golden_pcm;
                 code = $sscanf(ln, "%d %h %h %d", fr, ad, da, wc);   // 3-column
                 if (code >= 3) begin         // line can't desync/hang the parse
                     s_frame[n_writes] = fr; s_addr[n_writes] = ad; s_data[n_writes] = da;
-                    s_wcyc[n_writes]  = (code == 4) ? wc : 1000;
+                    //  apply cycles are written for the 1948-cycle frame
+                    s_wcyc[n_writes]  = (((code == 4) ? wc : 1000) * CPF + 974) / 1948;
                     n_writes++;
                 end
             end
         end
         $fclose(fd);
         $display("script: %0d writes, %0d frames", n_writes, frames);
+        $display("clock: CLK_HZ=%0d, engine frame=%0d cycles", CLK_HZ, dut.CYCLES_PER_FRAME);
 
         fd_out = $fopen(out_f, "w");
 

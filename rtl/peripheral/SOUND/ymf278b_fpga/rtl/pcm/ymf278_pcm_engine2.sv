@@ -95,14 +95,22 @@ module ymf278_pcm_engine2 #(
 // ═══════════════════════════════════════════════════════════════════════════
 // Schedule constants
 // ═══════════════════════════════════════════════════════════════════════════
-localparam int CYCLES_PER_FRAME = 1948;
+//  Every cycle count below is derived from CLK_HZ so the engine keeps 44.1 kHz
+//  and the same per-frame schedule at any clock.  The 85.909 MHz figures (1948,
+//  44, 130) were tuned by hand; the others are those scaled by
+//  CYCLES_PER_FRAME / 1948 (exactly x1.5 at 128.86 MHz: 2922, 66, 195).
+localparam int CYCLES_PER_FRAME = CLK_HZ / 44100;
+localparam int FRAME_W          = $clog2(CYCLES_PER_FRAME);
 // Frame-end CPU reserve: the last CPU_RESERVE cycles of every frame belong to
 // the CPU mem op service unconditionally (a slot still in flight is abandoned
 // for this frame).  This is what makes BUSY ≤ 1 frame by CONSTRUCTION.
-localparam int CPU_RESERVE      = 44;
+localparam int CPU_RESERVE      = (44 * CYCLES_PER_FRAME + 974) / 1948;
+//  A header load needs ~7 SDRAM fetches + parse; only start one when it fits
+//  before the CPU reserve.  130 cycles at 85.909 MHz.
+localparam int HDR_GUARD        = (130 * CYCLES_PER_FRAME + 974) / 1948;
 localparam int CPU_RESERVE_AT   = CYCLES_PER_FRAME - CPU_RESERVE;
 
-logic [10:0] frame_cycle;
+logic [FRAME_W-1:0] frame_cycle;
 logic [4:0]  cur_slot;       // next slot to dispatch (0..23, 24 = all done)
 logic [23:0] eg_cnt;         // global EG clock (1 tick per frame)
 logic [3:0]  tl_int_cnt;     // TL ramp phase: eg_cnt % 9
@@ -126,7 +134,7 @@ always_ff @(posedge clk or negedge rst_n) begin
             end else
                 tl_int_cnt <= tl_int_cnt + 4'd1;
         end else
-            frame_cycle <= frame_cycle + 11'd1;
+            frame_cycle <= frame_cycle + 1'd1;
     end
 end
 
@@ -920,7 +928,7 @@ always_ff @(posedge clk or negedge rst_n) begin
                     sv_state <= SV_CPU_RD_ISSUE;
                 else if (sv_can_cpu && cpu_wr_pend)
                     sv_state <= SV_CPU_WR_ISSUE;
-                else if (hf_found && frame_cycle < CPU_RESERVE_AT - 130
+                else if (hf_found && frame_cycle < CPU_RESERVE_AT - HDR_GUARD
                          && (slot_stalled_hdr || slots_done)) begin
                     // need ~7×15+parse ≈ 110 cycles — only start when they fit.
                     // slot_stalled_hdr = a waiting slot wants its header NOW
@@ -1122,6 +1130,9 @@ logic [9:0][7:0] fwd;
 logic [9:0][7:0] frd;         // read at ld_slot
 logic [1:0][7:0] frh;         // fields 0/1 read at hf_pick (wave)
 logic [9:0][7:0] frc;         // read at wr_snum (CPU readback of reg_addr)
+//  Declared here, before the g_f read ports that use it: iverilog refuses a use
+//  before the declaration (the lockstep benches stopped building at 50e246d).
+logic [4:0] rd_snum_q  = '0;
 always_comb begin
     for (int k = 0; k < 10; k++) begin
         fwe[k] = 1'b0;
@@ -1173,7 +1184,6 @@ endgenerate
 logic [7:0] ns_reg [0:15];    // 00h-07h -> 0..7, F8h-FFh -> 8..15
 wire        ns_hit = (reg_addr <= 8'h07) || (reg_addr >= 8'hF8);
 wire [3:0]  ns_idx = {reg_addr[7], reg_addr[2:0]};
-logic [4:0] rd_snum_q  = '0;
 logic [3:0] rd_field_q = '0;
 logic       rd_ns_q    = 1'b0;
 logic [3:0] rd_nsidx_q = '0;
