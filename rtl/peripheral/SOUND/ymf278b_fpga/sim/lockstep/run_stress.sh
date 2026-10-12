@@ -28,13 +28,13 @@ MODE=${1:-quick}
 rm -rf "$O"; mkdir -p "$O"
 (cd ../golden && python3 gen_pcm_testdata.py > /dev/null)
 
-build() {   # name engine-file
-    iverilog -g2012 -o "$O/$1.vvp" $R/rtl/pcm/ymf278_pcm_alu.sv $R/rtl/pcm/ymf278_pcm_eg_step.sv \
+build() {   # name engine-file [extra iverilog args]
+    iverilog -g2012 ${3:-} -o "$O/$1.vvp" $R/rtl/pcm/ymf278_pcm_alu.sv $R/rtl/pcm/ymf278_pcm_eg_step.sv \
         "$2" ymf278_pcm_engine2_ref.sv tb_lockstep_pcm.sv 2>&1 | grep -v 'sorry:'
     [ -x "$O/$1.vvp" ] || { echo "RESULT FAIL: iverilog did not build $1"; exit 1; }
 }
 build eng $R/rtl/pcm/ymf278_pcm_engine2.sv
-for m in rd1 nopend sw23 noclr; do build $m mut_$m.sv; done
+for m in rd1 nopend sw23 noclr; do build $m mut_$m.sv -DNO_SNAPCHK; done
 
 SC="sc_single8:620 sc_square16:620 sc_tri12_loop:720 sc_multi:520 sc_lfo:300 sc_pitchbend:820
     sc_wavehi:520 sc_odd16:620 sc_relwave:200 sc_songchange:900 sc_songchange24:340 sc_memwrite:440

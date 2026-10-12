@@ -2321,7 +2321,12 @@ assign dbg_jmp0          = '0;
 `endif
 
 ymf278b_top #(
-    .CLK_HZ   (85909090),
+    //  sdram128-study: clk_sdram is 128.863620 MHz on this branch (rtl/pll/
+    //  pll_0002.v), and the PCM engine derives its frame and PIPE from this.
+    //  It was a literal 85909090, so the first 128.86 MHz builds ran the engine
+    //  unpipelined with a 1948-cycle frame.  A real design should take it from
+    //  one place with the PLL setting.
+    .CLK_HZ   (128863620),
     .CLK_OPL3 (14318182)
 ) u_moonsound (
     .clk          (clk_sdram),

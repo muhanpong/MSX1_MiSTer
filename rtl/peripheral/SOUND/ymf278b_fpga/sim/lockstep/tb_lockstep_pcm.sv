@@ -373,6 +373,27 @@ module tb_lockstep_pcm #(
     end
     //  The TB stops on the edge that produces the last sample, before the block
     //  above has paired it: pair whatever both engines produced, then report.
+`ifndef NO_SNAPCHK   // the mutants are older engines without the sn_* snapshot
+    //  PIPE dispatches from a snapshot of last cycle's reads (engine sn_*).  At
+    //  every PIPE dispatch the snapshot must equal what the async read returns
+    //  on that same cycle -- the value the unpipelined engine dispatches with.
+    longint snap_chk = 0, snap_bad = 0;
+    wire dut_disp = (dut.sl_state == dut.SL_IDLE && dut.dispatch_now)
+                 || (dut.sl_state == dut.SL_STALL_HDR && dut.sn_fresh && !dut.sn_hfp);
+    always @(negedge clk) if (rst_n && dut.PIPE && dut_disp) begin
+        snap_chk++;
+        if (dut.sn_regs   !== dut.rr_ld                    || dut.sn_dyn   !== dut.ld_dyn_c
+         || dut.sn_hdr    !== dut.ld_hdr_c
+         || dut.sn_kprev  !== dut.key_on_prev[dut.ld_slot] || dut.sn_retrig !== dut.key_retrig[dut.ld_slot]
+         || dut.sn_hfp    !== dut.hf_pending[dut.ld_slot]  || dut.sn_posrst !== dut.pos_rst[dut.ld_slot]
+         || dut.sn_tl_we  !== dut.tl_we_c                  || (dut.tl_we_c && dut.sn_tl_next !== dut.tl_next_c)) begin
+            snap_bad++;
+            if (snap_bad <= 5) $display("SNAPCHK BAD cyc=%0d slot=%0d state=%0d", cyc, dut.ld_slot, dut.sl_state);
+        end
+    end
+    final if (dut.PIPE) $display("SNAPCHK dispatches=%0d bad=%0d", snap_chk, snap_bad);
+`endif
+
     //  Frames that ended with slots still undispatched or in flight (the
     //  frame-end CPU reserve abandons them): a slot budget overrun, not a
     //  datapath error.  Counted for both engines.

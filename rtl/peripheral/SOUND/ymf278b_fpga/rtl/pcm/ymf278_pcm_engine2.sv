@@ -411,8 +411,9 @@ endfunction
 // instead of corrupting the current one; slots that don't fit before the
 // frame-end CPU reserve are skipped for this frame (graceful degradation).
 wire clr_run;
+wire sn_fresh;                        // PIPE: the dispatch snapshot is current
 wire dispatch_now = (sl_state == SL_IDLE) && (cur_slot < 5'd24) && !in_reserve
-                    && !sample_start;
+                    && !sample_start && (!PIPE || sn_fresh);
 wire [4:0]  ld_slot = cur_slot;
 // whole-struct intermediates (iverilog can't access .field on a variable-
 // indexed unpacked array element — same workaround as v2)
@@ -447,15 +448,66 @@ always_comb begin
                        : 18'd0;
 end
 always_ff @(posedge clk) if (dyn_we) ram_dyn_m[w_slot] <= dyn_wd_c;
-wire        ld_edge_w = (ld_regs_c.keyon & ~key_on_prev[ld_slot])
-                      | key_retrig[ld_slot];
-wire        ld_run    = ((ld_dyn_c.env_state != EG_OFF) | ld_edge_w)
-                      & ~hf_pending[ld_slot];
+// ── PIPE: dispatch from a snapshot ──────────────────────────────────────────
+// Everything dispatch reads at cur_slot (field MLABs, dyn and header MLABs,
+// key/retrig/pending/pos-reset flags, the TL ramp) is captured into registers
+// every cycle, so dispatch starts from flops instead of an async MLAB read and
+// a 24-way select (-1.6 ns at 128.86 MHz).  A snapshot is used only when it is
+// current: same slot as last cycle, and nothing that can change those values
+// happened last cycle -- a field MLAB write (CPU, deferred, header backfill,
+// reset sweep), a slot-register write, a header store, a slot writeback
+// (SL_ACC: dyn, key_on_prev, retrig/pos-reset consume) or reset.  Then it
+// equals what the async read returns this cycle; otherwise dispatch waits a
+// cycle.  The lockstep bench checks that equality at every PIPE dispatch.
+slot_regs_t   sn_regs;
+slot_dyn_t    sn_dyn;
+slot_header_t sn_hdr;
+logic         sn_kprev, sn_retrig, sn_hfp, sn_posrst, sn_tl_we;
+logic [7:0]   sn_tl_next;
+logic [4:0]   sn_slot = 5'd31;
+logic         sn_chg  = 1'b1;
+wire          sn_src_chg;              // driven below, once fwe/wr_slot_reg exist
+logic         tl_we_c;                 // TL ramp: write ld_slot's tl_cur this dispatch
+logic [7:0]   tl_next_c;               //          and with this value
+always_ff @(posedge clk) begin
+    sn_regs   <= rr_ld;
+    sn_dyn    <= ld_dyn_c;
+    sn_hdr    <= ld_hdr_c;
+    sn_kprev  <= key_on_prev[ld_slot];
+    sn_retrig <= key_retrig[ld_slot];
+    sn_hfp    <= hf_pending[ld_slot];
+    sn_posrst <= pos_rst[ld_slot];
+    sn_tl_we  <= tl_we_c;
+    sn_tl_next<= tl_next_c;
+    sn_slot   <= cur_slot;
+    sn_chg    <= sn_src_chg;
+end
+`ifndef SN_MUT_NOCHG
+assign sn_fresh = (sn_slot == cur_slot) && !sn_chg;
+`else   // negative control for the lockstep SNAPCHK: ignores last cycle's writes
+assign sn_fresh = (sn_slot == cur_slot);
+`endif
+
+//  the views dispatch uses: the snapshot under PIPE, the async read otherwise
+slot_regs_t   d_regs;
+slot_dyn_t    d_dyn;
+slot_header_t d_hdr;
+always_comb begin
+    d_regs = PIPE ? sn_regs : ld_regs_c;
+    d_dyn  = PIPE ? sn_dyn  : ld_dyn_c;
+    d_hdr  = PIPE ? sn_hdr  : ld_hdr_c;
+end
+wire d_kprev  = PIPE ? sn_kprev  : key_on_prev[ld_slot];
+wire d_retrig = PIPE ? sn_retrig : key_retrig[ld_slot];
+wire d_hfp    = PIPE ? sn_hfp    : hf_pending[ld_slot];
+wire d_posrst = PIPE ? sn_posrst : pos_rst[ld_slot];
+
+wire        ld_edge_w = (d_regs.keyon & ~d_kprev) | d_retrig;
+wire        ld_run    = ((d_dyn.env_state != EG_OFF) | ld_edge_w) & ~d_hfp;
 // wants to run, but its wave-header re-fetch is still pending → must stall and
 // fetch the new header BEFORE playing (else the onset plays the stale prev-wave
 // header = the direction-dependency glitch).
-wire        ld_want_hdr = ((ld_dyn_c.env_state != EG_OFF) | ld_edge_w)
-                        & hf_pending[ld_slot];
+wire        ld_want_hdr = ((d_dyn.env_state != EG_OFF) | ld_edge_w) & d_hfp;
 
 // opportunistic CPU service grant while the slot FSM idles between slots
 wire sl_tail_idle = (sl_state == SL_IDLE);
@@ -571,11 +623,11 @@ always_ff @(posedge clk or negedge rst_n) begin
                     if (ld_run) begin
                         cur_slot <= cur_slot + 5'd1; // consume this slot's turn
                         w_slot <= ld_slot;
-                        w_regs <= rr_ld;
-                        w_hdr  <= ld_hdr_c;
-                        w_dyn  <= ld_dyn_c;
+                        w_regs <= d_regs;
+                        w_hdr  <= d_hdr;
+                        w_dyn  <= d_dyn;
                         w_edge <= ld_edge_w;
-                        w_posrst <= pos_rst[ld_slot];
+                        w_posrst <= d_posrst;
                         sl_state <= SL_VIB;
                     end else if (ld_want_hdr) begin
                         // wants to run but header re-fetch pending: stall (turn
@@ -592,14 +644,14 @@ always_ff @(posedge clk or negedge rst_n) begin
             SL_STALL_HDR: begin
                 // hold until the service FSM stored this slot's header
                 // (hf_pending clears on store), then dispatch with the new header.
-                if (!hf_pending[ld_slot]) begin
+                if (PIPE ? (sn_fresh && !sn_hfp) : !hf_pending[ld_slot]) begin
                     cur_slot <= cur_slot + 5'd1;
                     w_slot <= ld_slot;
-                    w_regs <= rr_ld;
-                    w_hdr  <= ld_hdr_c;
-                    w_dyn  <= ld_dyn_c;
+                    w_regs <= d_regs;
+                    w_hdr  <= d_hdr;
+                    w_dyn  <= d_dyn;
                     w_edge <= ld_edge_w;
-                    w_posrst <= pos_rst[ld_slot];
+                    w_posrst <= d_posrst;
                     sl_state <= SL_VIB;
                 end
             end
@@ -1139,6 +1191,7 @@ wire [4:0]  wr_snum  = (reg_addr >= 8'h08) ? 5'((reg_addr - 8'h08) % 8'd24) : 5'
 wire [3:0]  wr_field = (reg_addr >= 8'h08) ? 4'((reg_addr - 8'h08) / 8'd24) : 4'd0;
 wire        wr_slot_reg = reg_wr && (reg_addr >= 8'h08) && (reg_addr <= 8'hF7);
 
+
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         wavetblhdr <= '0;
@@ -1220,6 +1273,11 @@ always_ff @(posedge clk or negedge rst_n) begin
 end
 
 logic [9:0]      fwe;
+//  every event that can change a value the dispatch snapshot holds (see sn_*):
+//  field MLAB writes, slot-register writes, a header store, a slot writeback,
+//  reset, and the frame boundary (TL ramp phase, cur_slot restart)
+assign sn_src_chg = (|fwe) | wr_slot_reg | hf_store_now | (sl_state == SL_ACC)
+                  | clr_run | sample_start;
 logic [9:0][4:0] fwa;
 logic [9:0][7:0] fwd;
 logic [9:0][7:0] frd;         // read at ld_slot
@@ -1367,23 +1425,31 @@ end
 
 // TL ramp (v2, carried over): one step per slot per frame, 9-sample phase.
 wire wr_tl_load = wr_slot_reg && (wr_field == 4'd3) && reg_data[0];
-always_ff @(posedge clk or negedge rst_n) begin
+//  The ramp's next value for ld_slot, as one expression so PIPE can snapshot it
+//  (tl_we_c / tl_next_c are declared with the snapshot).
+always_comb begin
     slot_regs_t r_tl;
-    r_tl = rr_ld;
+    r_tl      = rr_ld;
+    tl_we_c   = 1'b0;
+    tl_next_c = tl_cur[ld_slot];
+    if (tl_load[ld_slot]) begin
+        tl_we_c = 1'b1;  tl_next_c = r_tl.tl;
+    end else if (tl_int_cnt == 4'd0) begin
+        if (tl_int_step == 2'd0) begin
+            if (tl_cur[ld_slot] < r_tl.tl) begin tl_we_c = 1'b1; tl_next_c = tl_cur[ld_slot] + 8'd1; end
+        end else begin
+            if (tl_cur[ld_slot] > r_tl.tl) begin tl_we_c = 1'b1; tl_next_c = tl_cur[ld_slot] - 8'd1; end
+        end
+    end
+end
+always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         for (int i = 0; i < 24; i++) tl_cur[i] <= 8'd0;
         tl_load <= '0;
     end else begin
         if (dispatch_now && !clr_run) begin   // register bytes not swept yet
-            if (tl_load[ld_slot])
-                tl_cur[ld_slot] <= r_tl.tl;
-            else if (tl_int_cnt == 4'd0) begin
-                if (tl_int_step == 2'd0) begin
-                    if (tl_cur[ld_slot] < r_tl.tl) tl_cur[ld_slot] <= tl_cur[ld_slot] + 8'd1;
-                end else begin
-                    if (tl_cur[ld_slot] > r_tl.tl) tl_cur[ld_slot] <= tl_cur[ld_slot] - 8'd1;
-                end
-            end
+            if (PIPE ? sn_tl_we : tl_we_c)
+                tl_cur[ld_slot] <= PIPE ? sn_tl_next : tl_next_c;
             tl_load[ld_slot] <= 1'b0;
         end
         if (wr_tl_load) tl_load[wr_snum] <= 1'b1;   // set wins
