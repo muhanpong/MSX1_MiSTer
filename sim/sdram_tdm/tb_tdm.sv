@@ -54,7 +54,7 @@ module tb;
     wire  [31:0] v_rdata;
 
     sdram_tdm #(.CACHE_LINES(1024)) dut (
-        .init(init), .clk(clk), .mode128(m128[0]),
+        .init(init), .clk(clk), .mode128(m128[0]), .v_en(1'b1),
         .SDRAM_DQ(DQ), .SDRAM_A(A), .SDRAM_DQML(DQML), .SDRAM_DQMH(DQMH), .SDRAM_BA(BA),
         .SDRAM_nCS(nCS), .SDRAM_nWE(nWE), .SDRAM_nRAS(nRAS), .SDRAM_nCAS(nCAS), .SDRAM_CKE(CKE),
         .SDRAM_CLK(SCLK),

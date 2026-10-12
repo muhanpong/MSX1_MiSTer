@@ -34,6 +34,7 @@ module sdram_tdm
     input             init,
     input             clk,
     input             mode128,     // 1: 128 MB board map (two 64 MB chips)
+    input             v_en,        // VRAM port in use: its bank is reserved, V slots run
 
     inout      [15:0] SDRAM_DQ,
     output reg [12:0] SDRAM_A,
@@ -95,7 +96,7 @@ module sdram_tdm
 
 // ─── timing (CLK_HZ) ───────────────────────────────────────────────────────
 localparam int  PERIOD_PS   = 1000000000 / (CLK_HZ / 1000);
-localparam int  RFSH_EVERY  = (7800000 / PERIOD_PS) - 48;  // 7.8 us/row, margin for a frame wait
+localparam int  RFSH_EVERY  = (7800000 / PERIOD_PS) - 60;  // 7.8 us/row; margin for 3 deferred frames + 1
 localparam int  INIT_CYCLES = (200000000 / PERIOD_PS);     // 200 us power-up
 localparam [12:0] MODE      = 13'b000_0_00_011_0_001;     // write burst, CL3, sequential, BL2
 localparam [26:0] VBASE128  = 27'h1C00000;                // 28 MB: chip 1, bank 3
@@ -220,7 +221,8 @@ reg  [3:0] vs_be;
 //  closed by cycle 7: the last write, G2 of n-1, precharges at ACT+11).
 reg [10:0] rf_cnt [0:1];
 reg  [1:0] rf_due;
-reg  [1:0] rf_now, rf_next;      // chip blocked this frame / blocked for V,G1 next frame
+reg  [1:0] rf_now, rf_next;
+reg  [1:0] rf_late;              // frames a due refresh has been deferred for the CPU      // chip blocked this frame / blocked for V,G1 next frame
 wire       v_chip = mode128;     // the VRAM's chip: 1 on 128 MB, 0 otherwise
 
 
@@ -239,12 +241,14 @@ function automatic logic ok(input loc_t l, input logic sens, input logic blk_c0,
 `endif
         | (sens && l.r[12:11] != 2'b00)
         | (l.c ? blk_c1 : blk_c0)
-        | (l.b == 2'd3 && l.c == m);                  // the VRAM bank
+        | (v_en && l.b == 2'd3 && l.c == m);          // the VRAM bank, when there is a VRAM
     return !bad;
 endfunction
 
 reg  [3:0] cand_ok;
 loc_t      cand_l [0:3];
+logic      c2_hold;
+loc_t      c2_l;
 always_comb begin
     logic sens, b0, b1;
     // G1 (decided in cycle 2) is sensitive when V reads this frame; G2 (cycle 6)
@@ -261,9 +265,15 @@ always_comb begin
     cand_l[2] = map(ch3_addr_1, mode128);
     cand_l[3] = map(ch4_addr_1, mode128);
     cand_ok[0] = ch2_rq & ok(cand_l[0], sens, b0, b1, prev_v, prev_c, prev_b, mode128);
-    cand_ok[1] = ch1_rq & ok(cand_l[1], sens, b0, b1, prev_v, prev_c, prev_b, mode128);
-    cand_ok[2] = ch3_rq & ok(cand_l[2], sens, b0, b1, prev_v, prev_c, prev_b, mode128);
-    cand_ok[3] = ch4_rq & ok(cand_l[3], sens, b0, b1, prev_v, prev_c, prev_b, mode128);
+    //  CPU bank reservation: while a CPU read is being looked up or waits, the
+    //  other channels may not take its bank -- the slot after would then be closed
+    //  to it by tRC, and at stock speed the CPU has a fixed deadline.  (32 MB banks
+    //  are 8 MB, so without this ch2 lost a slot to almost every other access.)
+    c2_hold = ch2_cpend | c_pend2 | ch2_rq;
+    c2_l    = map(ch2_rq ? ch2_addr_1 : ch2_caddr, mode128);
+    cand_ok[1] = ch1_rq & ok(cand_l[1], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(c2_hold & ~cand_ok[0] & cand_l[1].c == c2_l.c & cand_l[1].b == c2_l.b);
+    cand_ok[2] = ch3_rq & ok(cand_l[2], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(c2_hold & ~cand_ok[0] & cand_l[2].c == c2_l.c & cand_l[2].b == c2_l.b);
+    cand_ok[3] = ch4_rq & ok(cand_l[3], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(c2_hold & ~cand_ok[0] & cand_l[3].c == c2_l.c & cand_l[3].b == c2_l.b);
 end
 
 // ─── init ──────────────────────────────────────────────────────────────────
@@ -333,7 +343,7 @@ always @(posedge clk) begin
             run <= 1'b1; ph <= 4'd0;
             ch1_ready <= 1; ch2_ready <= 1; ch3_ready <= 1; ch4_ready <= 1;
             g1.v <= 0; g2.v <= 0; prev_v <= 0; vs_v <= 0; v_grant <= 0;
-            rf_due <= 0; rf_now <= 0; rf_next <= 0;
+            rf_due <= 0; rf_now <= 0; rf_next <= 0; rf_late <= 0;
             //  first refresh soon after the mode register (the chip counts from its
             //  init refreshes: chip 0's are ~200 clocks back), the chips staggered
             rf_cnt[0] <= RFSH_EVERY[10:0] - 11'd100; rf_cnt[1] <= RFSH_EVERY[10:0] - 11'd600;
@@ -356,12 +366,20 @@ always @(posedge clk) begin
         4'd11: begin
             //  one chip per refresh frame; the other stays due (a frame later
             //  is inside RFSH_EVERY's margin)
+            //  A CPU read waiting (or being looked up) defers the refresh frame:
+            //  the CPU has a fixed deadline at stock speed and a refresh frame costs
+            //  it up to two slots.  rf_late bounds the deferral to three frames,
+            //  inside RFSH_EVERY's 48-clock margin.
             rf_next <= rf_now;
-            if (rf_due[0])                 begin rf_now <= 2'b01; rf_due[0] <= 1'b0; end
-            else if (rf_due[1] && mode128) begin rf_now <= 2'b10; rf_due[1] <= 1'b0; end
+            if ((rf_due != 2'b00) && (ch2_rq | ch2_cpend | c_pend2) && rf_late != 2'd3) begin
+                rf_now  <= 2'b00;
+                rf_late <= rf_late + 2'd1;
+            end
+            else if (rf_due[0])            begin rf_now <= 2'b01; rf_due[0] <= 1'b0; rf_late <= 2'd0; end
+            else if (rf_due[1] && mode128) begin rf_now <= 2'b10; rf_due[1] <= 1'b0; rf_late <= 2'd0; end
             else                                 rf_now <= 2'b00;
             vl = map((mode128 ? VBASE128 : VBASE32) + {9'd0, v_addr, 2'b00}, mode128);
-            took = v_req && !(rf_due[v_chip] | rf_now[v_chip]);
+            took = v_en && v_req && !(rf_due[v_chip] | rf_now[v_chip]);
             vs_v <= took; vs_we <= v_we; vs_l <= vl; vs_wdata <= v_wdata; vs_be <= v_be;
             v_grant <= took;
             if (took) begin
