@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 #  Read a finished sdram128-study compile and say what it measured.
 #
-#    tools/sdram128/check_timing.sh            (from the worktree root, after a compile)
+#    tools/sdram128/check_timing.sh            (after a compile: everything below)
+#    tools/sdram128/check_timing.sh map        (after quartus_map only: the checks that
+#                                               need no fit, so a bad build stops ~6 min
+#                                               in instead of ~27; tools/sdram128/compile.sh)
 #
 #  It refuses to describe a build that is not the one it claims to be:
 #   - clk_sdram must be 7.760 ns (128.86 MHz).  A build at 11.641 ns is not this study.
@@ -10,18 +13,30 @@
 #     whole compile measured nothing of the change it was meant to measure.
 #   - the PCM memories must still be MLAB (RAM summary, not warnings: arrays have been
 #     silently built as flops with no warning).  MLAB_EXPECT, default 33.
+#   - no "can't infer memory" (10999) inside the PCM engine: in 99aac4e inv_tagA/B
+#     were read three times in the source, Quartus built them as flops, and the
+#     MLAB count only showed it after a 27-minute compile.
 #  Then it lists the failing endpoints grouped by module and register.
 set -u
 cd "$(dirname "$0")/../.."
 Q=${Q:-/home/sysop/data/intelFPGA_lite/17.0/quartus/bin}
 STA=output_files/MSX1.sta.rpt; MAP=output_files/MSX1.map.rpt
 FAIL=0; fail() { echo "  FAIL: $*"; FAIL=1; }
-for f in $STA $MAP; do [ -s "$f" ] || { echo "RESULT FAIL: $f missing -- no compile here"; exit 1; }; done
-echo "build: map $(date -r $MAP '+%F %T'), sta $(date -r $STA '+%F %T'), HEAD $(git log -1 --format=%h)"
-
-per=$(grep -m1 "general\[0\].gpll~PLL_OUTPUT_COUNTER|divclk *; Generated" $STA | awk -F';' '{gsub(/ /,"",$4); print $4}')
-echo "clk_sdram period: $per ns"
-[ "$per" = "7.760" ] || fail "clk_sdram is not 7.760 ns"
+MODE=${1:-all}
+case $MODE in all) NEED="$MAP $STA";; map) NEED=$MAP;; *) echo "usage: $0 [map]"; exit 2;; esac
+for f in $NEED; do [ -s "$f" ] || { echo "RESULT FAIL: $f missing -- no compile here"; exit 1; }; done
+if [ "$MODE" = all ]; then
+    [ "$STA" -nt "$MAP" ] || fail "sta report is older than the map report (fit/sta not rerun?)"
+    echo "build: map $(date -r $MAP '+%F %T'), sta $(date -r $STA '+%F %T'), HEAD $(git log -1 --format=%h)"
+    per=$(grep -m1 "general\[0\].gpll~PLL_OUTPUT_COUNTER|divclk *; Generated" $STA | awk -F';' '{gsub(/ /,"",$4); print $4}')
+    echo "clk_sdram period: $per ns"
+    [ "$per" = "7.760" ] || fail "clk_sdram is not 7.760 ns"
+else
+    echo "build: map $(date -r $MAP '+%F %T'), HEAD $(git log -1 --format=%h) (map only)"
+    #  the period is set in the PLL, not synthesised: check the PLL parameter instead
+    grep -q 'output_clock_frequency0("128.863620 MHz")' rtl/pll/pll_0002.v \
+        || fail "PLL output 0 (rtl/pll/pll_0002.v) is not 128.863620 MHz"
+fi
 
 pipe=$(grep -o "sl_state\.SL_\(ADV0\|CHIT0\|INTERP2\|INTERP3\|EGPRE\|EGPRE2\|GAIN2\|MUL1B\|MUL2B\|PANB\)\b" $MAP | sort -u | wc -l)
 echo "PCM pipeline states synthesised: $pipe / 10"
@@ -30,6 +45,16 @@ echo "PCM pipeline states synthesised: $pipe / 10"
 mlab=$(awk '/; Analysis & Synthesis RAM Summary/,/^$/' $MAP | grep "u_pcm" | grep -c " MLAB ")
 echo "PCM memories inferred as MLAB: $mlab (expect ${MLAB_EXPECT:-33})"
 [ "$mlab" -ge "${MLAB_EXPECT:-33}" ] || fail "fewer PCM MLABs than expected"
+noinf=$(grep "(10999)" $MAP | grep -c "ymf278_pcm_engine2")
+echo "PCM arrays Quartus could not infer as memory (10999): $noinf"
+[ "$noinf" -eq 0 ] || { grep "(10999)" $MAP | grep "ymf278_pcm_engine2" | sed 's/^/    /' | cut -c1-160; fail "PCM array built as flops"; }
+
+if [ "$MODE" = map ]; then
+    echo "════════════════════════════════"
+    [ "$FAIL" -eq 0 ] && echo "RESULT PASS: map stage is the 128.86 MHz PIPE study (fit may go on)" \
+                     || echo "RESULT FAIL: see above -- do not fit this"
+    exit "$FAIL"
+fi
 
 echo "setup, clk_sdram: $(awk '/; Setup Summary/,/^$/' $STA | grep 'emu|pll.*general\[0\]' | awk -F';' '{print "slack "$3" TNS "$4}' | tr -s ' ')"
 T=$(mktemp)

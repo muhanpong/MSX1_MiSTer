@@ -297,6 +297,7 @@ logic         w_posrst;   // dispatched copy of pos_rst[slot]
 logic signed [15:0] w_vib;
 logic [9:0]   w_vib_mag;               // |lfo offset| × depth (compute_vib stage 1)
 logic         w_vib_neg;
+logic [5:0]   w_vib_q;                 // PIPE: |vib offset| from vib_q_tab
 logic [31:0]  w_step;
 logic [15:0]  w_pos2, w_ptr2, w_posb;
 logic [21:0]  w_a0, w_a1, w_a2;       // registered byte addrs of sample A
@@ -405,6 +406,42 @@ function automatic [7:0] pick_by_sel(
     endcase
     return lsb ? w[15:8] : w[7:0];
 endfunction
+//  PIPE: compute_vib's |offset| as a table.  (mag * depth * 43691) >> 19 is a
+//  function of 7 bits (vib, mag 0..15) and equals mag * depth / 12 (checked for all
+//  128 when generated); it replaces the depth multiply and the x43691 multiply,
+//  two DSPs in a row that missed 7.76 ns by 0.95 ns.
+function automatic [5:0] vib_q_tab(input [2:0] vib, input [3:0] mag);
+    case ({vib, mag})
+        7'h16: return 6'd1;  7'h17: return 6'd1;  7'h18: return 6'd1;  7'h19: return 6'd1;
+        7'h1A: return 6'd1;  7'h1B: return 6'd1;  7'h1C: return 6'd2;  7'h1D: return 6'd2;
+        7'h1E: return 6'd2;  7'h1F: return 6'd2;
+        7'h24: return 6'd1;  7'h25: return 6'd1;  7'h26: return 6'd1;  7'h27: return 6'd1;
+        7'h28: return 6'd2;  7'h29: return 6'd2;  7'h2A: return 6'd2;  7'h2B: return 6'd2;
+        7'h2C: return 6'd3;  7'h2D: return 6'd3;  7'h2E: return 6'd3;  7'h2F: return 6'd3;
+        7'h33: return 6'd1;  7'h34: return 6'd1;  7'h35: return 6'd1;  7'h36: return 6'd2;
+        7'h37: return 6'd2;  7'h38: return 6'd2;  7'h39: return 6'd3;  7'h3A: return 6'd3;
+        7'h3B: return 6'd3;  7'h3C: return 6'd4;  7'h3D: return 6'd4;  7'h3E: return 6'd4;
+        7'h3F: return 6'd5;
+        7'h42: return 6'd1;  7'h43: return 6'd1;  7'h44: return 6'd2;  7'h45: return 6'd2;
+        7'h46: return 6'd3;  7'h47: return 6'd3;  7'h48: return 6'd4;  7'h49: return 6'd4;
+        7'h4A: return 6'd5;  7'h4B: return 6'd5;  7'h4C: return 6'd6;  7'h4D: return 6'd6;
+        7'h4E: return 6'd7;  7'h4F: return 6'd7;
+        7'h51: return 6'd1;  7'h52: return 6'd2;  7'h53: return 6'd3;  7'h54: return 6'd4;
+        7'h55: return 6'd5;  7'h56: return 6'd6;  7'h57: return 6'd7;  7'h58: return 6'd8;
+        7'h59: return 6'd9;  7'h5A: return 6'd10;  7'h5B: return 6'd11;  7'h5C: return 6'd12;
+        7'h5D: return 6'd13;  7'h5E: return 6'd14;  7'h5F: return 6'd15;
+        7'h61: return 6'd2;  7'h62: return 6'd4;  7'h63: return 6'd6;  7'h64: return 6'd8;
+        7'h65: return 6'd10;  7'h66: return 6'd12;  7'h67: return 6'd14;  7'h68: return 6'd16;
+        7'h69: return 6'd18;  7'h6A: return 6'd20;  7'h6B: return 6'd22;  7'h6C: return 6'd24;
+        7'h6D: return 6'd26;  7'h6E: return 6'd28;  7'h6F: return 6'd30;
+        7'h71: return 6'd4;  7'h72: return 6'd8;  7'h73: return 6'd12;  7'h74: return 6'd16;
+        7'h75: return 6'd20;  7'h76: return 6'd24;  7'h77: return 6'd28;  7'h78: return 6'd32;
+        7'h79: return 6'd36;  7'h7A: return 6'd40;  7'h7B: return 6'd44;  7'h7C: return 6'd48;
+        7'h7D: return 6'd52;  7'h7E: return 6'd56;  7'h7F: return 6'd60;
+        default: return 6'd0;
+    endcase
+endfunction
+
 //  PIPE: calc_attack_step (ymf278_pcm_alu) in two halves, same arithmetic and
 //  widths: the product leaves the DSP into a register (-1.88 ns at 128.86 MHz
 //  as one cycle), the add and the clamp take the next state.
@@ -572,6 +609,7 @@ always_ff @(posedge clk or negedge rst_n) begin
     logic signed [33:0] mul_w;     // explicit wide product (the 17' cast must
                                    // not narrow the multiply context pre-shift)
     slot_dyn_t   dyn_wb;
+    logic [20:0] it_a, it_b;       // the invalidate sweep's tag reads
 
     if (!rst_n) begin
         sl_state  <= SL_IDLE;
@@ -620,14 +658,16 @@ always_ff @(posedge clk or negedge rst_n) begin
             inv_idx  <= 5'd0;
             inv_run  <= 1'b1;
         end else if (inv_run) begin
-            //  tag + 1 == w and tag == w - 1 are the same test mod 2^21
-            if (inv_tagA[inv_idx[4:0]]           == inv_word
-             || (PIPE ? inv_tagA[inv_idx[4:0]] == inv_word_m1
-                      : (inv_tagA[inv_idx[4:0]] + 21'd1) == inv_word)
+            //  tag + 1 == w and tag == w - 1 are the same test mod 2^21.  Each
+            //  tag is read ONCE: three reads of one array in the source made
+            //  Quartus give up the MLAB and build inv_tagA/B as flops (99aac4e).
+            it_a = inv_tagA[inv_idx[4:0]];
+            it_b = inv_tagB[inv_idx[4:0]];
+            if (it_a == inv_word
+             || (PIPE ? it_a == inv_word_m1 : (it_a + 21'd1) == inv_word)
              || (cache_hasb[inv_idx[4:0]]
-                 && (inv_tagB[inv_idx[4:0]]           == inv_word
-                  || (PIPE ? inv_tagB[inv_idx[4:0]] == inv_word_m1
-                           : (inv_tagB[inv_idx[4:0]] + 21'd1) == inv_word))))
+                 && (it_b == inv_word
+                  || (PIPE ? it_b == inv_word_m1 : (it_b + 21'd1) == inv_word))))
                 cache_vld[inv_idx[4:0]] <= 1'b0;
             if (inv_idx == 5'd23) inv_run <= 1'b0;
             else                  inv_idx <= inv_idx + 5'd1;
@@ -719,9 +759,16 @@ always_ff @(posedge clk or negedge rst_n) begin
                 if (fm6[4]) fm6 = fm6 ^ 6'h1F;            // triangle fold
                 mag_fm    = fm6[5] ? (5'(fm6 & 6'h0F)) : {1'b0, fm6[3:0]};
                 w_vib_neg <= fm6[5];
-                w_vib_mag <= (w_regs.lfo_active && w_regs.vib != 3'd0)
-                           ? 10'(mag_fm * vib_depth_rom(w_regs.vib))
-                           : 10'd0;
+                if (PIPE)
+`ifndef PC_MUT_VIB
+                    w_vib_q <= w_regs.lfo_active ? vib_q_tab(w_regs.vib, fm6[3:0]) : 6'd0;
+`else               // negative control for PIPECHK
+                    w_vib_q <= w_regs.lfo_active ? vib_q_tab(w_regs.vib ^ 3'd1, fm6[3:0]) : 6'd0;
+`endif
+                else
+                    w_vib_mag <= (w_regs.lfo_active && w_regs.vib != 3'd0)
+                               ? 10'(mag_fm * vib_depth_rom(w_regs.vib))
+                               : 10'd0;
                 sl_state <= SL_VIB2;
             end
 
@@ -729,7 +776,7 @@ always_ff @(posedge clk or negedge rst_n) begin
                 logic [25:0] vscaled;
                 logic [9:0]  vq;
                 vscaled = w_vib_mag * 26'd43691;          // exact ÷12 reciprocal
-                vq      = vscaled[25:16] >> 3;
+                vq      = PIPE ? {4'd0, w_vib_q} : 10'(vscaled[25:16] >> 3);
                 w_vib   <= w_vib_neg ? -$signed({6'd0, vq}) : $signed({6'd0, vq});
                 sl_state <= SL_STEP;
             end
@@ -1714,7 +1761,7 @@ endgenerate
 //  PC_MUT_* are the negative controls (each breaks one split).  The compares are
 //  4-state (===): an X in both (slot 23 of sc_st02/st04 dispatches with X
 //  addresses) is the same value, and == would turn it into a false failure.
-longint pc_n[4] = '{0,0,0,0}, pc_bad[4] = '{0,0,0,0};
+longint pc_n[5] = '{0,0,0,0,0}, pc_bad[5] = '{0,0,0,0,0};
 task automatic pc(input int k, input bit ok, input string what);
     pc_n[k]++;
     if (!ok) begin
@@ -1723,6 +1770,13 @@ task automatic pc(input int k, input bit ok, input string what);
     end
 endtask
 wire [21:0] pc_blast = (w_hdr.bits == 2'd2) ? w_b1 : w_b2;
+//  vib: the unpipelined two-multiply value, from the same lfo_cnt and regs
+wire [5:0]  pc_fm6r  = w_dyn.lfo_cnt[17:12];
+wire [5:0]  pc_fm6   = pc_fm6r[4] ? (pc_fm6r ^ 6'h1F) : pc_fm6r;
+wire [9:0]  pc_vmag  = (w_regs.lfo_active && w_regs.vib != 3'd0)
+                     ? 10'(pc_fm6[3:0] * vib_depth_rom(w_regs.vib)) : 10'd0;
+wire [25:0] pc_vsc   = pc_vmag * 26'd43691;
+wire [9:0]  pc_vq    = 10'(pc_vsc[25:16] >> 3);
 always @(negedge clk) if (rst_n && PIPE) begin
     if (sl_state == SL_DECODE) pc(0,
            pick_by_sel(bsel[0], w_a0[0], w_word[0], w_word[1], w_word[2], w_word[3])
@@ -1742,9 +1796,13 @@ always @(negedge clk) if (rst_n && PIPE) begin
         !((w_b0[21:1] >= w_a0[21:1]) && (pc_blast[21:1] <= w_a0[21:1] + 21'd1)), "need_b");
     if (sl_state == SL_EGSTEP) pc(2, eg_att_r === calc_attack_step(w_dyn.env_vol, w_inc), "attack");
     if (inv_run && !cpu_wr_issue) pc(3, inv_word_m1 + 21'd1 === inv_word, "inv");
+    //  counted only where vibrato is non-zero: a run with no vibrato is no exposure
+    if (sl_state == SL_VIB2 && (pc_vq != 10'd0 || w_vib_q != 6'd0))
+        pc(4, {4'd0, w_vib_q} === pc_vq, "vib");
 end
-final $display("PIPECHK decode=%0d/%0d need_b=%0d/%0d attack=%0d/%0d inv=%0d/%0d (checks/bad)",
-               pc_n[0], pc_bad[0], pc_n[1], pc_bad[1], pc_n[2], pc_bad[2], pc_n[3], pc_bad[3]);
+final $display("PIPECHK decode=%0d/%0d need_b=%0d/%0d attack=%0d/%0d inv=%0d/%0d vib=%0d/%0d (checks/bad)",
+               pc_n[0], pc_bad[0], pc_n[1], pc_bad[1], pc_n[2], pc_bad[2], pc_n[3], pc_bad[3],
+               pc_n[4], pc_bad[4]);
 `endif
 
 endmodule
