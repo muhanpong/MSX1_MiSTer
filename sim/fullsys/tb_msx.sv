@@ -20,12 +20,25 @@ module tb;
    //  uses and is enough for functional work.
    //  clk_sdram and clk21m are msx ports: declared in msx_ports.svh, driven here.
    initial clk_sdram = 1'b0;
+`ifndef TDM
+   localparam real TCK_NS = 11.64;
    always #5.820 clk_sdram = ~clk_sdram;       // 85.909 MHz: 11.64 ns period
                                               // (1ps resolution -- at 1ns the
                                               //  half period rounds to 500x slow)
    logic [1:0] cdiv = 2'd0;
    always @(posedge clk_sdram) cdiv <= cdiv + 2'd1;
    assign clk21m = cdiv[1];
+`else
+   //  sdram128 study: clk_sdram 128.86 MHz, clk21m = clk_sdram / 6 (run_tdm.sh)
+   localparam real TCK_NS = 7.76;
+   always #3.880 clk_sdram = ~clk_sdram;
+   logic [1:0] cdiv6 = 2'd0;
+   logic       c21 = 1'b0;
+   always @(posedge clk_sdram)
+      if (cdiv6 == 2'd2) begin cdiv6 <= 2'd0; c21 <= ~c21; end
+      else cdiv6 <= cdiv6 + 2'd1;
+   assign clk21m = c21;
+`endif
 
 `include "msx_ports.svh"
 
@@ -184,9 +197,17 @@ module tb;
    wire  [15:0] dq_o, dq_i;
    wire         dq_oe, SDRAM_DQML, SDRAM_DQMH, SDRAM_nCS, SDRAM_nWE, SDRAM_nRAS, SDRAM_nCAS, SDRAM_CKE;
 
+`ifndef TDM
    sdram u_sdram
    (
       .init(rst_n_cnt != 0), .clk(clk_sdram), .doRefresh(1'b1),
+`else
+   sdram_tdm u_sdram
+   (
+      .init(rst_n_cnt != 0), .clk(clk_sdram), .mode128(1'b0),
+      .v_en(1'b0), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
+      .v_grant(), .v_rdata(), .v_rvalid(),
+`endif
       .SDRAM_A(SDRAM_A), .SDRAM_DQML(SDRAM_DQML), .SDRAM_DQMH(SDRAM_DQMH),
       .SDRAM_BA(SDRAM_BA), .SDRAM_nCS(SDRAM_nCS), .SDRAM_nWE(SDRAM_nWE),
       .SDRAM_nRAS(SDRAM_nRAS), .SDRAM_nCAS(SDRAM_nCAS), .SDRAM_CKE(SDRAM_CKE),
@@ -203,7 +224,11 @@ module tb;
       .ch4_ready(pcm_sdram_ready)
    );
 
+`ifndef TDM
    sdram_big u_chip
+`else
+   sdram_big_tdm u_chip
+`endif
    (
       .clk(clk_sdram), .DQ_out(dq_i), .DQ_in(dq_o), .DQ_oe(dq_oe),
       .A(SDRAM_A), .BA(SDRAM_BA), .nCS(SDRAM_nCS), .nWE(SDRAM_nWE),
@@ -892,6 +917,67 @@ module tb;
    always @(posedge clk21m)
       if (upl_ce & upl_sdram_rq & ((upl_addr & 27'h3FFF) >= 27'h18) & ((upl_addr & 27'h3FFF) <= 27'h1F))
          rom_tail[int'(upl_addr)] = upl_din;
+   //  ── SDRAM demand (sdram128 study, 2026-10-13) ───────────────────────────
+   //  How many SDRAM accesses the machine asks for, per channel, and the busiest
+   //  1 ms / 100 us windows -- to size a TDM controller (one general slot per 12
+   //  clk at 128.86 MHz = 10.74 M accesses/s; two = 21.5 M).  An access is an
+   //  ACTIVE command.  "run" counts start when memory_upload releases the machine.
+   //  The totals print with the window peaks: a zero total voids the peaks.
+   logic upload_seen = 1'b0;
+   always @(posedge clk21m) if (reset_rq) upload_seen <= 1'b1;
+   longint sd_cyc = 0, sd_act = 0, sd_run_cyc = 0, sd_run_act = 0, sd_rq[4] = '{0,0,0,0};
+   longint sd_hit = 0, sd_w1 = 0, sd_w1max = 0, sd_w01 = 0, sd_w01max = 0;
+   int     sd_c1 = 0, sd_c01 = 0;
+   logic   sd_run = 1'b0, sd_r1 = 1'b0, sd_r2 = 1'b0, sd_r3 = 1'b0, sd_r4 = 1'b0, sd_h = 1'b0;
+   always @(posedge clk_sdram) begin
+      automatic bit act = (u_sdram.command == 3'b011);
+      sd_cyc++;
+      if (act) sd_act++;
+      if (reset_rq) sd_run = 1'b0; else if (sd_cyc > 1000 && !sd_run && upload_seen) sd_run = 1'b1;
+      sd_r1 <= ch1_req; sd_r2 <= sdram_ce; sd_r3 <= flash_req; sd_r4 <= pcm_sdram_req; sd_h <= sdram_hit;
+      if (sd_run) begin
+         sd_run_cyc++;
+         if (act) begin sd_run_act++; sd_w1++; sd_w01++; end
+         if (ch1_req & ~sd_r1) sd_rq[0]++;
+         if (sdram_ce & ~sd_r2) sd_rq[1]++;
+         if (flash_req & ~sd_r3) sd_rq[2]++;
+         if (pcm_sdram_req & ~sd_r4) sd_rq[3]++;
+         if (sdram_hit & ~sd_h) sd_hit++;
+         if (++sd_c1 == int'(1.0e6 / TCK_NS)) begin if (sd_w1 > sd_w1max) sd_w1max = sd_w1; sd_w1 = 0; sd_c1 = 0; end
+         if (++sd_c01 == int'(1.0e5 / TCK_NS)) begin if (sd_w01 > sd_w01max) sd_w01max = sd_w01; sd_w01 = 0; sd_c01 = 0; end
+      end
+   end
+   //  CPU read latency: from the request edge (sdram_ce & ram_rnw rising, seen at
+   //  clk_sdram) to completion (ch2_rdtog flips, or a cache hit), in ns.  The
+   //  same for both controllers, so the TDM figures can be put next to the ones
+   //  of sdram.sv, which the board has run on.
+   realtime lat_t0 = 0, lat_max = 0;
+   longint  lat_n = 0, lat_open = 0, lat_hist[8] = '{0,0,0,0,0,0,0,0};   // <100,<150,<200,<250,<300,<350,<400,>=400
+   logic    lat_on = 1'b0, lat_ce = 1'b0, lat_tog = 1'b0, lat_hit = 1'b0;
+   always @(posedge clk_sdram) begin
+      lat_ce <= sdram_ce & ram_rnw;
+      if (sd_run && sdram_ce && ram_rnw && !lat_ce) begin lat_on <= 1'b1; lat_t0 = $realtime; lat_tog <= sdram_rdtog; lat_open++; end
+      else if (lat_on && (sdram_rdtog != lat_tog || sdram_hit)) begin
+         automatic realtime d;
+         d = ($realtime - lat_t0) / 1000.0;
+         lat_on <= 1'b0; lat_n++;
+         if (d > lat_max) lat_max = d;
+         lat_hist[(d >= 400.0) ? 7 : int'(d / 50.0) - 1 < 0 ? 0 : int'(d / 50.0) - 1]++;
+      end
+   end
+   final begin
+      $display("cpu read latency: requests=%0d completed=%0d max=%.1f ns  hist <100:%0d <150:%0d <200:%0d <250:%0d <300:%0d <350:%0d <400:%0d >=400:%0d",
+               lat_open, lat_n, lat_max, lat_hist[0], lat_hist[1], lat_hist[2], lat_hist[3], lat_hist[4], lat_hist[5], lat_hist[6], lat_hist[7]);
+      $display("sdram demand: all cycles=%0d ACT=%0d | run cycles=%0d (%.1f ms) ACT=%0d (%.3f M/s, busy-equivalent %.1f%% of one 12-clk slot stream)",
+               sd_cyc, sd_act, sd_run_cyc, sd_run_cyc * TCK_NS * 1e-6, sd_run_act,
+               sd_run_cyc ? sd_run_act / (sd_run_cyc * TCK_NS * 1e-9) / 1e6 : 0.0,
+               sd_run_cyc ? 100.0 * (sd_run_act / (sd_run_cyc * TCK_NS * 1e-9)) / 10.74e6 : 0.0);
+      $display("sdram demand: run requests ch1=%0d ch2=%0d (cache hits %0d) ch3=%0d ch4=%0d",
+               sd_rq[0], sd_rq[1], sd_hit, sd_rq[2], sd_rq[3]);
+      $display("sdram demand: busiest 1 ms = %0d ACT (%.3f M/s), busiest 100 us = %0d ACT (%.3f M/s)",
+               sd_w1max, sd_w1max / 1.0e3, sd_w01max, sd_w01max / 100.0e-6 / 1e6);
+   end
+
    task automatic mupack_report();
       int b, bad = 0;
       string sig = "";
@@ -949,5 +1035,56 @@ module sdram_big
             default : ;
          endcase
       end
+   end
+endmodule
+
+//  sdram128 study: CL3 / BL2 / write burst, DQM = A[12:11] (latency 2 read, 0
+//  write), on the chip clock = clk_sdram falling (the controller's SDRAM_CLK is
+//  the inverted clock).  Functional only -- sim/sdram_tdm/sdram_chk.sv checks the
+//  timing.  Chip 1 (nCS high) is not modelled: the bench runs the 32 MB map.
+module sdram_big_tdm
+(
+   input               clk,
+   output reg  [15:0]  DQ_out,
+   input       [15:0]  DQ_in,
+   input               DQ_oe,
+   input        [12:0] A,
+   input         [1:0] BA,
+   input nCS, input nWE, input nRAS, input nCAS, input DQML, input DQMH
+);
+   reg [15:0] mem [0:(1<<24)-1];
+   reg [12:0] row [0:3];
+   wire [2:0] cmd = {nRAS, nCAS, nWE};
+   //  read pipeline: slot n = the word valid n chip edges from now
+   reg [23:0] rq_idx [0:4];
+   reg        rq_v   [0:4];
+   reg  [1:0] dqm_d1, dqm_d2;
+   reg [23:0] w_idx;  reg w_pend = 1'b0;
+   initial for (int i = 0; i < 5; i++) rq_v[i] = 1'b0;
+   always @(negedge clk) begin
+      // the word valid at the NEXT chip edge goes out now (the controller samples
+      // on that edge, before this process runs again)
+      DQ_out <= (rq_v[1] && dqm_d1 == 2'b00) ? mem[rq_idx[1]] : 16'h0000;
+      for (int i = 0; i < 4; i++) begin rq_v[i] = rq_v[i+1]; rq_idx[i] = rq_idx[i+1]; end
+      rq_v[4] = 1'b0;
+      dqm_d2 = dqm_d1; dqm_d1 = A[12:11];
+      if (w_pend) begin
+         if (!A[11]) mem[w_idx][7:0]  <= DQ_in[7:0];
+         if (!A[12]) mem[w_idx][15:8] <= DQ_in[15:8];
+         w_pend = 1'b0;
+      end
+      if (!nCS) case (cmd)
+         3'b011: row[BA] <= A;
+         3'b101: begin
+            rq_v[2] = 1'b1; rq_idx[2] = {BA, row[BA], A[8:0]};
+            rq_v[3] = 1'b1; rq_idx[3] = {BA, row[BA], A[8:1], ~A[0]};
+         end
+         3'b100: begin
+            if (!A[11]) mem[{BA, row[BA], A[8:0]}][7:0]  <= DQ_in[7:0];
+            if (!A[12]) mem[{BA, row[BA], A[8:0]}][15:8] <= DQ_in[15:8];
+            w_idx = {BA, row[BA], A[8:1], ~A[0]}; w_pend = 1'b1;
+         end
+         default: ;
+      endcase
    end
 endmodule

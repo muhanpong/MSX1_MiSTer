@@ -209,6 +209,7 @@ PY
 #                     (splits the inout SDRAM_DQ; cache logic untouched).
 python3 sim/fullsys/mkports.py > "$OUT/msx_ports.svh"
 python3 tb/mkshim.py rtl/peripheral/sdram.sv "$OUT/sdram_sim.sv" > /dev/null
+python3 tb/mkshim_tdm.py rtl/peripheral/sdram_tdm.sv "$OUT/sdram_tdm_sim.sv" > /dev/null   # sdram128: run_tdm.sh
 echo "ports:    $(grep -c ';' "$OUT/msx_ports.svh") declarations"
 
 echo "filelist: $(wc -l < "$OUT/filelist.txt") files -> $OUT/filelist.txt"
