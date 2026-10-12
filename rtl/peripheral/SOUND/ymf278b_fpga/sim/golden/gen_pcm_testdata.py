@@ -219,6 +219,25 @@ slotw(L, 100, 0, 1, (0x40 << 1) | 0)     # FN
 slotw(L, 160, 0, 4, 0x80 | 0x20)         # KEY-ON 123 (re-trigger)
 scripts['sc_relwave.txt'] = (L, 300)
 
+# MEM-HIT: CPU sample-RAM writes INTO the words two playing voices have cached.
+# Until 2026-10-12 no scenario did: sc_memwrite's writes never matched a cached
+# word, so the invalidate sweep compared but never cleared an entry (its PIPE
+# split, the clear a cycle after the compare, had nothing to check).  Low pitch
+# keeps each voice inside the same words for many frames (pos stays near 0); the
+# writes cycle over the first two words of
+# the 8-bit ramp (wave 0, 0x1000) and the 16-bit square (wave 1, 0x2000) and change
+# the data, so a stale cached word is a sample difference, not just a flag.
+L = []
+keyon(L, 1, 0, wave=0, fn=0x010, oct_=0x9)     # oct -7: < 1 sample per frame
+keyon(L, 1, 5, wave=1, fn=0x010, oct_=0x9)
+for k, fr in enumerate(range(20, 380, 3)):
+    a = (0x1000 + (k // 2) % 4) if k % 2 == 0 else (0x2000 + (k // 2) % 4)
+    W(L, fr, 0x03, (a >> 16) & 0x3F, 1000)
+    W(L, fr, 0x04, (a >> 8) & 0xFF, 1020)
+    W(L, fr, 0x05, a & 0xFF, 1040)
+    W(L, fr, 0x06, (MEM[a] ^ 0x5A) & 0xFF, 1060)
+scripts['sc_memhit.txt'] = (L, 400)
+
 for name, (lines, frames) in scripts.items():
     lines = [t[2] for t in sorted(lines, key=lambda t: (t[0], t[1]))]
     with open(f"{out}/{name}", "w") as f:

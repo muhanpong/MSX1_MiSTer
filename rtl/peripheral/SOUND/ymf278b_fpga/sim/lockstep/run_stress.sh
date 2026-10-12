@@ -37,7 +37,7 @@ build eng $R/rtl/pcm/ymf278_pcm_engine2.sv
 for m in rd1 nopend sw23 noclr; do build $m mut_$m.sv -DNO_SNAPCHK; done
 
 SC="sc_single8:620 sc_square16:620 sc_tri12_loop:720 sc_multi:520 sc_lfo:300 sc_pitchbend:820
-    sc_wavehi:520 sc_odd16:620 sc_relwave:200 sc_songchange:900 sc_songchange24:340 sc_memwrite:440
+    sc_wavehi:520 sc_odd16:620 sc_relwave:200 sc_songchange:900 sc_songchange24:340 sc_memwrite:440 sc_memhit:400
     sc_dirdep_good:700 sc_dirdep_bad:700 sc_st02:1600 sc_st04:2500"
 if [ "$MODE" = full ]; then LATS="1 6 20 40"; SEEDS="1 2 3"; else LATS="6 20"; SEEDS="1"; fi
 RST="+reset_at=150000 +reset_every=70000"

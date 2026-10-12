@@ -363,6 +363,15 @@ logic [20:0] inv_word;
 logic [20:0] inv_word_m1;    // PIPE: inv_word - 1, so tag + 1 == w becomes tag == w - 1
 logic  [4:0] inv_idx;
 logic        inv_run;
+//  PIPE: the sweep's clear one cycle after its compare (the compare, the MLAB
+//  read behind it and a 24-way clear decode missed 7.76 ns by 0.17 ns together)
+logic        inv_clr;
+logic  [4:0] inv_clr_idx;
+wire         inv_busy = inv_run | (PIPE & inv_clr);   // a fill now is not validated
+//  PIPE: frame output in two cycles -- gain at sample_start, saturate the next
+//  (-0.22 ns as one).  Same values, pcm_valid one cycle later.
+logic signed [23:0] out_gl, out_gr;
+logic        out_pend;
 // Periodic cache-scrub round-robin pointer (see scrub block in the slot FSM).
 logic [4:0]  cache_rr;
 
@@ -385,6 +394,9 @@ function automatic [7:0] pick_byte(
     else if (wx == wa + 21'd1)  return x[0] ? wd1[15:8] : wd1[7:0];
     else if (wx == wb)          return x[0] ? wd2[15:8] : wd2[7:0];
     else                        return x[0] ? wd3[15:8] : wd3[7:0];
+endfunction
+function automatic signed [15:0] sat16(input signed [23:0] x);
+    return (x > 24'sd32767) ? 16'sh7FFF : (x < -24'sd32768) ? 16'sh8000 : x[15:0];
 endfunction
 //  PIPE: pick_byte in two halves.  The word index (21-bit compares) is taken in
 //  CHIT0 from the registered addresses; DECODE only muxes by it.
@@ -610,6 +622,7 @@ always_ff @(posedge clk or negedge rst_n) begin
                                    // not narrow the multiply context pre-shift)
     slot_dyn_t   dyn_wb;
     logic [20:0] it_a, it_b;       // the invalidate sweep's tag reads
+    logic        inv_hit;
 
     if (!rst_n) begin
         sl_state  <= SL_IDLE;
@@ -621,6 +634,8 @@ always_ff @(posedge clk or negedge rst_n) begin
         cache_vld <= '0;
         cache_hasb <= '0;
         inv_run    <= 1'b0;
+        inv_clr    <= 1'b0;
+        out_pend   <= 1'b0;
         inv_idx    <= 5'd0;
         cache_rr  <= '0;
         key_on_prev <= '0;
@@ -663,28 +678,46 @@ always_ff @(posedge clk or negedge rst_n) begin
             //  Quartus give up the MLAB and build inv_tagA/B as flops (99aac4e).
             it_a = inv_tagA[inv_idx[4:0]];
             it_b = inv_tagB[inv_idx[4:0]];
-            if (it_a == inv_word
-             || (PIPE ? it_a == inv_word_m1 : (it_a + 21'd1) == inv_word)
-             || (cache_hasb[inv_idx[4:0]]
-                 && (it_b == inv_word
-                  || (PIPE ? it_b == inv_word_m1 : (it_b + 21'd1) == inv_word))))
+            inv_hit = it_a == inv_word
+                   || (PIPE ? it_a == inv_word_m1 : (it_a + 21'd1) == inv_word)
+                   || (cache_hasb[inv_idx[4:0]]
+                       && (it_b == inv_word
+                        || (PIPE ? it_b == inv_word_m1 : (it_b + 21'd1) == inv_word)));
+            if (PIPE) begin
+                inv_clr     <= inv_hit;
+                inv_clr_idx <= inv_idx;
+            end else if (inv_hit)
                 cache_vld[inv_idx[4:0]] <= 1'b0;
             if (inv_idx == 5'd23) inv_run <= 1'b0;
             else                  inv_idx <= inv_idx + 5'd1;
         end
+        if (PIPE && !(inv_run && !cpu_wr_issue)) inv_clr <= 1'b0;
+`ifndef PC_MUT_CLR
+        if (PIPE && inv_clr) cache_vld[inv_clr_idx] <= 1'b0;
+`endif                              // (PC_MUT_CLR: negative control, never clears)
 
         // ── frame output (independent of slot FSM state) ──
+        if (PIPE && out_pend) begin
+            pcm_left  <= sat16(out_gl);
+            pcm_right <= sat16(out_gr);
+            pcm_valid <= 1'b1;
+            out_pend  <= 1'b0;
+        end
         if (sample_start) begin
             logic signed [23:0] osl, osr;
             logic [1:0] sh;
             sh  = 2'd3 - pcm_vol;
             osl = pcm_mix_gain(pcm_mix_l, accum_l >>> sh);
             osr = pcm_mix_gain(pcm_mix_r, accum_r >>> sh);
-            pcm_left  <= (osl > 24'sd32767)  ? 16'sh7FFF :
-                         (osl < -24'sd32768) ? 16'sh8000 : osl[15:0];
-            pcm_right <= (osr > 24'sd32767)  ? 16'sh7FFF :
-                         (osr < -24'sd32768) ? 16'sh8000 : osr[15:0];
-            pcm_valid <= 1'b1;
+            if (PIPE) begin
+                out_gl   <= osl;
+                out_gr   <= osr;
+                out_pend <= 1'b1;
+            end else begin
+                pcm_left  <= sat16(osl);
+                pcm_right <= sat16(osr);
+                pcm_valid <= 1'b1;
+            end
             accum_l   <= '0;
             accum_r   <= '0;
             sl_state  <= SL_IDLE;     // abandon any in-flight slot at frame end
@@ -913,7 +946,7 @@ always_ff @(posedge clk or negedge rst_n) begin
                         // this entry.  Costs at most one refetch per CPU write (which
                         // arrive ~1 per frame) and is stricter than the old 1-cycle
                         // blanket flush, which could re-validate such a fill.
-                        cache_vld[w_slot] <= ~inv_run;
+                        cache_vld[w_slot] <= ~inv_busy;
                         cache_hasb[w_slot] <= w_need_b;
                         sl_state <= SL_DECODE;
                     end else begin
@@ -1761,7 +1794,7 @@ endgenerate
 //  PC_MUT_* are the negative controls (each breaks one split).  The compares are
 //  4-state (===): an X in both (slot 23 of sc_st02/st04 dispatches with X
 //  addresses) is the same value, and == would turn it into a false failure.
-longint pc_n[5] = '{0,0,0,0,0}, pc_bad[5] = '{0,0,0,0,0};
+longint pc_n[6] = '{0,0,0,0,0,0}, pc_bad[6] = '{0,0,0,0,0,0};
 task automatic pc(input int k, input bit ok, input string what);
     pc_n[k]++;
     if (!ok) begin
@@ -1800,9 +1833,27 @@ always @(negedge clk) if (rst_n && PIPE) begin
     if (sl_state == SL_VIB2 && (pc_vq != 10'd0 || w_vib_q != 6'd0))
         pc(4, {4'd0, w_vib_q} === pc_vq, "vib");
 end
-final $display("PIPECHK decode=%0d/%0d need_b=%0d/%0d attack=%0d/%0d inv=%0d/%0d vib=%0d/%0d (checks/bad)",
+//  sweep: when an invalidate sweep ends (inv_busy falls, no new write), no valid
+//  entry may still cover the written word.  Counted only for sweeps that had a
+//  hit -- a sweep that cleared nothing exercises nothing.
+logic pc_busy_d = 1'b0, pc_had_hit = 1'b0;
+always @(negedge clk) if (rst_n && PIPE) begin
+    if (cpu_wr_issue) pc_had_hit = 1'b0;
+    if (inv_clr) pc_had_hit = 1'b1;
+    if (pc_busy_d && !inv_busy && !cpu_wr_issue && pc_had_hit) begin
+        bit ok;
+        ok = 1'b1;
+        for (int i = 0; i < 24; i++)
+            if (cache_vld[i] && (inv_tagA[i] == inv_word || inv_tagA[i] + 21'd1 == inv_word
+                 || (cache_hasb[i] && (inv_tagB[i] == inv_word || inv_tagB[i] + 21'd1 == inv_word))))
+                ok = 1'b0;
+        pc(5, ok, "sweep");
+    end
+    pc_busy_d = inv_busy;
+end
+final $display("PIPECHK decode=%0d/%0d need_b=%0d/%0d attack=%0d/%0d inv=%0d/%0d vib=%0d/%0d sweep=%0d/%0d (checks/bad)",
                pc_n[0], pc_bad[0], pc_n[1], pc_bad[1], pc_n[2], pc_bad[2], pc_n[3], pc_bad[3],
-               pc_n[4], pc_bad[4]);
+               pc_n[4], pc_bad[4], pc_n[5], pc_bad[5]);
 `endif
 
 endmodule
