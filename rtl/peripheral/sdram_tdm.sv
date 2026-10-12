@@ -19,9 +19,10 @@
 //
 // The chip samples on SDRAM_CLK rising = clk falling (inverted clock out).  All
 // chip-facing signals leave through one output register stage, so the chip sees
-// the internal schedule one clock late; read data comes back through one rising
-// edge IO register (dq_p).  Word0 of a READ issued internally in cycle t is in
-// dq_p during cycle t+5: V reads land at 8/9, G1 at 0, G2 at 4 of the next frame.
+// the internal schedule one clock late; read data comes back through two falling
+// edge registers and one rising (dq_n, dq_n2, dq_p -- see there for why).  Word0
+// of a READ issued internally in cycle t is in dq_p during cycle t+7: V reads land
+// at 10/11, G1 at 2, G2 at 6 of the next frame.
 //
 // This source file is free software under the GNU GPL v3 or later (sdram.sv,
 // Sorgelig, 2015-2019, which it is derived from).
@@ -132,13 +133,19 @@ assign SDRAM_CKE  = 1'b1;
 assign {SDRAM_DQMH, SDRAM_DQML} = SDRAM_A[12:11];
 assign SDRAM_DQ = dq_oe_o ? dq_o_r : 16'bz;
 
-//  Read data: one rising-edge register at the pins.  With the real delays (clock
-//  out ~3.5 ns, tAC 5.4, board ~1) a word "valid at chip edge E" is on the FPGA
-//  pins from about 2.1 ns to 7.0 ns after the internal falling edge E -- the
-//  rising edge 3.9 ns after E is inside that, the falling edge E itself is not
-//  (the first version took the previous word there).  sim/sdram_tdm models it.
-reg [15:0] dq_p;
-always @(posedge clk) dq_p <= SDRAM_DQ;
+//  Read data.  STA with tools/sdram128/sdram_io.sdc on a253d77: SDRAM_CLK leaves
+//  the pin 3.77 ns after the internal clock (DDIO + output buffer), so the chip
+//  edge is ~7.65 ns after an internal rising edge, and a word reaches the input
+//  register 8.5-12.6 ns after the chip edge that launches it (tAC 5.4 + board +
+//  input 2.4 ns; tOH 2.5 for the end).  Counted from the internal clock that is
+//  a window around a FALLING edge (+0.6 .. +4.7 ns after the rising edge two
+//  clocks on, falling edge at +3.88), with no rising edge inside: the rising-edge
+//  capture of a253d77 was 0.9 ns early.  So: falling-edge IO register (dq_n), a
+//  falling-edge fabric register (a full clock from the pad), then rising (dq_p,
+//  half a clock fabric to fabric).  The board delays (0.3-0.7 ns) are assumed.
+reg [15:0] dq_n, dq_n2, dq_p;
+always @(negedge clk) begin dq_n <= SDRAM_DQ; dq_n2 <= dq_n; end
+always @(posedge clk) dq_p <= dq_n2;
 
 // ─── address map ───────────────────────────────────────────────────────────
 //  32 MB (and 64 MB): bank = a[24:23], row = a[22:10], col = {a[25], a[9:1]},
@@ -440,10 +447,12 @@ always @(posedge clk) begin
                 dq_out <= vs_wdata[31:16]; dq_oe <= 1'b1;
             end
         end
-        ps[8]: if (vs_v && !vs_we) v_rdata[15:0] <= dq_p;   // V word0
-        ps[9]: if (vs_v && !vs_we) begin v_rdata[31:16] <= dq_p; v_rvalid <= 1'b1; end
+        ps[10]: if (vs_v && !vs_we) v_rdata[15:0] <= dq_p;   // V word0
         default: ;
         endcase
+        //  V word1 at the edge ending cycle 11 -- the one that also makes the next
+        //  V decision, so it reads this frame's vs_* (they change on this edge)
+        if (ps[11] && vs_v && !vs_we) begin v_rdata[31:16] <= dq_p; v_rvalid <= 1'b1; end
 
         // ── G1: decide in cycle 2, ACT 4, READ 7 / WRITE 9, mask 10 ───────────
         // ── G2: decide in cycle 6, ACT 8, READ 11 / WRITE 1, mask 2 ───────────
@@ -468,17 +477,18 @@ always @(posedge clk) begin
             if (ps[2]) g1 <= pick; else g2 <= pick;
             prev_v <= pick.v;
             if (pick.v) begin prev_c <= pick.l.c; prev_b <= pick.l.b; end
-            //  a write drops its cache line now (by index, as sdram.sv); the fills
-            //  come in cycles 11 and 3, so the port is free here
-            if (pick.v && !pick.rnw) begin c_we <= 1; c_waddr <= pick.word[CW-1:0]; c_wdata <= '0; end
         end
 
         // ACT (cycles 4, 8) and the cache drop for a write (by index, as sdram.sv)
+        //  ACT; a write drops its cache line here (by index, as sdram.sv) -- the
+        //  read fills come in cycles 2 and 6, so the port is free in 3 and 7
         if (ps[3] && g1.v) begin
             command <= CMD_ACT; chip <= g1.l.c; ba_i <= g1.l.b; a_i <= g1.l.r;
+            if (!g1.rnw) begin c_we <= 1; c_waddr <= g1.word[CW-1:0]; c_wdata <= '0; end
         end
         if (ps[7] && g2.v) begin
             command <= CMD_ACT; chip <= g2.l.c; ba_i <= g2.l.b; a_i <= g2.l.r;
+            if (!g2.rnw) begin c_we <= 1; c_waddr <= g2.word[CW-1:0]; c_wdata <= '0; end
         end
         // READ (cycles 7, 11)
         if (ps[6] && g1.v && g1.rnw) begin
@@ -505,17 +515,18 @@ always @(posedge clk) begin
         if ((ps[9] && g1.v && !g1.rnw) || (ps[1] && g2.v && !g2.rnw))
             a_i[12:11] <= 2'b11;
 
-        // read capture from dq_p: G1 word0 at the edge ending cycle 0 (next frame),
-        // G2 at cycle 4 (the output stage puts the chip one clock behind)
+        // read capture from dq_p: G1 word0 at the edge ending cycle 2 (next frame),
+        // G2 at cycle 6 -- the same edges that decide the next G1/G2, so g1/g2
+        // read here are still this access's
 `ifdef TDM_MUT_CAP          // negative control: one clock late
+        if ((ps[3] && g1.v && g1.rnw) || (ps[7] && g2.v && g2.rnw)) begin
+`elsif TDM_MUT_CAPE         // negative control: one clock early
         if ((ps[1] && g1.v && g1.rnw) || (ps[5] && g2.v && g2.rnw)) begin
-`elsif TDM_MUT_CAPE         // negative control: one clock early (= the falling-edge capture)
-        if ((ps[11] && g1.v && g1.rnw) || (ps[3] && g2.v && g2.rnw)) begin
 `else
-        if ((ps[0] && g1.v && g1.rnw) || (ps[4] && g2.v && g2.rnw)) begin
+        if ((ps[2] && g1.v && g1.rnw) || (ps[6] && g2.v && g2.rnw)) begin
 `endif
             gslot_t g;
-            g = (ps[11] | ps[0] | ps[1]) ? g1 : g2;
+            g = (ps[1] | ps[2] | ps[3]) ? g1 : g2;
             case (g.ch)
                 2'd0: begin ch1_saved_data <= dq_p; ch1_ready <= 1; end
                 2'd1: begin

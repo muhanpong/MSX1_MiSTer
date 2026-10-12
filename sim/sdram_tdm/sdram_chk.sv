@@ -63,6 +63,7 @@ module sdram_chk #(parameter int NCHIP = 1, parameter int COLS = 512, parameter 
     logic [1:0]  rd_m;
     bit          nx_ok = 1'b0;
     int          last_word = -100;   // last edge whose read word is on the bus
+    always @(negedge clk) drv <= nx_ok ? nx_v : 16'hzzzz;   // = FPGA rising edge
     //  (assignments to drv from a forked task never reached the net in the
     //  timing simulator; the falling-edge process below does it without delays)
 
@@ -102,14 +103,17 @@ module sdram_chk #(parameter int NCHIP = 1, parameter int COLS = 512, parameter 
         // ── write burst word1 ──
         if (e == wr_end) write_word(wr_c, wr_b, wr_r, wr_k, a[12:11]);
 
-        // ── read output: the word valid at chip edge e goes on the bus AT e and
-        //    stays until e+1.  That is the real order seen from the FPGA: with
-        //    the clock-out delay, tAC and the board, the word reaches the pins
-        //    ~2-7 ns after the internal falling edge e, so a falling-edge capture
-        //    at e takes the previous word and a rising-edge capture after it
-        //    takes this one.  (The first model drove it before e, and a design
-        //    capturing on the falling edge passed.)  No delays: blocking here is
-        //    safe, the FPGA samples on the other edge. ──
+        // ── read output.  Model clock = SDRAM_CLK = the FPGA clock inverted, so
+        //    this edge is an FPGA falling edge.  Measured by STA (sdram_io.sdc on
+        //    a253d77): the real pin clock lags 3.77 ns more, and the word valid at
+        //    chip edge e is at the FPGA input register from +0.6 to +4.7 ns after
+        //    the FPGA rising edge that follows this one -- i.e. around the NEXT
+        //    falling edge.  So the word computed here goes onto the bus at the
+        //    following FPGA rising edge (non-blocking, so an FPGA rising-edge
+        //    register on that edge still sees the old word) and stays one clock.
+        //    A rising-edge capture gets a wrong word; the falling edge in between
+        //    gets the right one.  (Two earlier versions put the word earlier and
+        //    passed designs the STA rejects.) ──
         if (rdq.exists(e)) begin
             rd_w  = rdq[e];
             rd_kk = key(rd_w.c, rd_w.b, rd_w.r, rd_w.k);
@@ -119,9 +123,9 @@ module sdram_chk #(parameter int NCHIP = 1, parameter int COLS = 512, parameter 
             if (rd_m[0]) nx_v[7:0]  = 8'hzz;
             if (rd_m[1]) nx_v[15:8] = 8'hzz;
             if (rd_m != 2'b00) err($sformatf("read word masked by DQM=%b (row bits on A12:A11?)", rd_m));
-            drv = nx_v;
+            nx_ok = 1'b1;
             last_word = e;
-        end else drv = 16'hzzzz;
+        end else nx_ok = 1'b0;
         if (rdq.exists(e)) rdq.delete(e);
 
         // ── commands ──

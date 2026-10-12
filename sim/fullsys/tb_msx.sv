@@ -1061,13 +1061,15 @@ module sdram_big_tdm
    reg  [1:0] dqm_d1, dqm_d2;
    reg [23:0] w_idx;  reg w_pend = 1'b0;
    initial for (int i = 0; i < 6; i++) rq_v[i] = 1'b0;
+   //  the word reaches the FPGA pins after the next FPGA rising edge (STA, as in
+   //  sim/sdram_tdm/sdram_chk.sv): it is put on DQ_out there, non-blocking
+   reg [15:0] pend = 16'h0000;
+   always @(posedge clk) DQ_out <= pend;
    always @(negedge clk) begin
-      // the word valid at this chip edge goes out now and stays until the next
-      // (as sim/sdram_tdm/sdram_chk.sv: the controller samples on the rising edge
-      // half a clock later; a falling-edge capture would take the previous word)
+      // the word valid at this chip edge
       for (int i = 0; i < 4; i++) begin rq_v[i] = rq_v[i+1]; rq_idx[i] = rq_idx[i+1]; end
       rq_v[4] = 1'b0;
-      DQ_out <= (rq_v[0] && dqm_d2 == 2'b00) ? mem[rq_idx[0]] : 16'h0000;   // DQM latency 2
+      pend <= (rq_v[0] && dqm_d2 == 2'b00) ? mem[rq_idx[0]] : 16'h0000;     // DQM latency 2
       dqm_d2 = dqm_d1; dqm_d1 = A[12:11];
       if (w_pend) begin
          if (!A[11]) mem[w_idx][7:0]  <= DQ_in[7:0];

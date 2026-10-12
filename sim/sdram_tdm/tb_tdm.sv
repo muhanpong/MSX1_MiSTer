@@ -146,7 +146,10 @@ module tb;
     // ── VRAM agent: a request every frame, changed only after a grant ──
     logic [31:0] vref [int];
     int vdone = 0, vreads = 0, vden = 0;
-    logic [31:0] vexp; bit vexp_v = 0; logic [15:0] vexp_a;
+    //  expected V reads in grant order: the result of one frame's read can arrive
+    //  on the edge that grants the next (v_rvalid at the frame boundary)
+    logic [31:0] vexp_q [$];
+    logic [15:0] vexpa_q [$];
     task automatic vagent();
 
         wait (dut.run); repeat (30) @(posedge clk);
@@ -166,7 +169,7 @@ module tb;
                     for (int b = 0; b < 4; b++) if (v_be[b]) o[b*8 +: 8] = v_wdata[b*8 +: 8];
                     vref[v_addr] = o;
                 end else begin
-                    vexp = vref[v_addr]; vexp_v = 1; vexp_a = v_addr;
+                    vexp_q.push_back(vref[v_addr]); vexpa_q.push_back(v_addr);
                 end
             end else if (v_req) vden++;
             @(negedge clk);
@@ -174,11 +177,12 @@ module tb;
     endtask
     always @(posedge clk) if (v_rvalid) begin
         #1;
-        if (!vexp_v) fail("v_rvalid with no read outstanding");
+        if (vexp_q.size() == 0) fail("v_rvalid with no read outstanding");
         else begin
+            logic [31:0] ex; logic [15:0] ea;
+            ex = vexp_q.pop_front(); ea = vexpa_q.pop_front();
             vreads++;
-            if (v_rdata !== vexp) fail($sformatf("V read %h = %h, expected %h", vexp_a, v_rdata, vexp));
-            vexp_v = 0;
+            if (v_rdata !== ex) fail($sformatf("V read %h = %h, expected %h", ea, v_rdata, ex));
         end
     end
 
