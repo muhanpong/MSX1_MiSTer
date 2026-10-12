@@ -1627,11 +1627,17 @@ wire        pcm_sdram_ready;
 // PCM ROM base address in SDRAM — driven by memory_upload when loading yrw801.rom
 wire [26:0] pcm_rom_base;
 
-sdram sdram
+//  sdram128 study: the fixed-slot controller (rtl/peripheral/sdram_tdm.sv,
+//  docs/sdram_tdm_design.md).  No V9968 yet: the VRAM port is idle (v_en = 0),
+//  which also leaves its bank to general data.  The instance keeps the name
+//  `sdram`; MSX1.sdc's ch2 exceptions name sdram_tdm:sdram.
+sdram_tdm sdram
 (
    .init(~locked_sdram),
    .clk(clk_sdram),
-   .doRefresh(1'd0),
+   .mode128(sdram_size == 2'd3),
+   .v_en(1'b0), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
+   .v_grant(), .v_rdata(), .v_rvalid(),
 
    .ch1_dout(nvbak_sdram_dout),
    .ch1_din (upload_active ? upload_ram_din  : dump_active ? dump_sdram_din  : nvbak_sdram_din),

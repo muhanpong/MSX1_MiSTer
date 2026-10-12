@@ -56,8 +56,11 @@ set_multicycle_path -hold  -end 5 -to [get_registers {*sdram*ch2_*}]
 # cmem -> ch2_saved_data at -4.2 ns single-cycle, signoff PASS, and read wrong
 # bytes on the board.  -from and -to both given outranks -to alone, so this
 # restores one cycle for internal sources and leaves the T80/NextZ80 hop at 6.
-set_multicycle_path -setup -end 1 -from [get_registers {*sdram:sdram|*}] -to [get_registers {*sdram*ch2_*}]
-set_multicycle_path -hold  -end 0 -from [get_registers {*sdram:sdram|*}] -to [get_registers {*sdram*ch2_*}]
+#  sdram128 study: the controller is sdram_tdm, instance `sdram`.  This pattern
+#  must name it -- with the old {*sdram:sdram|*} it matched nothing and every
+#  internal path into ch2_* would have been relaxed to 6 (the 20260928a failure).
+set_multicycle_path -setup -end 1 -from [get_registers {*sdram_tdm:sdram|*}] -to [get_registers {*sdram*ch2_*}]
+set_multicycle_path -hold  -end 0 -from [get_registers {*sdram_tdm:sdram|*}] -to [get_registers {*sdram*ch2_*}]
 
 # OPL4 CPU register write path (opl4latch → pcm_engine decode registers).
 # CPU writes the OPL4 latch on ce_3m58_p ticks; address decode goes through

@@ -67,13 +67,20 @@ if [ "$MODE" = map ]; then
     exit "$FAIL"
 fi
 
+#  an SDC exception whose name pattern matches nothing is dropped without an error
+#  (332049/332174).  The sdram -> sdram_tdm rename would have done exactly that to
+#  the ch2 single-cycle exception, so every ignored constraint fails the gate.
+ign=$(grep -E "\((332049|332174)\)" $STA | grep -o "MSX1\.sdc([0-9]*)" | sort -u | tr '\n' ' ')
+echo "SDC constraints ignored by TimeQuest: ${ign:-none}"
+[ -z "$ign" ] || fail "SDC constraints ignored: $ign"
+
 echo "setup, clk_sdram: $(awk '/; Setup Summary/,/^$/' $STA | grep 'emu|pll.*general\[0\]' | awk -F';' '{print "slack "$3" TNS "$4}' | tr -s ' ')"
 T=$(mktemp)
 "$Q/quartus_sta" -t tools/sdram128/sta_paths.tcl "$T" > /dev/null 2>&1 || fail "quartus_sta failed"
 echo "failing endpoints: $(wc -l < "$T")"
 awk -F'\t' '{n=split($4,a,"|"); t=a[n]; sub(/\[.*/,"",t); sub(/~.*/,"",t);
              m=split($3,b,"|"); s=b[m]; sub(/\[.*/,"",s); sub(/~.*/,"",s);
-             mod=($4 ~ /u_pcm/)?"pcm":(($4 ~ /sdram:sdram/)?"sdram":(($4 ~ /u_moonsound/)?"moonsound":"other"));
+             mod=($4 ~ /u_pcm/)?"pcm":(($4 ~ /sdram(_tdm)?:sdram/)?"sdram":(($4 ~ /u_moonsound/)?"moonsound":"other"));
              k=$1" "mod": "t" <- "s; c[k]++; if(!(k in w)||$2<w[k]) w[k]=$2}
      END{for(k in c) printf "%5d %7.2f  %s\n", c[k], w[k], k}' "$T" | sort -k2 -n | head -${TOP:-30}
 rm -f "$T"
