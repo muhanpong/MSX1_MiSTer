@@ -78,71 +78,23 @@ set_multicycle_path -hold  -end 5 \
     -from [get_registers {*ymf278b_regs*opl4latch*}] \
     -to   [get_registers {*pcm_engine*}]
 
-# OPL4 PCM position/step datapath (stage_a_reg -> next_pos_r / next_stepPtr_r /
-# next_pos_for_b_r).  stage_a_reg latches a slot's regs ONCE per 64-cycle slot
-# window (at dispatch, slot_phase==0) and holds; next_*_r feed next_addrs which
-# is only consumed at the next stage_advance (slot_phase==63), ~63 cycles later.
-# So the whole window is available and the single-cycle setup is pessimistic.
-# These are the chronic oct/fn -> next_pos setup violators on this clock.
-set_multicycle_path -setup -end 4 \
-    -from [get_registers {*u_pcm|stage_a_reg*}] \
-    -to   [get_registers {*u_pcm|next_pos_r* *u_pcm|next_stepPtr_r* *u_pcm|next_pos_for_b_r*}]
-set_multicycle_path -hold  -end 3 \
-    -from [get_registers {*u_pcm|stage_a_reg*}] \
-    -to   [get_registers {*u_pcm|next_pos_r* *u_pcm|next_stepPtr_r* *u_pcm|next_pos_for_b_r*}]
-# next_pos_for_b_r is chained off the (window-stable) next_pos_r.
-set_multicycle_path -setup -end 4 \
-    -from [get_registers {*u_pcm|next_pos_r*}] \
-    -to   [get_registers {*u_pcm|next_pos_for_b_r*}]
-set_multicycle_path -hold  -end 3 \
-    -from [get_registers {*u_pcm|next_pos_r*}] \
-    -to   [get_registers {*u_pcm|next_pos_for_b_r*}]
-# OPL4 PCM LFO vibrato ([14]).  vib_off_r = compute_vib(stage_a_reg.dyn.lfo_cnt):
-# triangle fold + multiply + signed /12 — a deep combinational cloud (~45 ns,
-# single-cycle slack -33.9 ns).  lfo_cnt is part of stage_a_reg, latched once
-# per 64-cycle slot window and held; vib_off_r is only consumed (via calc_step ->
-# next_pos_r) at the next stage_advance.  Window is free → multicycle (6 covers
-# the /12 with margin).
-set_multicycle_path -setup -end 6 \
-    -from [get_registers {*u_pcm|stage_a_reg*}] \
-    -to   [get_registers {*u_pcm|vib_off_r*}]
-set_multicycle_path -hold  -end 5 \
-    -from [get_registers {*u_pcm|stage_a_reg*}] \
-    -to   [get_registers {*u_pcm|vib_off_r*}]
-# vib_off_r feeds calc_step -> next_pos_r / next_stepPtr_r (same window-stable
-# datapath as the oct/fn paths above).
-set_multicycle_path -setup -end 4 \
-    -from [get_registers {*u_pcm|vib_off_r*}] \
-    -to   [get_registers {*u_pcm|next_pos_r* *u_pcm|next_stepPtr_r*}]
-set_multicycle_path -hold  -end 3 \
-    -from [get_registers {*u_pcm|vib_off_r*}] \
-    -to   [get_registers {*u_pcm|next_pos_r* *u_pcm|next_stepPtr_r*}]
+# The v2 PCM engine's window multicycles (stage_a_reg / stage_b_reg / stage_c_reg /
+# vib_off_r / next_pos_r / d1a_pkt) were removed 2026-10-13: engine2 has none of
+# those registers, TimeQuest ignored all nine pairs as empty collections (332049),
+# and engine2 closes 128.86 MHz single-cycle (sdram128-study efddce8, +0.180 ns).
+# A relaxed path inside engine2 would hide exactly the kind of chain PIPE splits.
 
-# OPL4 PCM Stage B -> Stage C sample decode/interpolation.  stage_b_reg, sb_split
-# and sb_b_idx all latch at stage_advance (slot_phase==63) and hold for the whole
-# 64-cycle window; stage_c_reg samples the decode result at the NEXT stage_advance,
-# ~64 cycles later.  The 12-bit loop-seam fix added an sb_split branch to this
-# combinational decode, pushing stage_b_reg/sb_split -> stage_c_reg.interp to
-# -0.418ns under single-cycle analysis — pessimistic, since the window is free.
-set_multicycle_path -setup -end 4 \
-    -from [get_registers {*u_pcm|stage_b_reg* *u_pcm|sb_split* *u_pcm|sb_b_idx*}] \
-    -to   [get_registers {*u_pcm|stage_c_reg*}]
-set_multicycle_path -hold  -end 3 \
-    -from [get_registers {*u_pcm|stage_b_reg* *u_pcm|sb_split* *u_pcm|sb_b_idx*}] \
-    -to   [get_registers {*u_pcm|stage_c_reg*}]
-
-# OPL4 PCM EG-rate datapath: stage_c_reg latches at stage_advance and HOLDS for
-# the whole 64-cycle window; d1a_pkt is latched at the NEXT stage_advance from it.
-# So the deep calc_eg_rate/calc_decay_rate -> eg_rate_shift_rom -> eg_inc_rom chain
-# (stage_c_reg.regs.rc/oct/fn -> d1a_pkt.inc_v) has the full window, not 1 cycle.
-# Same window-stable pattern as the stage_a/stage_b paths above; without it this
-# path swings to ~-1 ns on placement churn.
-set_multicycle_path -setup -end 4 \
-    -from [get_registers {*u_pcm|stage_c_reg*}] \
-    -to   [get_registers {*u_pcm|d1a_pkt*}]
-set_multicycle_path -hold  -end 3 \
-    -from [get_registers {*u_pcm|stage_c_reg*}] \
-    -to   [get_registers {*u_pcm|d1a_pkt*}]
+# ─── clk21m -> clk_sdram at 6:1 ──────────────────────────────────────────────
+#  With clk_sdram at 128.86 MHz the two clocks are an exact 6:1 and every
+#  single-cycle crossing gets one clk_sdram (7.76 ns, was 11.64).  The two
+#  multicycles above still hold: the ch2 head window is 1 clk21m + 2 clk_sdram =
+#  8 clk_sdram at 6:1 (4+2 = 6 at 4:1), so -end 6 keeps its margin; the OPL4
+#  latch is written an OUT instruction before the data write it qualifies.
+#  OSD audio trims (pcm_vol/fm_vol/mutes, hps_io status bits) into MoonSound's
+#  gain stage: set from the menu, read every sample; a change landing a sample
+#  late is inaudible and was the worst clk21m -> clk_sdram path (status[112] ->
+#  pc_l_mul, -0.35 ns in 4cd2115).
+set_false_path -from [get_registers {*hps_io|status[*]}] -to [get_registers {*u_moonsound|*}]
 
 # ─── CPU select ─────────────────────────────────────────────────────────────
 #  OSD speed bits: quasi-static, registered through clock.sv's bus-idle latch.
