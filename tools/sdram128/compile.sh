@@ -2,7 +2,8 @@
 #  Compile the sdram128 study in stages, and stop after synthesis when the build is
 #  not the one it claims to be.
 #
-#    tools/sdram128/compile.sh            (from the worktree root; LOG=<file> optional)
+#    tools/sdram128/compile.sh            (from the worktree root)
+#    FROM=fit tools/sdram128/compile.sh   (map report already current and checked)
 #
 #  map (~6 min) -> check_timing.sh map -> fit (~20 min) -> sta -> check_timing.sh
 #  99aac4e spent a whole 27-minute compile to find, at the end, that two PCM arrays
@@ -14,7 +15,7 @@
 set -u
 cd "$(dirname "$0")/../.."
 Q=${Q:-/home/sysop/data/intelFPGA_lite/17.0/quartus/bin}
-pgrep -f "quartus_(map|fit|sta|asm|sh)" > /dev/null && { echo "RESULT FAIL: another Quartus job is running"; exit 3; }
+pgrep -x "quartus_(map|fit|sta|asm|sh)" > /dev/null && { echo "RESULT FAIL: another Quartus job is running"; exit 3; }
 rc=0
 stage() {
     local st=$1 t0=$(date +%s)
@@ -25,7 +26,14 @@ stage() {
 echo "compile $(git log -1 --format='%h %s') at $(date '+%F %T')"
 [ -n "$(git status --porcelain -- rtl sys MSX1.sv MSX1.sdc)" ] && echo "note: uncommitted RTL changes are in this build"
 mkdir -p output_files
-if stage map && tools/sdram128/check_timing.sh map; then
+if [ "${FROM:-map}" = fit ]; then
+    [ output_files/MSX1.map.rpt -nt rtl/peripheral/SOUND/ymf278b_fpga/rtl/pcm/ymf278_pcm_engine2.sv ] \
+        || { echo "RESULT FAIL: FROM=fit but the map report is older than the engine source"; exit 1; }
+    tools/sdram128/check_timing.sh map; mok=$?
+else
+    stage map && tools/sdram128/check_timing.sh map; mok=$?
+fi
+if [ $mok -eq 0 ]; then
     t0=$(date +%s)
     if stage fit && stage sta; then
         [ $(( $(date +%s)-t0 )) -lt 240 ] && echo "WARN: fit+sta under 4 min -- smart recompile may have skipped the fit"
