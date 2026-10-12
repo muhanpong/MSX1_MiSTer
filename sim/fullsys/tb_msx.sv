@@ -951,7 +951,7 @@ module tb;
    //  clk_sdram) to completion (ch2_rdtog flips, or a cache hit), in ns.  The
    //  same for both controllers, so the TDM figures can be put next to the ones
    //  of sdram.sv, which the board has run on.
-   realtime lat_t0 = 0, lat_max = 0;
+   realtime lat_t0 = 0, lat_max = 0, lat_min = 1e9;   // first version divided ns by 1000: max read 0.2
    longint  lat_n = 0, lat_open = 0, lat_hist[8] = '{0,0,0,0,0,0,0,0};   // <100,<150,<200,<250,<300,<350,<400,>=400
    logic    lat_on = 1'b0, lat_ce = 1'b0, lat_tog = 1'b0, lat_hit = 1'b0;
    always @(posedge clk_sdram) begin
@@ -959,15 +959,16 @@ module tb;
       if (sd_run && sdram_ce && ram_rnw && !lat_ce) begin lat_on <= 1'b1; lat_t0 = $realtime; lat_tog <= sdram_rdtog; lat_open++; end
       else if (lat_on && (sdram_rdtog != lat_tog || sdram_hit)) begin
          automatic realtime d;
-         d = ($realtime - lat_t0) / 1000.0;
+         d = $realtime - lat_t0;              // timescale 1ns: already ns
+         if (d < lat_min) lat_min = d;
          lat_on <= 1'b0; lat_n++;
          if (d > lat_max) lat_max = d;
          lat_hist[(d >= 400.0) ? 7 : int'(d / 50.0) - 1 < 0 ? 0 : int'(d / 50.0) - 1]++;
       end
    end
    final begin
-      $display("cpu read latency: requests=%0d completed=%0d max=%.1f ns  hist <100:%0d <150:%0d <200:%0d <250:%0d <300:%0d <350:%0d <400:%0d >=400:%0d",
-               lat_open, lat_n, lat_max, lat_hist[0], lat_hist[1], lat_hist[2], lat_hist[3], lat_hist[4], lat_hist[5], lat_hist[6], lat_hist[7]);
+      $display("cpu read latency: requests=%0d completed=%0d min=%.1f max=%.1f ns  hist <100:%0d <150:%0d <200:%0d <250:%0d <300:%0d <350:%0d <400:%0d >=400:%0d",
+               lat_open, lat_n, lat_min, lat_max, lat_hist[0], lat_hist[1], lat_hist[2], lat_hist[3], lat_hist[4], lat_hist[5], lat_hist[6], lat_hist[7]);
       $display("sdram demand: all cycles=%0d ACT=%0d | run cycles=%0d (%.1f ms) ACT=%0d (%.3f M/s, busy-equivalent %.1f%% of one 12-clk slot stream)",
                sd_cyc, sd_act, sd_run_cyc, sd_run_cyc * TCK_NS * 1e-6, sd_run_act,
                sd_run_cyc ? sd_run_act / (sd_run_cyc * TCK_NS * 1e-9) / 1e6 : 0.0,
