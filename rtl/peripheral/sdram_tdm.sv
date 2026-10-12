@@ -1,0 +1,528 @@
+//
+// sdram_tdm -- fixed-slot SDRAM controller for 128.86 MHz (sdram128 study)
+//
+// Same channel ports as sdram.sv (ch1 upload, ch2 CPU + read cache, ch3 flash,
+// ch4 PCM), plus one VRAM port served in a fixed slot every 12 clocks (one V9968
+// slot at 85.909 MHz).  Design and the reasons for every number below:
+// docs/sdram_tdm_design.md; the frame comes from tools/sdram128/tdm_solve.py.
+//
+//   cycle  0 V  ACT      4 G1 ACT      8 G2 ACT
+//          3 V  READ     7 G1 READ    11 G2 READ
+//          5 V  WRITE    9 G1 WRITE    1 G2 WRITE (next frame)
+//          6 V  word1 mask  10 G1 mask 11   2 G2 mask 11
+//
+// CL3, BL2, write burst on, auto precharge on every access.  DQM is A[12:11]
+// (MiSTer modules tie them), so a general ACT may carry row bits A12:A11 != 00
+// only when the access before it is not a read (G1 after a V read, G2 after a
+// G1 read are DQM-sensitive).  Two consecutive general accesses must hit
+// different banks (tRC); refresh takes a frame per chip (section 5).
+//
+// The chip samples on SDRAM_CLK rising = clk FALLING (inverted clock out).  Read
+// data is captured on clk falling (the chip edge three after the READ), then
+// moved to clk rising: word0 of a READ issued in cycle t is in dq_n at the
+// rising edge that ends cycle t+3.
+//
+// This source file is free software under the GNU GPL v3 or later (sdram.sv,
+// Sorgelig, 2015-2019, which it is derived from).
+//
+module sdram_tdm
+#(
+    parameter CACHE_LINES = 8192,
+    parameter CLK_HZ      = 128863620
+)
+(
+    input             init,
+    input             clk,
+    input             mode128,     // 1: 128 MB board map (two 64 MB chips)
+
+    inout      [15:0] SDRAM_DQ,
+    output reg [12:0] SDRAM_A,
+    output            SDRAM_DQML,
+    output            SDRAM_DQMH,
+    output reg  [1:0] SDRAM_BA,
+    output            SDRAM_nCS,
+    output            SDRAM_nWE,
+    output            SDRAM_nRAS,
+    output            SDRAM_nCAS,
+    output            SDRAM_CKE,
+    output            SDRAM_CLK,
+
+    input      [26:0] ch1_addr,
+    output      [7:0] ch1_dout,
+    input       [7:0] ch1_din,
+    input             ch1_req,
+    input             ch1_rnw,
+    output reg        ch1_ready,
+
+    input      [26:0] ch2_addr,
+    output      [7:0] ch2_dout,
+    input       [7:0] ch2_din,
+    input             ch2_req,
+    input             ch2_rnw,
+    output reg        ch2_ready,
+    output reg        ch2_rdtog,
+    output            ch2_hit,
+
+    input      [26:0] ch3_addr,
+    output      [7:0] ch3_dout,
+    input       [7:0] ch3_din,
+    input             ch3_req,
+    input             ch3_rnw,
+    output reg        ch3_ready,
+    output reg        ch3_done,
+
+    input      [26:0] ch4_addr,
+    output      [7:0] ch4_dout,
+    output     [15:0] ch4_dout16,
+    input       [7:0] ch4_din,
+    input             ch4_req,
+    input             ch4_rnw,
+    output reg        ch4_ready,
+
+    // VRAM: one 32-bit access per frame.  Present v_req with the rest before the
+    // frame boundary (sampled at the edge that ends cycle 11); v_grant says this
+    // frame took it (0 = refresh owned the slot, ask again).  Read data arrives
+    // with v_rvalid; word0 (column 2n) is v_rdata[15:0].
+    input             v_req,
+    input             v_we,
+    input      [15:0] v_addr,      // 32-bit word address, 256 KB
+    input      [31:0] v_wdata,
+    input       [3:0] v_be,        // byte enables, 1 = write that byte
+    output reg        v_grant,
+    output reg [31:0] v_rdata,
+    output reg        v_rvalid
+);
+
+// ─── timing (CLK_HZ) ───────────────────────────────────────────────────────
+localparam int  PERIOD_PS   = 1000000000 / (CLK_HZ / 1000);
+localparam int  RFSH_EVERY  = (7800000 / PERIOD_PS) - 48;  // 7.8 us/row, margin for a frame wait
+localparam int  INIT_CYCLES = (200000000 / PERIOD_PS);     // 200 us power-up
+localparam [12:0] MODE      = 13'b000_0_00_011_0_001;     // write burst, CL3, sequential, BL2
+localparam [26:0] VBASE128  = 27'h1C00000;                // 28 MB: chip 1, bank 3
+localparam [26:0] VBASE32   = 27'h1800000;                // 24 MB: bank 3
+
+localparam [2:0] CMD_NOP = 3'b111, CMD_ACT = 3'b011, CMD_READ = 3'b101, CMD_WRITE = 3'b100,
+                 CMD_PRE = 3'b010, CMD_REF = 3'b001, CMD_MRS = 3'b000;
+
+reg  [2:0] command = CMD_NOP;
+reg        chip    = 1'b0;
+assign SDRAM_nCS  = chip;
+assign SDRAM_nRAS = command[2];
+assign SDRAM_nCAS = command[1];
+assign SDRAM_nWE  = command[0];
+assign SDRAM_CKE  = 1'b1;
+assign {SDRAM_DQMH, SDRAM_DQML} = SDRAM_A[12:11];
+
+reg [15:0] dq_out;
+reg        dq_oe = 1'b0;
+assign SDRAM_DQ = dq_oe ? dq_out : 16'bz;
+reg [15:0] dq_n;
+always @(negedge clk) dq_n <= SDRAM_DQ;
+
+// ─── address map ───────────────────────────────────────────────────────────
+//  32 MB (and 64 MB): bank = a[24:23], row = a[22:10], col = {a[25], a[9:1]},
+//  chip = a[26] -- the map sdram.sv uses.  128 MB: row[12:11] = w[25:24] so all of
+//  0-32 MB has row bits 00; chip = w[23]; chip 0 interleaves banks every 2 KB,
+//  chip 1 keeps 4 MB banks and bank 3 (28-32 MB) is the VRAM's.
+typedef struct packed { logic c; logic [1:0] b; logic [12:0] r; logic [9:0] k; } loc_t;
+function automatic loc_t map(input [26:0] a, input m);
+    loc_t l;
+    logic [25:0] w;
+    w = a[26:1];
+    if (!m) begin
+        l.c = a[26]; l.b = a[24:23]; l.r = a[22:10]; l.k = {a[25], a[9:1]};
+    end else begin
+        l.c = w[23];
+        l.r[12:11] = w[25:24];
+        l.k = w[9:0];
+        if (!w[23]) begin l.b = w[11:10]; l.r[10:0] = w[22:12]; end
+        else        begin l.b = w[22:21]; l.r[10:0] = w[20:10]; end
+    end
+    return l;
+endfunction
+
+// ─── frame ─────────────────────────────────────────────────────────────────
+reg [3:0] ph = 4'd0;
+reg       run = 1'b0;            // init sequence done
+
+// ─── requests (as sdram.sv) and the ch2 read cache ─────────────────────────
+reg        ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1;
+reg        ch1_rq, ch2_rq, ch3_rq, ch4_rq;
+reg        ch1_rnw_1, ch2_rnw_1, ch3_rnw_1, ch4_rnw_1;
+reg [26:0] ch1_addr_1, ch2_addr_1, ch3_addr_1, ch4_addr_1;
+reg  [7:0] ch1_din_1, ch2_din_1, ch3_din_1, ch4_din_1;
+reg [15:0] ch1_saved_data, ch2_saved_data, ch3_saved_data, ch4_saved_data;
+reg        ch1_saved_a0, ch2_saved_a0, ch3_saved_a0, ch4_saved_a0;
+initial begin
+    {ch1_rq, ch2_rq, ch3_rq, ch4_rq} = '0;
+    {ch1_ready, ch2_ready, ch3_ready, ch4_ready, ch3_done, ch2_rdtog} = '0;
+    {ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1} = '0;
+    v_grant = 0; v_rvalid = 0;
+end
+assign ch1_dout   = ch1_saved_a0 ? ch1_saved_data[15:8] : ch1_saved_data[7:0];
+assign ch2_dout   = ch2_saved_a0 ? ch2_saved_data[15:8] : ch2_saved_data[7:0];
+assign ch3_dout   = ch3_saved_a0 ? ch3_saved_data[15:8] : ch3_saved_data[7:0];
+assign ch4_dout   = ch4_saved_a0 ? ch4_saved_data[15:8] : ch4_saved_data[7:0];
+assign ch4_dout16 = ch4_saved_data;
+
+//  The cache is sdram.sv's (see the long note there): direct mapped, one word a
+//  line, index registered (ch2_caddr) so the clk21m hop stays inside MSX1.sdc's
+//  {*sdram*ch2_*} multicycle, fill at ch2 read capture, drop by index at every
+//  write issue, a lookup that overlaps a write to its index misses.
+localparam CL = (CACHE_LINES > 1) ? CACHE_LINES : 2;
+localparam CW = $clog2(CL);
+localparam LW = 1 + (26 - CW) + 16;
+reg  [LW-1:0] cmem [0:CL-1];
+reg  [LW-1:0] c_rdata;
+reg           c_we = 1'b0, c_we_d = 1'b0;
+reg  [CW-1:0] c_waddr, c_waddr_d;
+reg  [LW-1:0] c_wdata;
+reg           c_flush = 1'b1;
+reg  [CW-1:0] c_flush_idx = '0;
+reg           ch2_cpend = 1'b0, c_pend2 = 1'b0;
+reg  [26:0]   ch2_caddr;
+reg           ch2_hit_r = 1'b0;
+assign ch2_hit = ch2_hit_r;
+always @(posedge clk) begin
+    if (c_we) cmem[c_waddr] <= c_wdata;
+    c_rdata   <= cmem[ch2_caddr[CW:1]];
+    c_we_d    <= c_we;
+    c_waddr_d <= c_waddr;
+end
+wire [CW-1:0] c_pidx   = ch2_caddr[CW:1];
+wire          c_hazard = (c_we && c_waddr == c_pidx) | (c_we_d && c_waddr_d == c_pidx);
+wire          c_match  = c_rdata[LW-1] && c_rdata[LW-2:16] == ch2_caddr[26:CW+1];
+
+// ─── slot state ────────────────────────────────────────────────────────────
+//  per general slot: which channel, the access, where it lands
+typedef struct packed {
+    logic        v;              // slot used
+    logic [1:0]  ch;             // 0..3 = ch1..ch4
+    logic        rnw;
+    logic        a0;
+    logic [7:0]  din;
+    logic [25:0] word;           // for the ch2 cache fill
+    loc_t        l;
+} gslot_t;
+gslot_t g1, g2;                  // decided at cycle 2 / 6, issued from 4 / 8
+reg     prev_v;                  // the general slot before this one was used ...
+reg     prev_c;                  //   ... on this chip
+reg [1:0] prev_b;                //   ... and this bank
+
+reg        vs_v, vs_we;          // this frame's V access
+loc_t      vs_l;
+reg [31:0] vs_wdata;
+reg  [3:0] vs_be;
+
+// ─── refresh ───────────────────────────────────────────────────────────────
+//  per chip: due every RFSH_EVERY clocks.  A refresh frame n blocks the chip for
+//  V, G1, G2 of n and V, G1 of n+1; REFRESH is issued in cycle 10 of n (all banks
+//  closed by cycle 7: the last write, G2 of n-1, precharges at ACT+11).
+reg [10:0] rf_cnt [0:1];
+reg  [1:0] rf_due;
+reg  [1:0] rf_now, rf_next;      // chip blocked this frame / blocked for V,G1 next frame
+wire       v_chip = mode128;     // the VRAM's chip: 1 on 128 MB, 0 otherwise
+
+
+// ─── choose a general request for a slot ───────────────────────────────────
+//  priority ch2 > ch1 > ch3 > ch4; a candidate is skipped if its bank is the one
+//  the previous general access used (tRC), its row bits would hit a DQM-sensitive
+//  ACT, its chip is refreshing, or it falls into the VRAM bank (never: the upload
+//  map stops below it; the check keeps a bad address from breaking the V slot).
+function automatic logic ok(input loc_t l, input logic sens, input logic blk_c0, input logic blk_c1,
+                            input logic pv, input logic pc, input [1:0] pb, input logic m);
+    logic bad;
+`ifndef TDM_MUT_BANK
+    bad = (pv && l.c == pc && l.b == pb)
+`else           // negative control: no tRC rule between general slots
+    bad = 1'b0
+`endif
+        | (sens && l.r[12:11] != 2'b00)
+        | (l.c ? blk_c1 : blk_c0)
+        | (l.b == 2'd3 && l.c == m);                  // the VRAM bank
+    return !bad;
+endfunction
+
+reg  [3:0] cand_ok;
+loc_t      cand_l [0:3];
+always_comb begin
+    logic sens, b0, b1;
+    // G1 (decided in cycle 2) is sensitive when V reads this frame; G2 (cycle 6)
+    // when G1 reads.  The blocking set differs: G1 also sees rf_next.
+`ifndef TDM_MUT_SENS
+    sens = (ph == 4'd2) ? (vs_v && !vs_we) : (g1.v && g1.rnw);
+`else           // negative control (sim/sdram_tdm): ignore DQM-sensitive ACTs
+    sens = 1'b0;
+`endif
+    b0   = (ph == 4'd2) ? (rf_now[0] | rf_next[0]) : rf_now[0];
+    b1   = (ph == 4'd2) ? (rf_now[1] | rf_next[1]) : rf_now[1];
+    cand_l[0] = map(ch2_addr_1, mode128);
+    cand_l[1] = map(ch1_addr_1, mode128);
+    cand_l[2] = map(ch3_addr_1, mode128);
+    cand_l[3] = map(ch4_addr_1, mode128);
+    cand_ok[0] = ch2_rq & ok(cand_l[0], sens, b0, b1, prev_v, prev_c, prev_b, mode128);
+    cand_ok[1] = ch1_rq & ok(cand_l[1], sens, b0, b1, prev_v, prev_c, prev_b, mode128);
+    cand_ok[2] = ch3_rq & ok(cand_l[2], sens, b0, b1, prev_v, prev_c, prev_b, mode128);
+    cand_ok[3] = ch4_rq & ok(cand_l[3], sens, b0, b1, prev_v, prev_c, prev_b, mode128);
+end
+
+// ─── init ──────────────────────────────────────────────────────────────────
+reg [15:0] init_cnt = INIT_CYCLES[15:0] + 16'd200;
+
+always @(posedge clk) begin
+    gslot_t pick;
+    logic   took;
+    loc_t   vl;
+
+    ch1_req_1 <= ch1_req; ch2_req_1 <= ch2_req; ch3_req_1 <= ch3_req; ch4_req_1 <= ch4_req;
+    c_we     <= 1'b0;
+    v_rvalid <= 1'b0;
+    command  <= CMD_NOP;
+
+    // requests (sdram.sv semantics)
+    if (ch1_req & ~ch1_req_1) begin
+        ch1_rq <= 1; ch1_rnw_1 <= ch1_rnw; ch1_addr_1 <= ch1_addr; ch1_din_1 <= ch1_din;
+    end
+    if (~ch2_req) ch2_hit_r <= 0;
+    if (ch2_req & ~ch2_req_1) begin
+        if (CACHE_LINES != 0 && ch2_rnw) begin
+            ch2_cpend <= 1;
+            ch2_caddr <= ch2_addr;
+        end else begin
+            ch2_rq <= 1; ch2_rnw_1 <= ch2_rnw; ch2_addr_1 <= ch2_addr; ch2_din_1 <= ch2_din;
+        end
+    end
+    if (ch2_cpend) begin
+        ch2_cpend <= 0;
+        c_pend2   <= 1;
+    end else if (c_pend2) begin
+        c_pend2 <= 0;
+        if (~c_flush && ~ch2_rq && c_match && ~c_hazard) begin
+            ch2_saved_data <= c_rdata[15:0];
+            ch2_saved_a0   <= ch2_caddr[0];
+            ch2_ready      <= 1;
+            ch2_hit_r      <= 1;
+        end else begin
+            ch2_rq <= 1; ch2_rnw_1 <= 1; ch2_addr_1 <= ch2_caddr;
+        end
+    end
+    if (ch3_req & ~ch3_req_1) begin
+        ch3_rq <= 1; ch3_rnw_1 <= ch3_rnw; ch3_addr_1 <= ch3_addr; ch3_din_1 <= ch3_din;
+    end
+    if (ch4_req & ~ch4_req_1) begin
+        ch4_rq <= 1; ch4_rnw_1 <= ch4_rnw; ch4_addr_1 <= ch4_addr; ch4_din_1 <= ch4_din;
+    end
+    if (~ch3_req) ch3_done <= 0;
+
+    if (!run) begin
+        // ── power-up: wait, precharge all, 8 refreshes, mode, per chip ─────
+        SDRAM_A <= 13'd0; SDRAM_BA <= 2'd0;
+        if (init_cnt != 0) init_cnt <= init_cnt - 16'd1;
+        //  per chip (chip 0 in 199..100, chip 1 in 99..0): precharge all, eight
+        //  refreshes 11 clocks apart (tRFC), load mode, tMRD before the first frame
+        case (init_cnt)
+            16'd199, 16'd99: begin command <= CMD_PRE; SDRAM_A[10] <= 1'b1; end
+            16'd195, 16'd184, 16'd173, 16'd162, 16'd151, 16'd140, 16'd129, 16'd118,
+            16'd95,  16'd84,  16'd73,  16'd62,  16'd51,  16'd40,  16'd29,  16'd18:
+                             command <= CMD_REF;
+            16'd106, 16'd6:  begin command <= CMD_MRS; SDRAM_A <= MODE; end
+            default: ;
+        endcase
+        chip <= (init_cnt < 16'd100);
+        if (init_cnt == 0) begin
+            run <= 1'b1; ph <= 4'd0;
+            ch1_ready <= 1; ch2_ready <= 1; ch3_ready <= 1; ch4_ready <= 1;
+            g1.v <= 0; g2.v <= 0; prev_v <= 0; vs_v <= 0; v_grant <= 0;
+            rf_due <= 0; rf_now <= 0; rf_next <= 0;
+            //  first refresh soon after the mode register (the chip counts from its
+            //  init refreshes: chip 0's are ~200 clocks back), the chips staggered
+            rf_cnt[0] <= RFSH_EVERY[10:0] - 11'd100; rf_cnt[1] <= RFSH_EVERY[10:0] - 11'd600;
+        end
+    end else begin
+        ph <= (ph == 4'd11) ? 4'd0 : ph + 4'd1;
+
+        // refresh timers
+        for (int c = 0; c < 2; c++) begin
+            if (rf_cnt[c] >= RFSH_EVERY[10:0]) rf_cnt[c] <= 0;
+            else                               rf_cnt[c] <= rf_cnt[c] + 11'd1;
+        end
+
+        // default address bus: the DQM a NOP cycle owes (00 unless set below)
+        SDRAM_A[12:11] <= 2'b00;
+        dq_oe <= 1'b0;
+
+        case (ph)
+        // cycle 11 -> frame boundary: V decision, refresh frame start
+        4'd11: begin
+            //  one chip per refresh frame; the other stays due (a frame later
+            //  is inside RFSH_EVERY's margin)
+            rf_next <= rf_now;
+            if (rf_due[0])                 begin rf_now <= 2'b01; rf_due[0] <= 1'b0; end
+            else if (rf_due[1] && mode128) begin rf_now <= 2'b10; rf_due[1] <= 1'b0; end
+            else                                 rf_now <= 2'b00;
+            vl = map((mode128 ? VBASE128 : VBASE32) + {9'd0, v_addr, 2'b00}, mode128);
+            took = v_req && !(rf_due[v_chip] | rf_now[v_chip]);
+            vs_v <= took; vs_we <= v_we; vs_l <= vl; vs_wdata <= v_wdata; vs_be <= v_be;
+            v_grant <= took;
+            if (took) begin
+                command <= CMD_ACT; chip <= vl.c; SDRAM_BA <= vl.b; SDRAM_A <= vl.r;
+            end
+        end
+        4'd2: begin         // V READ (cycle 3) / G1 decision
+            if (vs_v && !vs_we) begin
+                command <= CMD_READ; chip <= vs_l.c; SDRAM_BA <= vs_l.b;
+                SDRAM_A <= {2'b00, 1'b1, vs_l.k};
+            end
+        end
+        4'd4: begin         // V WRITE (cycle 5): word0 with its byte mask
+            if (vs_v && vs_we) begin
+                command <= CMD_WRITE; chip <= vs_l.c; SDRAM_BA <= vs_l.b;
+                SDRAM_A <= {~vs_be[1], ~vs_be[0], 1'b1, vs_l.k};
+                dq_out <= vs_wdata[15:0]; dq_oe <= 1'b1;
+            end
+        end
+        4'd5: begin         // cycle 6: V word1 (mask on A12:A11), or 00 for a V read's DQM
+            if (vs_v && vs_we) begin
+                SDRAM_A[12:11] <= {~vs_be[3], ~vs_be[2]};
+                dq_out <= vs_wdata[31:16]; dq_oe <= 1'b1;
+            end
+        end
+        4'd6: if (vs_v && !vs_we) v_rdata[15:0] <= dq_n;   // V word0
+        4'd7: if (vs_v && !vs_we) begin v_rdata[31:16] <= dq_n; v_rvalid <= 1'b1; end
+        default: ;
+        endcase
+
+        // ── G1: decide in cycle 2, ACT 4, READ 7 / WRITE 9, mask 10 ───────────
+        // ── G2: decide in cycle 6, ACT 8, READ 11 / WRITE 1, mask 2 ───────────
+        if (ph == 4'd2 || ph == 4'd6) begin
+            pick = '0;
+            if      (cand_ok[0]) begin pick.v = 1; pick.ch = 2'd1; pick.rnw = ch2_rnw_1; pick.a0 = ch2_addr_1[0];
+                                       pick.din = ch2_din_1; pick.word = ch2_addr_1[26:1]; pick.l = cand_l[0]; end
+            else if (cand_ok[1]) begin pick.v = 1; pick.ch = 2'd0; pick.rnw = ch1_rnw_1; pick.a0 = ch1_addr_1[0];
+                                       pick.din = ch1_din_1; pick.word = ch1_addr_1[26:1]; pick.l = cand_l[1]; end
+            else if (cand_ok[2]) begin pick.v = 1; pick.ch = 2'd2; pick.rnw = ch3_rnw_1; pick.a0 = ch3_addr_1[0];
+                                       pick.din = ch3_din_1; pick.word = ch3_addr_1[26:1]; pick.l = cand_l[2]; end
+            else if (cand_ok[3]) begin pick.v = 1; pick.ch = 2'd3; pick.rnw = ch4_rnw_1; pick.a0 = ch4_addr_1[0];
+                                       pick.din = ch4_din_1; pick.word = ch4_addr_1[26:1]; pick.l = cand_l[3]; end
+            if (pick.v) begin
+                case (pick.ch)
+                    2'd0: begin ch1_rq <= 0; ch1_ready <= 0; ch1_saved_a0 <= pick.a0; end
+                    2'd1: begin ch2_rq <= 0; ch2_ready <= 0; ch2_saved_a0 <= pick.a0; end
+                    2'd2: begin ch3_rq <= 0; ch3_ready <= 0; ch3_saved_a0 <= pick.a0; end
+                    2'd3: begin ch4_rq <= 0; ch4_ready <= 0; ch4_saved_a0 <= pick.a0; end
+                endcase
+            end
+            if (ph == 4'd2) g1 <= pick; else g2 <= pick;
+            prev_v <= pick.v;
+            if (pick.v) begin prev_c <= pick.l.c; prev_b <= pick.l.b; end
+        end
+
+        // ACT (cycles 4, 8) and the cache drop for a write (by index, as sdram.sv)
+        if (ph == 4'd3 && g1.v) begin
+            command <= CMD_ACT; chip <= g1.l.c; SDRAM_BA <= g1.l.b; SDRAM_A <= g1.l.r;
+            if (!g1.rnw) begin c_we <= 1; c_waddr <= g1.word[CW-1:0]; c_wdata <= '0; end
+        end
+        if (ph == 4'd7 && g2.v) begin
+            command <= CMD_ACT; chip <= g2.l.c; SDRAM_BA <= g2.l.b; SDRAM_A <= g2.l.r;
+            if (!g2.rnw) begin c_we <= 1; c_waddr <= g2.word[CW-1:0]; c_wdata <= '0; end
+        end
+        // READ (cycles 7, 11)
+        if (ph == 4'd6 && g1.v && g1.rnw) begin
+            command <= CMD_READ; chip <= g1.l.c; SDRAM_BA <= g1.l.b; SDRAM_A <= {2'b00, 1'b1, g1.l.k};
+        end
+        if (ph == 4'd10 && g2.v && g2.rnw) begin
+            command <= CMD_READ; chip <= g2.l.c; SDRAM_BA <= g2.l.b; SDRAM_A <= {2'b00, 1'b1, g2.l.k};
+        end
+        // WRITE (cycles 9, 1): one byte, the other byte and word1 masked
+        if ((ph == 4'd8 && g1.v && !g1.rnw) || (ph == 4'd0 && g2.v && !g2.rnw)) begin
+            gslot_t g;
+            g = (ph == 4'd8) ? g1 : g2;
+            command <= CMD_WRITE; chip <= g.l.c; SDRAM_BA <= g.l.b;
+            SDRAM_A <= {~g.a0, g.a0, 1'b1, g.l.k};
+            dq_out <= {g.din, g.din}; dq_oe <= 1'b1;
+            case (g.ch)
+                2'd0: ch1_ready <= 1;
+                2'd1: ch2_ready <= 1;
+                2'd2: begin ch3_ready <= 1; ch3_done <= 1; end
+                2'd3: ch4_ready <= 1;
+            endcase
+        end
+        // word1 mask (cycles 10, 2)
+        if ((ph == 4'd9 && g1.v && !g1.rnw) || (ph == 4'd1 && g2.v && !g2.rnw))
+            SDRAM_A[12:11] <= 2'b11;
+
+        // read capture: G1 word0 at the edge ending cycle 10, G2 at cycle 2
+`ifndef TDM_MUT_CAP
+        if ((ph == 4'd10 && g1.v && g1.rnw) || (ph == 4'd2 && g2.v && g2.rnw)) begin
+`else           // negative control: general read data taken one clock late
+        if ((ph == 4'd11 && g1.v && g1.rnw) || (ph == 4'd3 && g2.v && g2.rnw)) begin
+`endif
+            gslot_t g;
+            g = (ph >= 4'd10) ? g1 : g2;
+            case (g.ch)
+                2'd0: begin ch1_saved_data <= dq_n; ch1_ready <= 1; end
+                2'd1: begin
+                    ch2_saved_data <= dq_n; ch2_ready <= 1; ch2_rdtog <= ~ch2_rdtog;
+                    c_we <= 1; c_waddr <= g.word[CW-1:0]; c_wdata <= {1'b1, g.word[25:CW], dq_n};
+                end
+                2'd2: begin ch3_saved_data <= dq_n; ch3_ready <= 1; end
+                2'd3: begin ch4_saved_data <= dq_n; ch4_ready <= 1; end
+            endcase
+        end
+
+        for (int c = 0; c < 2; c++) if (rf_cnt[c] >= RFSH_EVERY[10:0]) rf_due[c] <= 1'b1;
+
+        // REFRESH in cycle 10 of a refresh frame, on the chip it is for.  Cycle 10
+        // may owe G1's word1 mask (11): the REFRESH carries it on A12:A11.
+`ifndef TDM_MUT_NOREF
+        if (ph == 4'd9 && rf_now != 2'b00) begin
+`else           // negative control: refresh frames are kept but nothing is refreshed
+        if (1'b0) begin
+`endif
+            command <= CMD_REF;
+            chip    <= rf_now[1];
+        end
+    end
+
+    // valid-bit sweep (sdram.sv): wins the write port while it runs
+    if (c_flush && ~init) begin
+        c_we <= 1; c_waddr <= c_flush_idx; c_wdata <= '0;
+        c_flush_idx <= c_flush_idx + 1'b1;
+        if (&c_flush_idx) c_flush <= 0;
+    end
+
+    if (init) begin
+        run <= 1'b0;
+        init_cnt <= INIT_CYCLES[15:0] + 16'd200;
+        c_flush <= 1; c_flush_idx <= '0;
+        ch2_cpend <= 0; c_pend2 <= 0; ch2_hit_r <= 0;
+        dq_oe <= 1'b0;
+    end
+end
+
+altddio_out
+#(
+    .extend_oe_disable("OFF"),
+    .intended_device_family("Cyclone V"),
+    .invert_output("OFF"),
+    .lpm_hint("UNUSED"),
+    .lpm_type("altddio_out"),
+    .oe_reg("UNREGISTERED"),
+    .power_up_high("OFF"),
+    .width(1)
+)
+sdramclk_ddr
+(
+    .datain_h(1'b0),
+    .datain_l(1'b1),
+    .outclock(clk),
+    .dataout(SDRAM_CLK),
+    .aclr(1'b0),
+    .aset(1'b0),
+    .oe(1'b1),
+    .outclocken(1'b1),
+    .sclr(1'b0),
+    .sset(1'b0)
+);
+
+endmodule
