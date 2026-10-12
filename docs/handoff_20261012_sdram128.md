@@ -117,7 +117,7 @@ PCM 엔진을 SDRAM 컨트롤러와 같은 128.86 MHz로 옮긴다. 불변 조�
 | 명령 | 무엇을 판정하는가 |
 |---|---|
 | `rtl/peripheral/SOUND/ymf278b_fpga/sim/run_pcm128_verify.sh [quick]` | 4절의 검증 전체. 빈 결과, 빌드 실패, 음성 대조군 미검출을 실패로 처리하고 `RESULT` 한 줄과 종료 코드로 알린다 |
-| `tools/sdram128/check_timing.sh` | 컴파일 결과가 주장하는 빌드인지(clk_sdram 7.760 ns, PIPE 상태 8개, PCM MLAB 33개) 확인한 뒤 실패 끝점을 모듈별로 집계 |
+| `tools/sdram128/check_timing.sh` | 컴파일 결과가 주장하는 빌드인지(clk_sdram 7.760 ns, PIPE 상태 8개, PCM MLAB 33개) 확인한 뒤 실패 끝점을 모듈별로 집계. 음성 대조군(c126c6c 보고서 사본을 변조): 원본 PASS, PIPE 상태 0/8·7/8, 주기 11.641 ns, MLAB 0개 모두 FAIL. 실제 PIPE 꺼진 컴파일로는 아직 시험하지 않음 |
 | `sim/lockstep/run_stress.sh` (`SAMPLES=1`) | 기존 스트레스. `SAMPLES=1`이면 샘플 비교, 비교 0회는 실패 |
 | `tb_golden_pcm.sv` `CLK_HZ` 파라미터, `run_pcm_golden_vl.sh` `CLK_HZ`/`TAG` | 클록을 바꾼 골든 |
 | `tb_lockstep_pcm.sv` `+samples`, `DUT_PIPE`, `SNAPCHK`, `BUDGET` | 위 판정들의 부품 |
