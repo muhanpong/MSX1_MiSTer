@@ -16,7 +16,13 @@
 // worst-case real write timing (any hf_pending starves into frame N).
 `timescale 1ns/1ps
 
-module tb_lockstep_pcm;
+module tb_lockstep_pcm #(
+    //  Forwarded to the engine under test (ymf278_pcm_engine2 PIPE_FORCE).
+    //  iverilog -Ptb_lockstep_pcm.DUT_PIPE=1 runs the pipelined slot datapath at
+    //  this bench's 85.909 MHz; compare with +samples, since the extra states
+    //  move every event inside the frame.
+    parameter int DUT_PIPE = -1
+);
     logic clk = 0;
     always #5.82 clk = ~clk;          // 85.909 MHz
     logic rst_n = 0;
@@ -106,7 +112,45 @@ module tb_lockstep_pcm;
     wire  [23:0] n_dbg_slot_active, r_dbg_slot_active;
     wire  [23:0] n_dbg_slot_envlive, r_dbg_slot_envlive;
     logic reg_rd = 0;
-    ymf278_pcm_engine2 dut (
+    // ── +samples: each engine gets its own memory and only the audio samples
+    //    are compared, in order.  For changes that move WHEN things happen
+    //    inside a frame (extra pipeline states), where the cycle-by-cycle
+    //    comparison below fails by construction.  The ref engine's reads and
+    //    writes then go to memR; without +samples nothing here is used.
+    int SAMPLES = 0;
+    initial SAMPLES = $test$plusargs("samples");
+    logic [7:0]  memR [0:4194303];
+    logic        rR_pend = 1'b0;
+    int          rR_cnt  = 0;
+    logic [21:0] rR_addr;
+    logic [7:0]  memR_rd_data;
+    logic [15:0] memR_rd_data16;
+    logic        memR_rd_valid;
+    wire         memR_busy_w = rR_pend;
+    always_ff @(posedge clk) begin
+        memR_rd_valid <= 1'b0;
+        if (r_mem_rd_en && !rR_pend) begin
+            if (LAT <= 1) begin
+                memR_rd_data   <= memR[r_mem_addr[21:0]];
+                memR_rd_data16 <= {memR[{r_mem_addr[21:1], 1'b1}], memR[{r_mem_addr[21:1], 1'b0}]};
+                memR_rd_valid  <= 1'b1;
+            end else begin
+                rR_pend <= 1'b1;
+                rR_cnt  <= LAT - 1;
+                rR_addr <= r_mem_addr[21:0];
+            end
+        end else if (rR_pend) begin
+            if (rR_cnt <= 1) begin
+                memR_rd_data   <= memR[rR_addr];
+                memR_rd_data16 <= {memR[{rR_addr[21:1], 1'b1}], memR[{rR_addr[21:1], 1'b0}]};
+                memR_rd_valid  <= 1'b1;
+                rR_pend        <= 1'b0;
+            end else rR_cnt <= rR_cnt - 1;
+        end
+        if (r_mem_wr_en) memR[r_mem_addr[21:0]] <= r_mem_wr_data;
+    end
+
+    ymf278_pcm_engine2 #(.PIPE_FORCE(DUT_PIPE)) dut (
         .clk(clk),
         .rst_n(rst_n),
         .reg_addr(reg_addr),
@@ -165,10 +209,10 @@ module tb_lockstep_pcm;
         .reg_data(reg_data),
         .reg_wr(reg_wr),
         .reg_rd(reg_rd),
-        .mem_rd_data(mem_rd_data),
-        .mem_rd_data16(mem_rd_data16),
-        .mem_rd_valid(mem_rd_valid),
-        .mem_busy(mem_busy_w),
+        .mem_rd_data(SAMPLES ? memR_rd_data : mem_rd_data),
+        .mem_rd_data16(SAMPLES ? memR_rd_data16 : mem_rd_data16),
+        .mem_rd_valid(SAMPLES ? memR_rd_valid : mem_rd_valid),
+        .mem_busy(SAMPLES ? memR_busy_w : mem_busy_w),
         .pcm_vol(2'd3),
         .cpu_mem_rd_data(r_cpu_mem_rd_data),
         .cpu_mem_busy(r_cpu_mem_busy),
@@ -220,7 +264,7 @@ module tb_lockstep_pcm;
     always @(posedge clk) cyc <= cyc + 1;
     logic ls_run = 0;
     always @(posedge clk) if (rst_n) ls_run <= 1;
-    always @(negedge clk) if (rst_n && ls_run) begin
+    always @(negedge clk) if (rst_n && ls_run && !SAMPLES) begin
         if ({n_cpu_mem_rd_data, n_cpu_mem_busy, n_reg02_readback, n_mem_addr, n_mem_rd_en, n_mem_wr_en, n_mem_wr_data, n_pcm_left, n_pcm_right, n_pcm_valid, n_dbg_wavetblhdr, n_dbg_hf_pending, n_fm_mix_l_o, n_fm_mix_r_o, n_dbg_stage_b_bytes_done, n_dbg_stage_advance, n_dbg_stage_b_valid, n_dbg_slot_keyon, n_dbg_slot_active, n_dbg_slot_envlive} !== {r_cpu_mem_rd_data, r_cpu_mem_busy, r_reg02_readback, r_mem_addr, r_mem_rd_en, r_mem_wr_en, r_mem_wr_data, r_pcm_left, r_pcm_right, r_pcm_valid, r_dbg_wavetblhdr, r_dbg_hf_pending, r_fm_mix_l_o, r_fm_mix_r_o, r_dbg_stage_b_bytes_done, r_dbg_stage_advance, r_dbg_stage_b_valid, r_dbg_slot_keyon, r_dbg_slot_active, r_dbg_slot_envlive}) begin
             mism = mism + 1;
             if (mism <= 8) begin
@@ -307,6 +351,45 @@ module tb_lockstep_pcm;
     end
     final $display("COVERAGE slot_wr=%0d wr_same_cycle_as_dispatch=%0d dispatch_1to4_after_wr=%0d of_which_active=%0d wr_to_inflight_slot=%0d deferred_cpu_wr=%0d col_same_slot=%0d", n_wr, raw_same, raw_win, raw_act, wr_inflight, n_pend, n_col_same);
 
+    // +samples comparison: the k-th sample of one engine against the k-th of the
+    // other.  A warm reset restarts both streams, so the queues are cleared.
+    logic [31:0] qn[$], qr[$];
+    longint n_smp = 0;
+    logic [31:0] smp_a, smp_b;
+    always @(posedge clk) if (SAMPLES) begin
+        if (!rst_n) begin qn.delete(); qr.delete(); end
+        else begin
+            if (n_pcm_valid) qn.push_back({n_pcm_left, n_pcm_right});
+            if (r_pcm_valid) qr.push_back({r_pcm_left, r_pcm_right});
+            while (qn.size() > 0 && qr.size() > 0) begin
+                smp_a = qn.pop_front(); smp_b = qr.pop_front();
+                n_smp++;
+                if (smp_a !== smp_b) begin
+                    mism = mism + 1;
+                    if (mism <= 8) $display("SAMPLE MISMATCH #%0d cyc=%0d new=%h ref=%h", n_smp, cyc, smp_a, smp_b);
+                end
+            end
+        end
+    end
+    //  The TB stops on the edge that produces the last sample, before the block
+    //  above has paired it: pair whatever both engines produced, then report.
+    //  Frames that ended with slots still undispatched or in flight (the
+    //  frame-end CPU reserve abandons them): a slot budget overrun, not a
+    //  datapath error.  Counted for both engines.
+    longint cut_n = 0, cut_r = 0;
+    always @(posedge clk) if (rst_n) begin
+        if (dut.sample_start    && (dut.cur_slot    < 5'd24 || dut.sl_state    != dut.SL_IDLE)) cut_n <= cut_n + 1;
+        if (refeng.sample_start && (refeng.cur_slot < 5'd24 || refeng.sl_state != refeng.SL_IDLE)) cut_r <= cut_r + 1;
+    end
+    final $display("BUDGET frames_cut new=%0d ref=%0d", cut_n, cut_r);
+    final if (SAMPLES) begin
+        while (qn.size() > 0 && qr.size() > 0) begin
+            smp_a = qn.pop_front(); smp_b = qr.pop_front(); n_smp++;
+            if (smp_a !== smp_b) mism = mism + 1;
+        end
+        $display("SAMPLES compared=%0d mismatches=%0d pending new=%0d ref=%0d",
+                 n_smp, mism, qn.size(), qr.size());
+    end
     final $display("LOCKSTEP cycles=%0d mismatches=%0d hdr_store_then_stall_read=%0d dyn_writes=%0d resets=%0d", cyc, mism, hdr_path, dyn_wr, resets);
 
 
@@ -328,6 +411,7 @@ module tb_lockstep_pcm;
         void'($value$plusargs("frames=%d", frames));
 
         $readmemh(mem_f, mem);
+        $readmemh(mem_f, memR);
 
         fd = $fopen(script_f, "r");
         if (fd == 0) begin $display("FATAL: no script"); $finish; end

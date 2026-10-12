@@ -25,7 +25,10 @@ import ymf278_pcm_eg_pkg::*;
 
 module ymf278_pcm_engine2 #(
     parameter int CLK_HZ       = 85909090,
-    parameter int SDRAM_RD_LAT = 6
+    parameter int SDRAM_RD_LAT = 6,
+    //  -1: PIPE follows the clock (above 100 MHz).  0/1 force it, for benches
+    //  that run the pipelined datapath at 85.909 MHz against the reference.
+    parameter int PIPE_FORCE   = -1
 ) (
     input  wire        clk,
     input  wire        rst_n,
@@ -101,6 +104,14 @@ module ymf278_pcm_engine2 #(
 //  CYCLES_PER_FRAME / 1948 (exactly x1.5 at 128.86 MHz: 2922, 66, 195).
 localparam int CYCLES_PER_FRAME = CLK_HZ / 44100;
 localparam int FRAME_W          = $clog2(CYCLES_PER_FRAME);
+//  Above 100 MHz the slot datapath gets extra pipeline states (ADV0, INTERP2/3,
+//  EGPRE, GAIN2, MUL1B/2B, PANB): each splits a single-cycle chain that misses
+//  7.76 ns (128.86 MHz study build, docs/pcm_engine_128mhz_plan.md).  They read
+//  only registers that hold still for the whole slot, so the samples are the
+//  same; the 1.5x longer frame pays for the cycles.  At 85.909 MHz PIPE is 0
+//  and the circuit is unchanged.
+localparam bit PIPE             = (PIPE_FORCE >= 0) ? (PIPE_FORCE != 0)
+                                                    : (CLK_HZ > 100_000_000);
 // Frame-end CPU reserve: the last CPU_RESERVE cycles of every frame belong to
 // the CPU mem op service unconditionally (a slot still in flight is abandoned
 // for this frame).  This is what makes BUSY ≤ 1 frame by CONSTRUCTION.
@@ -269,7 +280,9 @@ end
 typedef enum logic [4:0] {
     SL_IDLE, SL_LOAD, SL_VIB, SL_VIB2, SL_STEP, SL_ADV, SL_POSB, SL_ADDR, SL_CHIT,
     SL_F_ISSUE, SL_F_WAIT, SL_DECODE, SL_INTERP, SL_EGRATE, SL_EGROM,
-    SL_EGSTEP, SL_GAIN, SL_MUL1, SL_MUL2, SL_PAN, SL_ACC, SL_DONE, SL_STALL_HDR
+    SL_EGSTEP, SL_GAIN, SL_MUL1, SL_MUL2, SL_PAN, SL_ACC, SL_DONE, SL_STALL_HDR,
+    //  extra pipeline states, used only when PIPE (a clock above 100 MHz)
+    SL_ADV0, SL_INTERP2, SL_INTERP3, SL_EGPRE, SL_GAIN2, SL_MUL1B, SL_MUL2B, SL_PANB
 } sl_state_t;
 sl_state_t sl_state;
 
@@ -305,6 +318,17 @@ logic [8:0]   w_am;
 logic signed [16:0] w_gain_e, w_gain_t;
 logic signed [16:0] w_inner, w_vol_sample;
 logic signed [23:0] w_l, w_r;
+//  PIPE-only stage registers
+logic [15:0]  adv_ptr, adv_inc;
+logic         adv_move;
+logic signed [16:0] w_idiff;
+logic signed [32:0] w_iprod;
+logic [9:0]   eg_att_r, eg_dl_r;
+logic [10:0]  eg_add_r;
+logic         g_e_zero, g_t_zero;
+logic [7:0]   g_vmul_e, g_vmul_t;
+logic [4:0]   g_vsh_e, g_vsh_t;
+logic signed [33:0] w_p1, w_p2, w_pl, w_pr;
 
 logic signed [23:0] accum_l, accum_r;
 
@@ -607,6 +631,14 @@ always_ff @(posedge clk or negedge rst_n) begin
 
             SL_STEP: begin
                 w_step <= calc_step(w_regs.oct, w_regs.fn, w_vib);
+                sl_state <= PIPE ? SL_ADV0 : SL_ADV;
+            end
+
+            SL_ADV0: begin
+                ptr_n    = w_dyn.stepPtr + w_step[15:0];
+                adv_ptr  <= ptr_n;
+                adv_move <= (w_step[31:16] != 16'd0) || (ptr_n < w_dyn.stepPtr);
+                adv_inc  <= w_step[31:16] + ((ptr_n < w_dyn.stepPtr) ? 16'd1 : 16'd0);
                 sl_state <= SL_ADV;
             end
 
@@ -615,6 +647,11 @@ always_ff @(posedge clk or negedge rst_n) begin
                     // key-on (or retrig): restart sample (v2: pos/stepPtr reset)
                     w_pos2 <= 16'd0;
                     w_ptr2 <= 16'd0;
+                end else if (PIPE) begin
+                    w_pos2 <= adv_move ? next_pos_calc(w_dyn.pos, adv_inc,
+                                                       w_hdr.endAddr, w_hdr.loopAddr)
+                                       : w_dyn.pos;
+                    w_ptr2 <= adv_ptr;
                 end else begin
                     ptr_n = w_dyn.stepPtr + w_step[15:0];
                     if (w_step[31:16] != 16'd0 || ptr_n < w_dyn.stepPtr) begin
@@ -726,7 +763,22 @@ always_ff @(posedge clk or negedge rst_n) begin
             end
 
             SL_INTERP: begin
-                w_interp <= calc_interp(w_sa, w_sb, w_ptr2);
+                if (PIPE) begin           // calc_interp, one operation per state
+                    w_idiff  <= $signed({w_sb[15], w_sb}) - $signed({w_sa[15], w_sa});
+                    sl_state <= SL_INTERP2;
+                end else begin
+                    w_interp <= calc_interp(w_sa, w_sb, w_ptr2);
+                    sl_state <= SL_EGRATE;
+                end
+            end
+
+            SL_INTERP2: begin
+                w_iprod  <= w_idiff * $signed({1'b0, w_ptr2});
+                sl_state <= SL_INTERP3;
+            end
+
+            SL_INTERP3: begin
+                w_interp <= w_sa + w_iprod[32:16];
                 sl_state <= SL_EGRATE;
             end
 
@@ -740,6 +792,13 @@ always_ff @(posedge clk or negedge rst_n) begin
                 w_do_upd <= eg_do_update(eg_cnt, eg_rate_shift_rom(w_rate));
                 w_inc    <= eg_inc_rom(7'(eg_rate_select_rom(w_rate)
                                        + {5'd0, eg_phase(eg_cnt, eg_rate_shift_rom(w_rate))}));
+                sl_state <= PIPE ? SL_EGPRE : SL_EGSTEP;
+            end
+
+            SL_EGPRE: begin               // EGSTEP's arithmetic, registered
+                eg_att_r <= calc_attack_step(w_dyn.env_vol, w_inc);
+                eg_add_r <= {1'b0, w_dyn.env_vol} + {3'd0, w_inc};
+                eg_dl_r  <= dl_tab_rom(w_regs.dl_idx);
                 sl_state <= SL_EGSTEP;
             end
 
@@ -760,23 +819,23 @@ always_ff @(posedge clk or negedge rst_n) begin
                 end else begin
                     case (w_dyn.env_state)
                         EG_ATT: if (w_rate < 6'd63 && w_do_upd) begin
-                            w_new_vol <= calc_attack_step(w_dyn.env_vol, w_inc);
-                            if (calc_attack_step(w_dyn.env_vol, w_inc) <= MIN_ATT_INDEX) begin
+                            w_new_vol <= PIPE ? eg_att_r : calc_attack_step(w_dyn.env_vol, w_inc);
+                            if ((PIPE ? eg_att_r : calc_attack_step(w_dyn.env_vol, w_inc)) <= MIN_ATT_INDEX) begin
                                 w_new_vol   <= MIN_ATT_INDEX;
                                 w_new_state <= (w_regs.dl_idx != 4'h0) ? EG_DEC : EG_SUS;
                             end
                         end
                         EG_DEC: if (w_do_upd) begin
-                            vol_add = {1'b0, w_dyn.env_vol} + {3'd0, w_inc};
+                            vol_add = PIPE ? eg_add_r : {1'b0, w_dyn.env_vol} + {3'd0, w_inc};
                             w_new_vol <= (vol_add > 11'h3FF) ? 10'h3FF : vol_add[9:0];
                             if (((vol_add > 11'h3FF) ? 10'h3FF : vol_add[9:0])
-                                >= dl_tab_rom(w_regs.dl_idx)) begin
+                                >= (PIPE ? eg_dl_r : dl_tab_rom(w_regs.dl_idx))) begin
                                 w_new_state <= (vol_add < {1'b0, MAX_ATT_INDEX})
                                              ? EG_SUS : EG_OFF;
                             end
                         end
                         EG_SUS, EG_REL: if (w_do_upd) begin
-                            vol_add = {1'b0, w_dyn.env_vol} + {3'd0, w_inc};
+                            vol_add = PIPE ? eg_add_r : {1'b0, w_dyn.env_vol} + {3'd0, w_inc};
                             if (vol_add >= {1'b0, MAX_ATT_INDEX}) begin
                                 w_new_vol   <= MAX_ATT_INDEX;
                                 w_new_state <= EG_OFF;
@@ -802,32 +861,68 @@ always_ff @(posedge clk or negedge rst_n) begin
                 vsh_e   = 5'(4'd7 + {1'b0, env_idx[9:6]});
                 vmul_t  = 8'h80 - {2'b0, tl_idx[5:0]};
                 vsh_t   = 5'(4'd7 + {1'b0, tl_idx[9:6]});
-                w_gain_e <= (env_idx >= 11'h280) ? 17'sd0
-                          : 17'((32'sh8000 * $signed({1'b0, vmul_e})) >>> vsh_e);
-                w_gain_t <= (tl_idx  >= 10'h280) ? 17'sd0
-                          : 17'((32'sh8000 * $signed({1'b0, vmul_t})) >>> vsh_t);
+                if (PIPE) begin
+                    g_e_zero <= (env_idx >= 11'h280);  g_vmul_e <= vmul_e;  g_vsh_e <= vsh_e;
+                    g_t_zero <= (tl_idx  >= 10'h280);  g_vmul_t <= vmul_t;  g_vsh_t <= vsh_t;
+                    sl_state <= SL_GAIN2;
+                end else begin
+                    w_gain_e <= (env_idx >= 11'h280) ? 17'sd0
+                              : 17'((32'sh8000 * $signed({1'b0, vmul_e})) >>> vsh_e);
+                    w_gain_t <= (tl_idx  >= 10'h280) ? 17'sd0
+                              : 17'((32'sh8000 * $signed({1'b0, vmul_t})) >>> vsh_t);
+                    sl_state <= SL_MUL1;
+                end
+            end
+
+            SL_GAIN2: begin
+                w_gain_e <= g_e_zero ? 17'sd0
+                          : 17'((32'sh8000 * $signed({1'b0, g_vmul_e})) >>> g_vsh_e);
+                w_gain_t <= g_t_zero ? 17'sd0
+                          : 17'((32'sh8000 * $signed({1'b0, g_vmul_t})) >>> g_vsh_t);
                 sl_state <= SL_MUL1;
             end
 
             SL_MUL1: begin
                 mul_w   = $signed(w_interp) * w_gain_e;
-                w_inner <= 17'(mul_w >>> 15);
+                if (PIPE) begin w_p1 <= mul_w; sl_state <= SL_MUL1B; end
+                else begin w_inner <= 17'(mul_w >>> 15); sl_state <= SL_MUL2; end
+            end
+
+            SL_MUL1B: begin
+                w_inner  <= 17'(w_p1 >>> 15);
                 sl_state <= SL_MUL2;
             end
 
             SL_MUL2: begin
                 mul_w        = w_inner * w_gain_t;
-                w_vol_sample <= 17'(mul_w >>> 15);
-                sl_state <= SL_PAN;
+                if (PIPE) begin w_p2 <= mul_w; sl_state <= SL_MUL2B; end
+                else begin w_vol_sample <= 17'(mul_w >>> 15); sl_state <= SL_PAN; end
+            end
+
+            SL_MUL2B: begin
+                w_vol_sample <= 17'(w_p2 >>> 15);
+                sl_state     <= SL_PAN;
             end
 
             SL_PAN: begin
                 pl_g = pan_att_left (w_regs.pan);
                 pr_g = pan_att_right(w_regs.pan);
-                mul_w = w_vol_sample * $signed({1'b0, pl_g});
-                w_l  <= 24'(mul_w >>> 5);
-                mul_w = w_vol_sample * $signed({1'b0, pr_g});
-                w_r  <= 24'(mul_w >>> 5);
+                if (PIPE) begin
+                    w_pl <= w_vol_sample * $signed({1'b0, pl_g});
+                    w_pr <= w_vol_sample * $signed({1'b0, pr_g});
+                    sl_state <= SL_PANB;
+                end else begin
+                    mul_w = w_vol_sample * $signed({1'b0, pl_g});
+                    w_l  <= 24'(mul_w >>> 5);
+                    mul_w = w_vol_sample * $signed({1'b0, pr_g});
+                    w_r  <= 24'(mul_w >>> 5);
+                    sl_state <= SL_ACC;
+                end
+            end
+
+            SL_PANB: begin
+                w_l  <= 24'(w_pl >>> 5);
+                w_r  <= 24'(w_pr >>> 5);
                 sl_state <= SL_ACC;
             end
 

@@ -58,11 +58,18 @@ RST="+reset_at=150000 +reset_every=70000"
 } | xargs -P "$P" -L1 bash -c '
     t=$0; v=$1; s=$2; f=$3; l=$4; sd=$5; shift 5
     vvp -n '"$O"'/$v.vvp +script=../golden/$s.txt +mem=../golden/mem.hex +frames=$f +lat=$l \
-        +out=/dev/null +stress=1 +seed=$sd "$@" 2>&1 \
-      | grep -E "^(LOCKSTEP|COVERAGE|STRESS|RESETCOV)" | tr "\n" " " > '"$O"'/${t}_${s}_${l}_${sd}.log
+        +out=/dev/null +stress=1 +seed=$sd '"${SAMPLES:++samples}"' "$@" 2>&1 \
+      | grep -E "^(LOCKSTEP|COVERAGE|STRESS|RESETCOV|SAMPLES)" | tr "\n" " " > '"$O"'/${t}_${s}_${l}_${sd}.log
     echo >> '"$O"'/${t}_${s}_${l}_${sd}.log'
 
 FAIL=0
+#  SAMPLES=1: each engine has its own memory and only the audio samples are
+#  compared (tb +samples).  A run that compared no samples proves nothing.
+if [ -n "${SAMPLES:-}" ]; then
+    z=$(cat "$O"/eng_*.log | grep -c "SAMPLES compared=0 ")
+    echo "samples mode: runs that compared no samples: $z"
+    [ "$z" -eq 0 ] || { echo "  FAIL: a run compared no samples"; FAIL=1; }
+fi
 runs()  { cat "$O"/$1_*.log | grep -c LOCKSTEP; }
 dirty() { cat "$O"/$1_*.log | grep LOCKSTEP | grep -vc 'mismatches=0 '; }
 total() { cat "$O"/$1_*.log | grep -oE "$2=[0-9]+" | awk -F= '{t+=$2} END{print t+0}'; }

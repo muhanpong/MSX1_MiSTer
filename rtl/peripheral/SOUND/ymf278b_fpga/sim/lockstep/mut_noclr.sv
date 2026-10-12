@@ -26,7 +26,8 @@ import ymf278_pcm_eg_pkg::*;
 // MUTANT noclr: reset sweep writes nothing
 module ymf278_pcm_engine2 #(
     parameter int CLK_HZ       = 85909090,
-    parameter int SDRAM_RD_LAT = 6
+    parameter int SDRAM_RD_LAT = 6,
+    parameter int PIPE_FORCE   = -1   // accepted, unused: the TB passes it
 ) (
     input  wire        clk,
     input  wire        rst_n,
