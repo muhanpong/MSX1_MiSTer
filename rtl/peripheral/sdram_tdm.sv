@@ -17,10 +17,11 @@
 // G1 read are DQM-sensitive).  Two consecutive general accesses must hit
 // different banks (tRC); refresh takes a frame per chip (section 5).
 //
-// The chip samples on SDRAM_CLK rising = clk FALLING (inverted clock out).  Read
-// data is taken on clk falling (dq_n, the chip edge three after the READ) and
-// moved to clk rising (dq_p): word0 of a READ issued in cycle t is in dq_p during
-// cycle t+4 -- V reads land at 7/8, G1 at 11, G2 at 3 of the next frame.
+// The chip samples on SDRAM_CLK rising = clk falling (inverted clock out).  All
+// chip-facing signals leave through one output register stage, so the chip sees
+// the internal schedule one clock late; read data comes back through one rising
+// edge IO register (dq_p).  Word0 of a READ issued internally in cycle t is in
+// dq_p during cycle t+5: V reads land at 8/9, G1 at 0, G2 at 4 of the next frame.
 //
 // This source file is free software under the GNU GPL v3 or later (sdram.sv,
 // Sorgelig, 2015-2019, which it is derived from).
@@ -105,24 +106,39 @@ localparam [26:0] VBASE32   = 27'h1800000;                // 24 MB: bank 3
 localparam [2:0] CMD_NOP = 3'b111, CMD_ACT = 3'b011, CMD_READ = 3'b101, CMD_WRITE = 3'b100,
                  CMD_PRE = 3'b010, CMD_REF = 3'b001, CMD_MRS = 3'b000;
 
+//  Everything below drives the internal copies (command, chip, a_i, ba_i,
+//  dq_out, dq_oe); one register stage takes them to the pins, so the slot logic
+//  never routes straight into an IO register (-1.68 ns in d2efe8d).  The whole
+//  chip-side schedule is one clock later than the internal one, uniformly.
 reg  [2:0] command = CMD_NOP;
 reg        chip    = 1'b0;
-assign SDRAM_nCS  = chip;
-assign SDRAM_nRAS = command[2];
-assign SDRAM_nCAS = command[1];
-assign SDRAM_nWE  = command[0];
+reg [12:0] a_i     = 13'd0;
+reg  [1:0] ba_i    = 2'd0;
+reg [15:0] dq_out;
+reg        dq_oe   = 1'b0;
+reg  [2:0] cmd_o   = CMD_NOP;
+reg        cs_o    = 1'b0;
+reg [15:0] dq_o_r;
+reg        dq_oe_o = 1'b0;
+always @(posedge clk) begin
+    SDRAM_A <= a_i;   SDRAM_BA <= ba_i;   cmd_o <= command;   cs_o <= chip;
+    dq_o_r  <= dq_out; dq_oe_o <= dq_oe;
+end
+assign SDRAM_nCS  = cs_o;
+assign SDRAM_nRAS = cmd_o[2];
+assign SDRAM_nCAS = cmd_o[1];
+assign SDRAM_nWE  = cmd_o[0];
 assign SDRAM_CKE  = 1'b1;
 assign {SDRAM_DQMH, SDRAM_DQML} = SDRAM_A[12:11];
+assign SDRAM_DQ = dq_oe_o ? dq_o_r : 16'bz;
 
-reg [15:0] dq_out;
-reg        dq_oe = 1'b0;
-assign SDRAM_DQ = dq_oe ? dq_out : 16'bz;
-reg [15:0] dq_n, dq_p;
-always @(negedge clk) dq_n <= SDRAM_DQ;
-//  falling -> rising is half a clock (3.88 ns); nothing but this register sits on
-//  it (the consumers were -2.5 ns behind it in 7de0ebe).  A word taken on the
-//  falling edge in cycle t is in dq_p during cycle t+1.
-always @(posedge clk) dq_p <= dq_n;
+//  Read data: one rising-edge register at the pins.  With the real delays (clock
+//  out ~3.5 ns, tAC 5.4, board ~1) a word "valid at chip edge E" is on the FPGA
+//  pins from about 2.1 ns to 7.0 ns after the internal falling edge E -- the
+//  rising edge 3.9 ns after E is inside that, the falling edge E itself is not
+//  (the first version took the previous word there).  sim/sdram_tdm models it.
+reg [15:0] dq_p;
+always @(posedge clk) dq_p <= SDRAM_DQ;
 
 // ─── address map ───────────────────────────────────────────────────────────
 //  32 MB (and 64 MB): bank = a[24:23], row = a[22:10], col = {a[25], a[9:1]},
@@ -344,16 +360,16 @@ always @(posedge clk) begin
 
     if (!run) begin
         // ── power-up: wait, precharge all, 8 refreshes, mode, per chip ─────
-        SDRAM_A <= 13'd0; SDRAM_BA <= 2'd0;
+        a_i <= 13'd0; ba_i <= 2'd0;
         if (init_cnt != 0) init_cnt <= init_cnt - 16'd1;
         //  per chip (chip 0 in 199..100, chip 1 in 99..0): precharge all, eight
         //  refreshes 11 clocks apart (tRFC), load mode, tMRD before the first frame
         case (init_cnt)
-            16'd199, 16'd99: begin command <= CMD_PRE; SDRAM_A[10] <= 1'b1; end
+            16'd199, 16'd99: begin command <= CMD_PRE; a_i[10] <= 1'b1; end
             16'd195, 16'd184, 16'd173, 16'd162, 16'd151, 16'd140, 16'd129, 16'd118,
             16'd95,  16'd84,  16'd73,  16'd62,  16'd51,  16'd40,  16'd29,  16'd18:
                              command <= CMD_REF;
-            16'd106, 16'd6:  begin command <= CMD_MRS; SDRAM_A <= MODE; end
+            16'd106, 16'd6:  begin command <= CMD_MRS; a_i <= MODE; end
             default: ;
         endcase
         chip <= (init_cnt < 16'd100);
@@ -377,7 +393,7 @@ always @(posedge clk) begin
         end
 
         // default address bus: the DQM a NOP cycle owes (00 unless set below)
-        SDRAM_A[12:11] <= 2'b00;
+        a_i[12:11] <= 2'b00;
         dq_oe <= 1'b0;
 
         case (1'b1)
@@ -402,30 +418,30 @@ always @(posedge clk) begin
             vs_v <= took; vs_we <= v_we; vs_l <= vl; vs_wdata <= v_wdata; vs_be <= v_be;
             v_grant <= took;
             if (took) begin
-                command <= CMD_ACT; chip <= vl.c; SDRAM_BA <= vl.b; SDRAM_A <= vl.r;
+                command <= CMD_ACT; chip <= vl.c; ba_i <= vl.b; a_i <= vl.r;
             end
         end
         ps[2]: begin         // V READ (cycle 3) / G1 decision
             if (vs_v && !vs_we) begin
-                command <= CMD_READ; chip <= vs_l.c; SDRAM_BA <= vs_l.b;
-                SDRAM_A <= {2'b00, 1'b1, vs_l.k};
+                command <= CMD_READ; chip <= vs_l.c; ba_i <= vs_l.b;
+                a_i <= {2'b00, 1'b1, vs_l.k};
             end
         end
         ps[4]: begin         // V WRITE (cycle 5): word0 with its byte mask
             if (vs_v && vs_we) begin
-                command <= CMD_WRITE; chip <= vs_l.c; SDRAM_BA <= vs_l.b;
-                SDRAM_A <= {~vs_be[1], ~vs_be[0], 1'b1, vs_l.k};
+                command <= CMD_WRITE; chip <= vs_l.c; ba_i <= vs_l.b;
+                a_i <= {~vs_be[1], ~vs_be[0], 1'b1, vs_l.k};
                 dq_out <= vs_wdata[15:0]; dq_oe <= 1'b1;
             end
         end
         ps[5]: begin         // cycle 6: V word1 (mask on A12:A11), or 00 for a V read's DQM
             if (vs_v && vs_we) begin
-                SDRAM_A[12:11] <= {~vs_be[3], ~vs_be[2]};
+                a_i[12:11] <= {~vs_be[3], ~vs_be[2]};
                 dq_out <= vs_wdata[31:16]; dq_oe <= 1'b1;
             end
         end
-        ps[7]: if (vs_v && !vs_we) v_rdata[15:0] <= dq_p;   // V word0 (dq_p: one cycle after dq_n)
-        ps[8]: if (vs_v && !vs_we) begin v_rdata[31:16] <= dq_p; v_rvalid <= 1'b1; end
+        ps[8]: if (vs_v && !vs_we) v_rdata[15:0] <= dq_p;   // V word0
+        ps[9]: if (vs_v && !vs_we) begin v_rdata[31:16] <= dq_p; v_rvalid <= 1'b1; end
         default: ;
         endcase
 
@@ -459,24 +475,24 @@ always @(posedge clk) begin
 
         // ACT (cycles 4, 8) and the cache drop for a write (by index, as sdram.sv)
         if (ps[3] && g1.v) begin
-            command <= CMD_ACT; chip <= g1.l.c; SDRAM_BA <= g1.l.b; SDRAM_A <= g1.l.r;
+            command <= CMD_ACT; chip <= g1.l.c; ba_i <= g1.l.b; a_i <= g1.l.r;
         end
         if (ps[7] && g2.v) begin
-            command <= CMD_ACT; chip <= g2.l.c; SDRAM_BA <= g2.l.b; SDRAM_A <= g2.l.r;
+            command <= CMD_ACT; chip <= g2.l.c; ba_i <= g2.l.b; a_i <= g2.l.r;
         end
         // READ (cycles 7, 11)
         if (ps[6] && g1.v && g1.rnw) begin
-            command <= CMD_READ; chip <= g1.l.c; SDRAM_BA <= g1.l.b; SDRAM_A <= {2'b00, 1'b1, g1.l.k};
+            command <= CMD_READ; chip <= g1.l.c; ba_i <= g1.l.b; a_i <= {2'b00, 1'b1, g1.l.k};
         end
         if (ps[10] && g2.v && g2.rnw) begin
-            command <= CMD_READ; chip <= g2.l.c; SDRAM_BA <= g2.l.b; SDRAM_A <= {2'b00, 1'b1, g2.l.k};
+            command <= CMD_READ; chip <= g2.l.c; ba_i <= g2.l.b; a_i <= {2'b00, 1'b1, g2.l.k};
         end
         // WRITE (cycles 9, 1): one byte, the other byte and word1 masked
         if ((ps[8] && g1.v && !g1.rnw) || (ps[0] && g2.v && !g2.rnw)) begin
             gslot_t g;
             g = ps[8] ? g1 : g2;
-            command <= CMD_WRITE; chip <= g.l.c; SDRAM_BA <= g.l.b;
-            SDRAM_A <= {~g.a0, g.a0, 1'b1, g.l.k};
+            command <= CMD_WRITE; chip <= g.l.c; ba_i <= g.l.b;
+            a_i <= {~g.a0, g.a0, 1'b1, g.l.k};
             dq_out <= {g.din, g.din}; dq_oe <= 1'b1;
             case (g.ch)
                 2'd0: ch1_ready <= 1;
@@ -487,16 +503,19 @@ always @(posedge clk) begin
         end
         // word1 mask (cycles 10, 2)
         if ((ps[9] && g1.v && !g1.rnw) || (ps[1] && g2.v && !g2.rnw))
-            SDRAM_A[12:11] <= 2'b11;
+            a_i[12:11] <= 2'b11;
 
-        // read capture from dq_p: G1 word0 at the edge ending cycle 11, G2 at cycle 3
-`ifndef TDM_MUT_CAP
+        // read capture from dq_p: G1 word0 at the edge ending cycle 0 (next frame),
+        // G2 at cycle 4 (the output stage puts the chip one clock behind)
+`ifdef TDM_MUT_CAP          // negative control: one clock late
+        if ((ps[1] && g1.v && g1.rnw) || (ps[5] && g2.v && g2.rnw)) begin
+`elsif TDM_MUT_CAPE         // negative control: one clock early (= the falling-edge capture)
         if ((ps[11] && g1.v && g1.rnw) || (ps[3] && g2.v && g2.rnw)) begin
-`else           // negative control: general read data taken one clock late
+`else
         if ((ps[0] && g1.v && g1.rnw) || (ps[4] && g2.v && g2.rnw)) begin
 `endif
             gslot_t g;
-            g = (ps[11] | ps[0]) ? g1 : g2;
+            g = (ps[11] | ps[0] | ps[1]) ? g1 : g2;
             case (g.ch)
                 2'd0: begin ch1_saved_data <= dq_p; ch1_ready <= 1; end
                 2'd1: begin

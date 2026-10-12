@@ -73,7 +73,7 @@ module tb;
 `else
     sdram_chk #(.NCHIP(2), .COLS(1024)) chip2 (
 `endif.clk(SCLK), .dq(DQ), .a(A), .ba(BA), .ncs(nCS),
-        .nras(nRAS), .ncas(nCAS), .nwe(nWE), .fpga_oe(dut.dq_oe));
+        .nras(nRAS), .ncas(nCAS), .nwe(nWE), .fpga_oe(dut.dq_oe_o));
 
     int bad = 0;
     task automatic fail(input string s);

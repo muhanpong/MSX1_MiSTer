@@ -1056,17 +1056,18 @@ module sdram_big_tdm
    reg [12:0] row [0:3];
    wire [2:0] cmd = {nRAS, nCAS, nWE};
    //  read pipeline: slot n = the word valid n chip edges from now
-   reg [23:0] rq_idx [0:4];
-   reg        rq_v   [0:4];
+   reg [23:0] rq_idx [0:5];
+   reg        rq_v   [0:5];
    reg  [1:0] dqm_d1, dqm_d2;
    reg [23:0] w_idx;  reg w_pend = 1'b0;
-   initial for (int i = 0; i < 5; i++) rq_v[i] = 1'b0;
+   initial for (int i = 0; i < 6; i++) rq_v[i] = 1'b0;
    always @(negedge clk) begin
-      // the word valid at the NEXT chip edge goes out now (the controller samples
-      // on that edge, before this process runs again)
-      DQ_out <= (rq_v[1] && dqm_d1 == 2'b00) ? mem[rq_idx[1]] : 16'h0000;
+      // the word valid at this chip edge goes out now and stays until the next
+      // (as sim/sdram_tdm/sdram_chk.sv: the controller samples on the rising edge
+      // half a clock later; a falling-edge capture would take the previous word)
       for (int i = 0; i < 4; i++) begin rq_v[i] = rq_v[i+1]; rq_idx[i] = rq_idx[i+1]; end
       rq_v[4] = 1'b0;
+      DQ_out <= (rq_v[0] && dqm_d2 == 2'b00) ? mem[rq_idx[0]] : 16'h0000;   // DQM latency 2
       dqm_d2 = dqm_d1; dqm_d1 = A[12:11];
       if (w_pend) begin
          if (!A[11]) mem[w_idx][7:0]  <= DQ_in[7:0];
@@ -1076,8 +1077,8 @@ module sdram_big_tdm
       if (!nCS) case (cmd)
          3'b011: row[BA] <= A;
          3'b101: begin
-            rq_v[2] = 1'b1; rq_idx[2] = {BA, row[BA], A[8:0]};
-            rq_v[3] = 1'b1; rq_idx[3] = {BA, row[BA], A[8:1], ~A[0]};
+            rq_v[3] = 1'b1; rq_idx[3] = {BA, row[BA], A[8:0]};          // CL3
+            rq_v[4] = 1'b1; rq_idx[4] = {BA, row[BA], A[8:1], ~A[0]};
          end
          3'b100: begin
             if (!A[11]) mem[{BA, row[BA], A[8:0]}][7:0]  <= DQ_in[7:0];

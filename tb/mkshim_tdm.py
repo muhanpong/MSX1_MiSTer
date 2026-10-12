@@ -13,9 +13,9 @@ def rep(a, b):
     s = s.replace(a, b)
 rep("    inout      [15:0] SDRAM_DQ,",
     "    output     [15:0] SDRAM_DQ_o,\n    output            SDRAM_DQ_oe,\n    input      [15:0] SDRAM_DQ_i,")
-rep("assign SDRAM_DQ = dq_oe ? dq_out : 16'bz;",
-    "assign SDRAM_DQ_o = dq_out;\nassign SDRAM_DQ_oe = dq_oe;")
-rep("always @(negedge clk) dq_n <= SDRAM_DQ;", "always @(negedge clk) dq_n <= SDRAM_DQ_i;")
+rep("assign SDRAM_DQ = dq_oe_o ? dq_o_r : 16'bz;",
+    "assign SDRAM_DQ_o = dq_o_r;\nassign SDRAM_DQ_oe = dq_oe_o;")
+rep("always @(posedge clk) dq_p <= SDRAM_DQ;", "always @(posedge clk) dq_p <= SDRAM_DQ_i;")
 rep("    c_rdata   <= cmem[ch2_caddr[CW:1]];",
     "    c_rdata   <= (c_we && c_waddr == ch2_caddr[CW:1])\n"
     "               ? {1'b1, ch2_caddr[26:CW+1], ~cmem[ch2_caddr[CW:1]][15:0]}\n"

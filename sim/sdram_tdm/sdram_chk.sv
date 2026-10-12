@@ -62,7 +62,7 @@ module sdram_chk #(parameter int NCHIP = 1, parameter int COLS = 512, parameter 
     logic [15:0] nx_v;
     logic [1:0]  rd_m;
     bit          nx_ok = 1'b0;
-    always @(negedge clk) drv = nx_ok ? nx_v : 16'hzzzz;
+    int          last_word = -100;   // last edge whose read word is on the bus
     //  (assignments to drv from a forked task never reached the net in the
     //  timing simulator; the falling-edge process below does it without delays)
 
@@ -96,28 +96,32 @@ module sdram_chk #(parameter int NCHIP = 1, parameter int COLS = 512, parameter 
         if (dqm_at.exists(e - 4)) dqm_at.delete(e - 4);
 
         // ── bus: the chip holds read data at this edge (tOH) -> FPGA must not drive
-        if (fpga_oe && (rdq.exists(e) || rdq.exists(e + 1)))
+        if (fpga_oe && (rdq.exists(e) || last_word == e - 1))
             err("bus contention: FPGA drives while the chip has read data");
 
         // ── write burst word1 ──
         if (e == wr_end) write_word(wr_c, wr_b, wr_r, wr_k, a[12:11]);
 
-        // ── read output: the word valid at edge e+1 goes on the bus at the falling
-        //    clock edge before it and stays until the one after.  No delays here:
-        //    with timing enabled, a process holding a delay read its own blocking
-        //    assignments one edge late and shifted every word by a column. ──
-        nx_ok = 1'b0;
-        if (rdq.exists(e + 1)) begin
-            rd_w  = rdq[e + 1];
+        // ── read output: the word valid at chip edge e goes on the bus AT e and
+        //    stays until e+1.  That is the real order seen from the FPGA: with
+        //    the clock-out delay, tAC and the board, the word reaches the pins
+        //    ~2-7 ns after the internal falling edge e, so a falling-edge capture
+        //    at e takes the previous word and a rising-edge capture after it
+        //    takes this one.  (The first model drove it before e, and a design
+        //    capturing on the falling edge passed.)  No delays: blocking here is
+        //    safe, the FPGA samples on the other edge. ──
+        if (rdq.exists(e)) begin
+            rd_w  = rdq[e];
             rd_kk = key(rd_w.c, rd_w.b, rd_w.r, rd_w.k);
             if (mem.exists(rd_kk)) nx_v = mem[rd_kk]; else nx_v = 16'hxxxx;
             rd_m  = 2'b00;
-            if (dqm_at.exists(e - 1)) rd_m = dqm_at[e - 1];     // DQM of valid edge - 2
+            if (dqm_at.exists(e - 2)) rd_m = dqm_at[e - 2];     // DQM latency 2
             if (rd_m[0]) nx_v[7:0]  = 8'hzz;
             if (rd_m[1]) nx_v[15:8] = 8'hzz;
             if (rd_m != 2'b00) err($sformatf("read word masked by DQM=%b (row bits on A12:A11?)", rd_m));
-            nx_ok = 1'b1;
-        end
+            drv = nx_v;
+            last_word = e;
+        end else drv = 16'hzzzz;
         if (rdq.exists(e)) rdq.delete(e);
 
         // ── commands ──
