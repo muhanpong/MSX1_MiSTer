@@ -5,7 +5,7 @@
 #
 #  It refuses to describe a build that is not the one it claims to be:
 #   - clk_sdram must be 7.760 ns (128.86 MHz).  A build at 11.641 ns is not this study.
-#   - the PCM pipeline states must be in the map report.  On 2026-10-12 msx.sv passed
+#   - the PCM pipeline states (10 since CHIT0 and EGPRE2) must be in the map report.  On 2026-10-12 msx.sv passed
 #     MoonSound a literal CLK_HZ 85909090, the engine was built unpipelined, and one
 #     whole compile measured nothing of the change it was meant to measure.
 #   - the PCM memories must still be MLAB (RAM summary, not warnings: arrays have been
@@ -23,9 +23,9 @@ per=$(grep -m1 "general\[0\].gpll~PLL_OUTPUT_COUNTER|divclk *; Generated" $STA |
 echo "clk_sdram period: $per ns"
 [ "$per" = "7.760" ] || fail "clk_sdram is not 7.760 ns"
 
-pipe=$(grep -o "sl_state\.SL_\(ADV0\|INTERP2\|INTERP3\|EGPRE\|GAIN2\|MUL1B\|MUL2B\|PANB\)" $MAP | sort -u | wc -l)
-echo "PCM pipeline states synthesised: $pipe / 8"
-[ "$pipe" -eq 8 ] || fail "PIPE is off in this build (check CLK_HZ passed to ymf278b_top)"
+pipe=$(grep -o "sl_state\.SL_\(ADV0\|CHIT0\|INTERP2\|INTERP3\|EGPRE\|EGPRE2\|GAIN2\|MUL1B\|MUL2B\|PANB\)\b" $MAP | sort -u | wc -l)
+echo "PCM pipeline states synthesised: $pipe / 10"
+[ "$pipe" -eq 10 ] || fail "PIPE is off in this build (check CLK_HZ passed to ymf278b_top)"
 
 mlab=$(awk '/; Analysis & Synthesis RAM Summary/,/^$/' $MAP | grep "u_pcm" | grep -c " MLAB ")
 echo "PCM memories inferred as MLAB: $mlab (expect ${MLAB_EXPECT:-33})"

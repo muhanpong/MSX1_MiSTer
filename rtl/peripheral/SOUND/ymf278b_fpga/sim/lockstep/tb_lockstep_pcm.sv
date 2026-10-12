@@ -386,7 +386,8 @@ module tb_lockstep_pcm #(
          || dut.sn_hdr    !== dut.ld_hdr_c
          || dut.sn_kprev  !== dut.key_on_prev[dut.ld_slot] || dut.sn_retrig !== dut.key_retrig[dut.ld_slot]
          || dut.sn_hfp    !== dut.hf_pending[dut.ld_slot]  || dut.sn_posrst !== dut.pos_rst[dut.ld_slot]
-         || dut.sn_tl_we  !== dut.tl_we_c                  || (dut.tl_we_c && dut.sn_tl_next !== dut.tl_next_c)) begin
+         || dut.sn_tl_load !== dut.tl_load[dut.ld_slot]    || dut.sn_tl_cur !== dut.tl_cur[dut.ld_slot]
+         || dut.d_tl_we   !== dut.tl_we_c                  || (dut.tl_we_c && dut.d_tl_next !== dut.tl_next_c)) begin
             snap_bad++;
             if (snap_bad <= 5) $display("SNAPCHK BAD cyc=%0d slot=%0d state=%0d", cyc, dut.ld_slot, dut.sl_state);
         end

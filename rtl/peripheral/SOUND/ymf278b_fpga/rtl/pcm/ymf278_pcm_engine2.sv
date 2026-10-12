@@ -104,8 +104,8 @@ module ymf278_pcm_engine2 #(
 //  CYCLES_PER_FRAME / 1948 (exactly x1.5 at 128.86 MHz: 2922, 66, 195).
 localparam int CYCLES_PER_FRAME = CLK_HZ / 44100;
 localparam int FRAME_W          = $clog2(CYCLES_PER_FRAME);
-//  Above 100 MHz the slot datapath gets extra pipeline states (ADV0, INTERP2/3,
-//  EGPRE, GAIN2, MUL1B/2B, PANB): each splits a single-cycle chain that misses
+//  Above 100 MHz the slot datapath gets extra pipeline states (ADV0, CHIT0,
+//  INTERP2/3, EGPRE/EGPRE2, GAIN2, MUL1B/2B, PANB): each splits a single-cycle chain that misses
 //  7.76 ns (128.86 MHz study build, docs/pcm_engine_128mhz_plan.md).  They read
 //  only registers that hold still for the whole slot, so the samples are the
 //  same; the 1.5x longer frame pays for the cycles.  At 85.909 MHz PIPE is 0
@@ -277,12 +277,13 @@ end
 // ═══════════════════════════════════════════════════════════════════════════
 // Slot FSM — one slot start-to-finish inside its 72-cycle window
 // ═══════════════════════════════════════════════════════════════════════════
-typedef enum logic [4:0] {
+typedef enum logic [5:0] {
     SL_IDLE, SL_LOAD, SL_VIB, SL_VIB2, SL_STEP, SL_ADV, SL_POSB, SL_ADDR, SL_CHIT,
     SL_F_ISSUE, SL_F_WAIT, SL_DECODE, SL_INTERP, SL_EGRATE, SL_EGROM,
     SL_EGSTEP, SL_GAIN, SL_MUL1, SL_MUL2, SL_PAN, SL_ACC, SL_DONE, SL_STALL_HDR,
     //  extra pipeline states, used only when PIPE (a clock above 100 MHz)
-    SL_ADV0, SL_INTERP2, SL_INTERP3, SL_EGPRE, SL_GAIN2, SL_MUL1B, SL_MUL2B, SL_PANB
+    SL_ADV0, SL_INTERP2, SL_INTERP3, SL_EGPRE, SL_GAIN2, SL_MUL1B, SL_MUL2B, SL_PANB,
+    SL_EGPRE2, SL_CHIT0
 } sl_state_t;
 sl_state_t sl_state;
 
@@ -325,6 +326,9 @@ logic signed [16:0] w_idiff;
 logic signed [32:0] w_iprod;
 logic [9:0]   eg_att_r, eg_dl_r;
 logic [10:0]  eg_add_r;
+logic signed [20:0] eg_prod_r;         // calc_attack_step's product (EGPRE -> EGPRE2)
+logic         c_need_b;                // CHIT0: need_b, registered for CHIT
+logic [1:0]   bsel [0:5];              // CHIT0: word holding a0,a1,a2,b0,b1,b2 (pick_byte)
 logic         g_e_zero, g_t_zero;
 logic [7:0]   g_vmul_e, g_vmul_t;
 logic [4:0]   g_vsh_e, g_vsh_t;
@@ -355,6 +359,7 @@ logic [23:0] cache_vld;
 logic [23:0] cache_hasb;
 // Sequential cache-invalidate sweep state (see the walk in the slot always_ff).
 logic [20:0] inv_word;
+logic [20:0] inv_word_m1;    // PIPE: inv_word - 1, so tag + 1 == w becomes tag == w - 1
 logic  [4:0] inv_idx;
 logic        inv_run;
 // Periodic cache-scrub round-robin pointer (see scrub block in the slot FSM).
@@ -379,6 +384,44 @@ function automatic [7:0] pick_byte(
     else if (wx == wa + 21'd1)  return x[0] ? wd1[15:8] : wd1[7:0];
     else if (wx == wb)          return x[0] ? wd2[15:8] : wd2[7:0];
     else                        return x[0] ? wd3[15:8] : wd3[7:0];
+endfunction
+//  PIPE: pick_byte in two halves.  The word index (21-bit compares) is taken in
+//  CHIT0 from the registered addresses; DECODE only muxes by it.
+function automatic [1:0] pick_sel(input [21:0] x, input [21:0] a0, input [21:0] b0);
+    logic [20:0] wx, wa, wb;
+    wx = x[21:1]; wa = a0[21:1]; wb = b0[21:1];
+    if      (wx == wa)          return 2'd0;
+    else if (wx == wa + 21'd1)  return 2'd1;
+    else if (wx == wb)          return 2'd2;
+    else                        return 2'd3;
+endfunction
+function automatic [7:0] pick_by_sel(
+    input [1:0] sel, input lsb,
+    input [15:0] wd0, input [15:0] wd1, input [15:0] wd2, input [15:0] wd3
+);
+    logic [15:0] w;
+    case (sel)
+        2'd0: w = wd0;  2'd1: w = wd1;  2'd2: w = wd2;  default: w = wd3;
+    endcase
+    return lsb ? w[15:8] : w[7:0];
+endfunction
+//  PIPE: calc_attack_step (ymf278_pcm_alu) in two halves, same arithmetic and
+//  widths: the product leaves the DSP into a register (-1.88 ns at 128.86 MHz
+//  as one cycle), the add and the clamp take the next state.
+function automatic signed [20:0] attack_prod(input [9:0] ev, input [7:0] inc_val);
+    logic signed [10:0] inv;
+    logic signed [20:0] product;
+    inv     = ~{1'b0, ev};
+    product = inv * $signed({1'b0, inc_val});
+    return product;
+endfunction
+function automatic [9:0] attack_fin(input [9:0] ev, input signed [20:0] product);
+    logic signed [11:0] result;
+    result  = $signed({2'b0, ev}) + (product >>> 4);
+`ifndef PC_MUT_ATT
+    if (result <= 12'sd0) return 10'd0;
+`endif                                     // (negative control for PIPECHK)
+    return result[9:0];
 endfunction
 
 wire [21:0] addr_a0 = byte_addr(w_hdr.startAddr, w_pos2, w_hdr.bits, 2'd0);
@@ -462,13 +505,15 @@ always_ff @(posedge clk) if (dyn_we) ram_dyn_m[w_slot] <= dyn_wd_c;
 slot_regs_t   sn_regs;
 slot_dyn_t    sn_dyn;
 slot_header_t sn_hdr;
-logic         sn_kprev, sn_retrig, sn_hfp, sn_posrst, sn_tl_we;
-logic [7:0]   sn_tl_next;
+logic         sn_kprev, sn_retrig, sn_hfp, sn_posrst, sn_tl_load;
+logic [7:0]   sn_tl_cur;
 logic [4:0]   sn_slot = 5'd31;
 logic         sn_chg  = 1'b1;
 wire          sn_src_chg;              // driven below, once fwe/wr_slot_reg exist
 logic         tl_we_c;                 // TL ramp: write ld_slot's tl_cur this dispatch
 logic [7:0]   tl_next_c;               //          and with this value
+logic         d_tl_we;                 //          the same, from the snapshot (PIPE)
+logic [7:0]   d_tl_next;
 always_ff @(posedge clk) begin
     sn_regs   <= rr_ld;
     sn_dyn    <= ld_dyn_c;
@@ -477,8 +522,8 @@ always_ff @(posedge clk) begin
     sn_retrig <= key_retrig[ld_slot];
     sn_hfp    <= hf_pending[ld_slot];
     sn_posrst <= pos_rst[ld_slot];
-    sn_tl_we  <= tl_we_c;
-    sn_tl_next<= tl_next_c;
+    sn_tl_load<= tl_load[ld_slot];
+    sn_tl_cur <= tl_cur[ld_slot];
     sn_slot   <= cur_slot;
     sn_chg    <= sn_src_chg;
 end
@@ -567,14 +612,22 @@ always_ff @(posedge clk or negedge rst_n) begin
         // fill actually fetched the B pair (cache_hasb).
         if (cpu_wr_issue) begin
             inv_word <= sv_wr_addr[21:1];
+`ifndef PC_MUT_INV
+            inv_word_m1 <= sv_wr_addr[21:1] - 21'd1;
+`else       // negative control for PIPECHK
+            inv_word_m1 <= sv_wr_addr[21:1];
+`endif
             inv_idx  <= 5'd0;
             inv_run  <= 1'b1;
         end else if (inv_run) begin
+            //  tag + 1 == w and tag == w - 1 are the same test mod 2^21
             if (inv_tagA[inv_idx[4:0]]           == inv_word
-             || (inv_tagA[inv_idx[4:0]] + 21'd1) == inv_word
+             || (PIPE ? inv_tagA[inv_idx[4:0]] == inv_word_m1
+                      : (inv_tagA[inv_idx[4:0]] + 21'd1) == inv_word)
              || (cache_hasb[inv_idx[4:0]]
                  && (inv_tagB[inv_idx[4:0]]           == inv_word
-                  || (inv_tagB[inv_idx[4:0]] + 21'd1) == inv_word)))
+                  || (PIPE ? inv_tagB[inv_idx[4:0]] == inv_word_m1
+                           : (inv_tagB[inv_idx[4:0]] + 21'd1) == inv_word))))
                 cache_vld[inv_idx[4:0]] <= 1'b0;
             if (inv_idx == 5'd23) inv_run <= 1'b0;
             else                  inv_idx <= inv_idx + 5'd1;
@@ -728,6 +781,28 @@ always_ff @(posedge clk or negedge rst_n) begin
                 // the decode muxes (failed clk_sdram by ~0.5 ns when it did)
                 w_a0 <= addr_a0;  w_a1 <= addr_a1;  w_a2 <= addr_a2;
                 w_b0 <= addr_b0;  w_b1 <= addr_b1;  w_b2 <= addr_b2;
+                sl_state <= PIPE ? SL_CHIT0 : SL_CHIT;
+            end
+
+            SL_CHIT0: begin           // CHIT's need_b and DECODE's word picks, registered
+                logic [21:0] b_last;
+`ifndef PC_MUT_NEEDB
+                b_last = (w_hdr.bits == 2'd2) ? w_b1 : w_b2;
+`else           // negative control for PIPECHK: the old 16-bit odd-start bug
+                b_last = w_b2;
+`endif
+                c_need_b <= !((w_b0[21:1] >= w_a0[21:1]) &&
+                              (b_last[21:1] <= w_a0[21:1] + 21'd1));
+                bsel[0] <= pick_sel(w_a0, w_a0, w_b0);
+                bsel[1] <= pick_sel(w_a1, w_a0, w_b0);
+                bsel[2] <= pick_sel(w_a2, w_a0, w_b0);
+                bsel[3] <= pick_sel(w_b0, w_a0, w_b0);
+`ifndef PC_MUT_BSEL
+                bsel[4] <= pick_sel(w_b1, w_a0, w_b0);
+`else           // negative control for PIPECHK
+                bsel[4] <= pick_sel(w_b0, w_a0, w_b0);
+`endif
+                bsel[5] <= pick_sel(w_b2, w_a0, w_b0);
                 sl_state <= SL_CHIT;
             end
 
@@ -740,8 +815,9 @@ always_ff @(posedge clk or negedge rst_n) begin
                 // Using b2 unconditionally missed b1 for 16-bit samples at ODD
                 // start addresses → un-fetched word selected in SL_DECODE (X).
                 b_last = (w_hdr.bits == 2'd2) ? w_b1 : w_b2;
-                need_b_c = !((w_b0[21:1] >= w_a0[21:1]) &&
-                             (b_last[21:1] <= w_a0[21:1] + 21'd1));
+                need_b_c = PIPE ? c_need_b
+                                : !((w_b0[21:1] >= w_a0[21:1]) &&
+                                    (b_last[21:1] <= w_a0[21:1] + 21'd1));
                 w_need_b <= need_b_c;
                 w_fidx   <= 2'd0;
                 hit_c = cache_vld[w_slot]
@@ -800,7 +876,19 @@ always_ff @(posedge clk or negedge rst_n) begin
                 end
             end
 
-            SL_DECODE: begin
+            SL_DECODE: if (PIPE) begin
+                w_sa <= decode_sample(
+                    pick_by_sel(bsel[0], w_a0[0], w_word[0], w_word[1], w_word[2], w_word[3]),
+                    pick_by_sel(bsel[1], w_a1[0], w_word[0], w_word[1], w_word[2], w_word[3]),
+                    pick_by_sel(bsel[2], w_a2[0], w_word[0], w_word[1], w_word[2], w_word[3]),
+                    w_pos2, w_hdr.bits);
+                w_sb <= decode_sample(
+                    pick_by_sel(bsel[3], w_b0[0], w_word[0], w_word[1], w_word[2], w_word[3]),
+                    pick_by_sel(bsel[4], w_b1[0], w_word[0], w_word[1], w_word[2], w_word[3]),
+                    pick_by_sel(bsel[5], w_b2[0], w_word[0], w_word[1], w_word[2], w_word[3]),
+                    w_posb, w_hdr.bits);
+                sl_state <= SL_INTERP;
+            end else begin
                 w_sa <= decode_sample(
                     pick_byte(w_a0, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
                     pick_byte(w_a1, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
@@ -848,9 +936,14 @@ always_ff @(posedge clk or negedge rst_n) begin
             end
 
             SL_EGPRE: begin               // EGSTEP's arithmetic, registered
-                eg_att_r <= calc_attack_step(w_dyn.env_vol, w_inc);
+                eg_prod_r <= attack_prod(w_dyn.env_vol, w_inc);
                 eg_add_r <= {1'b0, w_dyn.env_vol} + {3'd0, w_inc};
                 eg_dl_r  <= dl_tab_rom(w_regs.dl_idx);
+                sl_state <= SL_EGPRE2;
+            end
+
+            SL_EGPRE2: begin
+                eg_att_r <= attack_fin(w_dyn.env_vol, eg_prod_r);
                 sl_state <= SL_EGSTEP;
             end
 
@@ -1425,22 +1518,30 @@ end
 
 // TL ramp (v2, carried over): one step per slot per frame, 9-sample phase.
 wire wr_tl_load = wr_slot_reg && (wr_field == 4'd3) && reg_data[0];
-//  The ramp's next value for ld_slot, as one expression so PIPE can snapshot it
-//  (tl_we_c / tl_next_c are declared with the snapshot).
-always_comb begin
-    slot_regs_t r_tl;
-    r_tl      = rr_ld;
-    tl_we_c   = 1'b0;
-    tl_next_c = tl_cur[ld_slot];
-    if (tl_load[ld_slot]) begin
-        tl_we_c = 1'b1;  tl_next_c = r_tl.tl;
-    end else if (tl_int_cnt == 4'd0) begin
-        if (tl_int_step == 2'd0) begin
-            if (tl_cur[ld_slot] < r_tl.tl) begin tl_we_c = 1'b1; tl_next_c = tl_cur[ld_slot] + 8'd1; end
+//  The ramp's next value for ld_slot: {write, value}.  Without PIPE it is taken
+//  from the async reads of this cycle; with PIPE from the snapshot of tl_cur and
+//  tl_load (no 24-way select in front of the compares).  The phase counters are
+//  live in both: they change only at sample_start, which no dispatch shares.
+//  (tl_we_c / tl_next_c / d_tl_* are declared with the snapshot.)
+function automatic [8:0] tl_ramp(input load, input [7:0] cur, input [7:0] tgt,
+                                 input [3:0] int_cnt, input [1:0] int_step);
+    if (load)                return {1'b1, tgt};
+    if (int_cnt == 4'd0) begin
+        if (int_step == 2'd0) begin
+            if (cur < tgt)   return {1'b1, cur + 8'd1};
         end else begin
-            if (tl_cur[ld_slot] > r_tl.tl) begin tl_we_c = 1'b1; tl_next_c = tl_cur[ld_slot] - 8'd1; end
+            if (cur > tgt)   return {1'b1, cur - 8'd1};
         end
     end
+    return {1'b0, cur};
+endfunction
+always_comb begin
+    slot_regs_t r_tl;
+    r_tl = rr_ld;
+    {tl_we_c, tl_next_c} = tl_ramp(tl_load[ld_slot], tl_cur[ld_slot], r_tl.tl,
+                                   tl_int_cnt, tl_int_step);
+    {d_tl_we, d_tl_next} = tl_ramp(sn_tl_load, sn_tl_cur, sn_regs.tl,
+                                   tl_int_cnt, tl_int_step);
 end
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -1448,8 +1549,8 @@ always_ff @(posedge clk or negedge rst_n) begin
         tl_load <= '0;
     end else begin
         if (dispatch_now && !clr_run) begin   // register bytes not swept yet
-            if (PIPE ? sn_tl_we : tl_we_c)
-                tl_cur[ld_slot] <= PIPE ? sn_tl_next : tl_next_c;
+            if (PIPE ? d_tl_we : tl_we_c)
+                tl_cur[ld_slot] <= PIPE ? d_tl_next : tl_next_c;
             tl_load[ld_slot] <= 1'b0;
         end
         if (wr_tl_load) tl_load[wr_snum] <= 1'b1;   // set wins
@@ -1604,6 +1705,47 @@ generate
         assign dbg_slot_envlive[gi] = live_q;
     end
 endgenerate
+
+`ifdef PIPECHK
+//  Simulation only.  Each PIPE split computes, from registers, a value the
+//  unpipelined engine computes in one cycle; on every use check it equals that
+//  one-cycle expression on the same cycle's inputs.  The 128.86 MHz golden can
+//  only see these through the samples; this sees each one directly.
+//  PC_MUT_* are the negative controls (each breaks one split).  The compares are
+//  4-state (===): an X in both (slot 23 of sc_st02/st04 dispatches with X
+//  addresses) is the same value, and == would turn it into a false failure.
+longint pc_n[4] = '{0,0,0,0}, pc_bad[4] = '{0,0,0,0};
+task automatic pc(input int k, input bit ok, input string what);
+    pc_n[k]++;
+    if (!ok) begin
+        pc_bad[k]++;
+        if (pc_bad[k] <= 3) $display("PIPECHK BAD %s slot=%0d", what, w_slot);
+    end
+endtask
+wire [21:0] pc_blast = (w_hdr.bits == 2'd2) ? w_b1 : w_b2;
+always @(negedge clk) if (rst_n && PIPE) begin
+    if (sl_state == SL_DECODE) pc(0,
+           pick_by_sel(bsel[0], w_a0[0], w_word[0], w_word[1], w_word[2], w_word[3])
+             === pick_byte(w_a0, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3])
+        && pick_by_sel(bsel[1], w_a1[0], w_word[0], w_word[1], w_word[2], w_word[3])
+             === pick_byte(w_a1, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3])
+        && pick_by_sel(bsel[2], w_a2[0], w_word[0], w_word[1], w_word[2], w_word[3])
+             === pick_byte(w_a2, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3])
+        && pick_by_sel(bsel[3], w_b0[0], w_word[0], w_word[1], w_word[2], w_word[3])
+             === pick_byte(w_b0, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3])
+        && pick_by_sel(bsel[4], w_b1[0], w_word[0], w_word[1], w_word[2], w_word[3])
+             === pick_byte(w_b1, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3])
+        && pick_by_sel(bsel[5], w_b2[0], w_word[0], w_word[1], w_word[2], w_word[3])
+             === pick_byte(w_b2, w_a0, w_b0, w_word[0], w_word[1], w_word[2], w_word[3]),
+        "decode");
+    if (sl_state == SL_CHIT) pc(1, c_need_b ===
+        !((w_b0[21:1] >= w_a0[21:1]) && (pc_blast[21:1] <= w_a0[21:1] + 21'd1)), "need_b");
+    if (sl_state == SL_EGSTEP) pc(2, eg_att_r === calc_attack_step(w_dyn.env_vol, w_inc), "attack");
+    if (inv_run && !cpu_wr_issue) pc(3, inv_word_m1 + 21'd1 === inv_word, "inv");
+end
+final $display("PIPECHK decode=%0d/%0d need_b=%0d/%0d attack=%0d/%0d inv=%0d/%0d (checks/bad)",
+               pc_n[0], pc_bad[0], pc_n[1], pc_bad[1], pc_n[2], pc_bad[2], pc_n[3], pc_bad[3]);
+`endif
 
 endmodule
 `default_nettype wire
