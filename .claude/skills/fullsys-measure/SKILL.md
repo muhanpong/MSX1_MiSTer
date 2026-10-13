@@ -42,6 +42,29 @@ description: Get a number out of the whole-machine bench (sim/fullsys) instead o
 - **DDR3 모델의 계약.** `ddram.sv` 의 `dout` 은 레지스터다. 읽기와 함께 붙잡힌 주소로
   채우고 다음 읽기까지 유지한다. 주소를 좇는 모델은 한 바이트 뒤를 준다.
 
+## 계측 (2026-10-13 추가)
+
+`tb_msx.sv` 끝에 두 줄이 찍힌다. 두 컨트롤러 모두 같은 정의다.
+- `sdram demand:` 해제 후 ACTIVE 수, 채널별 요청, 가장 바쁜 1 ms / 100 us.
+- `cpu read latency:` 요청 에지(`sdram_ce & ram_rnw`)부터 완료(`rdtog` 뒤집힘 또는 캐시 적중)까지,
+  min/max(ns)와 50 ns 히스토그램.
+  **첫 버전은 ns를 1000으로 나눠 max 0.2 ns를 찍었고 바로 못 알아챘다.** min이 한두 클록보다
+  작으면 그 측정은 무효다.
+
+## 두 런을 맞대기
+
+`sim/fullsys/cmp_streams.sh <기준.log> <후보.log>`: 해제 후 분기 스트림이 같은지(짧은 쪽 길이
+까지). 업로드 끝 시각이 달라 타임스탬프는 보지 않는다. 같은 로그끼리는 PASS여야 한다(대조군).
+**SDRAM 컨트롤러를 바꾸면 이걸로 기존 컨트롤러 런과 맞대라.** sdram128 연구에서 TDM 코어는
+타이밍을 통과하고 단독 벤치도 통과했지만, 이 비교에서 5번째 분기에 갈렸다.
+
+## sdram128-study 브랜치 전용
+
+`sim/fullsys/run_tdm.sh`: clk_sdram 128.86 MHz, clk21m = clk_sdram/6, `sdram_tdm`(32 MB 맵),
+CL3/BL2 칩 모델 `sdram_big_tdm`(tb_msx.sv `-DTDM`). `prep.sh`가 `tb/mkshim_tdm.py`로
+`gen/sdram_tdm_sim.sv`를 만든다. 컨트롤러 RTL을 고친 뒤에는 그 파일을 다시 만들 것
+(`python3 tb/mkshim_tdm.py rtl/peripheral/sdram_tdm.sv sim/fullsys/gen/sdram_tdm_sim.sv`).
+
 ## 무엇이 아직 없나
 
 `.sav` 경로는 `tb_msx.sv` 안에 저장 엔진과 SD 모델로 들어와 있다. 플로피(WD2793)를
