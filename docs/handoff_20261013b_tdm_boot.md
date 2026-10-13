@@ -118,3 +118,48 @@ tAC(CL3) 5.4, tOH 2.5, tIS 1.5, tIH 0.8 ns, tREFI 7.8 us. 설계 문서 숫자�
 4. R800/터보(paced) 모드는 지연이 CPU 속도를 바꾸므로 분기 스트림 완전 일치를 기대할 수 없다.
    GT 700 ms 구간은 대부분 Z80이라 이 기준이 통했다.
 5. 인수인계 4절 나머지: 핀 타이밍(출력 setup +0.079), V9968 연결, rebase.
+
+## 5. 2026-10-13 밤: rebase, RAM 정책, CPU 마감 보강, 컴파일 (사용자 지시 1-4)
+
+**1. rebase.** `git rebase --onto nextz80 7b4cf67 sdram128-study`, 32커밋, 충돌 0. 옛 base의 28커밋은
+모두 nextz80에 패치로 있었다(`git cherry` 0). 검증: (rebase 전 -> 후 차이) == (7b4cf67 -> nextz80 차이),
+바이트 단위 동일. 백업 브랜치 `sdram128-study-prerebase-20261013`. 이제 nextz80(03f7653) 위.
+
+**2. RAM 정책 (b304b10).** 32 MB 보드는 머신 RAM 매퍼 최대 2 MB(memory_upload가 128 x 16 kB로 자르고
+매퍼는 2 MB에서 미러), 64 MB 이상은 4 MB. 64 MB 보드는 sdram_tdm `mode64`가 논리 24-32 MB를 물리
+32-40 MB(뱅크 0 열 윗절반, 행 비트 그대로)로 옮겨 VRAM 뱅크를 피한다(일반 영역 32 MB).
+측정(run_upload32.sh, 최대 구성): 32 MB 보드 22.42 MB(< 24), 64 MB 보드 24.42 MB(< 32).
+벤치: b64 4/4 PASS, 대조군 mno64 검출(ch4 stuck at 0x18806d3).
+
+**3. 보강 (722abff).** 행 비트 != 00인 CPU 주소(큰 RAM, 카트 ROM)의 표준 속도 마감:
+- G1 읽기 예약(CPU 대기 중이고 행 비트 != 00이면 다른 채널은 G1을 읽기로 못 잡음)
+- CPU 보류/위치를 요청 다음 에지부터 조합으로(한 클록 늦던 c2_hold/c2_l 때문에 뱅크를 뺏김)
+- ch2 두 칸 큐: R800 쓰기(완료 핸드셰이크 없음) 뒤 12-18클록 만의 다음 요청이 대기 중인 쓰기를
+  덮던 문제. 미스 읽기는 큐의 쓰기 뒤에 선다. 넘침은 ch2_ovf(벤치가 실패 처리).
+- 시도했으나 뺌: 캐시 조회와 병렬 조기 발행 -- 36위상 x 행 00/01 어디서도 차이 0.
+
+| 위상 36개, 32 MB 맵, V 동작, ch1 같은 뱅크 | 행 00 | 행 01 |
+|---|---|---|
+| 보강 전 | LATE 0/36 | **36/36, 1,030건** |
+| 보강 후 | 0/36, 최대 E0+24 | **0/36**, 최대 E0+28 |
+| `TDM_MUT_NORSV` | | 35/36 |
+| `TDM_MUT_LATEHOLD` | | 3/36 |
+
+벤치 수정: ch2 에이전트가 ready로 읽기 완료를 판단하던 것을 rdtog/hit로(앞선 쓰기의 ready를 자기
+것으로 착각), 행 01 CPU 영역이 ch1 영역과 겹치던 것, 마감 대조군은 위상 3개 x 40만 클록.
+`sim/sdram_tdm/run.sh quick`: PASS, 엔진 28판, 대조군 11개(msens mbank mnoref mcap mcape mrdy
+mrfslow mno64 mrsv mlate mrdover) 모두 검출.
+
+**4. 컴파일.**
+
+| 컴파일 (`tools/sdram128/compile.sh`) | clk_sdram setup | 실패 끝점 | 비고 |
+|---|---|---|---|
+| e1ceb7a (rebase + ready + 리프레시 취소 + OPL3) | **+0.291 ns** | 0 | 33bdddd +0.286과 같은 수준 |
+| 722abff (+ RAM 정책 + 보강 첫판) | -25.273 ns | 223 | 큐 레지스터 `ch2b_*`가 SDC `*sdram*ch2_*` 멀티사이클 밖, 조합 gmap |
+| 29b9886 (이름 `ch2_b*`, ch2_hl 레지스터, m128/m64 레지스터) | -0.110 ns | 3 | 모두 `ch2_bv` 출발 |
+| **7cd1475** (ch2_bv/ch2_rdwait를 결정 경로에서 뺌) | **+0.110 ns** | **0** | 무시된 SDC 0, PCM PIPE 10/10, MLAB 31/31 |
+
+핀 STA(io_sta.tcl, 7cd1475 fit): 입력 setup +2.777, 출력 setup +0.079 ns(이전과 같음, IO 레지스터 고정).
+교훈: `check_timing.sh`의 마지막 RESULT PASS는 "빌드가 128.86 MHz PIPE 연구판이 맞다"는 뜻이고
+타이밍 통과가 아니다. 722abff는 -25 ns인데 PASS가 찍혔다 -> slack 줄을 반드시 볼 것(5절 끝의 남은 일).
+비트스트림은 여전히 연구용이며 보드에 올리지 않는다.

@@ -20,7 +20,7 @@
 set -u
 cd "$(dirname "$0")/../.."
 Q=${Q:-/home/sysop/data/intelFPGA_lite/17.0/quartus/bin}
-STA=output_files/MSX1.sta.rpt; MAP=output_files/MSX1.map.rpt
+STA=${STA:-output_files/MSX1.sta.rpt}; MAP=${MAP:-output_files/MSX1.map.rpt}   # override: negative controls on report copies
 FAIL=0; fail() { echo "  FAIL: $*"; FAIL=1; }
 MODE=${1:-all}
 case $MODE in all) NEED="$MAP $STA";; map) NEED=$MAP;; *) echo "usage: $0 [map]"; exit 2;; esac
@@ -75,6 +75,14 @@ echo "SDC constraints ignored by TimeQuest: ${ign:-none}"
 [ -z "$ign" ] || fail "SDC constraints ignored: $ign"
 
 echo "setup, clk_sdram: $(awk '/; Setup Summary/,/^$/' $STA | grep 'emu|pll.*general\[0\]' | awk -F';' '{print "slack "$3" TNS "$4}' | tr -s ' ')"
+#  The verdict below says the build is the study it claims to be -- not that it
+#  meets timing.  722abff printed that PASS at -25.273 ns (2026-10-13), so timing
+#  has its own verdict and its own exit status.
+SLK=$(awk '/; Setup Summary/,/^$/' $STA | grep 'emu|pll.*general\[0\]' | awk -F';' '{gsub(/ /,"",$3); print $3}')
+TFAIL=0
+if [ -z "$SLK" ]; then TFAIL=1; TMSG="TIMING FAIL: no clk_sdram line in the Setup Summary"
+elif awk -v s="$SLK" 'BEGIN{exit !(s < 0)}'; then TFAIL=1; TMSG="TIMING FAIL: clk_sdram setup slack $SLK ns"
+else TMSG="TIMING PASS: clk_sdram setup slack $SLK ns"; fi
 T=$(mktemp)
 "$Q/quartus_sta" -t tools/sdram128/sta_paths.tcl "$T" > /dev/null 2>&1 || fail "quartus_sta failed"
 echo "failing endpoints: $(wc -l < "$T")"
@@ -87,4 +95,5 @@ rm -f "$T"
 echo "════════════════════════════════"
 [ "$FAIL" -eq 0 ] && echo "RESULT PASS: the build is the 128.86 MHz PIPE study it claims to be" \
                  || echo "RESULT FAIL: see above"
-exit "$FAIL"
+echo "$TMSG"
+[ "$FAIL" -eq 0 ] && [ "$TFAIL" -eq 0 ]
