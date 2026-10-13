@@ -122,6 +122,20 @@ module tb;
             @(negedge clk);
             c_addr[ag] = ad; c_rnw[ag] = rnw; c_din[ag] = d; c_req[ag] = 1;
             t0 = 0; started = 0;
+            // ch1 / ch3 behave like memory_upload and the flash bridge: a request
+            // one clk21m long (6 clocks), then ready polled once a clk21m, and
+            // ready high at a poll 12+ clocks after the request = done.  ready
+            // must therefore fall within 12 clocks of the request edge
+            // (memory_upload.sv:542); the fall-and-rise wait below hid that.
+            if (ag == 0 || ag == 2) begin
+                repeat (6) @(posedge clk);
+                c_req[ag] = 0; t0 = 6;
+                forever begin
+                    repeat (6) @(posedge clk); t0 += 6;
+                    if (c_ready[ag]) break;
+                    if (t0 > 2000) begin fail($sformatf("ch%0d stuck, addr %h rnw %0d", ag + 1, ad, rnw)); break; end
+                end
+            end else
             // done = ready fell and rose again, or (ch2 read) a cache hit
             forever begin
                 @(posedge clk); t0++;

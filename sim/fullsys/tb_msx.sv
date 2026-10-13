@@ -20,7 +20,15 @@ module tb;
    //  uses and is enough for functional work.
    //  clk_sdram and clk21m are msx ports: declared in msx_ports.svh, driven here.
    initial clk_sdram = 1'b0;
-`ifndef TDM
+   //  -DTDMCLK (run_tdm.sh CLKONLY=1): the TDM clocks with sdram.sv and its CL2 chip
+   //  model -- separates the 6:1 clock from the controller.
+`ifdef TDM
+ `define TDM_CLOCK
+`endif
+`ifdef TDMCLK
+ `define TDM_CLOCK
+`endif
+`ifndef TDM_CLOCK
    localparam real TCK_NS = 11.64;
    always #5.820 clk_sdram = ~clk_sdram;       // 85.909 MHz: 11.64 ns period
                                               // (1ps resolution -- at 1ns the
@@ -858,6 +866,7 @@ module tb;
       trace_on = 1;
       t_release = $realtime;
       $display("reset released at %0t", $time);
+      bios_check();
       $fflush;
       //  Stop at the limit, or +after=<ms> past the first SRAM access, read or
       //  write (default 500) -- once that exists the rest of the boot is not
@@ -978,6 +987,70 @@ module tb;
       $display("sdram demand: busiest 1 ms = %0d ACT (%.3f M/s), busiest 100 us = %0d ACT (%.3f M/s)",
                sd_w1max, sd_w1max / 1.0e3, sd_w01max, sd_w01max / 100.0e-6 / 1e6);
    end
+
+   //  What the CPU actually latched, read by read (sdram128 study, 2026-10-13):
+   //  T80s takes DI on the CEN edge of TState 2 with WAIT_n high (T80s.vhd:202);
+   //  NextZ80 on the clk21m edge nz_bus advances.  For an SDRAM read the line also
+   //  says whether ch2 had completed THIS request by then (rdtog moved since the
+   //  window opened, or a cache hit) -- "LATE" means the CPU took a stale byte.
+   //  The first RDL_MAX reads after release are printed; LATE is counted always.
+   localparam int RDL_MAX = 3000;
+   int      rdl_n = 0, rdl_late = 0, rdl_sd = 0;
+   logic    rdl_win_q = 1'b0, rdl_tog0 = 1'b0;
+   realtime rdl_t0 = 0;
+   wire     rdl_win   = ~MSX.mreq_n & ~MSX.rd_n & sdram_ce & ram_rnw;
+   wire     rdl_t80   = ~MSX.use_nz & ce_cpu & ~MSX.t80_hold & MSX.wait_n & (MSX.T80.tstate == 3'd2);
+   wire     rdl_nz    = MSX.use_nz & MSX.NZB.adv;
+   //  (Verilator 5.052 does not link MSX.x inside $display: copy them out)
+   wire        rdl_usenz = MSX.use_nz, rdl_m1n = MSX.m1_n;
+   wire [15:0] rdl_a     = MSX.a;
+   wire  [7:0] rdl_d     = MSX.d_to_cpu;
+   always @(posedge clk21m) begin
+      rdl_win_q <= rdl_win;
+      if (rdl_win & ~rdl_win_q) begin rdl_tog0 <= sdram_rdtog; rdl_t0 = $realtime; end
+      if (rst_n_cnt == 0 && trace_on && ~MSX.mreq_n & ~MSX.rd_n & (rdl_t80 | rdl_nz)) begin
+         automatic bit sd = rdl_win & rdl_win_q;
+         automatic bit done = sd && (sdram_rdtog != rdl_tog0 || sdram_hit);
+         if (sd) rdl_sd++;
+         if (sd && !done) rdl_late++;
+         if (rdl_n < RDL_MAX)
+            $display("%12.3f  RDL %s %04x %02x %s%s %0.1f", $realtime/1000000.0, rdl_usenz ? "nz" : "t8",
+                     rdl_a, rdl_d, rdl_m1n ? "rd" : "m1",
+                     !sd ? " other" : (done ? (sdram_hit ? " hit" : " sd") : " LATE"),
+                     sd ? $realtime - rdl_t0 : 0.0);
+         rdl_n++;
+      end
+   end
+   final $display("cpu latched reads: %0d, from sdram %0d, LATE (ch2 not complete) %0d", rdl_n, rdl_sd, rdl_late);
+
+   //  Did the upload land?  The first record of a machine pack is its BIOS, the
+   //  32 kB right after the 16-byte header, filled at lookup_RAM[0] (2026-10-13:
+   //  sdram_tdm dropped upload bytes and the machine diverged at the 5th branch).
+   //  Both chip models index words by byte address [24:1] for the low 32 MB.
+   task automatic bios_check();
+      int bad = 0, first = -1;
+      int base;
+      base = int'(lookup_RAM[0].addr);
+      for (int i = 0; i < 32768 && 16 + i < pack_bytes; i++) begin
+         logic [15:0] w;
+         logic  [7:0] b;
+         w = u_chip.mem[24'((base + i) >> 1)];
+         b = ((base + i) & 1) ? w[15:8] : w[7:0];
+         if (b !== packmem[16 + i]) begin bad++; if (first < 0) first = base + i; end
+      end
+      $display("upload check: BIOS 32 kB at %07x vs pack: %0d bytes differ%s", base, bad,
+               first < 0 ? "" : $sformatf(" (first at %07x)", first));
+   endtask
+   //  A ch1 request edge that finds the previous one still queued overwrites it.
+   int ch1_over = 0;
+   logic ch1_req_q = 1'b0;
+   always @(posedge clk_sdram) begin
+      ch1_req_q <= ch1_req;
+`ifdef TDM   // sdram.sv declares ch1_rq inside its always block: not reachable
+      if (ch1_req & ~ch1_req_q & u_sdram.ch1_rq) ch1_over++;
+`endif
+   end
+   final $display("ch1 request edges onto a queued request: %0d", ch1_over);
 
    task automatic mupack_report();
       int b, bad = 0;

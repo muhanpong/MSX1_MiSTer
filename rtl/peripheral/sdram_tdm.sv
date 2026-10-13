@@ -323,9 +323,18 @@ always @(posedge clk) begin
     v_rvalid <= 1'b0;
     command  <= CMD_NOP;
 
-    // requests (sdram.sv semantics)
+    // requests (sdram.sv semantics), except that ready falls AT the request edge.
+    //  memory_upload and the flash bridge issue a one-clk21m request and take
+    //  ready high two clk21m later (12 clocks here) as "done, send the next"
+    //  (memory_upload.sv:542).  sdram.sv drops ready when it picks the request,
+    //  1-2 clocks in; here the pick waits for a G slot (up to ~14 clocks), so the
+    //  uploader saw the previous ready, sent the next byte over the pending one
+    //  and the first was lost: BIOS word 04E6h read 00 in fullsys (2026-10-13).
     if (ch1_req & ~ch1_req_1) begin
         ch1_rq <= 1; ch1_rnw_1 <= ch1_rnw; ch1_addr_1 <= ch1_addr; ch1_din_1 <= ch1_din;
+`ifndef TDM_MUT_RDY     // negative control: ready falls only at the pick
+        ch1_ready <= 0;
+`endif
     end
     if (~ch2_req) ch2_hit_r <= 0;
     if (ch2_req & ~ch2_req_1) begin
@@ -359,9 +368,15 @@ always @(posedge clk) begin
     end
     if (ch3_req & ~ch3_req_1) begin
         ch3_rq <= 1; ch3_rnw_1 <= ch3_rnw; ch3_addr_1 <= ch3_addr; ch3_din_1 <= ch3_din;
+`ifndef TDM_MUT_RDY
+        ch3_ready <= 0;
+`endif
     end
     if (ch4_req & ~ch4_req_1) begin
         ch4_rq <= 1; ch4_rnw_1 <= ch4_rnw; ch4_addr_1 <= ch4_addr; ch4_din_1 <= ch4_din;
+`ifndef TDM_MUT_RDY
+        ch4_ready <= 0;
+`endif
     end
     if (~ch3_req) ch3_done <= 0;
 

@@ -23,13 +23,19 @@ MS=${2:-60}
 #  name, so the original has to come OUT of the list or it wins by being first.
 FILES=$(grep -v 'rtl/peripheral/sdram\(_tdm\)\?\.sv$' "$GEN/filelist.txt" | tr '\n' ' ')
 
+#  CLKONLY=1: the same clocks, but sdram.sv over its CL2 chip model (-DTDMCLK),
+#  to tell the 6:1 clock apart from the TDM controller.
+DEFS=-DTDM
+[ -n "${CLKONLY:-}" ] && DEFS=-DTDMCLK
+#  XDEFS="-DTDM_MUT_RDY": a negative control of sdram_tdm, as in sim/sdram_tdm.
+DEFS="$DEFS ${XDEFS:-}"
 mkdir -p "$OUT"
 verilator --binary --timing --public-flat-rw \
    -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL \
    -Wno-UNDRIVEN -Wno-PINMISSING -Wno-IMPLICIT -Wno-MULTIDRIVEN -Wno-CASEINCOMPLETE \
    -Wno-BLKSEQ -Wno-LATCH -Wno-SIDEEFFECT -Wno-ENUMVALUE -Wno-BLKANDNBLK \
    -Wno-TIMESCALEMOD \
-   -DTDM --top-module tb -o tbmsx -Mdir "$OUT/v" \
+   $DEFS --top-module tb -o tbmsx -Mdir "$OUT/v" \
    "+incdir+$GEN" $FILES "$GEN/sdram_sim.sv" "$GEN/sdram_tdm_sim.sv" sim/fullsys/tb_msx.sv \
    > "$OUT/build.log" 2>&1 || { echo "BUILD FAIL:"; grep -E '%Error' "$OUT/build.log" | head -20; exit 1; }
 
