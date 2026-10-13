@@ -1,0 +1,21 @@
+compile ae02602 pcm: PIPE pan gains looked up a clock ahead (c2c3c58: w_pl <- w_regs.pan -0.504 ns) at 2026-10-14 02:43:57
+build: map 2026-10-14 02:23:43, HEAD ae02602 (map only)
+PCM pipeline states synthesised: 10 / 10
+PCM memories in MLAB: 31 distinct, 31 required
+PCM arrays Quartus could not infer as memory (10999): 0
+════════════════════════════════
+RESULT PASS: map stage is the 128.86 MHz PIPE study (fit may go on)
+stage fit rc=0 1067s errors=0
+stage sta rc=0 25s errors=0
+build: map 2026-10-14 02:23:43, sta 2026-10-14 03:02:09, HEAD ae02602
+clk_sdram period: 7.760 ns
+PCM pipeline states synthesised: 10 / 10
+PCM memories in MLAB: 31 distinct, 31 required
+PCM arrays Quartus could not infer as memory (10999): 0
+SDC constraints ignored by TimeQuest: none
+setup, clk_sdram: slack 0.057 TNS 0.000 
+failing endpoints: 0
+════════════════════════════════
+RESULT PASS: the build is the 128.86 MHz PIPE study it claims to be
+TIMING PASS: clk_sdram setup slack 0.057 ns
+ASM seed 9 rc=0

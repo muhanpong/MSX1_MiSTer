@@ -177,3 +177,23 @@ mrfslow mno64 mrsv mlate mrdover) 모두 검출.
    pcm_rom_base 기본값 24 MB(VRAM 뱅크).
 5. V9968 연결(v_en=1): VRAM 포트, 리프레시 슬롯. 벤치는 V를 이미 돌리고 있으나 fullsys는 v_en=0.
 6. fullsys로 R800 쓰기 많은 부팅(ch2 큐가 실제로 쓰이는 경우)을 한 번 더: GT는 대부분 Z80 구간.
+
+## 6. 2026-10-14 새벽: 실기 보고 -- Neon Horizon(GT) 타일 깨짐
+
+7cd1475 rbf를 FS-A1GT에서 돌린 결과, 다른 소프트는 큰 이상이 없는데 MSXdev25 Neon Horizon(8 MB
+ASCII16-X 카트, MoonSound 사용)의 배경 타일이 깨졌다. 단독 벤치에 "R800 쓰기 뒤 0-12클록 안에 다음 요청"
+에이전트(+r800wr)를 넣자 두 가지가 재현됐다(c2c3c58):
+1. **캐시 무효화 틈**: 슬롯이 쓰기를 고른 다음 에지(ACT)에서야 줄을 무효화하는데, 그 에지에 같은 주소 읽기의
+   캐시 조회가 끝나면 큐는 비어 있고 c_we는 아직 0이라 옛 값이 적중으로 나간다(LD (HL),A / LD A,(HL)).
+   수정: 무효화 예정 에지에는 같은 줄 적중 금지. 틀린 값 0/16판, 대조군 TDM_MUT_DROPGAP 3/16판.
+2. **ch2 큐 넘침**: R800이 ~14클록마다 쓰면 한 뱅크에서 프레임당 한 슬롯보다 빨라 두 칸이 찬다(쓰기 유실).
+   수정: 새 출력 ch2_busy -> msx.sv sdram_busy, 가드가 페이스 CPU의 SDRAM 쓰기 창을 붙잡는다(표준 속도 무관).
+   대조군 TDM_MUT_NOBUSY 넘침 검출.
+긴 시험(시드 8 x 60만 클록 x 32/128 MB x 간격 2종): 32/32 PASS, ch2 약 100만 회, 틀린 값 0, 넘침 0.
+run.sh quick PASS(대조군 13개). fullsys GT 700 ms(c2c3c58): 46,026 분기 PASS, LATE 0.
+
+타이밍: c2c3c58 -0.504(PCM w_pl <- w_regs.pan) -> ae02602에서 팬 표 조회를 한 클록 앞으로(PIPE만,
+run_pcm128_verify quick PASS) -> SEED 8 -0.042(pcm w_word <- rdaddr_reg) -> **SEED 9 +0.057 ns, 0**.
+rbf `MSX1_20261014b_sdram128_ae02602.rbf`(md5 e3decc31...) 사용자에게 보냄. 실기 재시험 대기.
+**이 두 결함이 Neon Horizon 증상의 원인인지는 아직 증명되지 않았다**(게임을 fullsys로 돌리지 않음:
+8 MB 카트 + MoonSound 업로드만 시뮬레이션 1.5초 이상, 벽시계 약 10시간).
