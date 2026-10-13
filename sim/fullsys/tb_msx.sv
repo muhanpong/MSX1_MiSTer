@@ -212,7 +212,7 @@ module tb;
 `else
    sdram_tdm u_sdram
    (
-      .init(rst_n_cnt != 0), .clk(clk_sdram), .mode128(1'b0),
+      .init(rst_n_cnt != 0), .clk(clk_sdram), .mode128(1'b0), .mode64(1'b0),
       .v_en(1'b0), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
       .v_grant(), .v_rdata(), .v_rvalid(),
 `endif

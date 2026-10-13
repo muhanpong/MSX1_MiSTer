@@ -72,7 +72,7 @@ module tb_upload32;
    logic        kbd_request, kbd_we, load_sram, reset_rq;
    logic  [8:0] kbd_addr;
    logic  [7:0] kbd_din;
-   logic  [1:0] sdram_size = 2'd1;            // 32 MB
+   logic  [1:0] sdram_size = 2'd1;            // 32 MB; +sdsz=2 a 64 MB board
    MSX::block_t        slot_layout[64];
    MSX::lookup_RAM_t   lookup_RAM[16];
    MSX::lookup_SRAM_t  lookup_SRAM[4];
@@ -129,6 +129,7 @@ module tb_upload32;
       if ($value$plusargs("mapa=%d", ma)) cart_conf[0].selected_mapper = mapper_typ_t'(ma);
       if ($value$plusargs("mapb=%d", mb)) cart_conf[1].selected_mapper = mapper_typ_t'(mb);
       if ($value$plusargs("limit=%h", lim)) limit = 27'(lim);
+      begin int z; if ($value$plusargs("sdsz=%d", z)) sdram_size = 2'(z); end
       rd("pack", pack_n, 0); rd("fw", fw_n, 1); rd("roma", roma_n, 2); rd("romb", romb_n, 3);
       repeat (10) @(posedge clk);
       //  the order a board sees: FW pack and cart ROMs in DDR3, then the machine
@@ -143,6 +144,8 @@ module tb_upload32;
          if (lookup_RAM[i].size != 0)
             $display("lookup_RAM[%0d] addr=%07x size=%0d x16kB -> end %07x", i, lookup_RAM[i].addr,
                      lookup_RAM[i].size, lookup_RAM[i].addr + {lookup_RAM[i].size, 14'd0});
+      $display("machine RAM mapper: %0d x 16 kB (bios_config.ram_size=%0d), board sdram_size=%0d",
+               lookup_RAM[5].size, bios_config.ram_size, sdram_size);
       $display("pcm_rom_base=%07x (wave RAM to %07x)%s", pcm_rom_base, pcm_rom_base + 27'h400000,
                pcm_rom_base == 27'h1800000 ? "  [default: no yrw801 loaded]" : "");
       $display("upload: %0d SDRAM byte writes, highest %07x (%.2f MB); at or above %07x: %0d (first %07x)",

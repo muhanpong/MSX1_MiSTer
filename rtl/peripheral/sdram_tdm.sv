@@ -36,6 +36,7 @@ module sdram_tdm
     input             init,
     input             clk,
     input             mode128,     // 1: 128 MB board map (two 64 MB chips)
+    input             mode64,      // 1: 64 MB board (one chip, 32 MB map): general 24-32 MB moves to 32-40 MB
     input             v_en,        // VRAM port in use: its bank is reserved, V slots run
 
     inout      [15:0] SDRAM_DQ,
@@ -169,6 +170,21 @@ function automatic loc_t map(input [26:0] a, input m);
     return l;
 endfunction
 
+//  General (non-VRAM) addresses only.  The 32 MB map gives bank 3 (24-32 MB) to the
+//  VRAM; on a 64 MB board the column MSB a[25] reaches the other half of every
+//  row, so logical 24-32 MB is moved to 32-40 MB (bank 0, upper half, same row
+//  bits) and the general area is a contiguous 32 MB there -- a 4 MB machine with
+//  MoonSound and two 8 MB carts (24.42 MB) fits.  The V path calls map() directly.
+function automatic loc_t gmap(input [26:0] a, input m, input m64);
+    logic [26:0] p;
+`ifndef TDM_MUT_NO64        // negative control: no move (the VRAM bank refuses 24-32 MB)
+    p = (m64 && !m && a[26:23] == 4'b0011) ? {a[26], 3'b100, a[22:0]} : a;
+`else
+    p = a;
+`endif
+    return map(p, m);
+endfunction
+
 // ─── frame ─────────────────────────────────────────────────────────────────
 reg  [3:0] ph = 4'd0;            // the frame cycle (kept for benches)
 reg [11:0] ps = 12'd1;           // the same, one-hot: every decode below is one bit
@@ -296,13 +312,13 @@ assign rf_cxl = cpu_wait && rf_late != 2'd3 && (c2_l.c ? rf_now[1] : rf_now[0]) 
 assign rf_cxl = 1'b0;
 `endif
 always @(posedge clk) begin
-    cand_l[0] <= map(ch2_addr_1, mode128);
-    cand_l[1] <= map(ch1_addr_1, mode128);
-    cand_l[2] <= map(ch3_addr_1, mode128);
-    cand_l[3] <= map(ch4_addr_1, mode128);
+    cand_l[0] <= gmap(ch2_addr_1, mode128, mode64);
+    cand_l[1] <= gmap(ch1_addr_1, mode128, mode64);
+    cand_l[2] <= gmap(ch3_addr_1, mode128, mode64);
+    cand_l[3] <= gmap(ch4_addr_1, mode128, mode64);
     rq_d      <= {ch4_rq, ch3_rq, ch1_rq, ch2_rq};
     c2_hold   <= ch2_cpend | c_pend2 | c_pend3 | ch2_rq;
-    c2_l      <= map(ch2_rq ? ch2_addr_1 : ch2_caddr, mode128);
+    c2_l      <= gmap(ch2_rq ? ch2_addr_1 : ch2_caddr, mode128, mode64);
 end
 always_comb begin
     logic sens, b0, b1;

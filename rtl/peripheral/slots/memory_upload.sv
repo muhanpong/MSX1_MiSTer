@@ -375,6 +375,16 @@ module memory_upload
                         mapper      <= mapper_typ_t'(conf[8]);
                         mem_device  <= device_typ_t'(conf[4]);
                         data_size   <= {conf[5][2:0], conf[6],14'h0};
+                        //  sdram128: on a 32 MB board the machine's RAM mapper is at most
+                        //  2 MB (128 x 16 kB); 4 MB is for 64 MB boards and up.  sdram_tdm
+                        //  keeps 24-32 MB for the V9968's VRAM, and the largest machine (4 MB
+                        //  + MoonSound + two 8 MB carts) reaches 24.42 MB (sim/run_upload32.sh).
+                        //  The mapper then mirrors at 2 MB, as the 2 MB packs do.
+                        if (data_ID_t'(conf[4]) == ROM_RAM && sdram_size == 2'd1
+                            && {conf[5][2:0], conf[6]} > 11'd128) begin
+                           data_size <= 25'h200000;
+                           $display("     RAM capped at 2 MB on a 32 MB board (pack asks %0d x 16 kB)", {conf[5][2:0], conf[6]});
+                        end
                         sram_size   <= 25'({conf[12], 10'd0});
                         ref_sram    <= 3;
                         data_id     <= data_ID_t'(conf[4]);
@@ -387,10 +397,13 @@ module memory_upload
                            msx_dev_ref_ram[conf[7][2:0]] <= ref_ram;
                         end
                         if (device_typ_t'(conf[4]) == DEVICE_FDC) bios_config.use_FDC <= 1'b1;
-                        if (data_ID_t'(conf[4]) == ROM_RAM)
-                           if (bios_config.ram_size < conf[6]) begin
+                        if (data_ID_t'(conf[4]) == ROM_RAM) begin
+                           if (sdram_size == 2'd1 && {conf[5][2:0], conf[6]} > 11'd128) begin
+                              if (bios_config.ram_size < 8'd128) bios_config.ram_size <= 8'd128;   // the cap above
+                           end else if (bios_config.ram_size < conf[6]) begin
                               bios_config.ram_size <= conf[6];
                            end
+                        end
                      end
                      default: ;
                   endcase

@@ -28,6 +28,7 @@ module tb;
     logic clk = 0;
     always #(TCK/2) clk = ~clk;
 
+    int m64 = 0;                          // +m64=1: 64 MB board (build with -DCHIP64)
     int m128 = 0, ncyc = 200000, seed = 1, busy = 30, stock = 0, dl = 28, cpulow = 0;
     initial begin
         void'($value$plusargs("m128=%d", m128));
@@ -37,6 +38,7 @@ module tb;
         void'($value$plusargs("stock=%d", stock));
         void'($value$plusargs("dl=%d", dl));
         void'($value$plusargs("cpulow=%d", cpulow));
+        void'($value$plusargs("m64=%d", m64));
         void'($urandom(seed));
     end
 
@@ -63,7 +65,7 @@ module tb;
     wire  [31:0] v_rdata;
 
     sdram_tdm #(.CACHE_LINES(1024)) dut (
-        .init(init), .clk(clk), .mode128(m128[0]), .v_en(1'b1),
+        .init(init), .clk(clk), .mode128(m128[0]), .mode64(m64[0]), .v_en(1'b1),
         .SDRAM_DQ(DQ), .SDRAM_A(A), .SDRAM_DQML(DQML), .SDRAM_DQMH(DQMH), .SDRAM_BA(BA),
         .SDRAM_nCS(nCS), .SDRAM_nWE(nWE), .SDRAM_nRAS(nRAS), .SDRAM_nCAS(nCAS), .SDRAM_CKE(CKE),
         .SDRAM_CLK(SCLK),
@@ -77,7 +79,9 @@ module tb;
         .v_grant(v_grant), .v_rdata(v_rdata), .v_rvalid(v_rvalid)
     );
 
-`ifdef ONECHIP
+`ifdef CHIP64
+    sdram_chk #(.NCHIP(1), .COLS(1024)) chip2 (
+`elsif ONECHIP
     sdram_chk #(.NCHIP(1), .COLS(512)) chip2 (
 `else
     sdram_chk #(.NCHIP(2), .COLS(1024)) chip2 (
@@ -98,6 +102,8 @@ module tb;
         int base;
         //  +stock=1 with +cpulow=1: the CPU where a machine keeps its BIOS and RAM
         //  (0.25-1.25 MB: bank 0, row bits 00), next to ch1's region in the same bank
+        //  +m64: ch4 lives at 24.5-28.5 MB, the range a 64 MB board moves to 32 MB
+        if (ag == 3 && m64) return 27'h1880000 + ((r % 4) * 27'h0100000) + ($urandom % 16384);
         if (ag == 1 && stock && cpulow) return 27'h0040000 + ((r % 4) * 27'h0040000) + ($urandom % 16384);
         if (m128 == 0) base = ag * 27'h0500000 + 27'h0180000;   // 1.5, 6.5, 11.5, 16.5 MB ...
         else           base = ag * 27'h0600000 + 27'h0180000;   // up to ~19.5 MB, both chips
