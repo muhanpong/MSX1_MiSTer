@@ -239,6 +239,8 @@ end
 wire [CW-1:0] c_pidx   = ch2_caddr[CW:1];
 wire          c_hazard = (c_we && c_waddr == c_pidx) | (c_we_d && c_waddr_d == c_pidx);
 wire          c_match  = c_rdata[LW-1] && c_rdata[LW-2:16] == ch2_caddr[26:CW+1];
+//  a hit answers only with no ch2 access queued (ch2_saved_data must not be replaced under it)
+assign c2_hit_now = c_pend3 && c_hit_q && ~ch2_rq && ~ch2b_v && ~(c_we && c_waddr == c_pidx);
 
 // ─── slot state ────────────────────────────────────────────────────────────
 //  per general slot: which channel, the access, where it lands
@@ -252,6 +254,15 @@ typedef struct packed {
     loc_t        l;
 } gslot_t;
 gslot_t g1, g2;                  // decided at cycle 2 / 6, issued from 4 / 8
+reg     ch2b_v = 1'b0, ch2b_rnw;      // ch2 queue, second entry
+reg [26:0] ch2b_addr;
+reg  [7:0] ch2b_din;
+reg     ch2_ovf = 1'b0;              // a ch2 write found the queue full (never expected)
+logic   enq, enq_rnw, enq_rd;
+logic [26:0] enq_addr;
+logic  [7:0] enq_din;
+reg     ch2_rdwait = 1'b0;       // a ch2 read waits for a queued ch2 write to be picked
+wire    c2_hit_now;              // the cache answers the ch2 read on this edge
 reg     prev_v;                  // the general slot before this one was used ...
 reg     prev_c;                  //   ... on this chip
 reg [1:0] prev_b;                //   ... and this bank
@@ -305,7 +316,7 @@ reg  [3:0] cand_ok;
 loc_t      cand_l [0:3];         // registered: map() of each channel's held address
 reg  [3:0] rq_d;                 // the request was already up last cycle (cand_l is its)
 reg        c2_hold;              // registered CPU reservation
-assign cpu_wait = ch2_rq | ch2_cpend | c_pend2 | c_pend3;
+assign cpu_wait = ch2_rq | ch2_cpend | c_pend2 | c_pend3 | ch2_rdwait | ch2b_v;
 `ifndef TDM_MUT_RFSLOW      // negative control: no cancellation (the 2026-10-13 controller)
 assign rf_cxl = cpu_wait && rf_late != 2'd3 && (c2_l.c ? rf_now[1] : rf_now[0]) && !(ps[10] | ps[11]);
 `else
@@ -317,11 +328,12 @@ always @(posedge clk) begin
     cand_l[2] <= gmap(ch3_addr_1, mode128, mode64);
     cand_l[3] <= gmap(ch4_addr_1, mode128, mode64);
     rq_d      <= {ch4_rq, ch3_rq, ch1_rq, ch2_rq};
-    c2_hold   <= ch2_cpend | c_pend2 | c_pend3 | ch2_rq;
+    c2_hold   <= ch2_cpend | c_pend2 | c_pend3 | ch2_rq | ch2_rdwait | ch2b_v;
     c2_l      <= gmap(ch2_rq ? ch2_addr_1 : ch2_caddr, mode128, mode64);
 end
 always_comb begin
-    logic sens, b0, b1;
+    logic sens, b0, b1, rsv, hold;
+    loc_t hl;
     // G1 (decided in cycle 2) is sensitive when V reads this frame; G2 (cycle 6)
     // when G1 reads.  The blocking set differs: G1 also sees rf_next.
 `ifndef TDM_MUT_SENS
@@ -332,13 +344,34 @@ always_comb begin
     b0   = (rf_now[0] & ~rf_cxl) | (ps[2] & rf_next[0]);
     b1   = (rf_now[1] & ~rf_cxl) | (ps[2] & rf_next[1]);
     cand_ok[0] = ch2_rq & rq_d[0] & ok(cand_l[0], sens, b0, b1, prev_v, prev_c, prev_b, mode128);
+    //  The CPU's hold and location from the edge after its request, not a clock
+    //  later through c2_hold/c2_l: the decision on that edge used to give the CPU's
+    //  bank away (sim/sdram_tdm +stock +cpulow=2, "OB-" at 3 of 36 grid phases).
+    //  Bit slicing only (gmap) on registered addresses.
+`ifndef TDM_MUT_LATEHOLD
+    hold = c2_hold | ch2_cpend | ch2_rq | ch2_rdwait | ch2b_v;
+    hl   = gmap(ch2_rq ? ch2_addr_1 : ch2_caddr, mode128, mode64);
+`else
+    hold = c2_hold;
+    hl   = c2_l;
+`endif
     //  CPU bank reservation: while a CPU read is being looked up or waits, the
     //  other channels may not take its bank -- the slot after would then be closed
     //  to it by tRC, and at stock speed the CPU has a fixed deadline.  (32 MB banks
     //  are 8 MB, so without this ch2 lost a slot to almost every other access.)
-    cand_ok[1] = ch1_rq & rq_d[1] & ok(cand_l[1], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(c2_hold & ~cand_ok[0] & cand_l[1].c == c2_l.c & cand_l[1].b == c2_l.b);
-    cand_ok[2] = ch3_rq & rq_d[2] & ok(cand_l[2], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(c2_hold & ~cand_ok[0] & cand_l[2].c == c2_l.c & cand_l[2].b == c2_l.b);
-    cand_ok[3] = ch4_rq & rq_d[3] & ok(cand_l[3], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(c2_hold & ~cand_ok[0] & cand_l[3].c == c2_l.c & cand_l[3].b == c2_l.b);
+    //  G1 read reservation: a waiting CPU access whose row bits are not 00 cannot
+    //  take a DQM-sensitive G1 (after a V read) and can take G2 only if G1 is not a
+    //  read.  So while it waits, nobody else gets G1 for a READ (writes still may):
+    //  G2 stays open to it.  Without this, row bits 01 missed the stock deadline at
+    //  every grid phase (sim/sdram_tdm +stock +cpulow=2, 1030 LATE of ~31k).
+`ifndef TDM_MUT_NORSV
+    rsv  = ps[2] & hold & ~cand_ok[0] & (hl.r[12:11] != 2'b00);
+`else
+    rsv  = 1'b0;
+`endif
+    cand_ok[1] = ch1_rq & rq_d[1] & ok(cand_l[1], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(hold & ~cand_ok[0] & cand_l[1].c == hl.c & cand_l[1].b == hl.b) & ~(rsv & ch1_rnw_1);
+    cand_ok[2] = ch3_rq & rq_d[2] & ok(cand_l[2], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(hold & ~cand_ok[0] & cand_l[2].c == hl.c & cand_l[2].b == hl.b) & ~(rsv & ch3_rnw_1);
+    cand_ok[3] = ch4_rq & rq_d[3] & ok(cand_l[3], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(hold & ~cand_ok[0] & cand_l[3].c == hl.c & cand_l[3].b == hl.b) & ~(rsv & ch4_rnw_1);
 end
 
 // ─── init ──────────────────────────────────────────────────────────────────
@@ -368,12 +401,22 @@ always @(posedge clk) begin
 `endif
     end
     if (~ch2_req) ch2_hit_r <= 0;
+    //  ch2 queue: the head is ch2_rq / ch2_*_1 (what the slots pick), behind it one
+    //  more entry, ch2b.  A paced CPU writes with no completion handshake (msx.sv
+    //  GUARD_WR, 2 clk21m) and its next request follows 12-18 clocks later; a TDM
+    //  slot can take longer than that, and the second request used to overwrite the
+    //  queued one (a lost write; sdram.sv picked within a clock or two).  At most
+    //  one request enters per edge: a write, a cache miss, or a read that waited.
+    enq = 1'b0; enq_rnw = 1'b1; enq_addr = ch2_caddr; enq_din = ch2_din_1; enq_rd = 1'b0;
     if (ch2_req & ~ch2_req_1) begin
         if (CACHE_LINES != 0 && ch2_rnw) begin
             ch2_cpend <= 1;
             ch2_caddr <= ch2_addr;
+            //  (Issuing the read in parallel with this lookup was tried, with a drop
+            //  flag for hits: no change at any of 36 grid phases, rows 00 or 01 --
+            //  the first decision is lost to the slot rules, not to these 3 clocks.)
         end else begin
-            ch2_rq <= 1; ch2_rnw_1 <= ch2_rnw; ch2_addr_1 <= ch2_addr; ch2_din_1 <= ch2_din;
+            enq = 1'b1; enq_rnw = ch2_rnw; enq_addr = ch2_addr; enq_din = ch2_din;
         end
     end
     if (ch2_cpend) begin
@@ -388,13 +431,39 @@ always @(posedge clk) begin
         c_word_q <= c_rdata[15:0];
     end else if (c_pend3) begin
         c_pend3 <= 0;
-        if (c_hit_q && ~ch2_rq && ~(c_we && c_waddr == c_pidx)) begin
+        if (c2_hit_now) begin
             ch2_saved_data <= c_word_q;
             ch2_saved_a0   <= ch2_caddr[0];
             ch2_ready      <= 1;
             ch2_hit_r      <= 1;
         end else begin
-            ch2_rq <= 1; ch2_rnw_1 <= 1; ch2_addr_1 <= ch2_caddr;
+            enq = 1'b1; enq_rd = 1'b1;            // a miss: queued behind any write
+        end
+    end
+    if (ch2_rdwait) begin enq = 1'b1; enq_rd = 1'b1; end
+    begin
+        logic promo;
+        promo = !ch2_rq && ch2b_v;
+        if (promo) begin
+            ch2_rq <= 1; ch2_rnw_1 <= ch2b_rnw; ch2_addr_1 <= ch2b_addr; ch2_din_1 <= ch2b_din;
+            ch2b_v <= 0;
+        end
+        if (enq) begin
+`ifndef TDM_MUT_RDOVER      // negative control: no second entry, a request replaces the queued one
+            if (!ch2_rq && !ch2b_v) begin
+                ch2_rq <= 1; ch2_rnw_1 <= enq_rnw; ch2_addr_1 <= enq_addr; ch2_din_1 <= enq_din;
+                ch2_rdwait <= 0;
+            end else if (!ch2b_v || promo) begin
+                ch2b_v <= 1; ch2b_rnw <= enq_rnw; ch2b_addr <= enq_addr; ch2b_din <= enq_din;
+                ch2_rdwait <= 0;
+            end else if (enq_rd)
+                ch2_rdwait <= 1;                   // full: the read tries again next edge
+            else
+                ch2_ovf <= 1;                      // full: a write is lost (sticky, benches fail on it)
+`else
+            ch2_rq <= 1; ch2_rnw_1 <= enq_rnw; ch2_addr_1 <= enq_addr; ch2_din_1 <= enq_din;
+            ch2_rdwait <= 0;
+`endif
         end
     end
     if (ch3_req & ~ch3_req_1) begin
@@ -621,6 +690,7 @@ always @(posedge clk) begin
         init_cnt <= INIT_CYCLES[15:0] + 16'd200;
         c_flush <= 1; c_flush_idx <= '0;
         ch2_cpend <= 0; c_pend2 <= 0; c_pend3 <= 0; ch2_hit_r <= 0;
+        ch2_rdwait <= 0; ch2b_v <= 0;
         dq_oe <= 1'b0;
     end
 end

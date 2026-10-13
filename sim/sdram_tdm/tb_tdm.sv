@@ -28,7 +28,8 @@ module tb;
     logic clk = 0;
     always #(TCK/2) clk = ~clk;
 
-    int m64 = 0;                          // +m64=1: 64 MB board (build with -DCHIP64)
+    int m64 = 0;
+    int r800wr = 0;                       // +r800wr=1: ch2 writes do not wait (R800 GUARD_WR)                          // +m64=1: 64 MB board (build with -DCHIP64)
     int m128 = 0, ncyc = 200000, seed = 1, busy = 30, stock = 0, dl = 28, cpulow = 0;
     initial begin
         void'($value$plusargs("m128=%d", m128));
@@ -39,6 +40,7 @@ module tb;
         void'($value$plusargs("dl=%d", dl));
         void'($value$plusargs("cpulow=%d", cpulow));
         void'($value$plusargs("m64=%d", m64));
+        void'($value$plusargs("r800wr=%d", r800wr));
         void'($urandom(seed));
     end
 
@@ -104,6 +106,9 @@ module tb;
         //  (0.25-1.25 MB: bank 0, row bits 00), next to ch1's region in the same bank
         //  +m64: ch4 lives at 24.5-28.5 MB, the range a 64 MB board moves to 32 MB
         if (ag == 3 && m64) return 27'h1880000 + ((r % 4) * 27'h0100000) + ($urandom % 16384);
+        //  +cpulow=2: the CPU in bank 0 at 2.25-2.36 MB, row bits 01 -- a big machine's RAM
+        //  or cart ROM, which the DQM-sensitive slots refuse (clear of ch1's 2.5 MB window)
+        if (ag == 1 && stock && cpulow == 2) return 27'h0240000 + ((r % 4) * 27'h0008000) + ($urandom % 16384);
         if (ag == 1 && stock && cpulow) return 27'h0040000 + ((r % 4) * 27'h0040000) + ($urandom % 16384);
         if (m128 == 0) base = ag * 27'h0500000 + 27'h0180000;   // 1.5, 6.5, 11.5, 16.5 MB ...
         else           base = ag * 27'h0600000 + 27'h0180000;   // up to ~19.5 MB, both chips
@@ -180,6 +185,18 @@ module tb;
                 done[ag]++;
                 continue;
             end
+            if (r800wr && ag == 1 && !rnw) begin
+                //  a paced CPU write: two clk21m of strobe, no completion handshake
+                //  (msx.sv GUARD_WR); the next request follows at once
+                @(negedge clk);
+                c_addr[ag] = ad; c_rnw[ag] = rnw; c_din[ag] = d; c_req[ag] = 1;
+                repeat (12) @(posedge clk);
+                c_req[ag] = 0;
+                ref_mem[int'(ad)] = d;
+                done[ag]++;
+                repeat (6) @(posedge clk);
+                continue;
+            end
             @(negedge clk);
             c_addr[ag] = ad; c_rnw[ag] = rnw; c_din[ag] = d; c_req[ag] = 1;
             t0 = 0; started = 0;
@@ -197,13 +214,20 @@ module tb;
                     if (t0 > 2000) begin fail($sformatf("ch%0d stuck, addr %h rnw %0d", ag + 1, ad, rnw)); break; end
                 end
             end else
-            // done = ready fell and rose again, or (ch2 read) a cache hit
+            // done = ready fell and rose again; a ch2 read is done the way msx.sv sees it
+            // (hs_done): ch2_rdtog moved, or a cache hit.  ch2_ready is not that: with
+            // a write queued ahead, its ready rises for the write (2026-10-13, +r800wr).
+            begin
+                logic tg0;
+                #1 tg0 = ch2_rdtog;
             forever begin
                 @(posedge clk); t0++;
                 if (!c_ready[ag]) started = 1;
                 if (ag == 1 && rnw && ch2_hit) begin nhit++; break; end
-                if (started && c_ready[ag]) break;
+                if (ag == 1 && rnw) begin #1; if (ch2_rdtog != tg0) break; end
+                else if (started && c_ready[ag]) break;
                 if (t0 > 2000) begin fail($sformatf("ch%0d stuck, addr %h rnw %0d", ag + 1, ad, rnw)); break; end
+            end
             end
             c_req[ag] = 0;
             if (t0 > lat_max[ag]) lat_max[ag] = t0;
@@ -299,7 +323,8 @@ module tb;
         if (stock) $display("  ch2 stock: grid phase %0d: LATE=%0d  completion max E0+%0d (deadline E0+%0d)", gph, nlate, stock_lat_max, dl);
         $display("  chip: ACT=%0d READ=%0d WRITE=%0d REFRESH=%0d ras_lockout=%0d errors=%0d",
                  chip2.nact, chip2.nrd, chip2.nwr, chip2.nref, chip2.ras_lockout, chip2.errs);
-        if (bad == 0 && chip2.errs == 0 && done[0] > 0 && done[1] > 0 && done[2] > 0 && done[3] > 0
+        if (dut.ch2_ovf) $display("  ch2 queue overflow: a write was lost");
+        if (bad == 0 && !dut.ch2_ovf && chip2.errs == 0 && done[0] > 0 && done[1] > 0 && done[2] > 0 && done[3] > 0
             && vreads > 0 && chip2.nref > 0 && nread[1] > 0)
             $display("TDM RESULT PASS");
         else
