@@ -323,7 +323,9 @@ reg  [3:0] cand_ok;
 loc_t      cand_l [0:3];         // registered: map() of each channel's held address
 reg  [3:0] rq_d;                 // the request was already up last cycle (cand_l is its)
 reg        c2_hold;              // registered CPU reservation
-assign cpu_wait = ch2_rq | ch2_cpend | c_pend2 | c_pend3 | ch2_rdwait | ch2_bv;
+//  (ch2_bv / ch2_rdwait are set only while ch2_rq is: not repeated here, they sat
+//  on the slot decision path through rf_cxl, 29b9886 -0.110 ns)
+assign cpu_wait = ch2_rq | ch2_cpend | c_pend2 | c_pend3;
 `ifndef TDM_MUT_RFSLOW      // negative control: no cancellation (the 2026-10-13 controller)
 assign rf_cxl = cpu_wait && rf_late != 2'd3 && (c2_l.c ? rf_now[1] : rf_now[0]) && !(ps[10] | ps[11]);
 `else
@@ -358,7 +360,7 @@ always_comb begin
     //  register: MSX1.sdc's CPU-side multicycle covers its input); a comb gmap
     //  here put the map into every slot decision (722abff, -2.2 ns).
 `ifndef TDM_MUT_LATEHOLD
-    hold = c2_hold | ch2_cpend | ch2_rq | ch2_rdwait | ch2_bv;
+    hold = c2_hold | ch2_cpend | ch2_rq;     // c2_hold carries ch2_bv / ch2_rdwait
     hl   = ch2_hl;
 `else
     hold = c2_hold;
