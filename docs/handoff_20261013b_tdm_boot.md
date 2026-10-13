@@ -163,3 +163,17 @@ mrfslow mno64 mrsv mlate mrdover) 모두 검출.
 교훈: `check_timing.sh`의 마지막 RESULT PASS는 "빌드가 128.86 MHz PIPE 연구판이 맞다"는 뜻이고
 타이밍 통과가 아니다. 722abff는 -25 ns인데 PASS가 찍혔다 -> slack 줄을 반드시 볼 것(5절 끝의 남은 일).
 비트스트림은 여전히 연구용이며 보드에 올리지 않는다.
+
+**최종 기능 확인 (7cd1475, fullsys FS-A1GT DOS2 700 ms vs sdram.sv 700 ms):** cmp_streams **46,026 분기 PASS**
+(고유 PC 246, CPU 읽기 474,208회 동일), BIOS 업로드 차이 0, LATE 0, 느린 ch2 읽기 0, CPU 읽기 지연 최대 163.0 ns
+(기준 174.6), T80s 일반 읽기 여유 최소 108.6 ns, clk_opl3 14.3184 MHz. 722abff도 같은 결과.
+로그: `docs/evidence_20261013/fs_tdm_7cd1475_FS-A1GT_700ms.log.gz`, `compile_7cd1475.txt`.
+
+### 남은 일 (다음 세션)
+1. 실기는 아직이다(연구용 비트스트림, 보드 금지 유지). 128 단일 구조를 실제 릴리스로 삼을지는 사용자 결정.
+2. 출력 핀 setup +0.079 ns가 빠듯하다: SDRAM_CLK를 PLL 출력(위상 조절)으로.
+3. tRAS lockout(3절): 데이터시트 미보장. READ를 a+4로 옮기는 프레임 재탐색 또는 제조사 확인.
+4. 32 MB 보드 업로드 상한 검사(카트 10/16 MB 극단에서 24 MB 초과 가능), MoonSound 없을 때
+   pcm_rom_base 기본값 24 MB(VRAM 뱅크).
+5. V9968 연결(v_en=1): VRAM 포트, 리프레시 슬롯. 벤치는 V를 이미 돌리고 있으나 fullsys는 v_en=0.
+6. fullsys로 R800 쓰기 많은 부팅(ch2 큐가 실제로 쓰이는 경우)을 한 번 더: GT는 대부분 Z80 구간.
