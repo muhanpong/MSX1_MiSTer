@@ -1199,6 +1199,7 @@ msx MSX
    .turbor_pause(turbor_pause),
    .sdram_rdtog(sdram_rdtog),
    .sdram_hit(sdram_hit),
+   .sdram_busy(sdram_busy),
    .ce_5m39_n(ce_5m39_n),
    .ce_10hz  (ce_10hz   & ~msx_pause),
    .probe_freeze(msx_pause),
@@ -1594,6 +1595,7 @@ assign ram_dout = sdram_ce ? sdram_dout :
                   bram_ce  ? bram_dout  :
                              8'hFF;
 
+wire         sdram_busy;
 wire         sdram_ready, sdram_rdtog, sdram_hit, sdram_rnw, dw_sdram_we, dw_sdram_ready, flash_ready, flash_req, flash_done;
 wire  [26:0] sdram_addr;
 wire  [24:0] dw_sdram_addr;
@@ -1653,7 +1655,7 @@ sdram_tdm sdram
    .ch2_rnw(ram_rnw),
    .ch2_ready(sdram_ready),
    .ch2_rdtog(sdram_rdtog),
-   .ch2_hit(sdram_hit),
+   .ch2_hit(sdram_hit), .ch2_busy(sdram_busy),
 
    .ch3_addr(flash_addr),
    .ch3_dout(),

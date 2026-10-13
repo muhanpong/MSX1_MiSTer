@@ -56,7 +56,7 @@ module tb;
     logic        c_rnw  [4];
     wire   [7:0] c_dout [4];
     wire         c_ready[4];
-    wire         ch2_hit, ch2_rdtog, ch3_done;
+    wire         ch2_hit, ch2_rdtog, ch3_done, ch2_busy;
     wire  [15:0] ch4_dout16;
 
     logic        v_req = 0, v_we = 0;
@@ -73,7 +73,7 @@ module tb;
         .SDRAM_CLK(SCLK),
         .ch1_addr(c_addr[0]), .ch1_dout(c_dout[0]), .ch1_din(c_din[0]), .ch1_req(c_req[0]), .ch1_rnw(c_rnw[0]), .ch1_ready(c_ready[0]),
         .ch2_addr(c_addr[1]), .ch2_dout(c_dout[1]), .ch2_din(c_din[1]), .ch2_req(c_req[1]), .ch2_rnw(c_rnw[1]), .ch2_ready(c_ready[1]),
-        .ch2_rdtog(ch2_rdtog), .ch2_hit(ch2_hit),
+        .ch2_rdtog(ch2_rdtog), .ch2_hit(ch2_hit), .ch2_busy(ch2_busy),
         .ch3_addr(c_addr[2]), .ch3_dout(c_dout[2]), .ch3_din(c_din[2]), .ch3_req(c_req[2]), .ch3_rnw(c_rnw[2]), .ch3_ready(c_ready[2]),
         .ch3_done(ch3_done),
         .ch4_addr(c_addr[3]), .ch4_dout(c_dout[3]), .ch4_dout16(ch4_dout16), .ch4_din(c_din[3]), .ch4_req(c_req[3]), .ch4_rnw(c_rnw[3]), .ch4_ready(c_ready[3]),
@@ -191,10 +191,14 @@ module tb;
                 @(negedge clk);
                 c_addr[ag] = ad; c_rnw[ag] = rnw; c_din[ag] = d; c_req[ag] = 1;
                 repeat (12) @(posedge clk);
+                //  msx.sv holds a paced SDRAM write while ch2_busy (queue back-pressure)
+                while (ch2_busy) @(posedge clk);
                 c_req[ag] = 0;
                 ref_mem[int'(ad)] = d;
                 done[ag]++;
-                repeat (6) @(posedge clk);
+                //  the next request 0-12 clocks after the strobe ends (an R800 write
+                //  then a read of the same word, LD (HL),A / LD A,(HL)); +r800wr=2: 0-2
+                repeat ((r800wr == 2) ? ($urandom % 3) : ($urandom % 13)) @(posedge clk);
                 continue;
             end
             @(negedge clk);

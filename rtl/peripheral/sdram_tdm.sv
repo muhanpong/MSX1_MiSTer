@@ -66,6 +66,7 @@ module sdram_tdm
     output reg        ch2_ready,
     output reg        ch2_rdtog,
     output            ch2_hit,
+    output            ch2_busy,    // the ch2 queue's second entry is taken: a paced CPU must not send another write
 
     input      [26:0] ch3_addr,
     output      [7:0] ch3_dout,
@@ -236,6 +237,16 @@ reg  [15:0]   c_word_q;
 reg  [26:0]   ch2_caddr;
 reg           ch2_hit_r = 1'b0;
 assign ch2_hit = ch2_hit_r;
+//  Back-pressure for the paced CPU (msx.sv guard): while a request sits in the
+//  second entry, the write whose window is open is that one, and holding the
+//  window keeps the next request from finding the queue full.  An R800 writing
+//  every ~14 clocks outruns one slot per frame in one bank (ch2_ovf in
+//  sim/sdram_tdm +r800wr, 2026-10-14).
+`ifndef TDM_MUT_NOBUSY
+assign ch2_busy = ch2_bv;
+`else
+assign ch2_busy = 1'b0;
+`endif
 always @(posedge clk) begin
     if (c_we) cmem[c_waddr] <= c_wdata;
     c_rdata   <= cmem[ch2_caddr[CW:1]];
@@ -245,8 +256,6 @@ end
 wire [CW-1:0] c_pidx   = ch2_caddr[CW:1];
 wire          c_hazard = (c_we && c_waddr == c_pidx) | (c_we_d && c_waddr_d == c_pidx);
 wire          c_match  = c_rdata[LW-1] && c_rdata[LW-2:16] == ch2_caddr[26:CW+1];
-//  a hit answers only with no ch2 access queued (ch2_saved_data must not be replaced under it)
-assign c2_hit_now = c_pend3 && c_hit_q && ~ch2_rq && ~ch2_bv && ~(c_we && c_waddr == c_pidx);
 
 // ─── slot state ────────────────────────────────────────────────────────────
 //  per general slot: which channel, the access, where it lands
@@ -273,6 +282,18 @@ wire    c2_hit_now;              // the cache answers the ch2 read on this edge
 reg     prev_v;                  // the general slot before this one was used ...
 reg     prev_c;                  //   ... on this chip
 reg [1:0] prev_b;                //   ... and this bank
+//  a hit answers only with no ch2 access queued (ch2_saved_data must not be replaced under it)
+//  and not on the edge a picked write is about to drop its line: the drop is issued with
+//  the ACT, one edge after the pick (sdram.sv dropped on the pick itself), so on that edge
+//  the queue is already empty, c_we not yet up and the line still valid -- an R800
+//  LD (HL),A / LD A,(HL) read the old byte (sim/sdram_tdm +r800wr, 2026-10-14).
+wire          c_drop_due = (ps[3] && g1.v && !g1.rnw && g1.word[CW-1:0] == c_pidx)
+                         | (ps[7] && g2.v && !g2.rnw && g2.word[CW-1:0] == c_pidx);
+`ifndef TDM_MUT_DROPGAP     // negative control: the gap open
+assign c2_hit_now = c_pend3 && c_hit_q && ~ch2_rq && ~ch2_bv && ~(c_we && c_waddr == c_pidx) && ~c_drop_due;
+`else
+assign c2_hit_now = c_pend3 && c_hit_q && ~ch2_rq && ~ch2_bv && ~(c_we && c_waddr == c_pidx);
+`endif
 
 reg        vs_v, vs_we;          // this frame's V access
 loc_t      vs_l;

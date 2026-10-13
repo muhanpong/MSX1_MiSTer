@@ -21,6 +21,7 @@ module msx
    input                    cpu_turbo,           // 1 while ce_cpu_* runs faster than ce_3m58_*
    input                    sdram_rdtog,         // flips once per completed SDRAM ch2 READ (P3 closed loop)
    input                    sdram_hit,           // level: this ch2 READ was answered from sdram.sv's word latch
+   input                    sdram_busy,          // sdram_tdm: ch2 queue full behind this access -- hold a paced SDRAM write
    input              [2:0] cpu_speed_q,         // LATCHED speed, selects the guard limit
    input                    cpu_rate_ok,         // clock.sv has latched the rate the current bus owner wants (cpuswap SETTLE)
    output                   cpu_bus_idle,        // -> clock.sv: safe point to change speed
@@ -686,7 +687,7 @@ end
 // path is what recovers the throughput (a fast read no longer waits up to a
 // full 3.58MHz period for an edge it does not need).
 wire guard_open  = guard_slow           ? (guard_ce & (guard_cnt >= guard_min)) :
-                   ~wr_n                ? (guard_cnt >= guard_min)              :  // fast write
+                   ~wr_n                ? (guard_cnt >= guard_min) & ~(sdram_ce & sdram_busy) :  // fast write; sdram_tdm queue back-pressure
                    (sdram_ce & ram_rnw) ? (hs_done | sdram_hit | (&guard_cnt)) :  // fast SDRAM read: closed loop / latch hit
                                           (guard_cnt >= guard_min);                // fast BRAM/unmapped read
 wire bus_guard_n = ~cpu_paced | ~bus_cycle | (mreq_n & rd_n & wr_n) | guard_open;

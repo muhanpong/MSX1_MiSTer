@@ -215,6 +215,7 @@ module tb;
       .init(rst_n_cnt != 0), .clk(clk_sdram), .mode128(1'b0), .mode64(1'b0),
       .v_en(1'b0), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
       .v_grant(), .v_rdata(), .v_rvalid(),
+      .ch2_busy(sdram_busy),
 `endif
       .SDRAM_A(SDRAM_A), .SDRAM_DQML(SDRAM_DQML), .SDRAM_DQMH(SDRAM_DQMH),
       .SDRAM_BA(SDRAM_BA), .SDRAM_nCS(SDRAM_nCS), .SDRAM_nWE(SDRAM_nWE),
@@ -233,6 +234,7 @@ module tb;
    );
 
 `ifndef TDM
+   assign sdram_busy = 1'b0;               // sdram.sv has no ch2 queue
    sdram_big u_chip
 `else
    sdram_big_tdm u_chip
