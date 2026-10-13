@@ -1523,20 +1523,26 @@ turbor turbor
 
 // =============================================================================
 // MoonSound (YMF278B OPL4)
-// clk_sdram (85.909 MHz) is used as master; CLK_HZ=85909090 → fs≈44192 Hz (0.21% error)
-// OPL3 clock: clk_sdram / 6 ≈ 14318182 Hz (target 14318180 Hz — negligible error)
+// clk_sdram is the master: 128.863620 MHz on the sdram128 branch (rtl/pll/pll_0002.v;
+// it was 85.909 MHz).  Everything MoonSound derives from the clock takes it from
+// SDRAM_HZ below -- the PCM frame (CLK_HZ) and the OPL3 divider.
+// OPL3 clock: clk_sdram / OPL3_DIV = 14318182 Hz (/9 here, /6 at 85.909 MHz).
 // PCM sample memory: connected to SDRAM ch4 via request/valid bridge
 // =============================================================================
+localparam int SDRAM_HZ = 128863620;   // must match the PLL's outclk_0
+localparam int OPL3_HZ  = 14318182;
+localparam int OPL3_DIV = (SDRAM_HZ + OPL3_HZ / 2) / OPL3_HZ;
 
-// ─── OPL3 clock divider (clk_sdram / 6) ────────────────────────────────────
-logic [1:0] opl3_clk_div;
-logic       clk_opl3;
+// ─── OPL3 clock divider (clk_sdram / OPL3_DIV) ─────────────────────────────
+//  It was a fixed /6, which at 128.86 MHz ran the OPL3 at 21.48 MHz: FM pitch,
+//  sample rate and timers 1.5x (found 2026-10-13, measured in sim/fullsys).  An
+//  odd divisor gives a 4/5 duty; the OPL3 core uses rising edges only (its
+//  negedges are asynchronous resets).
+logic [3:0] opl3_clk_div = 4'd0;
+logic       clk_opl3 = 1'b0;
 always_ff @(posedge clk_sdram) begin
-    if (opl3_clk_div == 2'd2) begin
-        opl3_clk_div <= 2'd0;
-        clk_opl3     <= ~clk_opl3;
-    end else
-        opl3_clk_div <= opl3_clk_div + 1'd1;
+    opl3_clk_div <= (opl3_clk_div == 4'(OPL3_DIV - 1)) ? 4'd0 : opl3_clk_div + 4'd1;
+    clk_opl3     <= (opl3_clk_div <  4'(OPL3_DIV / 2));
 end
 
 // ─── CDC: CPU (clk21m) → ymf278b_top (clk_sdram) ───────────────────────────
@@ -2326,7 +2332,7 @@ ymf278b_top #(
     //  It was a literal 85909090, so the first 128.86 MHz builds ran the engine
     //  unpipelined with a 1948-cycle frame.  A real design should take it from
     //  one place with the PLL setting.
-    .CLK_HZ   (128863620),
+    .CLK_HZ   (SDRAM_HZ),
     .CLK_OPL3 (14318182)
 ) u_moonsound (
     .clk          (clk_sdram),

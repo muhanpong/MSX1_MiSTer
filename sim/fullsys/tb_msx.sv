@@ -1077,6 +1077,19 @@ module tb;
    end
 `endif
 
+   //  clk_opl3 measured, not assumed: the OPL3 core wants 14.318 MHz whatever
+   //  clk_sdram is (msx.sv divider; it was a fixed /6, 21.48 MHz at 128.86 MHz).
+   wire     opl3_ck = MSX.clk_opl3;
+   longint  opl3_n = 0;
+   realtime opl3_t0 = 0, opl3_t1 = 0;
+   always @(posedge opl3_ck) if (trace_on) begin
+      if (opl3_n == 0) opl3_t0 = $realtime;
+      opl3_t1 = $realtime; opl3_n++;
+   end
+   final if (opl3_n > 1)
+      $display("clk_opl3: %0d edges over %.3f ms = %.4f MHz (OPL3 wants 14.3182)",
+               opl3_n, (opl3_t1 - opl3_t0) / 1e6, (opl3_n - 1) / (opl3_t1 - opl3_t0) * 1e3);
+
    task automatic bios_check();
       int bad = 0, first = -1;
       int base;
