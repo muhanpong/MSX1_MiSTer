@@ -4,6 +4,12 @@
 //
 //   +m128=0|1  board map (1 chip / 2 chips)      +cycles=N  run length
 //   +seed=N                                       +busy=P    request rate, % per cycle
+//   +stock=1   ch2 behaves like T80s at 3.58 MHz: no handshake -- the request is
+//              held 30 clocks and the byte is taken at a FIXED point, after edge
+//              E0+DL (E0 = the edge that first sees the request; +dl=N, default 28,
+//              measured in fullsys: window 232.8 ns, completion must be by W+29 =
+//              E0+28).  Requests start on a 36-clock grid (one T-state = 3 frames),
+//              3-5 T-states apart.  A read not complete by then is "LATE" and fails.
 //
 // Each agent owns a disjoint address region, so a reference memory per agent
 // gives the exact expected read value (no cross-channel ordering to model).  The
@@ -22,12 +28,15 @@ module tb;
     logic clk = 0;
     always #(TCK/2) clk = ~clk;
 
-    int m128 = 0, ncyc = 200000, seed = 1, busy = 30;
+    int m128 = 0, ncyc = 200000, seed = 1, busy = 30, stock = 0, dl = 28, cpulow = 0;
     initial begin
         void'($value$plusargs("m128=%d", m128));
         void'($value$plusargs("cycles=%d", ncyc));
         void'($value$plusargs("seed=%d", seed));
         void'($value$plusargs("busy=%d", busy));
+        void'($value$plusargs("stock=%d", stock));
+        void'($value$plusargs("dl=%d", dl));
+        void'($value$plusargs("cpulow=%d", cpulow));
         void'($urandom(seed));
     end
 
@@ -87,6 +96,9 @@ module tb;
     //  both row-bit classes and several banks are hit.
     function automatic logic [26:0] region_addr(int ag, int r);
         int base;
+        //  +stock=1 with +cpulow=1: the CPU where a machine keeps its BIOS and RAM
+        //  (0.25-1.25 MB: bank 0, row bits 00), next to ch1's region in the same bank
+        if (ag == 1 && stock && cpulow) return 27'h0040000 + ((r % 4) * 27'h0040000) + ($urandom % 16384);
         if (m128 == 0) base = ag * 27'h0500000 + 27'h0180000;   // 1.5, 6.5, 11.5, 16.5 MB ...
         else           base = ag * 27'h0600000 + 27'h0180000;   // up to ~19.5 MB, both chips
         return base + ((r % 4) * 27'h0100000) + ($urandom % 16384);
@@ -94,6 +106,11 @@ module tb;
 
     byte ref_mem [int];
     int  done [4], lat_max [4], issued [4], nread [4], nhit = 0;
+    int  nlate = 0, stock_lat_max = 0;
+    int  gclk = 0;                       // clocks since start, for the T-state grid
+    int  gph;                            // the grid's phase against the TDM frame: per seed
+    initial begin #1; gph = $urandom % 36; void'($value$plusargs("gph=%d", gph)); end
+    always @(posedge clk) gclk++;
 
     task automatic agent(int ag);
         int r = 0;
@@ -119,6 +136,44 @@ module tb;
             expect_v = have_expect ? ref_mem[int'(ad)] : 0;
             // a read of a never-written byte proves nothing; write it first
             if (rnw && !have_expect) rnw = 0;
+            if (stock && ag == 1) begin
+                //  next T-state boundary 3-5 T-states on (the grid has a fixed phase)
+                int k;
+                logic tog0, dn;
+                int tdone;
+                k = 3 + ($urandom % 3);
+                while (gclk % 36 != gph) @(posedge clk);
+                repeat ((k - 1) * 36) @(posedge clk);
+                @(negedge clk);
+                c_addr[ag] = ad; c_rnw[ag] = rnw; c_din[ag] = d; c_req[ag] = 1;
+                @(posedge clk);                       // E0
+                #1 tog0 = ch2_rdtog; dn = 0; tdone = -1;
+                for (int e = 1; e <= dl; e++) begin
+                    @(posedge clk); #1;
+                    if (!dn && (ch2_rdtog != tog0 || ch2_hit)) begin dn = 1; tdone = e; end
+                end
+                if (rnw) begin                        // taken between E0+dl and E0+dl+1
+                    nread[ag]++;
+                    if (ch2_hit) nhit++;
+                    if (!dn) begin
+                        //  how late, and what the controller was doing (diagnosis only)
+                        int e2;
+                        string why;
+                        why = $sformatf("rf_now=%b rf_next=%b prev_b=%0d prev_v=%0d", dut.rf_now, dut.rf_next, dut.prev_b, dut.prev_v);
+                        for (e2 = dl + 1; e2 < 120; e2++) begin @(posedge clk); #1; if (ch2_rdtog != tog0) break; end
+                        nlate++;
+                        fail($sformatf("ch2 LATE (stock): read %h complete at E0+%0d, deadline E0+%0d (%s)", ad, e2, dl, why));
+                        repeat (2) @(posedge clk);
+                    end
+                    else if (c_dout[ag] !== expect_v)
+                        fail($sformatf("ch2 read %h = %h, expected %h", ad, c_dout[ag], expect_v));
+                    if (tdone > stock_lat_max) stock_lat_max = tdone;
+                end else ref_mem[int'(ad)] = d;
+                repeat (30 - dl) @(posedge clk);
+                c_req[ag] = 0;
+                done[ag]++;
+                continue;
+            end
             @(negedge clk);
             c_addr[ag] = ad; c_rnw[ag] = rnw; c_din[ag] = d; c_req[ag] = 1;
             t0 = 0; started = 0;
@@ -156,6 +211,31 @@ module tb;
             @(posedge clk);
         end
     endtask
+
+    // ── why a ch2 read is slow (diagnosis, as in sim/fullsys/tb_msx.sv): clocks
+    //    edge -> queued -> picked -> captured, and per passed-over G decision
+    //    R refresh, B previous slot's bank, O another channel, - not queued yet
+    int ts_cyc = 0, ts_e0 = -1, ts_q = -1, ts_p = -1;
+    string ts_why = "";
+    logic ts_rq_q = 0, ts_tog = 0, ts_req_q = 0;
+    always @(posedge clk) begin
+        ts_cyc++;
+        ts_rq_q <= dut.ch2_rq; ts_req_q <= c_req[1];
+        if (c_req[1] & c_rnw[1] & ~ts_req_q) begin ts_e0 = ts_cyc; ts_q = -1; ts_p = -1; ts_why = ""; ts_tog <= ch2_rdtog; end
+        if (dut.ch2_rq & ~ts_rq_q & ts_q < 0 & ts_e0 >= 0) ts_q = ts_cyc;
+        if (dut.run && (dut.ps[2] || dut.ps[6]) && ts_q >= 0 && ts_p < 0) begin
+            if (dut.cand_ok[0]) ts_p = ts_cyc;
+            else ts_why = {ts_why, (|dut.rf_now || (dut.ps[2] && |dut.rf_next)) ? "R"
+                                 : (dut.prev_v && dut.cand_l[0].b == dut.prev_b && dut.cand_l[0].c == dut.prev_c) ? "B"
+                                 : (|dut.cand_ok[3:1]) ? "O" : "-"};
+        end
+        if (ts_e0 >= 0 && ch2_rdtog != ts_tog && ts_p >= 0) begin
+            if (stock && ts_cyc - ts_e0 > dl)
+                $display("TDM SLOW t=%0t ch2 read %0d clk: queued +%0d picked +%0d, passed over [%s]",
+                         $time, ts_cyc - ts_e0, ts_q - ts_e0, ts_p - ts_e0, ts_why);
+            ts_e0 = -1;
+        end
+    end
 
     // ── VRAM agent: a request every frame, changed only after a grant ──
     logic [31:0] vref [int];
@@ -210,6 +290,7 @@ module tb;
         for (int i = 0; i < 4; i++)
             $display("  ch%0d: done=%0d reads=%0d max latency=%0d clk", i + 1, done[i], nread[i], lat_max[i]);
         $display("  ch2 cache hits=%0d  V: granted=%0d reads checked=%0d refused=%0d", nhit, vdone, vreads, vden);
+        if (stock) $display("  ch2 stock: grid phase %0d: LATE=%0d  completion max E0+%0d (deadline E0+%0d)", gph, nlate, stock_lat_max, dl);
         $display("  chip: ACT=%0d READ=%0d WRITE=%0d REFRESH=%0d ras_lockout=%0d errors=%0d",
                  chip2.nact, chip2.nrd, chip2.nwr, chip2.nref, chip2.ras_lockout, chip2.errs);
         if (bad == 0 && chip2.errs == 0 && done[0] > 0 && done[1] > 0 && done[2] > 0 && done[3] > 0

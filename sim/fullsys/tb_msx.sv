@@ -996,8 +996,16 @@ module tb;
    //  The first RDL_MAX reads after release are printed; LATE is counted always.
    localparam int RDL_MAX = 3000;
    int      rdl_n = 0, rdl_late = 0, rdl_sd = 0;
-   logic    rdl_win_q = 1'b0, rdl_tog0 = 1'b0;
-   realtime rdl_t0 = 0;
+   logic    rdl_win_q = 1'b0, rdl_tog0 = 1'b0, rdl_cdone = 1'b0;
+   realtime rdl_t0 = 0, rdl_tc = 0;
+   //  slack = latch time - completion time, per T80s SDRAM read (not paced), split
+   //  M1 / other; completion seen at clk_sdram (below), so it is exact to 7.8 ns
+   realtime rdl_slack_min[2] = '{1e9, 1e9}, rdl_lat_max[2] = '{0, 0};
+   always @(posedge clk_sdram)
+      if (!rdl_win) rdl_cdone <= 1'b0;
+      else if (rdl_win_q && !rdl_cdone && (sdram_rdtog != rdl_tog0 || sdram_hit)) begin
+         rdl_cdone <= 1'b1; rdl_tc = $realtime;
+      end
    wire     rdl_win   = ~MSX.mreq_n & ~MSX.rd_n & sdram_ce & ram_rnw;
    wire     rdl_t80   = ~MSX.use_nz & ce_cpu & ~MSX.t80_hold & MSX.wait_n & (MSX.T80.tstate == 3'd2);
    wire     rdl_nz    = MSX.use_nz & MSX.NZB.adv;
@@ -1013,7 +1021,12 @@ module tb;
          automatic bit done = sd && (sdram_rdtog != rdl_tog0 || sdram_hit);
          if (sd) rdl_sd++;
          if (sd && !done) rdl_late++;
-         if (rdl_n < RDL_MAX)
+         if (sd && done && rdl_t80 && rdl_cdone) begin
+            automatic int k = rdl_m1n ? 1 : 0;
+            if ($realtime - rdl_tc < rdl_slack_min[k]) rdl_slack_min[k] = $realtime - rdl_tc;
+            if (rdl_tc - rdl_t0 > rdl_lat_max[k]) rdl_lat_max[k] = rdl_tc - rdl_t0;
+         end
+         if (rdl_n < RDL_MAX || (sd && !done))
             $display("%12.3f  RDL %s %04x %02x %s%s %0.1f", $realtime/1000000.0, rdl_usenz ? "nz" : "t8",
                      rdl_a, rdl_d, rdl_m1n ? "rd" : "m1",
                      !sd ? " other" : (done ? (sdram_hit ? " hit" : " sd") : " LATE"),
@@ -1021,12 +1034,49 @@ module tb;
          rdl_n++;
       end
    end
-   final $display("cpu latched reads: %0d, from sdram %0d, LATE (ch2 not complete) %0d", rdl_n, rdl_sd, rdl_late);
+   final begin
+      $display("cpu latched reads: %0d, from sdram %0d, LATE (ch2 not complete) %0d", rdl_n, rdl_sd, rdl_late);
+      $display("T80s sdram reads: M1 latency max %.1f ns, slack min %.1f ns | other latency max %.1f ns, slack min %.1f ns",
+               rdl_lat_max[0], rdl_slack_min[0], rdl_lat_max[1], rdl_slack_min[1]);
+   end
 
    //  Did the upload land?  The first record of a machine pack is its BIOS, the
    //  32 kB right after the 16-byte header, filled at lookup_RAM[0] (2026-10-13:
    //  sdram_tdm dropped upload bytes and the machine diverged at the 5th branch).
    //  Both chip models index words by byte address [24:1] for the low 32 MB.
+`ifdef TDM
+   //  Why a ch2 SDRAM read is slow (sdram_tdm): edge seen -> queued (ch2_rq) ->
+   //  picked by a G slot -> captured, in clocks, and what each passed-over G
+   //  decision saw: R = refresh frame on the chip, B = the previous G slot's bank,
+   //  O = another channel picked (none of these = the CPU was not queued yet).
+   //  Printed for reads over TDM_SLOW_CLK clocks.
+   localparam int TDM_SLOW_CLK = 24;
+   int    ts_cyc = 0, ts_e0 = -1, ts_q = -1, ts_p = -1;
+   string ts_why = "";
+   logic  ts_rq_q = 1'b0, ts_tog = 1'b0;
+   wire   ts_dec = u_sdram.run & (u_sdram.ps[2] | u_sdram.ps[6]);
+   wire   ts_rf  = |u_sdram.rf_now | (u_sdram.ps[2] & |u_sdram.rf_next);
+   wire   ts_bk  = u_sdram.prev_v & (u_sdram.cand_l[0].b == u_sdram.prev_b);
+   wire   ts_ok0 = u_sdram.cand_ok[0];
+   wire   ts_oth = |u_sdram.cand_ok[3:1];
+   always @(posedge clk_sdram) begin
+      ts_cyc++;
+      ts_rq_q <= u_sdram.ch2_rq;
+      if (sdram_ce & ram_rnw & ~u_sdram.ch2_req_1) begin ts_e0 = ts_cyc; ts_q = -1; ts_p = -1; ts_why = ""; ts_tog <= sdram_rdtog; end
+      if (u_sdram.ch2_rq & ~ts_rq_q & ts_q < 0) ts_q = ts_cyc;
+      if (ts_dec && ts_q >= 0 && ts_p < 0) begin
+         if (ts_ok0) ts_p = ts_cyc;
+         else ts_why = {ts_why, ts_rf ? "R" : ts_bk ? "B" : ts_oth ? "O" : "-"};
+      end
+      if (ts_e0 >= 0 && sdram_rdtog != ts_tog && ts_p >= 0) begin
+         if (ts_cyc - ts_e0 > TDM_SLOW_CLK)
+            $display("%12.3f  SLOW ch2 read: %0d clk (queued +%0d, picked +%0d, captured +%0d) passed-over [%s] ph@edge=%0d",
+                     $realtime/1000000.0, ts_cyc - ts_e0, ts_q - ts_e0, ts_p - ts_e0, ts_cyc - ts_e0, ts_why, int'(u_sdram.ph));
+         ts_e0 = -1;
+      end
+   end
+`endif
+
    task automatic bios_check();
       int bad = 0, first = -1;
       int base;

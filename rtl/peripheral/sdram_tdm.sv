@@ -254,6 +254,16 @@ reg  [1:0] rf_due;
 reg  [1:0] rf_now, rf_next;
 reg  [1:0] rf_late;              // frames a due refresh has been deferred for the CPU      // chip blocked this frame / blocked for V,G1 next frame
 wire       v_chip = mode128;     // the VRAM's chip: 1 on 128 MB, 0 otherwise
+//  A CPU read that arrives inside a refresh frame cancels it, up to the edge that
+//  would issue the REFRESH (cycle 10): the frame's G slots open again and the
+//  refresh is due again from the next frame boundary.  At stock speed the CPU has
+//  a fixed deadline (E0+28 clocks, sim/sdram_tdm +stock) and a refresh frame
+//  passes over three of its G decisions (34 clocks, 2026-10-13); the stock CPU
+//  asks at most once in three frames, so the refresh goes in the next frame.
+//  rf_late bounds deferral and cancellation together (RFSH_EVERY's margin).
+wire       cpu_wait;
+loc_t      c2_l;
+wire       rf_cxl;
 
 
 // ─── choose a general request for a slot ───────────────────────────────────
@@ -279,7 +289,12 @@ reg  [3:0] cand_ok;
 loc_t      cand_l [0:3];         // registered: map() of each channel's held address
 reg  [3:0] rq_d;                 // the request was already up last cycle (cand_l is its)
 reg        c2_hold;              // registered CPU reservation
-loc_t      c2_l;
+assign cpu_wait = ch2_rq | ch2_cpend | c_pend2 | c_pend3;
+`ifndef TDM_MUT_RFSLOW      // negative control: no cancellation (the 2026-10-13 controller)
+assign rf_cxl = cpu_wait && rf_late != 2'd3 && (c2_l.c ? rf_now[1] : rf_now[0]) && !(ps[10] | ps[11]);
+`else
+assign rf_cxl = 1'b0;
+`endif
 always @(posedge clk) begin
     cand_l[0] <= map(ch2_addr_1, mode128);
     cand_l[1] <= map(ch1_addr_1, mode128);
@@ -298,8 +313,8 @@ always_comb begin
 `else           // negative control (sim/sdram_tdm): ignore DQM-sensitive ACTs
     sens = 1'b0;
 `endif
-    b0   = ps[2] ? (rf_now[0] | rf_next[0]) : rf_now[0];
-    b1   = ps[2] ? (rf_now[1] | rf_next[1]) : rf_now[1];
+    b0   = (rf_now[0] & ~rf_cxl) | (ps[2] & rf_next[0]);
+    b1   = (rf_now[1] & ~rf_cxl) | (ps[2] & rf_next[1]);
     cand_ok[0] = ch2_rq & rq_d[0] & ok(cand_l[0], sens, b0, b1, prev_v, prev_c, prev_b, mode128);
     //  CPU bank reservation: while a CPU read is being looked up or waits, the
     //  other channels may not take its bank -- the slot after would then be closed
@@ -428,12 +443,17 @@ always @(posedge clk) begin
             //  it up to two slots.  rf_late bounds the deferral to three frames,
             //  inside RFSH_EVERY's 48-clock margin.
             rf_next <= rf_now;
-            if ((rf_due != 2'b00) && (ch2_rq | ch2_cpend | c_pend2 | c_pend3) && rf_late != 2'd3) begin
+            //  (chip 1 exists only on 128 MB: its timer still runs on 32 MB, and an
+            //  unmasked rf_due[1] kept every boundary "deferring", rf_late pinned at 3)
+            if (((rf_due & {mode128, 1'b1}) != 2'b00) && cpu_wait && rf_late != 2'd3) begin
                 rf_now  <= 2'b00;
                 rf_late <= rf_late + 2'd1;
             end
-            else if (rf_due[0])            begin rf_now <= 2'b01; rf_due[0] <= 1'b0; rf_late <= 2'd0; end
-            else if (rf_due[1] && mode128) begin rf_now <= 2'b10; rf_due[1] <= 1'b0; rf_late <= 2'd0; end
+            //  rf_late is cleared when the REFRESH is issued, not here: a frame
+            //  started at the bound and then cancelled would restart the count
+            //  and postpone the refresh without limit (7.822 us, sim/sdram_tdm)
+            else if (rf_due[0])            begin rf_now <= 2'b01; rf_due[0] <= 1'b0; end
+            else if (rf_due[1] && mode128) begin rf_now <= 2'b10; rf_due[1] <= 1'b0; end
             else                                 rf_now <= 2'b00;
             vl = map((mode128 ? VBASE128 : VBASE32) + {9'd0, v_addr, 2'b00}, mode128);
             took = v_en && v_req && !(rf_due[v_chip] | rf_now[v_chip]);
@@ -553,12 +573,18 @@ always @(posedge clk) begin
             endcase
         end
 
+        if (rf_cxl) begin                // see rf_cxl: back to due, not done
+            rf_due  <= rf_due | rf_now;
+            rf_now  <= 2'b00;
+            rf_late <= rf_late + 2'd1;
+        end
         for (int c = 0; c < 2; c++) if (rf_cnt[c] >= RFSH_EVERY[10:0]) rf_due[c] <= 1'b1;
 
         // REFRESH in cycle 10 of a refresh frame, on the chip it is for.  Cycle 10
         // may owe G1's word1 mask (11): the REFRESH carries it on A12:A11.
 `ifndef TDM_MUT_NOREF
-        if (ps[9] && rf_now != 2'b00) begin
+        if (ps[9] && rf_now != 2'b00 && !rf_cxl) begin
+            rf_late <= 2'd0;
 `else           // negative control: refresh frames are kept but nothing is refreshed
         if (1'b0) begin
 `endif
