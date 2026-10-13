@@ -7,6 +7,10 @@
 
 ## 0. 먼저 할 일: TDM 코어가 fullsys에서 부팅하지 않는다
 
+> **해결됨 (2026-10-13 오후)**: 원인 두 개(ready를 늦게 내림 -> 업로드 바이트 유실, 리프레시 프레임이
+> 표준 속도 CPU 마감을 넘김). 3f26ad6에서 cmp_streams 46,026 분기 PASS.
+> `docs/handoff_20261013b_tdm_boot.md`를 볼 것. 아래는 당시 기록.
+
 타이밍은 통과했지만(33bdddd, +0.286 ns, 실패 0) **기능은 검증되지 않았다**.
 같은 팩(FS-A1GT DOS2), 같은 700 ms로 기존 컨트롤러(run.sh, 85.909 MHz)와 TDM
 (run_tdm.sh, 128.86 MHz, clk21m = clk_sdram/6)을 돌린 결과:

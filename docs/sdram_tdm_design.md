@@ -159,3 +159,31 @@ CPU 읽기 지연(요청 -> rdtog/적중, ns) 비교는 재측정 중(첫 계측
 (run.sh)와 해제 후 5번째 분기에서 갈리고 부팅하지 않는다(고유 PC 60개를 맴돔). 타이밍 통과는
 기능 통과가 아니다. `sim/fullsys/cmp_streams.sh`, 증거 `docs/evidence_20261013/`, 원인 후보와
 가르는 방법은 `docs/handoff_20261013_sdram128_tdm.md` 0절.
+
+## 12. 채널 ready와 CPU 마감 (2026-10-13 오후)
+
+- ready(ch1/ch3/ch4)는 **요청 에지에서** 내린다. 소비자(memory_upload, 플래시 브리지)는 1 clk21m
+  요청 뒤 2 clk21m(12클록) 후 ready를 "끝남"으로 읽는다. 슬롯이 고를 때(최대 ~14클록) 내리면
+  다음 요청이 대기 중인 요청을 덮는다(b1b80f9, 대조군 `TDM_MUT_RDY`).
+- 표준 속도 T80s는 핸드셰이크가 없다: 일반 읽기는 창 232.8 ns, 완료는 요청 에지 E0+28까지.
+  T-state(36클록) = 프레임 3개라 CPU 요청은 프레임에 대해 고정 위상으로 온다.
+- 리프레시 프레임은 G 결정 세 번(G1, G2, 다음 G1)을 막아 34-37클록을 만든다. CPU 읽기가 대기 중이면
+  REFRESH 발행(사이클 10) 전까지 프레임을 취소하고 다음 경계에서 다시 시도한다. `rf_late`(연기+취소
+  합계, 최대 3)는 REFRESH를 낼 때만 지운다. 32 MB에서 `rf_due[1]`은 mode128로 가린다(3f26ad6,
+  대조군 `TDM_MUT_RFSLOW`).
+- 측정: `sim/sdram_tdm` +stock, 격자 위상 36개 전부 LATE 0, 완료 최대 E0+25. fullsys GT 700 ms 지연
+  최대 163 ns.
+- 남은 위험: 직전 G 슬롯이 다른 채널의 같은 뱅크(`B`), DQM 민감 슬롯의 행 비트 != 00. 0-2 MB CPU
+  주소에서는 관측 0, 큰 구성(RAM 16-20 MB)과 v_en=1에서는 미검증.
+
+## 13. 32 MB 수용 (`sim/run_upload32.sh`)
+
+FS-A1GT 4MB + MoonSound + 8 MB 카트 둘 = 최고 24.42 MB, VRAM 뱅크(24 MB+)에 442,368 B.
+카트 하나면 16.42 MB. v_en=1이면 뱅크 3 G 접근은 영원히 거절되므로 업로드가 멈춘다. MoonSound가 없으면
+pcm_rom_base 기본값 = 24 MB. 결정 대기(handoff_20261013b 2절).
+
+## 14. 데이터시트 확인 (AS4C32M16SB Rev 1.0, -7)
+
+tRC 63, tRFC 63, tRCD 21, tRP 21, tRRD 14, tRAS 42 ns, tWR 14, tAC 5.4, tOH 2.5 -- 4, 5, 8절 숫자와 같다.
+tRAS lockout은 데이터시트에 없다(READ+AP 뒤 {tRP + BL}만 명시): READ a+3 / BL2면 내부 프리차지가 a+5에
+시작할 수 있어 tRAS(a+6)보다 1클록 이르다. 미해결.
