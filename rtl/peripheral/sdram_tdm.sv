@@ -97,6 +97,12 @@ module sdram_tdm
     output reg        v_rvalid
 );
 
+//  The board size is static (HPS sdram_sz), but it comes from another clock
+//  domain and every slot decision depends on it: take it through one register
+//  here so it is not part of those paths (722abff: g1/g2 <- sdram_sz, -2.2 ns).
+reg m128 = 1'b0, m64 = 1'b0;
+always @(posedge clk) begin m128 <= mode128; m64 <= mode64; end
+
 // ─── timing (CLK_HZ) ───────────────────────────────────────────────────────
 localparam int  PERIOD_PS   = 1000000000 / (CLK_HZ / 1000);
 localparam int  RFSH_EVERY  = (7800000 / PERIOD_PS) - 60;  // 7.8 us/row; margin for 3 deferred frames + 1
@@ -240,7 +246,7 @@ wire [CW-1:0] c_pidx   = ch2_caddr[CW:1];
 wire          c_hazard = (c_we && c_waddr == c_pidx) | (c_we_d && c_waddr_d == c_pidx);
 wire          c_match  = c_rdata[LW-1] && c_rdata[LW-2:16] == ch2_caddr[26:CW+1];
 //  a hit answers only with no ch2 access queued (ch2_saved_data must not be replaced under it)
-assign c2_hit_now = c_pend3 && c_hit_q && ~ch2_rq && ~ch2b_v && ~(c_we && c_waddr == c_pidx);
+assign c2_hit_now = c_pend3 && c_hit_q && ~ch2_rq && ~ch2_bv && ~(c_we && c_waddr == c_pidx);
 
 // ─── slot state ────────────────────────────────────────────────────────────
 //  per general slot: which channel, the access, where it lands
@@ -254,9 +260,10 @@ typedef struct packed {
     loc_t        l;
 } gslot_t;
 gslot_t g1, g2;                  // decided at cycle 2 / 6, issued from 4 / 8
-reg     ch2b_v = 1'b0, ch2b_rnw;      // ch2 queue, second entry
-reg [26:0] ch2b_addr;
-reg  [7:0] ch2b_din;
+loc_t   ch2_hl;                      // the latest CPU request's location (bank reservation)
+reg     ch2_bv = 1'b0, ch2_brnw;      // ch2 queue, second entry
+reg [26:0] ch2_baddr;
+reg  [7:0] ch2_bdin;
 reg     ch2_ovf = 1'b0;              // a ch2 write found the queue full (never expected)
 logic   enq, enq_rnw, enq_rd;
 logic [26:0] enq_addr;
@@ -280,7 +287,7 @@ reg [10:0] rf_cnt [0:1];
 reg  [1:0] rf_due;
 reg  [1:0] rf_now, rf_next;
 reg  [1:0] rf_late;              // frames a due refresh has been deferred for the CPU      // chip blocked this frame / blocked for V,G1 next frame
-wire       v_chip = mode128;     // the VRAM's chip: 1 on 128 MB, 0 otherwise
+wire       v_chip = m128;     // the VRAM's chip: 1 on 128 MB, 0 otherwise
 //  A CPU read that arrives inside a refresh frame cancels it, up to the edge that
 //  would issue the REFRESH (cycle 10): the frame's G slots open again and the
 //  refresh is due again from the next frame boundary.  At stock speed the CPU has
@@ -316,20 +323,20 @@ reg  [3:0] cand_ok;
 loc_t      cand_l [0:3];         // registered: map() of each channel's held address
 reg  [3:0] rq_d;                 // the request was already up last cycle (cand_l is its)
 reg        c2_hold;              // registered CPU reservation
-assign cpu_wait = ch2_rq | ch2_cpend | c_pend2 | c_pend3 | ch2_rdwait | ch2b_v;
+assign cpu_wait = ch2_rq | ch2_cpend | c_pend2 | c_pend3 | ch2_rdwait | ch2_bv;
 `ifndef TDM_MUT_RFSLOW      // negative control: no cancellation (the 2026-10-13 controller)
 assign rf_cxl = cpu_wait && rf_late != 2'd3 && (c2_l.c ? rf_now[1] : rf_now[0]) && !(ps[10] | ps[11]);
 `else
 assign rf_cxl = 1'b0;
 `endif
 always @(posedge clk) begin
-    cand_l[0] <= gmap(ch2_addr_1, mode128, mode64);
-    cand_l[1] <= gmap(ch1_addr_1, mode128, mode64);
-    cand_l[2] <= gmap(ch3_addr_1, mode128, mode64);
-    cand_l[3] <= gmap(ch4_addr_1, mode128, mode64);
+    cand_l[0] <= gmap(ch2_addr_1, m128, m64);
+    cand_l[1] <= gmap(ch1_addr_1, m128, m64);
+    cand_l[2] <= gmap(ch3_addr_1, m128, m64);
+    cand_l[3] <= gmap(ch4_addr_1, m128, m64);
     rq_d      <= {ch4_rq, ch3_rq, ch1_rq, ch2_rq};
-    c2_hold   <= ch2_cpend | c_pend2 | c_pend3 | ch2_rq | ch2_rdwait | ch2b_v;
-    c2_l      <= gmap(ch2_rq ? ch2_addr_1 : ch2_caddr, mode128, mode64);
+    c2_hold   <= ch2_cpend | c_pend2 | c_pend3 | ch2_rq | ch2_rdwait | ch2_bv;
+    c2_l      <= gmap(ch2_rq ? ch2_addr_1 : ch2_caddr, m128, m64);
 end
 always_comb begin
     logic sens, b0, b1, rsv, hold;
@@ -343,14 +350,16 @@ always_comb begin
 `endif
     b0   = (rf_now[0] & ~rf_cxl) | (ps[2] & rf_next[0]);
     b1   = (rf_now[1] & ~rf_cxl) | (ps[2] & rf_next[1]);
-    cand_ok[0] = ch2_rq & rq_d[0] & ok(cand_l[0], sens, b0, b1, prev_v, prev_c, prev_b, mode128);
+    cand_ok[0] = ch2_rq & rq_d[0] & ok(cand_l[0], sens, b0, b1, prev_v, prev_c, prev_b, m128);
     //  The CPU's hold and location from the edge after its request, not a clock
     //  later through c2_hold/c2_l: the decision on that edge used to give the CPU's
     //  bank away (sim/sdram_tdm +stock +cpulow=2, "OB-" at 3 of 36 grid phases).
-    //  Bit slicing only (gmap) on registered addresses.
+    //  ch2_hl is mapped from the request address on the request edge (a ch2_*
+    //  register: MSX1.sdc's CPU-side multicycle covers its input); a comb gmap
+    //  here put the map into every slot decision (722abff, -2.2 ns).
 `ifndef TDM_MUT_LATEHOLD
-    hold = c2_hold | ch2_cpend | ch2_rq | ch2_rdwait | ch2b_v;
-    hl   = gmap(ch2_rq ? ch2_addr_1 : ch2_caddr, mode128, mode64);
+    hold = c2_hold | ch2_cpend | ch2_rq | ch2_rdwait | ch2_bv;
+    hl   = ch2_hl;
 `else
     hold = c2_hold;
     hl   = c2_l;
@@ -369,9 +378,9 @@ always_comb begin
 `else
     rsv  = 1'b0;
 `endif
-    cand_ok[1] = ch1_rq & rq_d[1] & ok(cand_l[1], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(hold & ~cand_ok[0] & cand_l[1].c == hl.c & cand_l[1].b == hl.b) & ~(rsv & ch1_rnw_1);
-    cand_ok[2] = ch3_rq & rq_d[2] & ok(cand_l[2], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(hold & ~cand_ok[0] & cand_l[2].c == hl.c & cand_l[2].b == hl.b) & ~(rsv & ch3_rnw_1);
-    cand_ok[3] = ch4_rq & rq_d[3] & ok(cand_l[3], sens, b0, b1, prev_v, prev_c, prev_b, mode128) & ~(hold & ~cand_ok[0] & cand_l[3].c == hl.c & cand_l[3].b == hl.b) & ~(rsv & ch4_rnw_1);
+    cand_ok[1] = ch1_rq & rq_d[1] & ok(cand_l[1], sens, b0, b1, prev_v, prev_c, prev_b, m128) & ~(hold & ~cand_ok[0] & cand_l[1].c == hl.c & cand_l[1].b == hl.b) & ~(rsv & ch1_rnw_1);
+    cand_ok[2] = ch3_rq & rq_d[2] & ok(cand_l[2], sens, b0, b1, prev_v, prev_c, prev_b, m128) & ~(hold & ~cand_ok[0] & cand_l[2].c == hl.c & cand_l[2].b == hl.b) & ~(rsv & ch3_rnw_1);
+    cand_ok[3] = ch4_rq & rq_d[3] & ok(cand_l[3], sens, b0, b1, prev_v, prev_c, prev_b, m128) & ~(hold & ~cand_ok[0] & cand_l[3].c == hl.c & cand_l[3].b == hl.b) & ~(rsv & ch4_rnw_1);
 end
 
 // ─── init ──────────────────────────────────────────────────────────────────
@@ -402,13 +411,14 @@ always @(posedge clk) begin
     end
     if (~ch2_req) ch2_hit_r <= 0;
     //  ch2 queue: the head is ch2_rq / ch2_*_1 (what the slots pick), behind it one
-    //  more entry, ch2b.  A paced CPU writes with no completion handshake (msx.sv
+    //  more entry, ch2_b*.  A paced CPU writes with no completion handshake (msx.sv
     //  GUARD_WR, 2 clk21m) and its next request follows 12-18 clocks later; a TDM
     //  slot can take longer than that, and the second request used to overwrite the
     //  queued one (a lost write; sdram.sv picked within a clock or two).  At most
     //  one request enters per edge: a write, a cache miss, or a read that waited.
     enq = 1'b0; enq_rnw = 1'b1; enq_addr = ch2_caddr; enq_din = ch2_din_1; enq_rd = 1'b0;
     if (ch2_req & ~ch2_req_1) begin
+        ch2_hl <= gmap(ch2_addr, m128, m64);
         if (CACHE_LINES != 0 && ch2_rnw) begin
             ch2_cpend <= 1;
             ch2_caddr <= ch2_addr;
@@ -443,18 +453,18 @@ always @(posedge clk) begin
     if (ch2_rdwait) begin enq = 1'b1; enq_rd = 1'b1; end
     begin
         logic promo;
-        promo = !ch2_rq && ch2b_v;
+        promo = !ch2_rq && ch2_bv;
         if (promo) begin
-            ch2_rq <= 1; ch2_rnw_1 <= ch2b_rnw; ch2_addr_1 <= ch2b_addr; ch2_din_1 <= ch2b_din;
-            ch2b_v <= 0;
+            ch2_rq <= 1; ch2_rnw_1 <= ch2_brnw; ch2_addr_1 <= ch2_baddr; ch2_din_1 <= ch2_bdin;
+            ch2_bv <= 0;
         end
         if (enq) begin
 `ifndef TDM_MUT_RDOVER      // negative control: no second entry, a request replaces the queued one
-            if (!ch2_rq && !ch2b_v) begin
+            if (!ch2_rq && !ch2_bv) begin
                 ch2_rq <= 1; ch2_rnw_1 <= enq_rnw; ch2_addr_1 <= enq_addr; ch2_din_1 <= enq_din;
                 ch2_rdwait <= 0;
-            end else if (!ch2b_v || promo) begin
-                ch2b_v <= 1; ch2b_rnw <= enq_rnw; ch2b_addr <= enq_addr; ch2b_din <= enq_din;
+            end else if (!ch2_bv || promo) begin
+                ch2_bv <= 1; ch2_brnw <= enq_rnw; ch2_baddr <= enq_addr; ch2_bdin <= enq_din;
                 ch2_rdwait <= 0;
             end else if (enq_rd)
                 ch2_rdwait <= 1;                   // full: the read tries again next edge
@@ -530,7 +540,7 @@ always @(posedge clk) begin
             rf_next <= rf_now;
             //  (chip 1 exists only on 128 MB: its timer still runs on 32 MB, and an
             //  unmasked rf_due[1] kept every boundary "deferring", rf_late pinned at 3)
-            if (((rf_due & {mode128, 1'b1}) != 2'b00) && cpu_wait && rf_late != 2'd3) begin
+            if (((rf_due & {m128, 1'b1}) != 2'b00) && cpu_wait && rf_late != 2'd3) begin
                 rf_now  <= 2'b00;
                 rf_late <= rf_late + 2'd1;
             end
@@ -538,9 +548,9 @@ always @(posedge clk) begin
             //  started at the bound and then cancelled would restart the count
             //  and postpone the refresh without limit (7.822 us, sim/sdram_tdm)
             else if (rf_due[0])            begin rf_now <= 2'b01; rf_due[0] <= 1'b0; end
-            else if (rf_due[1] && mode128) begin rf_now <= 2'b10; rf_due[1] <= 1'b0; end
+            else if (rf_due[1] && m128) begin rf_now <= 2'b10; rf_due[1] <= 1'b0; end
             else                                 rf_now <= 2'b00;
-            vl = map((mode128 ? VBASE128 : VBASE32) + {9'd0, v_addr, 2'b00}, mode128);
+            vl = map((m128 ? VBASE128 : VBASE32) + {9'd0, v_addr, 2'b00}, m128);
             took = v_en && v_req && !(rf_due[v_chip] | rf_now[v_chip]);
             vs_v <= took; vs_we <= v_we; vs_l <= vl; vs_wdata <= v_wdata; vs_be <= v_be;
             v_grant <= took;
@@ -690,7 +700,7 @@ always @(posedge clk) begin
         init_cnt <= INIT_CYCLES[15:0] + 16'd200;
         c_flush <= 1; c_flush_idx <= '0;
         ch2_cpend <= 0; c_pend2 <= 0; c_pend3 <= 0; ch2_hit_r <= 0;
-        ch2_rdwait <= 0; ch2b_v <= 0;
+        ch2_rdwait <= 0; ch2_bv <= 0;
         dq_oe <= 1'b0;
     end
 end
