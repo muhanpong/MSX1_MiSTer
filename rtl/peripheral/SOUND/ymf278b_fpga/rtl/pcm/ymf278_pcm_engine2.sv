@@ -334,6 +334,14 @@ logic         g_e_zero, g_t_zero;
 logic [7:0]   g_vmul_e, g_vmul_t;
 logic [4:0]   g_vsh_e, g_vsh_t;
 logic signed [33:0] w_p1, w_p2, w_pl, w_pr;
+//  PIPE: the pan gains looked up a clock ahead.  w_regs.pan holds still for the
+//  whole slot, so the table lookup need not share SL_PAN's cycle with the
+//  multiply (w_pl <- w_regs.pan missed by 0.504 ns in c2c3c58).
+logic [5:0] pl_gq, pr_gq;
+always_ff @(posedge clk) begin
+    pl_gq <= pan_att_left (w_regs.pan);
+    pr_gq <= pan_att_right(w_regs.pan);
+end
 
 logic signed [23:0] accum_l, accum_r;
 
@@ -1133,8 +1141,8 @@ always_ff @(posedge clk or negedge rst_n) begin
                 pl_g = pan_att_left (w_regs.pan);
                 pr_g = pan_att_right(w_regs.pan);
                 if (PIPE) begin
-                    w_pl <= w_vol_sample * $signed({1'b0, pl_g});
-                    w_pr <= w_vol_sample * $signed({1'b0, pr_g});
+                    w_pl <= w_vol_sample * $signed({1'b0, pl_gq});
+                    w_pr <= w_vol_sample * $signed({1'b0, pr_gq});
                     sl_state <= SL_PANB;
                 end else begin
                     mul_w = w_vol_sample * $signed({1'b0, pl_g});
