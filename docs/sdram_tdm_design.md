@@ -154,3 +154,8 @@ CPU 읽기 지연(요청 -> rdtog/적중, ns) 비교는 재측정 중(첫 계측
 `sim/sdram_tdm/run.sh quick`: 엔진 8/8, 음성 대조군 SENS/BANK/NOREF/CAP/CAPE 모두 검출.
 남은 것: 출력 setup 여유, 입력 hold 기준 확인, CPU 지연 비교, tRAS lockout 데이터시트 확인
 (모든 READ가 의존), V9968 연결(VRAM 포트, 리프레시 슬롯), memory_upload의 VRAM 영역 한도.
+
+**기능 미검증 (2026-10-13 확인):** fullsys에서 TDM 코어(run_tdm.sh)가 기존 컨트롤러
+(run.sh)와 해제 후 5번째 분기에서 갈리고 부팅하지 않는다(고유 PC 60개를 맴돔). 타이밍 통과는
+기능 통과가 아니다. `sim/fullsys/cmp_streams.sh`, 증거 `docs/evidence_20261013/`, 원인 후보와
+가르는 방법은 `docs/handoff_20261013_sdram128_tdm.md` 0절.
