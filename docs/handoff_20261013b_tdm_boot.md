@@ -102,6 +102,11 @@ tAC(CL3) 5.4, tOH 2.5, tIS 1.5, tIH 0.8 ns, tREFI 7.8 us. 설계 문서 숫자�
 
 ## 4. 남은 일
 
+0. (해결, 2026-10-13 밤) OPL3 클록이 `clk_sdram / 6` 고정이라 128.86 MHz에서 21.48 MHz로 돌았다
+   (FM 1.5배). `msx.sv`의 `SDRAM_HZ` 하나에서 PCM CLK_HZ와 OPL3_DIV(=9)를 만든다. 측정: 기준 14.3184,
+   수정 전 21.4777, 수정 후 14.3184 MHz. 이 브랜치는 128.86 MHz 단일 구조로 간다(사용자 결정,
+   85.909 MHz와의 이중 리비전은 하지 않음).
+
 1. **Quartus 컴파일 안 함**(사용자 지시 없음): b1b80f9, 3f26ad6의 타이밍 영향 미확인.
    `tools/sdram128/compile.sh`, 뒤에 `git checkout -- MSX1.qsf`.
 2. 32 MB 수용 결정(2절).
