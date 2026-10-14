@@ -8,9 +8,13 @@ holds "BDX61XFM"), byte 8 = mode (02), bytes 16..31 = 128-bit dirty bitmap (bloc
 b = byte b/8, bit b%8); then every dirty 64 KB block in ascending order from sector 1.
 A headerless file of the ROM's size is a legacy full dump.
 
-A block restored from a correct save differs from the ROM only where the game
-programmed flash: a flash program can only clear bits (new == old & new), and an
-erase sets a 64 KB sector to FF.  Anything else is a bad save or a bad read-back.
+A flash program can only clear bits, so a byte with a bit set that the ROM has
+clear needs an ERASE of its sector first (64 KB, or an 8 KB boot sector below
+10000h on this part).  Games erase and rewrite their save sector, so such bytes
+are normal there.  The script reports, per sector, which kind of change it holds;
+it cannot tell a game's save from a bad read-back -- that needs the game's own
+save layout (2026-10-15: first version called every set bit IMPOSSIBLE and was
+wrong for Neon Horizon's 8 KB save sector at 00C000h).
 """
 import sys
 
@@ -43,12 +47,14 @@ for b, d in sorted(data.items()):
     if d == b'\xff' * BLK:
         print('block %02x: erased (all FF), %d bytes differ from ROM' % (b, len(diff))); continue
     legit = [i for i in diff if d[i] & o[i] == d[i]]          # bits only cleared
-    bad = [i for i in diff if d[i] & o[i] != d[i]]            # a bit set that the ROM had clear
+    bad = [i for i in diff if d[i] & o[i] != d[i]]            # a bit set: needs an erase first
+    sect = lambda a: (a & ~0x1FFF) if a < 0x10000 else (a & ~0xFFFF)
+    secs = sorted({sect(b * BLK + i) for i in bad})
     bad_total += len(bad)
-    print('block %02x (%06x): %d bytes differ, %d bit-clear only (flash program), %d IMPOSSIBLE (bit set)'
-          % (b, b * BLK, len(diff), len(legit), len(bad)))
+    print('block %02x (%06x): %d bytes differ, %d bit-clear only, %d need an erase (sectors %s)'
+          % (b, b * BLK, len(diff), len(legit), len(bad), ' '.join('%06x' % x for x in secs) or '-'))
     for i in diff[:12]:
-        print('   %06x  rom %02x  sav %02x%s' % (b * BLK + i, o[i], d[i], '' if d[i] & o[i] == d[i] else '  <-- bit set'))
+        print('   %06x  rom %02x  sav %02x%s' % (b * BLK + i, o[i], d[i], '' if d[i] & o[i] == d[i] else '  (bit set: erased sector)'))
     if len(diff) > 12:
         print('   ... (%d more)' % (len(diff) - 12))
-print('RESULT %s: %d byte(s) a flash program cannot produce' % ('PASS' if bad_total == 0 else 'FAIL', bad_total))
+print('SUMMARY: %d byte(s) need an erased sector; judge them against the game\'s save layout' % bad_total)
