@@ -22,8 +22,19 @@ module tb;
    initial clk_sdram = 1'b0;
    //  -DTDMCLK (run_tdm.sh CLKONLY=1): the TDM clocks with sdram.sv and its CL2 chip
    //  model -- separates the 6:1 clock from the controller.
+   //  -DTDM128 (run_preload.sh tdm128): sdram_tdm in its 128 MB board map (two chips,
+   //  10-bit columns, chip 0 interleaving banks every 2 KB), sdram_size 3 -- the map a
+   //  128 MB board runs.  The 32 MB map (-DTDM) leaves it entirely unexercised.
+`ifdef TDM128
+ `define TDM
+`endif
 `ifdef TDM
  `define TDM_CLOCK
+`endif
+`ifdef TDM128
+ `define MEMW 26
+`else
+ `define MEMW 24
 `endif
 `ifdef TDMCLK
  `define TDM_CLOCK
@@ -211,8 +222,8 @@ module tb;
       if (fd == 0) $fatal(1, "cannot open %s.sdram.bin", pfx);
       a = 0; c = $fgetc(fd);
       while (c >= 0) begin
-         if (a & 1) u_chip.mem[24'(a >> 1)][15:8] = 8'(c);
-         else       u_chip.mem[24'(a >> 1)][7:0]  = 8'(c);
+         if (a & 1) u_chip.mem[`MEMW'(a >> 1)][15:8] = 8'(c);
+         else       u_chip.mem[`MEMW'(a >> 1)][7:0]  = 8'(c);
          a++; c = $fgetc(fd);
       end
       $fclose(fd);
@@ -266,7 +277,7 @@ module tb;
 `else
    sdram_tdm u_sdram
    (
-      .init(rst_n_cnt != 0), .clk(clk_sdram), .mode128(1'b0), .mode64(1'b0),
+      .init(rst_n_cnt != 0), .clk(clk_sdram), .mode128(`ifdef TDM128 1'b1 `else 1'b0 `endif), .mode64(1'b0),
       .v_en(1'b0), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
       .v_grant(), .v_rdata(), .v_rvalid(),
       .ch2_busy(sdram_busy),
@@ -291,7 +302,7 @@ module tb;
    assign sdram_busy = 1'b0;               // sdram.sv has no ch2 queue
    sdram_big u_chip
 `else
-   sdram_big_tdm u_chip
+   sdram_big_tdm #(.M128(`ifdef TDM128 1 `else 0 `endif)) u_chip
 `endif
    (
       .clk(clk_sdram), .DQ_out(dq_i), .DQ_in(dq_o), .DQ_oe(dq_oe),
@@ -735,7 +746,11 @@ module tb;
    //  MSX1.sv:1267 -- and the FFh default is load-bearing: an unmapped read is
    //  what a runaway executes as RST 38h.
    assign ram_dout = sdram_ce ? sdram_dout : bram_ce ? bram_dout : 8'hFF;
+`ifdef TDM128
+   assign sdram_size = 2'd3;
+`else
    assign sdram_size = 2'd2;
+`endif
 
    //  ── reset / pacing ───────────────────────────────────────────────────────
    int rst_n_cnt = 256;
@@ -1159,6 +1174,8 @@ module tb;
    //  MoonSound wait that depends on clk_sdram) can still be compared value by value.
    int    iol_fd = 0;
    logic  iol_q = 1'b0;
+   realtime iol_flt = 0;
+   int    iol_vw = 0;
    wire   iol_wr = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n;
    wire   iol_rd = ~MSX.iorq_n & ~MSX.rd_n & MSX.m1_n;
    wire [7:0] iol_port = MSX.a[7:0];
@@ -1168,16 +1185,40 @@ module tb;
    always @(posedge clk21m) begin
       iol_q <= iol_wr | iol_rd;
       if (iol_fd != 0 && ~iol_q && (iol_wr | iol_rd)) begin
+`ifndef IOLOG_MUT     // negative control: VDP filter on 9Ch-9Fh, nothing there
          if (iol_wr && (iol_port[7:2] == 6'b100110 || iol_port[7:1] == 7'b0111111 || iol_port[7:2] == 6'b110001))
+`else
+         if (iol_wr && (iol_port[7:2] == 6'b100111 || iol_port[7:1] == 7'b0111111 || iol_port[7:2] == 6'b110001))
+`endif
+         begin
             $fdisplay(iol_fd, "%0.3f W %02x %02x", $realtime/1000000.0, iol_port, iol_dw);
+            if (iol_port[7:4] == 4'h9) iol_vw++;          // a VDP line written
+         end
       end
+      //  flushed every 1 ms of machine time: a run stopped early still leaves its
+      //  lines (the first version kept them in a 4 kB buffer -- a 0-byte file read as
+      //  a dead probe while the A1FX BIOS had simply not touched the VDP yet)
+      if (iol_fd != 0 && ($realtime - iol_flt) >= 1000000.0) begin $fflush(iol_fd); iol_flt = $realtime; end
       //  reads: sample the byte at the end of the strobe (T80s takes it before)
       if (iol_fd != 0 && iol_q && ~(iol_wr | iol_rd) && iol_rdq && (iol_portq[7:1] == 7'b0111111 || iol_portq[7:2] == 6'b110001))
          $fdisplay(iol_fd, "%0.3f R %02x %02x", $realtime/1000000.0, iol_portq, iol_drq);
    end
    always @(posedge clk21m) if (iol_rd) begin iol_rdq <= 1'b1; iol_portq <= iol_port; iol_drq <= iol_dr; end
                             else if (~iol_wr) iol_rdq <= 1'b0;
-   final if (iol_fd != 0) $fclose(iol_fd);
+   //  The probe proves itself: VDP write strobes counted from msx.sv's own decode
+   //  (vdp_bus & ~wr_n, at clk_sdram) against the lines it wrote.  Unequal = lost
+   //  or doubled lines; 0 strobes = the window saw no VDP traffic (no verdict).
+   int   iol_vstrobe = 0;
+   logic iol_vq = 1'b0;
+   always @(posedge clk_sdram) begin
+      iol_vq <= MSX.vdp_bus & ~MSX.wr_n;
+      if (MSX.vdp_bus & ~MSX.wr_n & ~iol_vq) iol_vstrobe++;
+   end
+   final if (iol_fd != 0) begin
+      $display("iolog: VDP write lines %0d, VDP write strobes (msx.sv vdp_bus) %0d -- %s", iol_vw, iol_vstrobe,
+               iol_vstrobe == 0 ? "no VDP traffic, no verdict" : iol_vw == iol_vstrobe ? "PASS" : "FAIL");
+      $fclose(iol_fd);
+   end
 
    task automatic bios_check();
       int bad = 0, first = -1;
@@ -1186,7 +1227,7 @@ module tb;
       for (int i = 0; i < 32768 && 16 + i < pack_bytes; i++) begin
          logic [15:0] w;
          logic  [7:0] b;
-         w = u_chip.mem[24'((base + i) >> 1)];
+         w = u_chip.mem[`MEMW'((base + i) >> 1)];
          b = ((base + i) & 1) ? w[15:8] : w[7:0];
          if (b !== packmem[16 + i]) begin bad++; if (first < 0) first = base + i; end
       end
@@ -1267,8 +1308,12 @@ endmodule
 //  sdram128 study: CL3 / BL2 / write burst, DQM = A[12:11] (latency 2 read, 0
 //  write), on the chip clock = clk_sdram falling (the controller's SDRAM_CLK is
 //  the inverted clock).  Functional only -- sim/sdram_tdm/sdram_chk.sv checks the
-//  timing.  Chip 1 (nCS high) is not modelled: the bench runs the 32 MB map.
+//  timing.  M128=0: the 32 MB map, one chip (nCS high is not modelled).  M128=1: a
+//  128 MB board, two 64 MB chips (nCS selects chip 1, as cs_o), 10-bit columns.
+//  Either way mem[] is indexed by the LOGICAL word address -- the inverse of
+//  sdram_tdm's map() -- so the preload and the upload check address it directly.
 module sdram_big_tdm
+#(parameter M128 = 0)
 (
    input               clk,
    output reg  [15:0]  DQ_out,
@@ -1278,14 +1323,28 @@ module sdram_big_tdm
    input         [1:0] BA,
    input nCS, input nWE, input nRAS, input nCAS, input DQML, input DQMH
 );
-   reg [15:0] mem [0:(1<<24)-1];
-   reg [12:0] row [0:3];
+   localparam int IW = M128 ? 26 : 24;
+   reg [15:0] mem [0:(1<<IW)-1];
+   reg [12:0] row [0:7];
+   //  logical word index of (chip, bank, row, column): map()'s inverse
+   function automatic [25:0] lw(input c, input [1:0] b, input [12:0] r, input [9:0] k);
+      if (!M128)   lw = {2'b00, b, r, k[8:0]};
+`ifndef TDM128_MUT_MAP    // negative control: chip 0 bank bits taken as row bits
+      else if (!c) lw = {r[12:11], 1'b0, r[10:0], b, k};
+`else
+      else if (!c) lw = {r[12:11], 1'b0, r[10:2], b, r[1:0], k};
+`endif
+      else         lw = {r[12:11], 1'b1, b, r[10:0], k};
+   endfunction
+   wire        cs   = M128 ? nCS : 1'b0;
+   wire  [9:0] col  = M128 ? A[9:0] : {1'b0, A[8:0]};
+   wire  [9:0] col1 = M128 ? {A[9:1], ~A[0]} : {1'b0, A[8:1], ~A[0]};
    wire [2:0] cmd = {nRAS, nCAS, nWE};
    //  read pipeline: slot n = the word valid n chip edges from now
-   reg [23:0] rq_idx [0:5];
+   reg [25:0] rq_idx [0:5];
    reg        rq_v   [0:5];
    reg  [1:0] dqm_d1, dqm_d2;
-   reg [23:0] w_idx;  reg w_pend = 1'b0;
+   reg [25:0] w_idx;  reg w_pend = 1'b0;
    initial for (int i = 0; i < 6; i++) rq_v[i] = 1'b0;
    //  the word reaches the FPGA pins after the next FPGA rising edge (STA, as in
    //  sim/sdram_tdm/sdram_chk.sv): it is put on DQ_out there, non-blocking
@@ -1295,23 +1354,23 @@ module sdram_big_tdm
       // the word valid at this chip edge
       for (int i = 0; i < 4; i++) begin rq_v[i] = rq_v[i+1]; rq_idx[i] = rq_idx[i+1]; end
       rq_v[4] = 1'b0;
-      pend <= (rq_v[0] && dqm_d2 == 2'b00) ? mem[rq_idx[0]] : 16'h0000;     // DQM latency 2
+      pend <= (rq_v[0] && dqm_d2 == 2'b00) ? mem[IW'(rq_idx[0])] : 16'h0000; // DQM latency 2
       dqm_d2 = dqm_d1; dqm_d1 = A[12:11];
       if (w_pend) begin
-         if (!A[11]) mem[w_idx][7:0]  <= DQ_in[7:0];
-         if (!A[12]) mem[w_idx][15:8] <= DQ_in[15:8];
+         if (!A[11]) mem[IW'(w_idx)][7:0]  <= DQ_in[7:0];
+         if (!A[12]) mem[IW'(w_idx)][15:8] <= DQ_in[15:8];
          w_pend = 1'b0;
       end
-      if (!nCS) case (cmd)
-         3'b011: row[BA] <= A;
+      if (M128 || !nCS) case (cmd)
+         3'b011: row[{cs, BA}] <= A;
          3'b101: begin
-            rq_v[3] = 1'b1; rq_idx[3] = {BA, row[BA], A[8:0]};          // CL3
-            rq_v[4] = 1'b1; rq_idx[4] = {BA, row[BA], A[8:1], ~A[0]};
+            rq_v[3] = 1'b1; rq_idx[3] = lw(cs, BA, row[{cs, BA}], col);  // CL3
+            rq_v[4] = 1'b1; rq_idx[4] = lw(cs, BA, row[{cs, BA}], col1);
          end
          3'b100: begin
-            if (!A[11]) mem[{BA, row[BA], A[8:0]}][7:0]  <= DQ_in[7:0];
-            if (!A[12]) mem[{BA, row[BA], A[8:0]}][15:8] <= DQ_in[15:8];
-            w_idx = {BA, row[BA], A[8:1], ~A[0]}; w_pend = 1'b1;
+            if (!A[11]) mem[IW'(lw(cs, BA, row[{cs, BA}], col))][7:0]  <= DQ_in[7:0];
+            if (!A[12]) mem[IW'(lw(cs, BA, row[{cs, BA}], col))][15:8] <= DQ_in[15:8];
+            w_idx = lw(cs, BA, row[{cs, BA}], col1); w_pend = 1'b1;
          end
          default: ;
       endcase
