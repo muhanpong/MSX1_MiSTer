@@ -16,6 +16,8 @@ import sys
 def ev(fn, every):
     out = []; latch = None
     for ln in open(fn, errors='replace'):
+        if not ln.endswith('\n'):
+            break                         # a live file's half-written last line
         p = ln.split()
         if len(p) < 4 or p[1] not in ('W', 'R'):
             continue                      # a line cut by a stopped run
