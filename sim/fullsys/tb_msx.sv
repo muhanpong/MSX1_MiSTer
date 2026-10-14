@@ -162,6 +162,7 @@ module tb;
       begin int sb; if ($value$plusargs("slotb=%d", sb)) cart_conf[1].typ = cart_typ_t'(sb); end
    end
 
+`ifndef PRELOAD
    memory_upload u_upload
    (
       .clk(clk21m),
@@ -187,6 +188,59 @@ module tb;
       .msx_dev_ref_ram(msx_dev_ref_ram),
       .pcm_rom_base(pcm_rom_base)
    );
+`else
+   //  -DPRELOAD (+preload=<prefix> from sim/tb_upload32.sv +dump): no uploader.  An
+   //  8 MB cart plus MoonSound is ~12 MB of byte writes, hours of whole-machine
+   //  simulation; the upload bench builds the same SDRAM image in minutes.  The
+   //  images go straight into the chip model and systemRAM, the uploader's
+   //  outputs come from <prefix>.state.svh (compiled in: -DPRELOAD_SVH="...").
+   initial begin
+      reset_rq = 1'b0; upl_addr = '0; upl_din = '0; upl_ce = 1'b0; upl_sdram_rq = 1'b0;
+      upl_bram_rq = 1'b0; upl_load_sram = 1'b0;
+      kbd_request = 1'b0; kbd_addr = '0; kbd_din = '0; kbd_we = 1'b0;
+   end
+   task automatic preload();
+      string pfx;
+      int fd, c, a, n;
+      if (!$value$plusargs("preload=%s", pfx)) $fatal(1, "-DPRELOAD needs +preload=<prefix>");
+      reset_rq = 1'b1;                       // what the machine sees during an upload
+      begin
+`include `PRELOAD_SVH
+      end
+      fd = $fopen({pfx, ".sdram.bin"}, "rb");
+      if (fd == 0) $fatal(1, "cannot open %s.sdram.bin", pfx);
+      a = 0; c = $fgetc(fd);
+      while (c >= 0) begin
+         if (a & 1) u_chip.mem[24'(a >> 1)][15:8] = 8'(c);
+         else       u_chip.mem[24'(a >> 1)][7:0]  = 8'(c);
+         a++; c = $fgetc(fd);
+      end
+      $fclose(fd);
+      fd = $fopen({pfx, ".bram.bin"}, "rb");
+      if (fd == 0) $fatal(1, "cannot open %s.bram.bin", pfx);
+      for (int i = 0; i < 65536; i++) begin c = $fgetc(fd); systemRAM.ram.mem[i] = 8'(c); end
+      $fclose(fd);
+      //  the keyboard layout: replayed through the same port the uploader uses
+      fd = $fopen({pfx, ".kbd.txt"}, "r");
+      n = 0;
+      if (fd != 0) begin
+         logic [8:0] ka; logic [7:0] kd;
+         kbd_request = 1'b1;
+         while ($fscanf(fd, "%h %h", ka, kd) == 2) begin
+            @(posedge clk21m); kbd_addr = ka; kbd_din = kd; kbd_we = 1'b1;
+            @(posedge clk21m); kbd_we = 1'b0; n++;
+         end
+         @(posedge clk21m); kbd_request = 1'b0;
+         $fclose(fd);
+      end
+      //  The SDRAM controllers spend 200 us in power-up init; a real upload takes far
+      //  longer than that.  Released earlier, the CPU read through an uninitialised
+      //  controller and the boot split at branch 2 (first validation, 2026-10-14).
+      repeat (8000) @(posedge clk21m);       // 372 us
+      reset_rq = 1'b0;
+      $display("preload: %s -- SDRAM %0d bytes, %0d kbd writes", pfx, a, n);
+   endtask
+`endif
 
    //  ── SDRAM: the real controller over a behavioural chip ───────────────────
    wire        upload_active = upl_ce & upl_sdram_rq;
@@ -310,6 +364,7 @@ module tb;
    //  magic is not "MSX" sends the FSM back to IDLE with nothing parsed and no
    //  message, so this is the only place the failure is visible.
    int hdr_seen = 0;
+`ifndef PRELOAD
    always @(posedge clk21m) begin
       if (u_upload.state == 4'd4 /*STATE_CHECK_CONFIG*/ && hdr_seen < 4) begin
          hdr_seen++;
@@ -319,6 +374,7 @@ module tb;
                   ({u_upload.conf[0],u_upload.conf[1],u_upload.conf[2]} == "MSX") ? "OK" : "BAD");
       end
    end
+`endif
 
    //  Serve one sector: hold ack, sweep the 512 offsets, drop ack.  nvram_backup
    //  makes its own BRAM write enable from ack and the offset, so the model only
@@ -715,6 +771,7 @@ module tb;
       scc_ch_en = 5'h1F; psg_mute = 1'b0; opll_mute = 1'b0;
       pcm_mute = 1'b1; fm_mute = 1'b1; pcm_vol = 4'd0; fm_vol = 4'd0;
       msxConfig = '{default:'0};
+      msxConfig.moonsound_en = $test$plusargs("moonsound");   // the OSD MoonSound switch
       for (int i = 0; i < 2; i++) selected_mapper[i] = MAPPER_UNUSED;
       sram_save = 1'b0; sram_load = 1'b0;
    end
@@ -788,6 +845,9 @@ module tb;
       end
       wait (pack_bytes > 0);
       repeat (64) @(posedge clk21m);
+`ifdef PRELOAD
+      preload();
+`else
       //  The firmware mounts <rom>.sav around the ROM load.  Both orders happen
       //  in the field, and the late one is what used to lose the auto-load.
       if (sav_bytes > 0 && !sav_late) mount_sav();
@@ -821,6 +881,7 @@ module tb;
          @(posedge clk21m);
          if (!reset_rq) break;
       end
+`endif
       $display("upload: done at %0t", $time);
       for (int i = 0; i < 4; i++)
          $display("upload: lookup_SRAM[%0d] = %0d kB at %0d", i, lookup_SRAM[i].size, lookup_SRAM[i].addr);
