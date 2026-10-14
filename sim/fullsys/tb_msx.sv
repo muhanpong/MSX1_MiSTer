@@ -801,7 +801,7 @@ module tb;
                      slot_layout[0].mapper, slot_layout[0].ref_ram);
          if (trace_on && (fetch_a == last_fetch || (fetch_a - last_fetch) > 16'd4)) begin
             nev = nev + 1;
-            if (nev < 400000) $display("%12.3f  BR  %04x", $realtime/1000000.0, fetch_a);
+            if (nev < 400000) $display("%12.3f  BR  %04x  #%0d", $realtime/1000000.0, fetch_a, nev);
          end
          last_fetch <= fetch_a;
       end
@@ -1152,6 +1152,32 @@ module tb;
    final if (opl3_n > 1)
       $display("clk_opl3: %0d edges over %.3f ms = %.4f MHz (OPL3 wants 14.3182)",
                opl3_n, (opl3_t1 - opl3_t0) / 1e6, (opl3_n - 1) / (opl3_t1 - opl3_t0) * 1e3);
+
+   //  +iolog=<file>: every CPU OUT to the VDP (98h-9Bh) and MoonSound (7Eh/7Fh,
+   //  C4h-C7h) and every IN from MoonSound, "t dir port value", in order.  Picture
+   //  data the CPU sends is in here, so two runs that differ only in timing (a
+   //  MoonSound wait that depends on clk_sdram) can still be compared value by value.
+   int    iol_fd = 0;
+   logic  iol_q = 1'b0;
+   wire   iol_wr = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n;
+   wire   iol_rd = ~MSX.iorq_n & ~MSX.rd_n & MSX.m1_n;
+   wire [7:0] iol_port = MSX.a[7:0];
+   wire [7:0] iol_dw = MSX.d_from_cpu, iol_dr = MSX.d_to_cpu;
+   logic iol_rdq = 1'b0; logic [7:0] iol_portq, iol_drq;
+   initial begin string f; if ($value$plusargs("iolog=%s", f)) iol_fd = $fopen(f, "w"); end
+   always @(posedge clk21m) begin
+      iol_q <= iol_wr | iol_rd;
+      if (iol_fd != 0 && ~iol_q && (iol_wr | iol_rd)) begin
+         if (iol_wr && (iol_port[7:2] == 6'b100110 || iol_port[7:1] == 7'b0111111 || iol_port[7:2] == 6'b110001))
+            $fdisplay(iol_fd, "%0.3f W %02x %02x", $realtime/1000000.0, iol_port, iol_dw);
+      end
+      //  reads: sample the byte at the end of the strobe (T80s takes it before)
+      if (iol_fd != 0 && iol_q && ~(iol_wr | iol_rd) && iol_rdq && (iol_portq[7:1] == 7'b0111111 || iol_portq[7:2] == 6'b110001))
+         $fdisplay(iol_fd, "%0.3f R %02x %02x", $realtime/1000000.0, iol_portq, iol_drq);
+   end
+   always @(posedge clk21m) if (iol_rd) begin iol_rdq <= 1'b1; iol_portq <= iol_port; iol_drq <= iol_dr; end
+                            else if (~iol_wr) iol_rdq <= 1'b0;
+   final if (iol_fd != 0) $fclose(iol_fd);
 
    task automatic bios_check();
       int bad = 0, first = -1;

@@ -58,6 +58,28 @@ description: Get a number out of the whole-machine bench (sim/fullsys) instead o
 **SDRAM 컨트롤러를 바꾸면 이걸로 기존 컨트롤러 런과 맞대라.** sdram128 연구에서 TDM 코어는
 타이밍을 통과하고 단독 벤치도 통과했지만, 이 비교에서 5번째 분기에 갈렸다.
 
+**로그 유실 주의 (2026-10-14).** 시뮬레이터 stdout이 가끔 한 덩어리(수백 줄, ~10 ms)를 잃는다.
+흔적은 한 줄에 타임스탬프 두 개("1085.7    1091.016  BR  7d60")다. cmp_streams.sh는 순번으로
+맞추므로 그 뒤 전부가 어긋나 **가짜 갈림**을 낸다. 실제로 한 번 그렇게 속았다.
+`sim/fullsys/cmp_time.sh <기준> <후보>`: 시각 기준 비교, 양쪽 로그의 유실 구간을 모두 빼고
+PC 순서열을 맞댄다. 대조군: 같은 로그끼리 PASS, 다른 기종끼리 FAIL. BR 줄 끝의 `#n`(일련번호)이
+건너뛰면 그것도 유실이다. 타이밍만 다르고 경로가 같으면 경로가 바뀌는 지점까지 PASS다.
+
+## 큰 카트·펌웨어: 업로드 건너뛰기 (`-DPRELOAD`)
+
+8 MB 카트 + MoonSound는 바이트 단위 업로드만 수 시간이다.
+`sim/fullsys/run_preload.sh <old|tdm> <pack.MSX> <ms> [rom 매퍼번호] [fw.bin]`
+(`MOONSOUND=1`로 OSD MoonSound 켬, `EXTRA="+plusarg"`): `sim/tb_upload32.sv +dump`가 SDRAM 이미지,
+systemRAM 이미지, 업로더 출력(필드별 SV 대입문), 키보드 배치 쓰기를 만들고, tb_msx `-DPRELOAD`가
+그걸 칩 모델에 넣은 뒤 **SDRAM 컨트롤러 초기화(200 us)를 기다렸다가** 리셋을 푼다. 초기화를 안
+기다린 첫 판은 2번째 분기에서 갈렸다. 검증: GT DOS2 프리로드 vs 정상 업로드 18,236 분기 일치.
+fw.bin은 `sim/run_upload32.sh`가 yrw801.rom으로 만든다(헤더 typ 8). ASCII16-X 매퍼 번호는 19.
+TDM 빌드는 기존보다 느리다(MoonSound 켬, 기계 1 ms당 십수 초).
+
+`+iolog=<file>`(tb_msx): VDP(98h-9Bh)·MoonSound(7Eh/7Fh, C4h-C7h) 출입 값 순서열.
+**2026-10-14 현재 검증 안 됨**: FS-A1FX 1.17 s까지 파일이 0바이트였다(BIOS도 VDP에 쓰므로 비면 안 됨).
+쓰기 전에 짧은 판으로 줄이 찍히는지부터 확인할 것.
+
 ## sdram128-study 브랜치 전용
 
 `sim/fullsys/run_tdm.sh`: clk_sdram 128.86 MHz, clk21m = clk_sdram/6, `sdram_tdm`(32 MB 맵),
