@@ -10,6 +10,10 @@
 ;      window, AA->4AAAh 55->4555h A0->4AAAh 45h->4000h.  Then read the byte back
 ;      and re-run T1 (only page 121h may differ: expected, and reported as such).
 ;  T3  VRAM 128 KB: write a pattern through port 98h, read it back.
+;  T5  (v2) every page cart -> VRAM by an unrolled OUTI chain in SCREEN 5 with the
+;      display off, as Neon draws; read back through 98h, checked against the table.
+;      Pass 1 at Neon's 18 T per byte, pass 2 at 50 T: fast-only errors are timing,
+;      errors in both are data.
 ;  T4  mapper RAM segments 4..N-1 (page 2, N found by wrap): pattern write/read.
 ;  Reset the machine afterwards (T3 overwrites the screen, T4 DOS2 segments).
 
@@ -21,16 +25,24 @@ EXPTBL  equ 0FCC1h
 
         org 0C000h
 start:
+        ; turbo R: run as Z80 (the A1F/A1FX show the corruption too)
+        ld a,(002Dh) : cp 3 : jr c,.noturbo
+        ld a,80h : call 0180h
+.noturbo:
         call t3                 ; VRAM first: it ends with INITXT (clears the screen)
-        ld hl,s_title : call puts
-        ld hl,s_t3r : call puts
-        ld hl,(vbad) : call phex16 : call crlf
         call findcart
         jr nc,.found
+        ld hl,s_title : call puts
         ld hl,s_nocart : call puts
         ret
 .found:
         ld (cartslot),a
+        ld a,1 : ld (pass),a : call t5 : ld (bad5a),hl
+        ld a,2 : ld (pass),a : call t5 : ld (bad5b),hl
+        call INITXT
+        ld hl,s_title : call puts
+        ld hl,s_t3r : call puts
+        ld hl,(vbad) : call phex16 : call crlf
         ld hl,s_slot : call puts
         ld a,(cartslot) : call phex : call crlf
         ld a,1 : ld (pass),a : call t1 : ld (bad1),hl
@@ -39,6 +51,9 @@ start:
         ld a,3 : ld (pass),a : call t1 : ld (bad3),hl
         call t4
         ; summary
+        ld hl,s_sum5 : call puts
+        ld hl,(bad5a) : call phex16 : ld a,' ' : call CHPUT
+        ld hl,(bad5b) : call phex16 : call crlf
         ld hl,s_sum : call puts
         ld hl,(bad1) : call phex16 : ld a,' ' : call CHPUT
         ld hl,(bad2) : call phex16 : ld a,' ' : call CHPUT
@@ -51,6 +66,7 @@ start:
         ld hl,(vbad) : call phex16 : ld a,' ' : call CHPUT
         ld hl,(rbad) : call phex16 : ld a,'/' : call CHPUT
         ld a,(nseg) : call phex : call crlf
+        call t5list
         ld hl,s_done : call puts
         ret
 
@@ -188,6 +204,126 @@ t1:
         ld hl,(bad)
         ret
 
+; ---------------------------------------------------------------------------
+; T5: the way Neon draws -- cart page -> VRAM through an unrolled OUTI chain (one
+; cart read every 18 T, code fetched in between), VRAM address set as the game's
+; RAM routine does (R#14, low, high|40h under DI).  Eight 16 KB pages fill VRAM,
+; then each is read back through port 98h and checked against tbl.  64 rounds.
+t5:
+        ; SCREEN 5, display off -- the mode Neon draws its pictures in (R#0 = 06h,
+        ; R#1 = 22h).  In SCREEN 0 an 18 T OUTI chain loses ~4% of its writes even
+        ; with the display off (openMSX 2026 slot model, measured on hardware); the
+        ; release core draws Neon correctly in this mode, so a mismatch here is the
+        ; cart read path, not the VDP.  RG0SAV/RG1SAV are left alone: INITXT restores.
+        di
+        ld a,06h : out (99h),a : ld a,80h : out (99h),a
+        ld a,20h : out (99h),a : ld a,81h : out (99h),a
+        ei
+        ld hl,0 : ld (bad),hl
+        ld hl,0 : ld (pg),hl
+.round:
+        ld b,0                  ; k = VRAM bank 0..7
+.wk:    push bc
+        call cart_on            ; ENASLT clobbers BC
+        pop bc : push bc
+        ld hl,(pg) : ld a,b : add a,l : ld l,a
+        ld a,l : ld e,h : call setbank
+        pop bc : push bc
+        ld a,b : ld hl,0 : call vset_w
+        ; DI for the chain: the BIOS ISR moved the VRAM pointer (openMSX, one
+        ; byte lost per interrupt); the question here is the cart read path
+        ld hl,4000h : ld c,98h
+        ld d,64
+        ld a,(pass) : cp 2 : jr z,.slow
+.ch:    call outi256            ; pass 1: 18 T per byte, as Neon
+        dec d : jr nz,.ch
+        jr .wdone
+.slow:  call outi256s           ; pass 2: 50 T per byte
+        dec d : jr nz,.slow
+.wdone:
+        ei
+        call cart_off
+        pop bc
+        inc b : ld a,b : cp 8 : jr nz,.wk
+        ; verify the eight pages
+        ld b,0
+.vk:    push bc
+        di
+        ld a,b : call vaddr_r
+        call vsum               ; HL sum, C xor
+        ei
+        ld (gotsum),hl : ld a,c : ld (gotxor),a
+        pop bc : push bc
+        ld hl,(pg) : ld a,b : add a,l : ld l,a
+        ld (cur5),hl
+        ld d,h : ld e,l : add hl,hl : add hl,de
+        ld de,tbl : add hl,de
+        ld de,(gotsum)
+        ld a,(hl) : cp e : jr nz,.bad
+        inc hl : ld a,(hl) : cp d : jr nz,.bad
+        inc hl : ld a,(gotxor) : cp (hl) : jr z,.ok
+.bad:   ld hl,(bad) : inc hl : ld (bad),hl
+        ld a,h : or a : jr nz,.ok
+        ld a,l : cp 5 : jr nc,.ok       ; keep the first 4 per pass
+        dec a : add a,a : add a,a      ; 4 bytes per entry: pass, pg lo/hi, xor-ish
+        ld e,a : ld d,0
+        ld hl,(pass) : ld a,l
+        ld hl,(listp) : add hl,de
+        ld (hl),a : inc hl
+        ld de,(cur5) : ld (hl),e : inc hl : ld (hl),d : inc hl
+        ld a,(gotxor) : ld (hl),a
+.ok:    pop bc
+        inc b : ld a,b : cp 8 : jr nz,.vk
+        ld hl,(pg) : ld de,8 : add hl,de : ld (pg),hl
+        ld a,h : cp 2 : jp nz,.round
+        ld a,(pass) : cp 1 : jr nz,.p2
+        ld hl,list5b : ld (listp),hl
+.p2:    ld hl,(bad)
+        ret
+; VRAM write address A:HL (A = 16 KB bank), as the game: DI, R#14, low, high|40h, EI
+vset_w:
+        di
+        out (99h),a : ld a,8Eh : out (99h),a
+        ld a,l : out (99h),a
+        ld a,h : and 3Fh : or 40h : out (99h),a
+        ret
+; sum16/xor8 of 16 KB from port 98h
+vsum:   ld hl,0 : ld c,0 : ld de,4000h
+.l:     in a,(98h)
+        ld b,a
+        xor c : ld c,a
+        ld a,b
+        add a,l : ld l,a
+        jr nc,.n
+        inc h
+.n:     dec de
+        ld a,d : or e : jr nz,.l
+        ret
+outi256:
+        rept 256
+        outi
+        endr
+        ret
+outi256s:
+        rept 256
+        outi
+        nop : nop : nop : nop : nop : nop : nop : nop
+        endr
+        ret
+; print the kept T5 entries
+t5list:
+        ld hl,list5a : ld b,8
+.l:     ld a,(hl) : or a : jr z,.n
+        push bc : push hl
+        push hl : ld hl,s_t5e : call puts : pop hl
+        ld a,(hl) : add a,'0' : call CHPUT : ld a,' ' : call CHPUT
+        inc hl : ld e,(hl) : inc hl : ld d,(hl) : ex de,hl : call phex16
+        call crlf
+        pop hl : pop bc
+.n:     inc hl : inc hl : inc hl : inc hl
+        djnz .l
+        ret
+
 ; T2: Neon's flash byte-program at cart address 484000h (bank 121h, offset 0)
 t2:
         ld hl,s_t2 : call puts
@@ -309,7 +445,7 @@ phex:   push af : rrca : rrca : rrca : rrca : call .n : pop af
 .n:     and 0Fh : add a,'0' : cp '9'+1 : jr c,.o : add a,7
 .o:     jp CHPUT
 
-s_title: db "NHTEST 1 - Neon Horizon / sdram128",13,10,0
+s_title: db "NHTEST 2 - Neon Horizon / sdram128",13,10,0
 s_nocart: db "No ASCII16X cart found (load NHTEST.ROM)",13,10,0
 s_slot:  db "cart slot ",0
 s_t1:    db "T1 cart 8MB pass ",0
@@ -326,12 +462,20 @@ s_t3r:   db "T3 VRAM bad bytes: ",0
 s_t4:    db "T4 mapper RAM",13,10,0
 s_t4n:   db " segments: ",0
 s_t4r:   db "T4 RAM bad bytes: ",0
+s_sum5:  db "SUM T5 OUTI bad fast/slow: ",0
+s_t5e:   db " T5 BAD pass/pg ",0
 s_sum:   db "SUM T1 bad p1 p2 p3: ",0
 s_sum2:  db "SUM T2 bef/aft/nxt: ",0
 s_sum3:  db "SUM T3 VRAM, T4 RAM/seg: ",0
 s_done:  db "DONE - please reset",13,10,0
 
 cartslot: db 0
+bad5a:  dw 0
+bad5b:  dw 0
+cur5:   dw 0
+listp:  dw list5a
+list5a: ds 16
+list5b: ds 16
 nseg:   db 0
 tmpslot: db 0
 pass:   db 0
