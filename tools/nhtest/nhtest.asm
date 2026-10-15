@@ -513,7 +513,7 @@ phex:   push af : rrca : rrca : rrca : rrca : call .n : pop af
 .n:     and 0Fh : add a,'0' : cp '9'+1 : jr c,.o : add a,7
 .o:     jp CHPUT
 
-s_title: db "NHTEST 2 - Neon Horizon / sdram128",13,10,0
+s_title: db "NHTEST 3 - Neon Horizon / sdram128",13,10,0
 s_nocart: db "No ASCII16X cart found (load NHTEST.ROM)",13,10,0
 s_slot:  db "cart slot ",0
 s_t1:    db "T1 cart 8MB pass ",0
