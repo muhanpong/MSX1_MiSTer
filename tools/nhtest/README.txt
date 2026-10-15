@@ -1,4 +1,4 @@
-NHTEST 3 -- Neon Horizon / sdram128 실기 확인용
+NHTEST 4 -- Neon Horizon / sdram128 실기 확인용
 
 파일
   nhtest.dsk   720 KB 디스크 (AUTOEXEC.BAS -> BLOAD "NHTEST.BIN",R)
@@ -25,8 +25,15 @@ NHTEST 3 -- Neon Horizon / sdram128 실기 확인용
   T6 (v3) 매퍼 RAM 세그먼트에서 바이트 쓰기가 이웃 바이트를 건드리는지(DQM 마스킹).
      채운 뒤 짝수 주소만 다시 쓰고 홀수가 남았는지, 그 반대도 확인.
 
+  T7 (v4) 압축 해제기 RAM 패턴: 겹치는 LDIR(k=1..64), 역참조 복사 256회와 재확인.
+  T8 (v4) 카트 페이지 104h/105h를 SCREEN 5로 12초 동안 화면에 띄우고(화면 켬),
+     1초마다 VRAM을 다시 읽어 원본과 비교. 이 12초 동안 스크린샷을 찍으면 표시 경로도 봄.
+
 기대값 (openMSX에서 확인; 한 비트 바꾼 ROM은 T1/T5 모두 페이지 0168을 잡아내고,
-        이웃을 일부러 덮는 판은 T6 oddv = 8000)
+        이웃을 일부러 덮는 판은 T6 oddv = 8000, 복사 직후 1바이트 변조판은 T7 0400 0400,
+        VRAM 1바이트 변조판은 T8 0C/00)
+  SUM T8 dispon bad/first: 00/FF
+  SUM T7 ovl/bref/late: 0000 0000 0000
   SUM T6 ev/oddv/evv: 0000 0000 0000
   SUM T5 OUTI fast/slow: 0000 0000
   SUM T1 bad p1 p2 p3: 0000 0000 0001
@@ -34,6 +41,8 @@ NHTEST 3 -- Neon Horizon / sdram128 실기 확인용
   SUM T3 VRAM, T4 RAM/seg: 0000 0000/<세그먼트 수>
 
 읽는 법
+  T8 bad > 0      : 화면을 켠 동안 VRAM이 바뀜 (first = 처음 틀린 회차)
+  T7 > 0          : 압축 해제 같은 RAM 패턴에서 틀림
   T6 oddv 또는 evv > 0 : 바이트 쓰기가 이웃 바이트를 망가뜨림 -> 쓰기 DQM 타이밍
   T6 ev > 0            : 쓰기 자체가 틀림
   T5 fast > 0, slow = 0 : 18 T 간격 연속 읽기에서만 틀림 -> SDRAM 읽기 타이밍

@@ -16,6 +16,9 @@
 ;      errors in both are data.
 ;  T4  mapper RAM segments 4..N-1 (page 2, N found by wrap): pattern write/read.
 ;  T6  (v3) byte writes in mapper RAM must leave the neighbour byte intact (DQM).
+;  T7  (v4) decompressor RAM patterns: overlapping LDIR, back-reference copies.
+;  T8  (v4) cart pages 104h/105h shown in SCREEN 5 for 12 s, VRAM re-verified
+;      every second with the display on.
 ;  Reset the machine afterwards (T3 overwrites the screen, T4 DOS2 segments).
 
 CHPUT   equ 00A2h
@@ -61,7 +64,16 @@ main:
         ld a,3 : ld (pass),a : call t1 : ld (bad3),hl
         call t4
         call t6
+        call t7
+        call t8
         ; summary
+        ld hl,s_sum8 : call puts
+        ld a,(bad8) : call phex : ld a,'/' : call CHPUT
+        ld a,(first8) : call phex : call crlf
+        ld hl,s_sum7 : call puts
+        ld hl,(bad7a) : call phex16 : ld a,' ' : call CHPUT
+        ld hl,(bad7b) : call phex16 : ld a,' ' : call CHPUT
+        ld hl,(bad7c) : call phex16 : call crlf
         ld hl,s_sum6 : call puts
         ld hl,(bad6a) : call phex16 : ld a,' ' : call CHPUT
         ld hl,(bad6b) : call phex16 : ld a,' ' : call CHPUT
@@ -505,6 +517,178 @@ t6:
         ret
 
 ; ---------------------------------------------------------------------------
+; T7: the RAM patterns of a decompressor (Neon unpacks its pictures into RAM and
+; draws from there).  Mapper segments 4..7 in page 2.
+;  A) overlapping LDIR (RLE expansion): k seed bytes at 8000h, then LDIR
+;     HL=8000h DE=8000h+k BC=1000h-k -- every byte read was written k bytes (k
+;     iterations, 21 T each) earlier.  Verify (HL) == (HL-k).  k = 1,2,3,5,8,13,21,64.
+;  B) back-reference copies: 256 x LDIR src=8000h+16*r dst=A000h+32*i len=(r&31)+1
+;     (r = a program byte), compared with the source immediately after the copy
+;     and once more after all 256.
+; Counts: ovl = A mismatches, bref = B immediate, late = B re-check.
+t7:
+        ld hl,0 : ld (bad7a),hl : ld (bad7b),hl : ld (bad7c),hl
+        ld a,(nseg) : cp 8 : ret c
+        di
+        ld b,4
+.seg:   ld a,b : out (0FEh),a
+        push bc
+        ; ---- A ----
+        ld ix,klist
+.k:     ld a,(ix) : or a : jr z,.adone
+        ld c,a                  ; k
+        ld hl,8000h : ld de,0C000h : ld b,c
+.seed:  ld a,(de) : xor l : ld (hl),a : inc hl : inc de : djnz .seed
+        ld hl,1000h : ld e,c : ld d,0 : or a : sbc hl,de
+        ld b,h : ld c,l                        ; BC = 1000h - k
+        push bc
+        ld hl,8000h : ld d,80h : ld e,(ix)      ; DE = 8000h + k
+        ldir
+        ; verify (DE) == (HL) over the copied range, DE = HL + k
+        pop bc
+        ld hl,8000h : ld d,80h : ld e,(ix)
+.vl:    ld a,(de) : cp (hl) : jr z,.vok
+        push hl : ld hl,(bad7a) : inc hl : ld (bad7a),hl : pop hl
+.vok:   inc hl : inc de : dec bc : ld a,b : or c : jr nz,.vl
+        inc ix : jr .k
+.adone:
+        ; ---- B ----
+        ld ix,0C000h            ; r source
+        ld hl,0A000h : ld (dst7),hl
+        ld b,0
+.bl:    push bc
+        ld a,(ix) : inc ix
+        ld e,a : ld d,0
+        ld hl,8000h : add hl,de : add hl,de : add hl,de : add hl,de
+        add hl,de : add hl,de : add hl,de : add hl,de
+        add hl,de : add hl,de : add hl,de : add hl,de
+        add hl,de : add hl,de : add hl,de : add hl,de   ; HL = 8000h + 16*r
+        ld (src7),hl
+        and 31 : inc a : ld c,a : ld b,0 : ld (len7),bc
+        ld de,(dst7)
+        push hl : push de
+        ldir
+        IFDEF T7NEG
+        pop de : push de : ld a,(de) : cpl : ld (de),a   ; negative control: clobber dst[0]
+        ENDIF
+        pop de : pop hl
+        ld bc,(len7)
+.cmp:   ld a,(de) : cp (hl) : jr z,.cok
+        push hl : ld hl,(bad7b) : inc hl : ld (bad7b),hl : pop hl
+.cok:   inc hl : inc de : dec bc : ld a,b : or c : jr nz,.cmp
+        ld hl,(dst7) : ld de,32 : add hl,de : ld (dst7),hl
+        pop bc
+        djnz .bl
+        ; re-check all 256 copies
+        ld ix,0C000h
+        ld hl,0A000h : ld (dst7),hl
+        ld b,0
+.rl:    push bc
+        ld a,(ix) : inc ix
+        ld e,a : ld d,0
+        ld hl,8000h : add hl,de : add hl,de : add hl,de : add hl,de
+        add hl,de : add hl,de : add hl,de : add hl,de
+        add hl,de : add hl,de : add hl,de : add hl,de
+        add hl,de : add hl,de : add hl,de : add hl,de
+        and 31 : inc a : ld c,a : ld b,0
+        ld de,(dst7)
+.rcmp:  ld a,(de) : cp (hl) : jr z,.rok
+        push hl : ld hl,(bad7c) : inc hl : ld (bad7c),hl : pop hl
+.rok:   inc hl : inc de : dec bc : ld a,b : or c : jr nz,.rcmp
+        ld hl,(dst7) : ld de,32 : add hl,de : ld (dst7),hl
+        pop bc
+        djnz .rl
+        pop bc
+        inc b : ld a,b : cp 8 : jp nz,.seg
+        ld a,1 : out (0FEh),a
+        ei
+        ld hl,s_t7 : call puts
+        ld hl,(bad7a) : call phex16 : ld a,' ' : call CHPUT
+        ld hl,(bad7b) : call phex16 : ld a,' ' : call CHPUT
+        ld hl,(bad7c) : call phex16 : call crlf
+        ret
+klist:  db 1,2,3,5,8,13,21,64,0
+
+; ---------------------------------------------------------------------------
+; T8: a picture shown.  Cart pages 104h/105h (Neon's packed picture data: noise,
+; every pixel counts) -> VRAM 0000h-7FFFh by the T5 chain, SCREEN 5 page 0, then
+; the display is turned ON for ~12 s (screenshot it) while the 32 KB is re-read
+; through port 98h every second and checked against the table.
+; bad8 = passes (of 12) with a mismatch, first8 = first such pass (FF = none).
+t8:
+        xor a : ld (bad8),a : ld a,0FFh : ld (first8),a
+        di
+        ld a,06h : out (99h),a : ld a,80h : out (99h),a      ; SCREEN 5
+        ld a,20h : out (99h),a : ld a,81h : out (99h),a      ; display off
+        ld a,1Fh : out (99h),a : ld a,82h : out (99h),a      ; page 0
+        ld b,0
+.wk:    push bc
+        call cart_on
+        pop bc : push bc
+        ld a,b : add a,4 : ld e,1 : call setbank              ; page 104h+b
+        pop bc : push bc
+        ld a,b : ld hl,0 : call vset_w
+        ld hl,4000h : ld c,98h : ld d,64
+.ch:    call outi256
+        dec d : jr nz,.ch
+        ei
+        call cart_off
+        pop bc
+        inc b : ld a,b : cp 2 : jr nz,.wk
+        IFDEF T8NEG
+        di                                                   ; negative control: one VRAM byte off
+        xor a : ld hl,1234h : call vset_w
+        ld a,0A5h : out (98h),a
+        ei
+        ENDIF
+        di
+        ld a,60h : out (99h),a : ld a,81h : out (99h),a      ; display ON
+        ei
+        ld b,12
+.pass:  push bc
+        call wait1s
+        pop bc : push bc
+        ld a,12 : sub b : ld (pass),a                         ; 0..11
+        di
+        ld c,0                  ; c = bad flag
+        ld b,0
+.vk:    push bc
+        ld a,b : call vaddr_r
+        call vsum
+        ld (gotsum),hl : ld a,c : ld (gotxor),a
+        pop bc : push bc
+        ld hl,104h : ld a,b : add a,l : ld l,a
+        ld d,h : ld e,l : add hl,hl : add hl,de
+        ld de,tbl : add hl,de
+        ld de,(gotsum)
+        ld a,(hl) : cp e : jr nz,.bad
+        inc hl : ld a,(hl) : cp d : jr nz,.bad
+        inc hl : ld a,(gotxor) : cp (hl) : jr z,.ok
+.bad:   pop bc : ld c,1 : push bc
+.ok:    pop bc
+        inc b : ld a,b : cp 2 : jr nz,.vk
+        ei
+        ld a,c : or a : jr z,.pok
+        ld a,(bad8) : inc a : ld (bad8),a
+        ld a,(first8) : inc a : jr nz,.pok
+        ld a,(pass) : ld (first8),a
+.pok:   pop bc
+        djnz .pass
+        di
+        ld a,20h : out (99h),a : ld a,81h : out (99h),a
+        ei
+        call INITXT
+        ld hl,s_t8 : call puts
+        ld a,(bad8) : call phex : ld a,'/' : call CHPUT
+        ld a,(first8) : call phex : call crlf
+        ret
+wait1s: ld de,0
+.w:     dec de : ld a,d : or e : jr nz,.w          ; 65536 x 24 T = 0.44 s
+        ld de,0
+.w2:    dec de : ld a,d : or e : jr nz,.w2
+        ret
+
+; ---------------------------------------------------------------------------
 puts:   ld a,(hl) : or a : ret z
         call CHPUT : inc hl : jr puts
 crlf:   ld a,13 : call CHPUT : ld a,10 : jp CHPUT
@@ -513,7 +697,7 @@ phex:   push af : rrca : rrca : rrca : rrca : call .n : pop af
 .n:     and 0Fh : add a,'0' : cp '9'+1 : jr c,.o : add a,7
 .o:     jp CHPUT
 
-s_title: db "NHTEST 3 - Neon Horizon / sdram128",13,10,0
+s_title: db "NHTEST 4 - Neon Horizon / sdram128",13,10,0
 s_nocart: db "No ASCII16X cart found (load NHTEST.ROM)",13,10,0
 s_slot:  db "cart slot ",0
 s_t1:    db "T1 cart 8MB pass ",0
@@ -530,6 +714,10 @@ s_t3r:   db "T3 VRAM bad bytes: ",0
 s_t4:    db "T4 mapper RAM",13,10,0
 s_t4n:   db " segments: ",0
 s_t4r:   db "T4 RAM bad bytes: ",0
+s_t7:    db "T7 RAM ovl/bref/late: ",0
+s_sum7:  db "SUM T7 ovl/bref/late: ",0
+s_t8:    db "T8 disp-on bad passes/first: ",0
+s_sum8:  db "SUM T8 dispon bad/first: ",0
 s_t6:    db "T6 bytewr ev/oddvic/evvic: ",0
 s_sum6:  db "SUM T6 ev/oddv/evv: ",0
 s_sum5:  db "SUM T5 OUTI fast/slow: ",0
@@ -540,6 +728,14 @@ s_sum3:  db "SUM T3 VRAM, T4 RAM/seg: ",0
 s_done:  db "DONE - please reset",13,10,0
 
 cartslot: db 0
+bad7a:  dw 0
+bad7b:  dw 0
+bad7c:  dw 0
+src7:   dw 0
+dst7:   dw 0
+len7:   dw 0
+bad8:   db 0
+first8: db 0
 savsp:  dw 0
 bad6a:  dw 0
 bad6b:  dw 0
