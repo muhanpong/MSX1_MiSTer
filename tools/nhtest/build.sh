@@ -16,7 +16,7 @@ for p in range(512):
     t+=bytes([s&0xff,s>>8,x])
 open('nhtbl.bin','wb').write(t)
 PY
-/home/sysop/data/knightmare/tools/sjasmplus --raw=nhtest.raw --lst=nhtest.lst nhtest.asm > sj.err 2>&1 || { cat sj.err; exit 1; }
+/home/sysop/data/knightmare/tools/sjasmplus ${ASMDEFS:-} --raw=nhtest.raw --lst=nhtest.lst nhtest.asm > sj.err 2>&1 || { cat sj.err; exit 1; }
 python3 - "$SRC" <<'PY'
 r=open('nhtest.raw','rb').read(); st=0xC000; en=st+len(r)-1
 open('NHTEST.BIN','wb').write(bytes([0xFE,st&255,st>>8,en&255,en>>8,st&255,st>>8])+r)

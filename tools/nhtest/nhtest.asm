@@ -15,6 +15,7 @@
 ;      Pass 1 at Neon's 18 T per byte, pass 2 at 50 T: fast-only errors are timing,
 ;      errors in both are data.
 ;  T4  mapper RAM segments 4..N-1 (page 2, N found by wrap): pattern write/read.
+;  T6  (v3) byte writes in mapper RAM must leave the neighbour byte intact (DQM).
 ;  Reset the machine afterwards (T3 overwrites the screen, T4 DOS2 segments).
 
 CHPUT   equ 00A2h
@@ -25,6 +26,15 @@ EXPTBL  equ 0FCC1h
 
         org 0C000h
 start:
+        ; the stack: CLEAR 200,&HBFFF put BASIC's at ~BD16h, in page 2 -- T4/T6 map
+        ; test segments there and a push on their mismatch path landed on the data
+        ; under test (seen as 1 bad byte per segment in the T6NEG control).  Page 3.
+        ld (savsp),sp
+        ld sp,0EF00h
+        call main
+        ld sp,(savsp)
+        ret
+main:
         ; turbo R: run as Z80 (the A1F/A1FX show the corruption too)
         ld a,(002Dh) : cp 3 : jr c,.noturbo
         ld a,80h : call 0180h
@@ -50,7 +60,12 @@ start:
         call t2
         ld a,3 : ld (pass),a : call t1 : ld (bad3),hl
         call t4
+        call t6
         ; summary
+        ld hl,s_sum6 : call puts
+        ld hl,(bad6a) : call phex16 : ld a,' ' : call CHPUT
+        ld hl,(bad6b) : call phex16 : ld a,' ' : call CHPUT
+        ld hl,(bad6c) : call phex16 : call crlf
         ld hl,s_sum5 : call puts
         ld hl,(bad5a) : call phex16 : ld a,' ' : call CHPUT
         ld hl,(bad5b) : call phex16 : call crlf
@@ -437,6 +452,59 @@ t4:
         ret
 
 ; ---------------------------------------------------------------------------
+; T6: byte writes must not touch their neighbour.  A CPU byte write is a 16-bit
+; SDRAM write with the other byte masked by DQM (sdram_tdm: DQM = A[12:11], write
+; latency 0); T4 wrote both bytes of every word in order, which hides a mask
+; failure.  Mapper segments 4..N-1 in page 2: fill with P1 (lo^hi^5Ah), rewrite
+; the EVEN bytes only with ~P1, verify (odd must still be P1, even ~P1); then the
+; same with the ODD bytes.  Counts: evwr = even-write errors, odd-victim = odd
+; bytes changed by even writes, ev-victim = even bytes changed by odd writes.
+t6:
+        ld hl,0 : ld (bad6a),hl : ld (bad6b),hl : ld (bad6c),hl
+        ld a,(nseg) : cp 5 : ret c
+        di
+        ld b,4
+.seg:   ld a,b : out (0FEh),a
+        ; fill P1
+        ld hl,8000h
+.f:     ld a,l : xor h : xor 5Ah : ld (hl),a
+        inc hl : ld a,h : cp 0C0h : jr nz,.f
+        ; even bytes <- ~P1 (19 T apart)
+        ld hl,8000h
+.e:     ld a,l : xor h : xor 5Ah : cpl
+        IFDEF T6NEG
+        ld (hl),a : inc hl : ld (hl),a : inc hl   ; negative control: clobber the neighbour
+        ELSE
+        ld (hl),a : inc hl : inc hl
+        ENDIF
+        ld a,h : cp 0C0h : jr nz,.e
+        ; verify
+        ld hl,8000h
+.v1:    ld a,l : xor h : xor 5Ah : cpl : cp (hl) : jr z,.v1a
+        push hl : ld hl,(bad6a) : inc hl : ld (bad6a),hl : pop hl
+.v1a:   inc hl
+        ld a,l : xor h : xor 5Ah : cp (hl) : jr z,.v1b
+        push hl : ld hl,(bad6b) : inc hl : ld (bad6b),hl : pop hl
+.v1b:   inc hl : ld a,h : cp 0C0h : jr nz,.v1
+        ; odd bytes <- ~P1, even bytes (now ~P1) must survive
+        ld hl,8001h
+.o:     ld a,l : xor h : xor 5Ah : cpl
+        ld (hl),a : inc hl : inc hl
+        ld a,h : cp 0C0h : jr nz,.o
+        ld hl,8000h
+.v2:    ld a,l : xor h : xor 5Ah : cpl : cp (hl) : jr z,.v2a
+        push hl : ld hl,(bad6c) : inc hl : ld (bad6c),hl : pop hl
+.v2a:   inc hl : ld a,h : cp 0C0h : jr nz,.v2
+        inc b : ld a,(nseg) : cp b : jr nz,.seg
+        ld a,1 : out (0FEh),a
+        ei
+        ld hl,s_t6 : call puts
+        ld hl,(bad6a) : call phex16 : ld a,' ' : call CHPUT
+        ld hl,(bad6b) : call phex16 : ld a,' ' : call CHPUT
+        ld hl,(bad6c) : call phex16 : call crlf
+        ret
+
+; ---------------------------------------------------------------------------
 puts:   ld a,(hl) : or a : ret z
         call CHPUT : inc hl : jr puts
 crlf:   ld a,13 : call CHPUT : ld a,10 : jp CHPUT
@@ -462,7 +530,9 @@ s_t3r:   db "T3 VRAM bad bytes: ",0
 s_t4:    db "T4 mapper RAM",13,10,0
 s_t4n:   db " segments: ",0
 s_t4r:   db "T4 RAM bad bytes: ",0
-s_sum5:  db "SUM T5 OUTI bad fast/slow: ",0
+s_t6:    db "T6 bytewr ev/oddvic/evvic: ",0
+s_sum6:  db "SUM T6 ev/oddv/evv: ",0
+s_sum5:  db "SUM T5 OUTI fast/slow: ",0
 s_t5e:   db " T5 BAD pass/pg ",0
 s_sum:   db "SUM T1 bad p1 p2 p3: ",0
 s_sum2:  db "SUM T2 bef/aft/nxt: ",0
@@ -470,6 +540,10 @@ s_sum3:  db "SUM T3 VRAM, T4 RAM/seg: ",0
 s_done:  db "DONE - please reset",13,10,0
 
 cartslot: db 0
+savsp:  dw 0
+bad6a:  dw 0
+bad6b:  dw 0
+bad6c:  dw 0
 bad5a:  dw 0
 bad5b:  dw 0
 cur5:   dw 0
