@@ -12,13 +12,15 @@
 ;  T3  VRAM 128 KB: write a pattern through port 98h, read it back.
 ;  T5  (v2) every page cart -> VRAM by an unrolled OUTI chain in SCREEN 5 with the
 ;      display off, as Neon draws; read back through 98h, checked against the table.
-;      Pass 1 at Neon's 18 T per byte, pass 2 at 50 T: fast-only errors are timing,
+;      Pass 1 at Neon's 18 T per byte, pass 2 at ~70 T: fast-only errors are timing,
 ;      errors in both are data.
 ;  T4  mapper RAM segments 4..N-1 (page 2, N found by wrap): pattern write/read.
 ;  T6  (v3) byte writes in mapper RAM must leave the neighbour byte intact (DQM).
 ;  T7  (v4) decompressor RAM patterns: overlapping LDIR, back-reference copies.
 ;  T8  (v4) cart pages 104h/105h shown in SCREEN 5 for 12 s, VRAM re-verified
 ;      every second with the display on.
+;  T9  (v5) Neon's interpreter pattern: bank write to 7000h/7100h then at once
+;      512 bytes OUTIed from the 8000h window; checked against slow cart reads.
 ;  Reset the machine afterwards (T3 overwrites the screen, T4 DOS2 segments).
 
 CHPUT   equ 00A2h
@@ -65,8 +67,12 @@ main:
         call t4
         call t6
         call t7
+        call t9
         call t8
         ; summary
+        ld hl,s_sum9 : call puts
+        ld hl,(bad9) : call phex16 : ld a,'/' : call CHPUT
+        ld hl,(first9) : call phex16 : call crlf
         ld hl,s_sum8 : call puts
         ld a,(bad8) : call phex : ld a,'/' : call CHPUT
         ld a,(first8) : call phex : call crlf
@@ -265,7 +271,7 @@ t5:
 .ch:    call outi256            ; pass 1: 18 T per byte, as Neon
         dec d : jr nz,.ch
         jr .wdone
-.slow:  call outi256s           ; pass 2: 50 T per byte
+.slow:  call outi256s           ; pass 2: ~70 T per byte
         dec d : jr nz,.slow
 .wdone:
         ei
@@ -331,11 +337,11 @@ outi256:
         outi
         endr
         ret
-outi256s:
-        rept 256
-        outi
+outi256s:                       ; ~70 T per byte (B counts 256 down to 0)
+        ld b,0
+.l:     outi
         nop : nop : nop : nop : nop : nop : nop : nop
-        endr
+        jp nz,.l
         ret
 ; print the kept T5 entries
 t5list:
@@ -689,6 +695,84 @@ wait1s: ld de,0
         ret
 
 ; ---------------------------------------------------------------------------
+; T9: Neon's draw interpreter (code at 3065h in its RAM): it stores the new bank
+; in a RAM variable, writes it to 7100h (8000h window, banks 100h+) and fetches its
+; next stream byte from the new bank a few cycles later, then OUTIs data to VRAM.
+; Here: pages 1 and 2 both on the cart; for every bank b (all 512) a RAM write,
+; the bank write at 7000h/7100h, and at once 512 bytes from 8000h+(b&31)*512
+; OUTIed to VRAM; 32 banks fill one 16 KB VRAM bank, which is then compared byte
+; for byte with the cart read back slowly through the 4000h window (T1 proved
+; those reads).  bad9 = differing bytes, first9 = first bank with a difference.
+t9:
+        ld hl,0 : ld (bad9),hl : ld hl,0FFFFh : ld (first9),hl
+        di
+        ld a,06h : out (99h),a : ld a,80h : out (99h),a      ; SCREEN 5, display off
+        ld a,20h : out (99h),a : ld a,81h : out (99h),a
+        ld hl,0 : ld (pg),hl                                 ; first bank of the group
+.grp:   ; ---- write: 32 banks -> VRAM bank (pg>>5)&7 ----
+        call cart12_on
+        ld a,(pg) : rrca : rrca : rrca : rrca : rrca : and 7
+        ld hl,0 : call vset_w
+        ld b,32
+.wb:    push bc
+        ld hl,(pg) : ld a,32 : sub b : add a,l : ld l,a      ; bank = pg + (32-b)
+        ld (cur9),hl
+        ld a,l : ld (scratch9),a                             ; the game's RAM variable write
+        ld a,h : or 70h : ld d,a : ld e,0                    ; 7000h / 7100h
+        ld a,l : ld (de),a                                   ; bank -> 8000h window
+        ld a,l : and 1Fh : add a,a : or 80h : ld h,a : ld l,0 ; 8000h + (b&31)*512
+        ld c,98h
+        call outi256 : call outi256
+        IFDEF T9NEG
+        ld a,(cur9) : and 3Fh : jr nz,.nn                    ; negative control: every 64th
+        ld a,0A5h : out (98h),a                              ; bank one extra byte (shifts the rest)
+.nn:
+        ENDIF
+        pop bc
+        djnz .wb
+        call cart12_off
+        ; ---- verify the VRAM bank against slow cart reads ----
+        ld a,(pg) : rrca : rrca : rrca : rrca : rrca : and 7
+        call vaddr_r
+        ld b,32
+.vb:    push bc
+        ld hl,(pg) : ld a,32 : sub b : add a,l : ld l,a
+        ld (cur9),hl
+        call cart_on
+        ld hl,(cur9) : ld a,l : ld e,h : call setbank        ; same bank, 4000h window
+        ld a,l : and 1Fh : add a,a : or 40h : ld h,a : ld l,0 ; 4000h + (b&31)*512
+        ld de,512
+.vl:    in a,(98h) : cp (hl) : jr z,.vok
+        push hl : ld hl,(bad9) : inc hl : ld (bad9),hl
+        ld hl,(first9) : inc hl : ld a,h : or l : jr nz,.vnf
+        ld hl,(cur9) : ld (first9),hl
+.vnf:   pop hl
+.vok:   inc hl : dec de : ld a,d : or e : jr nz,.vl
+        call cart_off
+        di
+        pop bc
+        djnz .vb
+        ld hl,(pg) : ld de,32 : add hl,de : ld (pg),hl
+        ld a,h : cp 2 : jp nz,.grp
+        ei
+        ld hl,s_t9 : call puts
+        ld hl,(bad9) : call phex16 : ld a,'/' : call CHPUT
+        ld hl,(first9) : call phex16 : call crlf
+        ret
+; pages 1 and 2 on the cart (DI held); back to BASIC ROM / RAM
+cart12_on:
+        di
+        ld a,(cartslot) : ld h,40h : call ENASLT
+        ld a,(cartslot) : ld h,80h : call ENASLT
+        di
+        ret
+cart12_off:
+        ld a,(EXPTBL) : ld h,40h : call ENASLT
+        ld a,(0F343h) : ld h,80h : call ENASLT                ; RAMAD2
+        di
+        ret
+
+; ---------------------------------------------------------------------------
 puts:   ld a,(hl) : or a : ret z
         call CHPUT : inc hl : jr puts
 crlf:   ld a,13 : call CHPUT : ld a,10 : jp CHPUT
@@ -697,7 +781,7 @@ phex:   push af : rrca : rrca : rrca : rrca : call .n : pop af
 .n:     and 0Fh : add a,'0' : cp '9'+1 : jr c,.o : add a,7
 .o:     jp CHPUT
 
-s_title: db "NHTEST 4 - Neon Horizon / sdram128",13,10,0
+s_title: db "NHTEST 5 - Neon Horizon / sdram128",13,10,0
 s_nocart: db "No ASCII16X cart found (load NHTEST.ROM)",13,10,0
 s_slot:  db "cart slot ",0
 s_t1:    db "T1 cart 8MB pass ",0
@@ -716,6 +800,8 @@ s_t4n:   db " segments: ",0
 s_t4r:   db "T4 RAM bad bytes: ",0
 s_t7:    db "T7 RAM ovl/bref/late: ",0
 s_sum7:  db "SUM T7 ovl/bref/late: ",0
+s_t9:    db "T9 bankswitch+OUTI bad/first: ",0
+s_sum9:  db "SUM T9 bnksw bad/first: ",0
 s_t8:    db "T8 disp-on bad passes/first: ",0
 s_sum8:  db "SUM T8 dispon bad/first: ",0
 s_t6:    db "T6 bytewr ev/oddvic/evvic: ",0
@@ -728,6 +814,10 @@ s_sum3:  db "SUM T3 VRAM, T4 RAM/seg: ",0
 s_done:  db "DONE - please reset",13,10,0
 
 cartslot: db 0
+bad9:   dw 0
+first9: dw 0
+cur9:   dw 0
+scratch9: db 0
 bad7a:  dw 0
 bad7b:  dw 0
 bad7c:  dw 0

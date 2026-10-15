@@ -1,4 +1,4 @@
-NHTEST 4 -- Neon Horizon / sdram128 실기 확인용
+NHTEST 5 -- Neon Horizon / sdram128 실기 확인용
 
 파일
   nhtest.dsk   720 KB 디스크 (AUTOEXEC.BAS -> BLOAD "NHTEST.BIN",R)
@@ -29,9 +29,13 @@ NHTEST 4 -- Neon Horizon / sdram128 실기 확인용
   T8 (v4) 카트 페이지 104h/105h를 SCREEN 5로 12초 동안 화면에 띄우고(화면 켬),
      1초마다 VRAM을 다시 읽어 원본과 비교. 이 12초 동안 스크린샷을 찍으면 표시 경로도 봄.
 
-기대값 (openMSX에서 확인; 한 비트 바꾼 ROM은 T1/T5 모두 페이지 0168을 잡아내고,
+  T9 (v5) Neon 그리기 해석기 패턴: 7000h/7100h에 뱅크를 쓰고 곧바로 8000h 창에서
+     512바이트를 OUTI로 VRAM에 보냄(512뱅크 전부). 느린 카트 읽기와 바이트 단위 비교.
+
+기대값 (openMSX에서 확인; T9 대조군(1바이트 끼워 넣음)은 9B5F/0001; 한 비트 바꾼 ROM은 T1/T5 모두 페이지 0168을 잡아내고,
         이웃을 일부러 덮는 판은 T6 oddv = 8000, 복사 직후 1바이트 변조판은 T7 0400 0400,
         VRAM 1바이트 변조판은 T8 0C/00)
+  SUM T9 bnksw bad/first: 0000/FFFF
   SUM T8 dispon bad/first: 00/FF
   SUM T7 ovl/bref/late: 0000 0000 0000
   SUM T6 ev/oddv/evv: 0000 0000 0000
@@ -41,6 +45,7 @@ NHTEST 4 -- Neon Horizon / sdram128 실기 확인용
   SUM T3 VRAM, T4 RAM/seg: 0000 0000/<세그먼트 수>
 
 읽는 법
+  T9 bad > 0      : 뱅크 전환 직후 읽기가 틀림 (first = 처음 틀린 뱅크)
   T8 bad > 0      : 화면을 켠 동안 VRAM이 바뀜 (first = 처음 틀린 회차)
   T7 > 0          : 압축 해제 같은 RAM 패턴에서 틀림
   T6 oddv 또는 evv > 0 : 바이트 쓰기가 이웃 바이트를 망가뜨림 -> 쓰기 DQM 타이밍
