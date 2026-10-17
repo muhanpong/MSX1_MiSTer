@@ -55,3 +55,20 @@ description: Use openMSX as the reference oracle when a game misbehaves on the M
 
 **숫자를 넘기기 전에 "이 계측이 지금 조건에서 울릴 수 있나"를 한 번 확인한다.**
 그리고 틀렸으면 즉시 철회 메시지를 보낸다 — 상대 세션이 그 숫자로 RTL을 고친다.
+
+## 이 머신에서 openMSX를 headless로 (2026-10-15, sdram128 세션)
+
+- `~/.local/bin/openmsx` 심볼릭 링크는 사라진 스크래치를 가리킨다. 동작하는 것:
+  `D=~/data/openMSX587/derived/x86_64-linux-opt-3rd/bindist/install`,
+  `OPENMSX_SYSTEM_DATA=$D/share LD_LIBRARY_PATH=~/data/openMSX587/derived/x86_64-linux-opt-3rd/3rdparty/install/lib SDL_VIDEODRIVER=dummy $D/bin/openmsx -command "set renderer none" -machine ... -script x.tcl`.
+  X가 없어 `screenshot`은 안 된다 — VRAM을 `debug read_block` 으로 떠서 직접 그린다.
+- **`VRAM`은 현재 화면 모드의 CPU 관점, `physical VRAM`이 코어와 같은 물리 배치**(SCREEN 7/8에서 다름).
+  `VRAM pointer`(14비트 LE), `VRAM access status`, `VDP register latch status`, `VDP data latch value`,
+  `VDP status regs` 디버거블이 있다(재생 벤치의 구간 시작 상태).
+- I/O 녹화: `debug set_watchpoint write_io {0x98 0x9b} {} proc`, `$::wp_last_address/$::wp_last_value`,
+  시각은 `round([machine_info time]*21477270)`. 같은 조건 두 번 녹화가 한 줄도 다르지 않았다.
+- **영구 플래시/SRAM**: `~/.openMSX/persistent/roms/<rom>/<rom>.SRAM`이 다음 실행에 남는다(실기 .sav와
+  같은 현상). 깨끗한 기준이 필요하면 지울 것.
+- FS-A1GT는 펌웨어로 부팅해 디스크 BASIC에 안 간다(`firmwareswitch` 설정 이름 미확인) — 디스크 시험은
+  Philips_NMS_8250 같은 펌웨어 없는 기종으로. 디스크 이미지는 MSX 부트 섹터가 필요(mformat의 PC 부트
+  코드가 C01Eh에서 Z80으로 실행돼 BLOAD를 망침).

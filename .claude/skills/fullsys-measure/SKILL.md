@@ -92,3 +92,33 @@ CL3/BL2 칩 모델 `sdram_big_tdm`(tb_msx.sv `-DTDM`). `prep.sh`가 `tb/mkshim_t
 `.sav` 경로는 `tb_msx.sv` 안에 저장 엔진과 SD 모델로 들어와 있다. 플로피(WD2793)를
 통한 디스크 접근은 아직 없다. 분기 스트림을 openMSX 와 대조하는 비교기도 없다
 (`docs/handoff_20260926.md` 참조).
+
+## 128 MB 맵, 프로브, 지연 주입 (2026-10-17, sdram128-study)
+
+- **`run_preload.sh tdm128`**: sdram_tdm을 128 MB 보드 맵(칩 2개, 2 KB 뱅크 교차, sdram_size 3)으로.
+  `tdm`(32 MB 맵)은 사용자 보드(128 MB)를 검증하지 않는다. 칩 모델 `sdram_big_tdm #(M128)`은 논리 주소로
+  저장하므로 프리로드·BIOS 검사가 그대로 쓴다. 대조군 `-DTDM128_MUT_MAP`.
+- `XDEFS="-D..."`(대조군·프로브), `VFLAGS`(Verilator 옵션; `--threads 4`는 오히려 느렸다), `EXTRA="+..."`.
+- **BIOS 패치 프로브**(`+kprobe=<hex>`, 리셋 벡터 자리에 덮음, 스택·RAM 없이 쓸 것):
+  - `-DKPROBE` + `sim/fullsys/kprobe/kprobe.hex`: 한자 D9h 4096회 x {Z80 INIR, Z80 느린 IN, R800 INIR},
+    읽기마다 장치 주소의 SDRAM 이미지와 비교. `+kwave=N`: 첫 N회 읽기를 clk_sdram마다 추적.
+  - `-DRPROBE` + `sim/fullsys/rprobe/rprobe.hex`: 매퍼 RAM 32세그먼트, FFFF 쓰기/읽기 + 센티널,
+    Z80과 R800. 단계별 오류 수는 포트 2Fh. `+zspeed=N`: Z80 터보(0 3.58 ... 3 10.74 ... 4 21.48 MHz).
+  - 프로브 쓰기 전 확인: 첫 판의 KPROBE는 스택(F000h)으로 CALL했다가 리셋 직후 페이지 3이 RAM이 아니라
+    81 us마다 재시작했다. FFFF에 0Fh를 쓰면 다음 페이지 0 인출에서 RST 38로 빠졌다(미추적) — 00만 쓸 것.
+- **지연 주입**(`-DINJ_RNW/_DIN/_ADDR/_UNMAP`, `-DKDLY`, `-DKMUT`, `-DKNOB`): clk21m 상승 직후 첫
+  clk_sdram 주기에만 컨트롤러가 그 신호를 직전 값으로 본다 = "그 경로가 clk_sdram 하나 늦다". 그 사이엔
+  clk_sdram 논리만 표본을 잡으므로 내부 넷도 `force`로 같은 효과. 각 주입은 실제로 값이 달랐던 횟수를
+  찍는다(0이면 주입기가 죽은 것). **`msx.sv`는 `msx_slots`의 `clk_sdram` 포트를 연결하지 않는다(0)** —
+  그 모듈 안에 시뮬 플롭을 걸려면 `tb.clk_sdram`을 쓸 것. 첫 KDLY는 이걸 몰라 선택이 영구히 꺼진 채로
+  "재현"을 보고했다가 철회했다. 주입을 넣은 직후 `+kwave`로 파형이 의도대로인지 먼저 볼 것.
+- 결과 비교: `cmp_io.sh`(+iolog 값 순서열), `cmp_time.sh`(분기 시각).
+
+## VDP 단독 재생 (`sim/run_vdp_replay.sh`)
+
+openMSX 녹화(포트 98h-9Bh, clk21m 단위 + 0.5 s마다 physical VRAM/레지스터/포인터/래치)를 VDP RTL에
+재생해 VRAM을 맞댄다. 구간(0.5 s)마다 그 시점 상태로 시작, 병렬 실행(벤치는 기계 1 s에 약 1시간).
+배선은 msx.sv 그대로: REQ는 **1클록 펄스**(msx.sv `iack`; 레벨로 주면 99h 한 번이 두 바이트로 처리),
+VRAM은 PRAMADR(16)로 고르는 두 altsyncram, DLCLK 게이트 없음. 구간 시작에 포인터·포트99 래치·R32-45를
+복원하지 않으면 가짜 차이가 난다(w25, w4에서 한 번씩 속음). `MUT=-1`(구간 마지막 98h 쓰기)이 음성 대조 —
+그보다 앞선 쓰기는 다음 프레임이 덮을 수 있다. 녹화본: ~/data/MiSTer_build/sdram128_evidence_20261017/.
