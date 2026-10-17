@@ -1,0 +1,49 @@
+# RPROBE strobe-race injection, 2026-10-18 (fixed probe: PPI mode word 82h before OUT (A8h))
+# trees: rp128 = sdram128-study tdm128 (sdram_tdm, 128 MB map); rpnz = nextz80 3f09aaf old (sdram.sv)
+##### rp128
+== ADDR_z0: RPROBE p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | INJ_ADDR: windows with a request where the held address differed: 0
+== ADDR_z3: RPROBE p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | INJ_ADDR: windows with a request where the held address differed: 0
+== DIN_z0: RPROBE p1 Z80 RAM errors 8160 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 1 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT FAIL | INJ_DIN: windows with a request where the held din differed: 123981
+== DIN_z3: RPROBE p1 Z80 RAM errors 8160 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 1 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT FAIL | INJ_DIN: windows with a request where the held din differed: 123981
+== none_z0: RPROBE p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | 
+== none_z3: RPROBE p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | 
+== RNW_z0: RPROBE p1 Z80 RAM errors 8160 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 1 | p3 R800 RAM errors 8160 | p4 R800 FFFF: bad reads 0, sentinel lost 1 | RPROBE RESULT FAIL | INJ_RNW: windows where the held rnw differed: 33802
+== RNW_z3: RPROBE p1 Z80 RAM errors 8160 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 1 | p3 R800 RAM errors 8160 | p4 R800 FFFF: bad reads 0, sentinel lost 1 | RPROBE RESULT FAIL | INJ_RNW: windows where the held rnw differed: 33802
+== UNMAP_z0: RPROBE p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 1 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 1 | RPROBE RESULT FAIL | INJ_UNMAP: windows where the held mem_unmaped differed from the live one: 2054
+== UNMAP_z3: RPROBE p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 1 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 1 | RPROBE RESULT FAIL | INJ_UNMAP: windows where the held mem_unmaped differed from the live one: 2054
+##### rpnz
+== ADDR_z0: RPROBE p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | INJ_ADDR: windows with a request where the held address differed: 0
+== ADDR_z3: RPROBE p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | INJ_ADDR: windows with a request where the held address differed: 0
+== DIN_z0: RPROBE p1 Z80 RAM errors 8160 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 1 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT FAIL | INJ_DIN: windows with a request where the held din differed: 123981
+== DIN_z3: RPROBE p1 Z80 RAM errors 8160 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 1 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT FAIL | INJ_DIN: windows with a request where the held din differed: 123981
+== none_z0: RPROBE p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | 
+== none_z3: RPROBE p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | 
+== RNW_z0: RPROBE p1 Z80 RAM errors 8160 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 1 | p3 R800 RAM errors 8160 | p4 R800 FFFF: bad reads 0, sentinel lost 1 | RPROBE RESULT FAIL | INJ_RNW: windows where the held rnw differed: 33802
+== RNW_z3: RPROBE p1 Z80 RAM errors 8160 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 1 | p3 R800 RAM errors 8160 | p4 R800 FFFF: bad reads 0, sentinel lost 1 | RPROBE RESULT FAIL | INJ_RNW: windows where the held rnw differed: 33802
+== UNMAP_z0: RPROBE p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 1 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 1 | RPROBE RESULT FAIL | INJ_UNMAP: windows where the held mem_unmaped differed from the live one: 2054
+== UNMAP_z3: RPROBE p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 1 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 1 | RPROBE RESULT FAIL | INJ_UNMAP: windows where the held mem_unmaped differed from the live one: 2054
+
+# EDGEHIST (none_z0, both trees identical)
+EDGEHIST (changes first seen on edge k; k=0 = first edge with clk21m high = INJ_* window, k=3 = first with it low)
+EDGEHIST rnw   33802 0 0 0 0 0
+EDGEHIST req   610466 0 0 0 0 0
+EDGEHIST addr  415447 1 0 0 0 0
+EDGEHIST din   242519 0 0 0 0 0
+EDGEHIST unmap 2054 0 0 0 0 0
+
+# FFFF=0Fh controls (tdm128, zspeed 3)
+== ff_ppi
+rprobe: phase 1 at 0.490 ms
+rprobe: phase 2 at 74.992 ms
+rprobe: phase 3 at 77.118 ms
+rprobe: phase 4 at 99.714 ms
+rprobe: phase 15 at 100.548 ms
+RPROBE p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0
+RPROBE RESULT PASS
+     100.539  BR  011d  #33276
+== ff_noppi
+rprobe: phase 1 at 0.488 ms
+rprobe: phase 2 at 77.106 ms
+     130.473  BR  0038  #54583
+
+# superseded: the 2026-10-17 runs (probe without PPI init) -- all 20 FAIL alike incl. none, rnw/addr injectors 0

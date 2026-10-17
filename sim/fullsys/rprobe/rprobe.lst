@@ -59,177 +59,187 @@
 36    0040 ~                    ld a,5Ah
 36    0040 ~              ld (0BFFFh),a                 ; = FFFFh of the page-3 segment
 37    0040 ~                    ld b,0
-38    0040 ~            .l:     ld a,b
-38    0040 ~              and 0Fh
-38    0040 ~              ld (0FFFFh),a         ; subslot reg; pages 2/3 stay subslot 0
-39    0040 ~                    ld a,(0FFFFh)
-40    0040 ~                    ld a,(8000h)
-40    0040 ~              cp 85h
-40    0040 ~              jr z,.k          ; RAMTEST left 80h^00h^05h there
-41    0040 ~                    inc e
-42    0040 ~            .k:     djnz .l
-43    0040 ~                    ld a,(0BFFFh)
-43    0040 ~              cp 5Ah
-43    0040 ~              jr z,.s
-44    0040 ~                    inc d
-45    0040 ~            .s:     xor a
-45    0040 ~              ld (0FFFFh),a
-46    0040 ~                    ld a,e
-46    0040 ~              out (2Fh),a
-46    0040 ~              ld a,d
-46    0040 ~              out (2Fh),a
-47    0040                      endm
-48    0040
-49    0040 F3           start:  di
-50    0041 3E 06                ld a,6
-50    0043 D3 E4          out (0E4h),a
-50    0045 3E 60          ld a,60h
-50    0047 D3 E5          out (0E5h),a     ; Z80
-51    0049 3E F0                ld a,0F0h
-51    004B D3 A8          out (0A8h),a                            ; pages 2,3 -> slot 3
-52    004D AF                   xor a
-52    004E 32 FF FF       ld (0FFFFh),a                               ; subslot 0 (RAM)
-53    0051 3E 01                ld a,1
-53    0053 D3 2E          out (2Eh),a
-54    0055                      RAMTEST
-54    0055 11 00 00    >        ld de,0
-54    0058 0E 00       >        ld c,0
-54    005A 79          >.ws:    ld a,c
-54    005B D3 FE       >  out (0FEh),a
-54    005D 21 00 80    >        ld hl,8000h
-54    0060 7D          >.wl:    ld a,l
-54    0061 AC          >  xor h
-54    0062 A9          >  xor c
-54    0063 77          >  ld (hl),a
-54    0064 2C          >        inc l
-54    0065 20 F9       >  jr nz,.wl
-54    0067 0C          >        inc c
-54    0068 79          >  ld a,c
-54    0069 FE 20       >  cp 32
-54    006B 20 ED       >  jr nz,.ws
-54    006D 0E 00       >        ld c,0
-54    006F 79          >.rs:    ld a,c
-54    0070 D3 FE       >  out (0FEh),a
-54    0072 21 00 80    >        ld hl,8000h
-54    0075 7D          >.rl:    ld a,l
-54    0076 AC          >  xor h
-54    0077 A9          >  xor c
-54    0078 BE          >  cp (hl)
-54    0079 28 01       >  jr z,.ok
-54    007B 13          >        inc de
-54    007C 2C          >.ok:    inc l
-54    007D 20 F6       >  jr nz,.rl
-54    007F 0C          >        inc c
-54    0080 79          >  ld a,c
-54    0081 FE 20       >  cp 32
-54    0083 20 EA       >  jr nz,.rs
-54    0085 7B          >        ld a,e
-54    0086 D3 2F       >  out (2Fh),a
-54    0088 7A          >  ld a,d
-54    0089 D3 2F       >  out (2Fh),a
-55    008B 3E 02                ld a,2
-55    008D D3 2E          out (2Eh),a
-56    008F                      SENTTEST
-56    008F 11 00 00    >        ld de,0
-56    0092 3E 05       >        ld a,5
-56    0094 D3 FE       >  out (0FEh),a
-56    0096 D3 FF       >  out (0FFh),a     ; pages 2 and 3: segment 5
-56    0098 3E 5A       >        ld a,5Ah
-56    009A 32 FF BF    >  ld (0BFFFh),a                 ; = FFFFh of the page-3 segment
-56    009D 06 00       >        ld b,0
-56    009F 78          >.l:     ld a,b
-56    00A0 E6 0F       >  and 0Fh
-56    00A2 32 FF FF    >  ld (0FFFFh),a         ; subslot reg; pages 2/3 stay subslot 0
-56    00A5 3A FF FF    >        ld a,(0FFFFh)
-56    00A8 3A 00 80    >        ld a,(8000h)
-56    00AB FE 85       >  cp 85h
-56    00AD 28 01       >  jr z,.k          ; RAMTEST left 80h^00h^05h there
-56    00AF 1C          >        inc e
-56    00B0 10 ED       >.k:     djnz .l
-56    00B2 3A FF BF    >        ld a,(0BFFFh)
-56    00B5 FE 5A       >  cp 5Ah
-56    00B7 28 01       >  jr z,.s
-56    00B9 14          >        inc d
-56    00BA AF          >.s:     xor a
-56    00BB 32 FF FF    >  ld (0FFFFh),a
-56    00BE 7B          >        ld a,e
-56    00BF D3 2F       >  out (2Fh),a
-56    00C1 7A          >  ld a,d
-56    00C2 D3 2F       >  out (2Fh),a
-57    00C4 3E 06                ld a,6
-57    00C6 D3 E4          out (0E4h),a
-57    00C8 3E 40          ld a,40h
-57    00CA D3 E5          out (0E5h),a     ; R800
-58    00CC 3E 03                ld a,3
-58    00CE D3 2E          out (2Eh),a
-59    00D0                      RAMTEST
-59    00D0 11 00 00    >        ld de,0
-59    00D3 0E 00       >        ld c,0
-59    00D5 79          >.ws:    ld a,c
-59    00D6 D3 FE       >  out (0FEh),a
-59    00D8 21 00 80    >        ld hl,8000h
-59    00DB 7D          >.wl:    ld a,l
-59    00DC AC          >  xor h
-59    00DD A9          >  xor c
-59    00DE 77          >  ld (hl),a
-59    00DF 2C          >        inc l
-59    00E0 20 F9       >  jr nz,.wl
-59    00E2 0C          >        inc c
-59    00E3 79          >  ld a,c
-59    00E4 FE 20       >  cp 32
-59    00E6 20 ED       >  jr nz,.ws
-59    00E8 0E 00       >        ld c,0
-59    00EA 79          >.rs:    ld a,c
-59    00EB D3 FE       >  out (0FEh),a
-59    00ED 21 00 80    >        ld hl,8000h
-59    00F0 7D          >.rl:    ld a,l
-59    00F1 AC          >  xor h
-59    00F2 A9          >  xor c
-59    00F3 BE          >  cp (hl)
-59    00F4 28 01       >  jr z,.ok
-59    00F6 13          >        inc de
-59    00F7 2C          >.ok:    inc l
-59    00F8 20 F6       >  jr nz,.rl
-59    00FA 0C          >        inc c
-59    00FB 79          >  ld a,c
-59    00FC FE 20       >  cp 32
-59    00FE 20 EA       >  jr nz,.rs
-59    0100 7B          >        ld a,e
-59    0101 D3 2F       >  out (2Fh),a
-59    0103 7A          >  ld a,d
-59    0104 D3 2F       >  out (2Fh),a
-60    0106 3E 04                ld a,4
-60    0108 D3 2E          out (2Eh),a
-61    010A                      SENTTEST
-61    010A 11 00 00    >        ld de,0
-61    010D 3E 05       >        ld a,5
-61    010F D3 FE       >  out (0FEh),a
-61    0111 D3 FF       >  out (0FFh),a     ; pages 2 and 3: segment 5
-61    0113 3E 5A       >        ld a,5Ah
-61    0115 32 FF BF    >  ld (0BFFFh),a                 ; = FFFFh of the page-3 segment
-61    0118 06 00       >        ld b,0
-61    011A 78          >.l:     ld a,b
-61    011B E6 0F       >  and 0Fh
-61    011D 32 FF FF    >  ld (0FFFFh),a         ; subslot reg; pages 2/3 stay subslot 0
-61    0120 3A FF FF    >        ld a,(0FFFFh)
-61    0123 3A 00 80    >        ld a,(8000h)
-61    0126 FE 85       >  cp 85h
-61    0128 28 01       >  jr z,.k          ; RAMTEST left 80h^00h^05h there
-61    012A 1C          >        inc e
-61    012B 10 ED       >.k:     djnz .l
-61    012D 3A FF BF    >        ld a,(0BFFFh)
-61    0130 FE 5A       >  cp 5Ah
-61    0132 28 01       >  jr z,.s
-61    0134 14          >        inc d
-61    0135 AF          >.s:     xor a
-61    0136 32 FF FF    >  ld (0FFFFh),a
-61    0139 7B          >        ld a,e
-61    013A D3 2F       >  out (2Fh),a
-61    013C 7A          >  ld a,d
-61    013D D3 2F       >  out (2Fh),a
-62    013F 3E 0F                ld a,0Fh
-62    0141 D3 2E          out (2Eh),a
-63    0143 18 FE        park:   jr park
-64    0145                      assert $ < 0180h
-65    0145
+38    0040 ~            .l:     xor a
+38    0040 ~              ld (0FFFFh),a                    ; subslot reg, value 00 (all subslots 0)
+39    0040 ~                    ; (0Fh here crashed into RST 38h only while the PPI was never set up: every
+40    0040 ~                    ;  page was slot 0, so FFFFh was slot 0's subslot register and page 0 left the
+41    0040 ~                    ;  probe.  With the 82h mode word 0Fh passes -- docs/evidence_20261018)
+42    0040 ~                    ld a,(0FFFFh)
+43    0040 ~                    ld a,(8000h)
+43    0040 ~              cp 85h
+43    0040 ~              jr z,.k          ; RAMTEST left 80h^00h^05h there
+44    0040 ~                    inc e
+45    0040 ~            .k:     djnz .l
+46    0040 ~                    ld a,(0BFFFh)
+46    0040 ~              cp 5Ah
+46    0040 ~              jr z,.s
+47    0040 ~                    inc d
+48    0040 ~            .s:     xor a
+48    0040 ~              ld (0FFFFh),a
+49    0040 ~                    ld a,e
+49    0040 ~              out (2Fh),a
+49    0040 ~              ld a,d
+49    0040 ~              out (2Fh),a
+50    0040                      endm
+51    0040
+52    0040 F3           start:  di
+53    0041 3E 82                ld a,82h
+53    0043 D3 AB          out (0ABh),a                             ; PPI mode word, as the BIOS: port A out
+54    0045                      ; (without it port A stays an input, ppi_out_a = 0 and OUT (A8h) does nothing --
+55    0045                      ;  every page is slot 0, writes reach no RAM; the first 20 runs measured that)
+56    0045 3E 06                ld a,6
+56    0047 D3 E4          out (0E4h),a
+56    0049 3E 60          ld a,60h
+56    004B D3 E5          out (0E5h),a     ; Z80
+57    004D 3E F0                ld a,0F0h
+57    004F D3 A8          out (0A8h),a                            ; pages 2,3 -> slot 3
+58    0051 AF                   xor a
+58    0052 32 FF FF       ld (0FFFFh),a                               ; subslot 0 (RAM)
+59    0055 3E 01                ld a,1
+59    0057 D3 2E          out (2Eh),a
+60    0059                      RAMTEST
+60    0059 11 00 00    >        ld de,0
+60    005C 0E 00       >        ld c,0
+60    005E 79          >.ws:    ld a,c
+60    005F D3 FE       >  out (0FEh),a
+60    0061 21 00 80    >        ld hl,8000h
+60    0064 7D          >.wl:    ld a,l
+60    0065 AC          >  xor h
+60    0066 A9          >  xor c
+60    0067 77          >  ld (hl),a
+60    0068 2C          >        inc l
+60    0069 20 F9       >  jr nz,.wl
+60    006B 0C          >        inc c
+60    006C 79          >  ld a,c
+60    006D FE 20       >  cp 32
+60    006F 20 ED       >  jr nz,.ws
+60    0071 0E 00       >        ld c,0
+60    0073 79          >.rs:    ld a,c
+60    0074 D3 FE       >  out (0FEh),a
+60    0076 21 00 80    >        ld hl,8000h
+60    0079 7D          >.rl:    ld a,l
+60    007A AC          >  xor h
+60    007B A9          >  xor c
+60    007C BE          >  cp (hl)
+60    007D 28 01       >  jr z,.ok
+60    007F 13          >        inc de
+60    0080 2C          >.ok:    inc l
+60    0081 20 F6       >  jr nz,.rl
+60    0083 0C          >        inc c
+60    0084 79          >  ld a,c
+60    0085 FE 20       >  cp 32
+60    0087 20 EA       >  jr nz,.rs
+60    0089 7B          >        ld a,e
+60    008A D3 2F       >  out (2Fh),a
+60    008C 7A          >  ld a,d
+60    008D D3 2F       >  out (2Fh),a
+61    008F 3E 02                ld a,2
+61    0091 D3 2E          out (2Eh),a
+62    0093                      SENTTEST
+62    0093 11 00 00    >        ld de,0
+62    0096 3E 05       >        ld a,5
+62    0098 D3 FE       >  out (0FEh),a
+62    009A D3 FF       >  out (0FFh),a     ; pages 2 and 3: segment 5
+62    009C 3E 5A       >        ld a,5Ah
+62    009E 32 FF BF    >  ld (0BFFFh),a                 ; = FFFFh of the page-3 segment
+62    00A1 06 00       >        ld b,0
+62    00A3 AF          >.l:     xor a
+62    00A4 32 FF FF    >  ld (0FFFFh),a                    ; subslot reg, value 00 (all subslots 0)
+62    00A7             >        ; (0Fh here crashed into RST 38h only while the PPI was never set up: every
+62    00A7             >        ;  page was slot 0, so FFFFh was slot 0's subslot register and page 0 left the
+62    00A7             >        ;  probe.  With the 82h mode word 0Fh passes -- docs/evidence_20261018)
+62    00A7 3A FF FF    >        ld a,(0FFFFh)
+62    00AA 3A 00 80    >        ld a,(8000h)
+62    00AD FE 85       >  cp 85h
+62    00AF 28 01       >  jr z,.k          ; RAMTEST left 80h^00h^05h there
+62    00B1 1C          >        inc e
+62    00B2 10 EF       >.k:     djnz .l
+62    00B4 3A FF BF    >        ld a,(0BFFFh)
+62    00B7 FE 5A       >  cp 5Ah
+62    00B9 28 01       >  jr z,.s
+62    00BB 14          >        inc d
+62    00BC AF          >.s:     xor a
+62    00BD 32 FF FF    >  ld (0FFFFh),a
+62    00C0 7B          >        ld a,e
+62    00C1 D3 2F       >  out (2Fh),a
+62    00C3 7A          >  ld a,d
+62    00C4 D3 2F       >  out (2Fh),a
+63    00C6 3E 06                ld a,6
+63    00C8 D3 E4          out (0E4h),a
+63    00CA 3E 40          ld a,40h
+63    00CC D3 E5          out (0E5h),a     ; R800
+64    00CE 3E 03                ld a,3
+64    00D0 D3 2E          out (2Eh),a
+65    00D2                      RAMTEST
+65    00D2 11 00 00    >        ld de,0
+65    00D5 0E 00       >        ld c,0
+65    00D7 79          >.ws:    ld a,c
+65    00D8 D3 FE       >  out (0FEh),a
+65    00DA 21 00 80    >        ld hl,8000h
+65    00DD 7D          >.wl:    ld a,l
+65    00DE AC          >  xor h
+65    00DF A9          >  xor c
+65    00E0 77          >  ld (hl),a
+65    00E1 2C          >        inc l
+65    00E2 20 F9       >  jr nz,.wl
+65    00E4 0C          >        inc c
+65    00E5 79          >  ld a,c
+65    00E6 FE 20       >  cp 32
+65    00E8 20 ED       >  jr nz,.ws
+65    00EA 0E 00       >        ld c,0
+65    00EC 79          >.rs:    ld a,c
+65    00ED D3 FE       >  out (0FEh),a
+65    00EF 21 00 80    >        ld hl,8000h
+65    00F2 7D          >.rl:    ld a,l
+65    00F3 AC          >  xor h
+65    00F4 A9          >  xor c
+65    00F5 BE          >  cp (hl)
+65    00F6 28 01       >  jr z,.ok
+65    00F8 13          >        inc de
+65    00F9 2C          >.ok:    inc l
+65    00FA 20 F6       >  jr nz,.rl
+65    00FC 0C          >        inc c
+65    00FD 79          >  ld a,c
+65    00FE FE 20       >  cp 32
+65    0100 20 EA       >  jr nz,.rs
+65    0102 7B          >        ld a,e
+65    0103 D3 2F       >  out (2Fh),a
+65    0105 7A          >  ld a,d
+65    0106 D3 2F       >  out (2Fh),a
+66    0108 3E 04                ld a,4
+66    010A D3 2E          out (2Eh),a
+67    010C                      SENTTEST
+67    010C 11 00 00    >        ld de,0
+67    010F 3E 05       >        ld a,5
+67    0111 D3 FE       >  out (0FEh),a
+67    0113 D3 FF       >  out (0FFh),a     ; pages 2 and 3: segment 5
+67    0115 3E 5A       >        ld a,5Ah
+67    0117 32 FF BF    >  ld (0BFFFh),a                 ; = FFFFh of the page-3 segment
+67    011A 06 00       >        ld b,0
+67    011C AF          >.l:     xor a
+67    011D 32 FF FF    >  ld (0FFFFh),a                    ; subslot reg, value 00 (all subslots 0)
+67    0120             >        ; (0Fh here crashed into RST 38h only while the PPI was never set up: every
+67    0120             >        ;  page was slot 0, so FFFFh was slot 0's subslot register and page 0 left the
+67    0120             >        ;  probe.  With the 82h mode word 0Fh passes -- docs/evidence_20261018)
+67    0120 3A FF FF    >        ld a,(0FFFFh)
+67    0123 3A 00 80    >        ld a,(8000h)
+67    0126 FE 85       >  cp 85h
+67    0128 28 01       >  jr z,.k          ; RAMTEST left 80h^00h^05h there
+67    012A 1C          >        inc e
+67    012B 10 EF       >.k:     djnz .l
+67    012D 3A FF BF    >        ld a,(0BFFFh)
+67    0130 FE 5A       >  cp 5Ah
+67    0132 28 01       >  jr z,.s
+67    0134 14          >        inc d
+67    0135 AF          >.s:     xor a
+67    0136 32 FF FF    >  ld (0FFFFh),a
+67    0139 7B          >        ld a,e
+67    013A D3 2F       >  out (2Fh),a
+67    013C 7A          >  ld a,d
+67    013D D3 2F       >  out (2Fh),a
+68    013F 3E 0F                ld a,0Fh
+68    0141 D3 2E          out (2Eh),a
+69    0143 18 FE        park:   jr park
+70    0145                      assert $ < 0180h
+71    0145
 # file closed: rprobe.asm

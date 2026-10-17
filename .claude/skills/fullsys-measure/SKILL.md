@@ -105,7 +105,10 @@ CL3/BL2 칩 모델 `sdram_big_tdm`(tb_msx.sv `-DTDM`). `prep.sh`가 `tb/mkshim_t
   - `-DRPROBE` + `sim/fullsys/rprobe/rprobe.hex`: 매퍼 RAM 32세그먼트, FFFF 쓰기/읽기 + 센티널,
     Z80과 R800. 단계별 오류 수는 포트 2Fh. `+zspeed=N`: Z80 터보(0 3.58 ... 3 10.74 ... 4 21.48 MHz).
   - 프로브 쓰기 전 확인: 첫 판의 KPROBE는 스택(F000h)으로 CALL했다가 리셋 직후 페이지 3이 RAM이 아니라
-    81 us마다 재시작했다. FFFF에 0Fh를 쓰면 다음 페이지 0 인출에서 RST 38로 빠졌다(미추적) — 00만 쓸 것.
+    81 us마다 재시작했다. **BIOS를 대신하는 프로브는 PPI 모드 워드(`OUT (0ABh),82h`)를 먼저 쓸 것** — 안 쓰면
+    포트 A가 입력으로 남아(ppi_out_a=0) `OUT (A8h)`가 무효, 모든 페이지가 슬롯 0이다. 첫 RPROBE 20판은 이것
+    때문에 전부(주입 없음 포함) 같은 FAIL이었고, "FFFF←0Fh → RST 38"도 같은 원인(FFFF가 슬롯 0 레지스터)이었다.
+    `+rwave=N`(8000-BFFF 읽기/쓰기 + 슬롯·매퍼·ram_addr), EDGEHIST(입력이 바뀌는 clk_sdram 위상)로 확인.
 - **지연 주입**(`-DINJ_RNW/_DIN/_ADDR/_UNMAP`, `-DKDLY`, `-DKMUT`, `-DKNOB`): clk21m 상승 직후 첫
   clk_sdram 주기에만 컨트롤러가 그 신호를 직전 값으로 본다 = "그 경로가 clk_sdram 하나 늦다". 그 사이엔
   clk_sdram 논리만 표본을 잡으므로 내부 넷도 `force`로 같은 효과. 각 주입은 실제로 값이 달랐던 횟수를

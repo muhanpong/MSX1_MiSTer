@@ -36,8 +36,9 @@
         ld a,5Ah : ld (0BFFFh),a                 ; = FFFFh of the page-3 segment
         ld b,0
 .l:     xor a : ld (0FFFFh),a                    ; subslot reg, value 00 (all subslots 0)
-        ; (writing 0Fh here -- pages 0/1 of slot 3 only -- crashed every run into
-        ;  RST 38h on the next fetch from page 0, slot 0-0; not chased here)
+        ; (0Fh here crashed into RST 38h only while the PPI was never set up: every
+        ;  page was slot 0, so FFFFh was slot 0's subslot register and page 0 left the
+        ;  probe.  With the 82h mode word 0Fh passes -- docs/evidence_20261018)
         ld a,(0FFFFh)
         ld a,(8000h) : cp 85h : jr z,.k          ; RAMTEST left 80h^00h^05h there
         inc e
@@ -49,6 +50,9 @@
         endm
 
 start:  di
+        ld a,82h : out (0ABh),a                             ; PPI mode word, as the BIOS: port A out
+        ; (without it port A stays an input, ppi_out_a = 0 and OUT (A8h) does nothing --
+        ;  every page is slot 0, writes reach no RAM; the first 20 runs measured that)
         ld a,6 : out (0E4h),a : ld a,60h : out (0E5h),a     ; Z80
         ld a,0F0h : out (0A8h),a                            ; pages 2,3 -> slot 3
         xor a : ld (0FFFFh),a                               ; subslot 0 (RAM)

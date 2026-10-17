@@ -1314,6 +1314,58 @@ module tb;
          rp_nb++;
       end
    end
+   //  Which clk_sdram edge each controller input changes on, k = 0..5 (128.86 MHz
+   //  bench: clk21m = clk_sdram / 6).  k = 0 is the first edge that sees clk21m high
+   //  (c21 is an NBA of the edge before), i.e. the first edge a clk21m-rise flop's
+   //  new value can reach -- the edge the INJ_* window covers.  An injection
+   //  that holds a net only for the edge after the clk21m rise is alive only if that
+   //  net changes there (INJ_* "differed" counts of 0 = it never does).
+   int eh_rnw [6], eh_ce [6], eh_addr [6], eh_din [6], eh_unm [6], eh_ph = 0;
+   logic eh_c21 = 1'b0, eh_rnw_q = 1'b1, eh_ce_q = 1'b0, eh_unm_q = 1'b0;
+   logic [26:0] eh_addr_q = '0; logic [7:0] eh_din_q = '0;
+   wire eh_unm_now = MSX.msx_slots.mem_unmaped;
+   initial for (int i = 0; i < 6; i++) begin eh_rnw[i] = 0; eh_ce[i] = 0; eh_addr[i] = 0; eh_din[i] = 0; eh_unm[i] = 0; end
+   always @(posedge clk_sdram) begin
+      //  sampled in the active region of this edge = what the controller sees on it
+      automatic int ph = (clk21m & ~eh_c21) ? 0 : eh_ph + 1;
+      eh_c21 <= clk21m; eh_ph = ph > 5 ? 5 : ph;
+      if (ram_rnw  != eh_rnw_q)  eh_rnw[eh_ph]++;
+      if (sdram_ce != eh_ce_q)   eh_ce[eh_ph]++;
+      if (ram_addr != eh_addr_q) eh_addr[eh_ph]++;
+      if (ram_din  != eh_din_q)  eh_din[eh_ph]++;
+      if (eh_unm_now != eh_unm_q) eh_unm[eh_ph]++;
+      eh_rnw_q <= ram_rnw; eh_ce_q <= sdram_ce; eh_addr_q <= ram_addr; eh_din_q <= ram_din;
+      eh_unm_q <= eh_unm_now;
+   end
+   final begin
+      $display("EDGEHIST (changes first seen on edge k; k=0 = first edge with clk21m high = INJ_* window, k=3 = first with it low)");
+      $display("EDGEHIST rnw   %0d %0d %0d %0d %0d %0d", eh_rnw[0], eh_rnw[1], eh_rnw[2], eh_rnw[3], eh_rnw[4], eh_rnw[5]);
+      $display("EDGEHIST req   %0d %0d %0d %0d %0d %0d", eh_ce[0], eh_ce[1], eh_ce[2], eh_ce[3], eh_ce[4], eh_ce[5]);
+      $display("EDGEHIST addr  %0d %0d %0d %0d %0d %0d", eh_addr[0], eh_addr[1], eh_addr[2], eh_addr[3], eh_addr[4], eh_addr[5]);
+      $display("EDGEHIST din   %0d %0d %0d %0d %0d %0d", eh_din[0], eh_din[1], eh_din[2], eh_din[3], eh_din[4], eh_din[5]);
+      $display("EDGEHIST unmap %0d %0d %0d %0d %0d %0d", eh_unm[0], eh_unm[1], eh_unm[2], eh_unm[3], eh_unm[4], eh_unm[5]);
+   end
+   //  +rwave=N: the first N memory reads/writes in 8000h-BFFFh, one line each, sampled
+   //  on the clk21m before the strobe goes away (what the CPU takes).
+   int  rp_wave = 0, rp_wave_n = 0;
+   initial void'($value$plusargs("rwave=%d", rp_wave));
+   logic rp_mrd_q = 1'b0, rp_mwr_q = 1'b0;
+   logic [7:0] rp_wd = 8'h00, rp_rd = 8'h00;
+   logic [15:0] rp_wa = 16'h0;
+   string rp_ctx = "";
+   wire rp_mrd = ~MSX.mreq_n & ~MSX.rd_n & MSX.m1_n & (MSX.a[15:14] == 2'b10);
+   wire rp_mwr = ~MSX.mreq_n & ~MSX.wr_n & (MSX.a[15:14] == 2'b10);
+   always @(posedge clk21m) if (rp_wave_n < rp_wave) begin
+      rp_mrd_q <= rp_mrd; rp_mwr_q <= rp_mwr;
+      if (rp_mrd | rp_mwr)
+         rp_ctx = $sformatf("slot=%0d sub=%0d mapper=%0d unmap=%b ram_addr=%07x sdram_ce=%b rnw=%b sdram_dout=%02x",
+                            MSX.msx_slots.active_slot, MSX.msx_slots.subslot, MSX.msx_slots.mapper, MSX.msx_slots.mem_unmaped,
+                            MSX.msx_slots.ram_addr, sdram_ce, ram_rnw, sdram_dout);
+      if (rp_mrd) begin rp_rd <= MSX.d_to_cpu; rp_wa <= MSX.a; end
+      if (rp_mwr) begin rp_wd <= MSX.d_from_cpu; rp_wa <= MSX.a; end
+      if (rp_mrd_q & ~rp_mrd) begin rp_wave_n++; $display("RW %.4f ph%0d RD %04x -> %02x  %s", $realtime / 1e6, rp_phase, rp_wa, rp_rd, rp_ctx); end
+      if (rp_mwr_q & ~rp_mwr) begin rp_wave_n++; $display("RW %.4f ph%0d WR %04x <- %02x  %s", $realtime / 1e6, rp_phase, rp_wa, rp_wd, rp_ctx); end
+   end
 `endif
 `ifdef KPROBE
    int  kp_phase = 0;
