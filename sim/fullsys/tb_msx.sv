@@ -28,6 +28,12 @@ module tb;
 `ifdef TDM128
  `define TDM
 `endif
+`ifdef KPROBE
+ `define PROBEPATCH
+`endif
+`ifdef RPROBE
+ `define PROBEPATCH
+`endif
 `ifdef TDM
  `define TDM_CLOCK
 `endif
@@ -227,7 +233,7 @@ module tb;
          a++; c = $fgetc(fd);
       end
       $fclose(fd);
-`ifdef KPROBE
+`ifdef PROBEPATCH
       kprobe_patch();
 `endif
       fd = $fopen({pfx, ".bram.bin"}, "rb");
@@ -266,6 +272,72 @@ module tb;
    wire        sdram_ready;
 
    wire  [7:0] sdram_dout, sdram_dout_c;
+   //  ── delay injection (core_builder's strobe review, 2026-10-17) ─────────────
+   //  -DINJ_RNW / -DINJ_DIN / -DINJ_ADDR / -DINJ_UNMAP: for the FIRST clk_sdram cycle
+   //  after every clk21m rise, the controller sees that signal as it was before the
+   //  rise.  Between two clk21m edges only clk_sdram logic samples, so holding a
+   //  clk21m-domain net there is "this path arrives one clk_sdram late" and nothing
+   //  else.  INJ_ADDR is the negative control: a memory cycle's address is out a
+   //  T-state before the strobe, so delaying it must change nothing.
+   logic inj_win = 1'b0, inj_c21 = 1'b0;
+   always @(negedge clk_sdram) begin
+      inj_win <= clk21m & ~inj_c21;          // open from the negedge after the rise
+      inj_c21 <= clk21m;                     // to the next negedge
+   end
+   logic        pre_rnw;  logic [7:0] pre_din;  logic [26:0] pre_addr;  logic pre_unmap;
+   always @(posedge clk_sdram) begin
+      //  sampled before the clk21m logic of this edge has run (it runs a delta later)
+      pre_rnw <= ram_rnw; pre_din <= ram_din; pre_addr <= ram_addr; pre_unmap <= MSX.msx_slots.mem_unmaped;
+   end
+   logic        hold_rnw; logic [7:0] hold_din; logic [26:0] hold_addr; logic hold_unmap;
+   always @(negedge clk_sdram) if (clk21m & ~inj_c21) begin
+      hold_rnw <= pre_rnw; hold_din <= pre_din; hold_addr <= pre_addr; hold_unmap <= pre_unmap;
+   end
+   wire        inj_rnw;  wire [7:0] inj_din;  wire [26:0] inj_addr;
+`ifdef INJ_RNW
+   assign inj_rnw  = inj_win ? hold_rnw  : ram_rnw;
+`else
+   assign inj_rnw  = ram_rnw;
+`endif
+`ifdef INJ_DIN
+   assign inj_din  = inj_win ? hold_din  : ram_din;
+`else
+   assign inj_din  = ram_din;
+`endif
+`ifdef INJ_ADDR
+   assign inj_addr = inj_win ? hold_addr : ram_addr;
+`else
+   assign inj_addr = ram_addr;
+`endif
+`ifdef INJ_UNMAP
+   //  inside msx_slots: mem_unmaped gates sdram_ce (B1 FFFF write, B3 reads)
+   logic inj_rel = 1'b0;
+   always @(negedge clk_sdram)
+      if (clk21m & ~inj_c21) force MSX.msx_slots.mem_unmaped = pre_unmap;
+      else if (inj_win) begin release MSX.msx_slots.mem_unmaped; inj_rel <= 1'b1; end
+      else inj_rel <= 1'b0;
+   //  injection activity, so a quiet result cannot be a dead injector: on the edge
+   //  after the release the live value is visible again -- did the hold differ?
+   //  (inside the window the net is forced, so it cannot be compared there)
+   int inj_n = 0;
+   always @(posedge clk_sdram) if (inj_rel && (hold_unmap != MSX.msx_slots.mem_unmaped)) inj_n++;
+   final $display("INJ_UNMAP: windows where the held mem_unmaped differed from the live one: %0d", inj_n);
+`endif
+`ifdef INJ_RNW
+   int inj_n = 0;
+   always @(posedge clk_sdram) if (inj_win && hold_rnw != ram_rnw) inj_n++;
+   final $display("INJ_RNW: windows where the held rnw differed: %0d", inj_n);
+`endif
+`ifdef INJ_DIN
+   int inj_n = 0;
+   always @(posedge clk_sdram) if (inj_win && hold_din != ram_din && sdram_ce) inj_n++;
+   final $display("INJ_DIN: windows with a request where the held din differed: %0d", inj_n);
+`endif
+`ifdef INJ_ADDR
+   int inj_n = 0;
+   always @(posedge clk_sdram) if (inj_win && hold_addr != ram_addr && sdram_ce) inj_n++;
+   final $display("INJ_ADDR: windows with a request where the held address differed: %0d", inj_n);
+`endif
 `ifndef KMUT
    assign sdram_dout = sdram_dout_c;
 `else
@@ -304,8 +376,8 @@ module tb;
       .SDRAM_DQ_o(dq_o), .SDRAM_DQ_oe(dq_oe), .SDRAM_DQ_i(dq_i),
       .ch1_addr(ch1_addr), .ch1_dout(ch1_dout), .ch1_din(ch1_din),
       .ch1_req(ch1_req), .ch1_rnw(ch1_rnw), .ch1_ready(sdram_ready),
-      .ch2_addr(ram_addr), .ch2_dout(sdram_dout_c), .ch2_din(ram_din),
-      .ch2_req(sdram_ce), .ch2_rnw(ram_rnw), .ch2_ready(ch2_ready),
+      .ch2_addr(inj_addr), .ch2_dout(sdram_dout_c), .ch2_din(inj_din),
+      .ch2_req(sdram_ce), .ch2_rnw(inj_rnw), .ch2_ready(ch2_ready),
       .ch2_rdtog(sdram_rdtog), .ch2_hit(sdram_hit),
       .ch3_addr(flash_addr), .ch3_din(flash_din), .ch3_req(flash_req),
       .ch3_rnw(1'b0), .ch3_ready(flash_ready),
@@ -782,9 +854,13 @@ module tb;
       //  As MSX1.sv:637 -- NextZ80 (R800 mode) runs at full rate.  This was
       //  3'd0, so after CHGCPU the bench ran the R800 at the Z80's enable,
       //  about six times too slow, and SDRAM's guard kept the slow limit.
-      .cpu_speed(use_nz ? 3'd4 : 3'd0), .cpu_bus_idle(cpu_bus_idle),
+      .cpu_speed(use_nz ? 3'd4 : zspeed), .cpu_bus_idle(cpu_bus_idle),
       .ce_cpu(ce_cpu), .cpu_turbo(cpu_turbo), .cpu_speed_q(cpu_speed_q)
    );
+
+   //  +zspeed=N: the Z80's turbo setting (clock.sv: 0 3.58, 1 5.37, 2 7.16, 3 10.74, 4 21.48 MHz)
+   logic [2:0] zspeed = 3'd0;
+   initial begin int z; if ($value$plusargs("zspeed=%d", z)) zspeed = 3'(z); end
 
    //  ── everything the machine needs that nothing else drives ────────────────
    initial begin
@@ -1184,7 +1260,7 @@ module tb;
       $display("clk_opl3: %0d edges over %.3f ms = %.4f MHz (OPL3 wants 14.3182)",
                opl3_n, (opl3_t1 - opl3_t0) / 1e6, (opl3_n - 1) / (opl3_t1 - opl3_t0) * 1e3);
 
-`ifdef KPROBE
+`ifdef PROBEPATCH
    //  -DKPROBE +kprobe=<hex> (sim/fullsys/kprobe/kprobe.asm): the hex image replaces the
    //  BIOS at its SDRAM home after the preload.  Every IN from D9h is checked: the
    //  byte the CPU took (d_to_cpu on the last clk21m of the strobe, as tb_kanji.sv
@@ -1211,6 +1287,35 @@ module tb;
       logic [15:0] w = u_chip.mem[`MEMW'(a >> 1)];
       return (a & 1) ? w[15:8] : w[7:0];
    endfunction
+`endif
+`ifdef RPROBE
+   //  -DRPROBE (sim/fullsys/rprobe/rprobe.asm, through +kprobe=<hex>): phases from
+   //  OUT (2Eh),n, each followed by its error count as two OUT (2Fh) bytes.
+   int rp_phase = 0, rp_nb = 0, rp_lo = 0;
+   int rp_err [16];
+   logic rp_q2e = 1'b0, rp_q2f = 1'b0;
+   wire rp_w2e = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n & (MSX.a[7:0] == 8'h2E);
+   wire rp_w2f = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n & (MSX.a[7:0] == 8'h2F);
+   always @(posedge clk21m) begin
+      rp_q2e <= rp_w2e; rp_q2f <= rp_w2f;
+      if (rp_w2e & ~rp_q2e) begin
+         rp_phase = int'(MSX.d_from_cpu); rp_nb = 0;
+         $display("rprobe: phase %0d at %.3f ms", rp_phase, $realtime / 1e6);
+         if (rp_phase == 15) begin
+            $display("RPROBE p1 Z80 RAM errors %0d | p2 Z80 FFFF: bad 8000h reads %0d, sentinel lost %0d | p3 R800 RAM errors %0d | p4 R800 FFFF: bad reads %0d, sentinel lost %0d",
+                     rp_err[1], rp_err[2] & 255, rp_err[2] >> 8, rp_err[3], rp_err[4] & 255, rp_err[4] >> 8);
+            $display("RPROBE RESULT %s", (rp_err[1] | rp_err[2] | rp_err[3] | rp_err[4]) == 0 ? "PASS" : "FAIL");
+            $finish;
+         end
+      end
+      if (rp_w2f & ~rp_q2f) begin
+         if (rp_nb == 0) rp_lo = int'(MSX.d_from_cpu);
+         else rp_err[rp_phase & 15] = rp_lo | (int'(MSX.d_from_cpu) << 8);
+         rp_nb++;
+      end
+   end
+`endif
+`ifdef KPROBE
    int  kp_phase = 0;
    int  kp_n [16], kp_ok [16];
    logic kp_rd_q = 1'b0, kp_io_q = 1'b0, kp_seen = 1'b0;

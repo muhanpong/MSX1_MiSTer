@@ -1,0 +1,235 @@
+# file opened: rprobe.asm
+ 1    0000              ; RPROBE for fullsys (tb_msx.sv -DRPROBE): replaces the BIOS at 0000h (GT pack).
+ 2    0000              ; Checks the memory paths core_builder's strobe review flagged, under a bench-side
+ 3    0000              ; delay injection (tb_msx.sv INJ_*).  Phases (OUT (2Eh),n), each followed by its
+ 4    0000              ; error count on port 2Fh (low, high):
+ 5    0000              ;   1  Z80   mapper RAM: 32 segments x 256 bytes written with LD (HL),A, read back
+ 6    0000              ;   2  Z80   FFFFh: 256 x (write subslot reg, read it, read 8000h), then the byte
+ 7    0000              ;            planted at BFFFh (= FFFFh of the page-3 segment) must have survived
+ 8    0000              ;            -- errors: low byte = wrong 8000h reads, high byte = sentinel lost
+ 9    0000              ;   3  R800  as 1        4  R800  as 2        0Fh done
+10    0000              ; No stack: page 3 is a test segment.  turbor.sv overlays 002Dh and 0180h-018Bh.
+11    0000                      org 0
+12    0000 18 3E                jr start
+13    0002 00 00 00...          ds 40h - $, 0
+14    0040
+15    0040                      macro RAMTEST
+16    0040 ~                    ld de,0
+17    0040 ~                    ld c,0
+18    0040 ~            .ws:    ld a,c
+18    0040 ~              out (0FEh),a
+19    0040 ~                    ld hl,8000h
+20    0040 ~            .wl:    ld a,l
+20    0040 ~              xor h
+20    0040 ~              xor c
+20    0040 ~              ld (hl),a
+21    0040 ~                    inc l
+21    0040 ~              jr nz,.wl
+22    0040 ~                    inc c
+22    0040 ~              ld a,c
+22    0040 ~              cp 32
+22    0040 ~              jr nz,.ws
+23    0040 ~                    ld c,0
+24    0040 ~            .rs:    ld a,c
+24    0040 ~              out (0FEh),a
+25    0040 ~                    ld hl,8000h
+26    0040 ~            .rl:    ld a,l
+26    0040 ~              xor h
+26    0040 ~              xor c
+26    0040 ~              cp (hl)
+26    0040 ~              jr z,.ok
+27    0040 ~                    inc de
+28    0040 ~            .ok:    inc l
+28    0040 ~              jr nz,.rl
+29    0040 ~                    inc c
+29    0040 ~              ld a,c
+29    0040 ~              cp 32
+29    0040 ~              jr nz,.rs
+30    0040 ~                    ld a,e
+30    0040 ~              out (2Fh),a
+30    0040 ~              ld a,d
+30    0040 ~              out (2Fh),a
+31    0040                      endm
+32    0040
+33    0040                      macro SENTTEST
+34    0040 ~                    ld de,0
+35    0040 ~                    ld a,5
+35    0040 ~              out (0FEh),a
+35    0040 ~              out (0FFh),a     ; pages 2 and 3: segment 5
+36    0040 ~                    ld a,5Ah
+36    0040 ~              ld (0BFFFh),a                 ; = FFFFh of the page-3 segment
+37    0040 ~                    ld b,0
+38    0040 ~            .l:     ld a,b
+38    0040 ~              and 0Fh
+38    0040 ~              ld (0FFFFh),a         ; subslot reg; pages 2/3 stay subslot 0
+39    0040 ~                    ld a,(0FFFFh)
+40    0040 ~                    ld a,(8000h)
+40    0040 ~              cp 85h
+40    0040 ~              jr z,.k          ; RAMTEST left 80h^00h^05h there
+41    0040 ~                    inc e
+42    0040 ~            .k:     djnz .l
+43    0040 ~                    ld a,(0BFFFh)
+43    0040 ~              cp 5Ah
+43    0040 ~              jr z,.s
+44    0040 ~                    inc d
+45    0040 ~            .s:     xor a
+45    0040 ~              ld (0FFFFh),a
+46    0040 ~                    ld a,e
+46    0040 ~              out (2Fh),a
+46    0040 ~              ld a,d
+46    0040 ~              out (2Fh),a
+47    0040                      endm
+48    0040
+49    0040 F3           start:  di
+50    0041 3E 06                ld a,6
+50    0043 D3 E4          out (0E4h),a
+50    0045 3E 60          ld a,60h
+50    0047 D3 E5          out (0E5h),a     ; Z80
+51    0049 3E F0                ld a,0F0h
+51    004B D3 A8          out (0A8h),a                            ; pages 2,3 -> slot 3
+52    004D AF                   xor a
+52    004E 32 FF FF       ld (0FFFFh),a                               ; subslot 0 (RAM)
+53    0051 3E 01                ld a,1
+53    0053 D3 2E          out (2Eh),a
+54    0055                      RAMTEST
+54    0055 11 00 00    >        ld de,0
+54    0058 0E 00       >        ld c,0
+54    005A 79          >.ws:    ld a,c
+54    005B D3 FE       >  out (0FEh),a
+54    005D 21 00 80    >        ld hl,8000h
+54    0060 7D          >.wl:    ld a,l
+54    0061 AC          >  xor h
+54    0062 A9          >  xor c
+54    0063 77          >  ld (hl),a
+54    0064 2C          >        inc l
+54    0065 20 F9       >  jr nz,.wl
+54    0067 0C          >        inc c
+54    0068 79          >  ld a,c
+54    0069 FE 20       >  cp 32
+54    006B 20 ED       >  jr nz,.ws
+54    006D 0E 00       >        ld c,0
+54    006F 79          >.rs:    ld a,c
+54    0070 D3 FE       >  out (0FEh),a
+54    0072 21 00 80    >        ld hl,8000h
+54    0075 7D          >.rl:    ld a,l
+54    0076 AC          >  xor h
+54    0077 A9          >  xor c
+54    0078 BE          >  cp (hl)
+54    0079 28 01       >  jr z,.ok
+54    007B 13          >        inc de
+54    007C 2C          >.ok:    inc l
+54    007D 20 F6       >  jr nz,.rl
+54    007F 0C          >        inc c
+54    0080 79          >  ld a,c
+54    0081 FE 20       >  cp 32
+54    0083 20 EA       >  jr nz,.rs
+54    0085 7B          >        ld a,e
+54    0086 D3 2F       >  out (2Fh),a
+54    0088 7A          >  ld a,d
+54    0089 D3 2F       >  out (2Fh),a
+55    008B 3E 02                ld a,2
+55    008D D3 2E          out (2Eh),a
+56    008F                      SENTTEST
+56    008F 11 00 00    >        ld de,0
+56    0092 3E 05       >        ld a,5
+56    0094 D3 FE       >  out (0FEh),a
+56    0096 D3 FF       >  out (0FFh),a     ; pages 2 and 3: segment 5
+56    0098 3E 5A       >        ld a,5Ah
+56    009A 32 FF BF    >  ld (0BFFFh),a                 ; = FFFFh of the page-3 segment
+56    009D 06 00       >        ld b,0
+56    009F 78          >.l:     ld a,b
+56    00A0 E6 0F       >  and 0Fh
+56    00A2 32 FF FF    >  ld (0FFFFh),a         ; subslot reg; pages 2/3 stay subslot 0
+56    00A5 3A FF FF    >        ld a,(0FFFFh)
+56    00A8 3A 00 80    >        ld a,(8000h)
+56    00AB FE 85       >  cp 85h
+56    00AD 28 01       >  jr z,.k          ; RAMTEST left 80h^00h^05h there
+56    00AF 1C          >        inc e
+56    00B0 10 ED       >.k:     djnz .l
+56    00B2 3A FF BF    >        ld a,(0BFFFh)
+56    00B5 FE 5A       >  cp 5Ah
+56    00B7 28 01       >  jr z,.s
+56    00B9 14          >        inc d
+56    00BA AF          >.s:     xor a
+56    00BB 32 FF FF    >  ld (0FFFFh),a
+56    00BE 7B          >        ld a,e
+56    00BF D3 2F       >  out (2Fh),a
+56    00C1 7A          >  ld a,d
+56    00C2 D3 2F       >  out (2Fh),a
+57    00C4 3E 06                ld a,6
+57    00C6 D3 E4          out (0E4h),a
+57    00C8 3E 40          ld a,40h
+57    00CA D3 E5          out (0E5h),a     ; R800
+58    00CC 3E 03                ld a,3
+58    00CE D3 2E          out (2Eh),a
+59    00D0                      RAMTEST
+59    00D0 11 00 00    >        ld de,0
+59    00D3 0E 00       >        ld c,0
+59    00D5 79          >.ws:    ld a,c
+59    00D6 D3 FE       >  out (0FEh),a
+59    00D8 21 00 80    >        ld hl,8000h
+59    00DB 7D          >.wl:    ld a,l
+59    00DC AC          >  xor h
+59    00DD A9          >  xor c
+59    00DE 77          >  ld (hl),a
+59    00DF 2C          >        inc l
+59    00E0 20 F9       >  jr nz,.wl
+59    00E2 0C          >        inc c
+59    00E3 79          >  ld a,c
+59    00E4 FE 20       >  cp 32
+59    00E6 20 ED       >  jr nz,.ws
+59    00E8 0E 00       >        ld c,0
+59    00EA 79          >.rs:    ld a,c
+59    00EB D3 FE       >  out (0FEh),a
+59    00ED 21 00 80    >        ld hl,8000h
+59    00F0 7D          >.rl:    ld a,l
+59    00F1 AC          >  xor h
+59    00F2 A9          >  xor c
+59    00F3 BE          >  cp (hl)
+59    00F4 28 01       >  jr z,.ok
+59    00F6 13          >        inc de
+59    00F7 2C          >.ok:    inc l
+59    00F8 20 F6       >  jr nz,.rl
+59    00FA 0C          >        inc c
+59    00FB 79          >  ld a,c
+59    00FC FE 20       >  cp 32
+59    00FE 20 EA       >  jr nz,.rs
+59    0100 7B          >        ld a,e
+59    0101 D3 2F       >  out (2Fh),a
+59    0103 7A          >  ld a,d
+59    0104 D3 2F       >  out (2Fh),a
+60    0106 3E 04                ld a,4
+60    0108 D3 2E          out (2Eh),a
+61    010A                      SENTTEST
+61    010A 11 00 00    >        ld de,0
+61    010D 3E 05       >        ld a,5
+61    010F D3 FE       >  out (0FEh),a
+61    0111 D3 FF       >  out (0FFh),a     ; pages 2 and 3: segment 5
+61    0113 3E 5A       >        ld a,5Ah
+61    0115 32 FF BF    >  ld (0BFFFh),a                 ; = FFFFh of the page-3 segment
+61    0118 06 00       >        ld b,0
+61    011A 78          >.l:     ld a,b
+61    011B E6 0F       >  and 0Fh
+61    011D 32 FF FF    >  ld (0FFFFh),a         ; subslot reg; pages 2/3 stay subslot 0
+61    0120 3A FF FF    >        ld a,(0FFFFh)
+61    0123 3A 00 80    >        ld a,(8000h)
+61    0126 FE 85       >  cp 85h
+61    0128 28 01       >  jr z,.k          ; RAMTEST left 80h^00h^05h there
+61    012A 1C          >        inc e
+61    012B 10 ED       >.k:     djnz .l
+61    012D 3A FF BF    >        ld a,(0BFFFh)
+61    0130 FE 5A       >  cp 5Ah
+61    0132 28 01       >  jr z,.s
+61    0134 14          >        inc d
+61    0135 AF          >.s:     xor a
+61    0136 32 FF FF    >  ld (0FFFFh),a
+61    0139 7B          >        ld a,e
+61    013A D3 2F       >  out (2Fh),a
+61    013C 7A          >  ld a,d
+61    013D D3 2F       >  out (2Fh),a
+62    013F 3E 0F                ld a,0Fh
+62    0141 D3 2E          out (2Eh),a
+63    0143 18 FE        park:   jr park
+64    0145                      assert $ < 0180h
+65    0145
+# file closed: rprobe.asm
