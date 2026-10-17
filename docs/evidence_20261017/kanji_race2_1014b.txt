@@ -1,0 +1,12 @@
+kanji	caddr	668 paths	worst data delay 5.823 ns	emu:emu|msx:MSX|msx_slots:msx_slots|kanji:kanji|addr2[2]~DUPLICATE -> emu:emu|sdram_tdm:sdram|ch2_caddr[26]
+kanji	cpend	0 paths	worst data delay -1.000 ns	 -> 
+kanji	req1	0 paths	worst data delay -1.000 ns	 -> 
+kanji	hl	170 paths	worst data delay 7.109 ns	emu:emu|msx:MSX|msx_slots:msx_slots|kanji:kanji|addr2[2]~DUPLICATE -> emu:emu|sdram_tdm:sdram|ch2_hl.r[12]
+t80	caddr	1736 paths	worst data delay 27.930 ns	emu:emu|msx:MSX|T80s:T80|T80:u0|IR[4] -> emu:emu|sdram_tdm:sdram|ch2_caddr[26]
+t80	cpend	62 paths	worst data delay 26.620 ns	emu:emu|msx:MSX|T80s:T80|T80:u0|IR[4] -> emu:emu|sdram_tdm:sdram|ch2_cpend
+t80	req1	124 paths	worst data delay 26.190 ns	emu:emu|msx:MSX|T80s:T80|T80:u0|IR[4] -> emu:emu|sdram_tdm:sdram|ch2_req_1
+t80	hl	310 paths	worst data delay 29.216 ns	emu:emu|msx:MSX|T80s:T80|T80:u0|IR[4] -> emu:emu|sdram_tdm:sdram|ch2_hl.r[12]
+t80bus	caddr	112 paths	worst data delay 18.293 ns	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_caddr[26]
+t80bus	cpend	4 paths	worst data delay 16.751 ns	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+t80bus	req1	8 paths	worst data delay 16.321 ns	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_req_1
+t80bus	hl	20 paths	worst data delay 19.579 ns	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_hl.r[12]

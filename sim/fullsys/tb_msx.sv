@@ -227,6 +227,9 @@ module tb;
          a++; c = $fgetc(fd);
       end
       $fclose(fd);
+`ifdef KPROBE
+      kprobe_patch();
+`endif
       fd = $fopen({pfx, ".bram.bin"}, "rb");
       if (fd == 0) $fatal(1, "cannot open %s.bram.bin", pfx);
       for (int i = 0; i < 65536; i++) begin c = $fgetc(fd); systemRAM.ram.mem[i] = 8'(c); end
@@ -262,7 +265,20 @@ module tb;
    wire  [7:0] ch1_dout;
    wire        sdram_ready;
 
-   wire  [7:0] sdram_dout;
+   wire  [7:0] sdram_dout, sdram_dout_c;
+`ifndef KMUT
+   assign sdram_dout = sdram_dout_c;
+`else
+   //  negative control: during an I/O cycle the CPU gets the SDRAM byte as it was
+   //  when IORQ fell -- the previous read's word, as a late completion would leave it
+   logic [7:0] kmut_hold = 8'h00;
+   logic       kmut_q = 1'b0;
+   always @(posedge clk_sdram) begin
+      kmut_q <= ~MSX.iorq_n;
+      if (MSX.iorq_n) kmut_hold <= sdram_dout_c;
+   end
+   assign sdram_dout = (~MSX.iorq_n & kmut_q) ? kmut_hold : sdram_dout_c;
+`endif
    wire        ch2_ready;
 
    logic [12:0] SDRAM_A;
@@ -288,7 +304,7 @@ module tb;
       .SDRAM_DQ_o(dq_o), .SDRAM_DQ_oe(dq_oe), .SDRAM_DQ_i(dq_i),
       .ch1_addr(ch1_addr), .ch1_dout(ch1_dout), .ch1_din(ch1_din),
       .ch1_req(ch1_req), .ch1_rnw(ch1_rnw), .ch1_ready(sdram_ready),
-      .ch2_addr(ram_addr), .ch2_dout(sdram_dout), .ch2_din(ram_din),
+      .ch2_addr(ram_addr), .ch2_dout(sdram_dout_c), .ch2_din(ram_din),
       .ch2_req(sdram_ce), .ch2_rnw(ram_rnw), .ch2_ready(ch2_ready),
       .ch2_rdtog(sdram_rdtog), .ch2_hit(sdram_hit),
       .ch3_addr(flash_addr), .ch3_din(flash_din), .ch3_req(flash_req),
@@ -1167,6 +1183,74 @@ module tb;
    final if (opl3_n > 1)
       $display("clk_opl3: %0d edges over %.3f ms = %.4f MHz (OPL3 wants 14.3182)",
                opl3_n, (opl3_t1 - opl3_t0) / 1e6, (opl3_n - 1) / (opl3_t1 - opl3_t0) * 1e3);
+
+`ifdef KPROBE
+   //  -DKPROBE +kprobe=<hex> (sim/fullsys/kprobe/kprobe.asm): the hex image replaces the
+   //  BIOS at its SDRAM home after the preload.  Every IN from D9h is checked: the
+   //  byte the CPU took (d_to_cpu on the last clk21m of the strobe, as tb_kanji.sv
+   //  does -- that bench matched the board on 2026-09-23) against the kanji image at
+   //  the address the kanji device put on the bus for that read (device_kanji_addr
+   //  while device_kanji_ram_ce).  Phases come from OUT (2Eh),n.
+   task automatic kprobe_patch();
+      string f; int fd, v, n = 0; int base;
+      if (!$value$plusargs("kprobe=%s", f)) $fatal(1, "-DKPROBE needs +kprobe=<hex>");
+      fd = $fopen(f, "r");
+      if (fd == 0) $fatal(1, "cannot open %s", f);
+      base = int'(lookup_RAM[0].addr);
+      //  only the bytes in the file (the first version patched 512 and, 2-state,
+      //  wrote zeros past the end of the image)
+      while ($fscanf(fd, "%h", v) == 1) begin
+         if ((base + n) & 1) u_chip.mem[`MEMW'((base + n) >> 1)][15:8] = 8'(v);
+         else                u_chip.mem[`MEMW'((base + n) >> 1)][7:0]  = 8'(v);
+         n++;
+      end
+      $fclose(fd);
+      $display("kprobe: %0d bytes over the BIOS at %07x", n, base);
+   endtask
+   function automatic logic [7:0] sd_byte(input int a);
+      logic [15:0] w = u_chip.mem[`MEMW'(a >> 1)];
+      return (a & 1) ? w[15:8] : w[7:0];
+   endfunction
+   int  kp_phase = 0;
+   int  kp_n [16], kp_ok [16];
+   logic kp_rd_q = 1'b0, kp_io_q = 1'b0, kp_seen = 1'b0;
+   logic [7:0]  kp_d;
+   logic [26:0] kp_a;
+   int  kp_bad_shown = 0;
+   initial for (int i = 0; i < 16; i++) begin kp_n[i] = 0; kp_ok[i] = 0; end
+   wire kp_rd = ~MSX.iorq_n & ~MSX.rd_n & MSX.m1_n & (MSX.a[7:0] == 8'hD9);
+   wire kp_wr = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n & (MSX.a[7:0] == 8'h2E);
+   always @(posedge clk21m) begin
+      kp_rd_q <= kp_rd;
+      kp_io_q <= kp_wr;
+      if (kp_wr & ~kp_io_q) begin
+         kp_phase = int'(MSX.d_from_cpu);
+         $display("kprobe: phase %0d at %.3f ms", kp_phase, $realtime / 1e6);
+         if (kp_phase == 15) begin
+            for (int p = 1; p < 4; p++)
+               $display("KPROBE phase %0d: %0d / %0d reads correct", p, kp_ok[p], kp_n[p]);
+            $display("KPROBE RESULT %s", (kp_n[1] == 4096 && kp_ok[1] == 4096 && kp_n[2] == 4096 && kp_ok[2] == 4096
+                                          && kp_n[3] == 4096 && kp_ok[3] == 4096) ? "PASS" : "FAIL");
+            $finish;
+         end
+      end
+      if (kp_rd) begin
+         kp_d <= MSX.d_to_cpu;
+         if (MSX.msx_slots.device_kanji_ram_ce) begin kp_a <= MSX.msx_slots.device_kanji_addr; kp_seen <= 1'b1; end
+      end
+      if (kp_rd_q & ~kp_rd) begin
+         automatic logic [7:0] want = sd_byte(int'(kp_a));
+         kp_n[kp_phase & 15]++;
+         if (kp_seen && kp_d == want) kp_ok[kp_phase & 15]++;
+         else if (kp_bad_shown < 12) begin
+            kp_bad_shown++;
+            $display("kprobe BAD ph%0d #%0d t=%.4f ms addr %07x got %02x want %02x%s", kp_phase, kp_n[kp_phase & 15],
+                     $realtime / 1e6, kp_a, kp_d, want, kp_seen ? "" : " (no kanji ram_ce seen)");
+         end
+         kp_seen <= 1'b0;
+      end
+   end
+`endif
 
    //  +iolog=<file>: every CPU OUT to the VDP (98h-9Bh) and MoonSound (7Eh/7Fh,
    //  C4h-C7h) and every IN from MoonSound, "t dir port value", in order.  Picture

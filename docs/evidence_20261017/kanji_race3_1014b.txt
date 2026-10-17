@@ -1,0 +1,14 @@
+*T80s:T80|IORQ_n	caddr	paths 28	max 14.069	min 6.747
+*T80s:T80|IORQ_n	cpend	paths 1	max 9.414	min 7.566
+*T80s:T80|IORQ_n	req1	paths 2	max 9.111	min 7.247
+*T80s:T80|RD_n	caddr	paths 28	max 17.976	min 5.249
+*T80s:T80|RD_n	cpend	paths 1	max 16.563	min 6.394
+*T80s:T80|RD_n	req1	paths 2	max 16.133	min 6.075
+*T80s:T80|MREQ_n	caddr	paths 28	max 18.164	min 6.158
+*T80s:T80|MREQ_n	cpend	paths 1	max 16.751	min 5.723
+*T80s:T80|MREQ_n	req1	paths 2	max 16.321	min 7.506
+*msx:MSX|iack	caddr	paths 0	max -1.000	min 1000000000.000
+*msx:MSX|iack	cpend	paths 0	max -1.000	min 1000000000.000
+*msx:MSX|iack	req1	paths 0	max -1.000	min 1000000000.000
+*T80s:T80|A[*]	NO-SOURCES
+clk_sdram period 7.760 waveform 0.000 3.880  | clk21m period 46.563 waveform 0.000 23.281 
