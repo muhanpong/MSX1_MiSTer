@@ -1,0 +1,42 @@
+# strobe_race MARGIN=0.0 ns
+slow	T80_IORQ_n	kanji	FAIL	capture max 17.193 vs request min 6.403  (capture min 5.934, request max 10.634, 62 paths)	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_addr_1[10]
+slow	T80_IORQ_n	rnw	NO-PATH	(request min 6.403 max 10.634)
+slow	T80_IORQ_n	other	NO-PATH	(request min 6.403 max 10.634)
+slow	T80_IORQ_n	SKEW-INFO	req_1 min 6.403 max 10.336 | cpend min 6.726 max 10.634
+slow	T80_MREQ_n	kanji	NO-PATH	(request min 6.699 max 18.023)
+slow	T80_MREQ_n	rnw	FAIL	capture max 13.352 vs request min 6.699  (capture min 5.156, request max 18.023, 1 paths)	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_rnw_1
+slow	T80_MREQ_n	other	FAIL	capture max 21.337 vs request min 6.699  (capture min 4.337, request max 18.023, 60 paths)	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_addr_1[10]
+slow	T80_MREQ_n	SKEW-INFO	req_1 min 6.699 max 17.598 | cpend min 6.990 max 18.023
+slow	T80_RD_n	kanji	FAIL	capture max 16.235 vs request min 5.230  (capture min 4.435, request max 17.781, 62 paths)	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_addr_1[10]
+slow	T80_RD_n	rnw	FAIL	capture max 13.374 vs request min 5.230  (capture min 7.808, request max 17.781, 1 paths)	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_rnw_1
+slow	T80_RD_n	other	FAIL	capture max 21.095 vs request min 5.230  (capture min 1000000000.000, request max 17.781, 60 paths)	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_addr_1[10]
+slow	T80_RD_n	SKEW-INFO	req_1 min 5.230 max 17.356 | cpend min 5.553 max 17.781
+slow	T80_WR_n	kanji	NO-PATH	(request min 5.000 max 17.711)
+slow	T80_WR_n	rnw	FAIL	capture max 13.092 vs request min 5.000  (capture min 5.012, request max 17.711, 1 paths)	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_rnw_1
+slow	T80_WR_n	other	FAIL	capture max 21.408 vs request min 5.000  (capture min 4.193, request max 17.711, 61 paths)	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_addr_1[10]
+slow	T80_WR_n	SKEW-INFO	req_1 min 5.000 max 17.286 | cpend min 5.323 max 17.711
+slow	NZB	kanji	FAIL	capture max 16.462 vs request min 4.372  (capture min 3.889, request max 17.003, 62 paths)	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_addr_1[10]
+slow	NZB	rnw	FAIL	capture max 12.384 vs request min 4.372  (capture min 4.282, request max 17.003, 1 paths)	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_rnw_1
+slow	NZB	other	FAIL	capture max 20.700 vs request min 4.372  (capture min 3.463, request max 17.003, 61 paths)	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_addr_1[10]
+slow	NZB	SKEW-INFO	req_1 min 4.372 max 16.578 | cpend min 4.695 max 17.003
+fast	T80_IORQ_n	kanji	FAIL	capture max 8.102 vs request min 3.129  (capture min 2.852, request max 5.189, 62 paths)	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_addr_1[24]
+fast	T80_IORQ_n	rnw	NO-PATH	(request min 3.129 max 5.189)
+fast	T80_IORQ_n	other	NO-PATH	(request min 3.129 max 5.189)
+fast	T80_IORQ_n	SKEW-INFO	req_1 min 3.129 max 4.956 | cpend min 3.341 max 5.189
+fast	T80_MREQ_n	kanji	NO-PATH	(request min 2.991 max 8.349)
+fast	T80_MREQ_n	rnw	FAIL	capture max 6.036 vs request min 2.991  (capture min 2.384, request max 8.349, 1 paths)	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_rnw_1
+fast	T80_MREQ_n	other	FAIL	capture max 9.670 vs request min 2.991  (capture min 2.009, request max 8.349, 60 paths)	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_addr_1[10]
+fast	T80_MREQ_n	SKEW-INFO	req_1 min 2.991 max 8.056 | cpend min 3.194 max 8.349
+fast	T80_RD_n	kanji	FAIL	capture max 7.492 vs request min 2.519  (capture min 2.149, request max 8.333, 62 paths)	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_addr_1[24]
+fast	T80_RD_n	rnw	FAIL	capture max 5.990 vs request min 2.519  (capture min 3.642, request max 8.333, 1 paths)	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_rnw_1
+fast	T80_RD_n	other	FAIL	capture max 9.654 vs request min 2.519  (capture min 1000000000.000, request max 8.333, 60 paths)	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_addr_1[10]
+fast	T80_RD_n	SKEW-INFO	req_1 min 2.519 max 8.040 | cpend min 2.758 max 8.333
+fast	T80_WR_n	kanji	NO-PATH	(request min 2.274 max 8.179)
+fast	T80_WR_n	rnw	FAIL	capture max 5.999 vs request min 2.274  (capture min 2.258, request max 8.179, 1 paths)	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_rnw_1
+fast	T80_WR_n	other	FAIL	capture max 9.760 vs request min 2.274  (capture min 1.883, request max 8.179, 61 paths)	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_addr_1[10]
+fast	T80_WR_n	SKEW-INFO	req_1 min 2.274 max 7.886 | cpend min 2.513 max 8.179
+fast	NZB	kanji	FAIL	capture max 7.699 vs request min 1.962  (capture min 1.856, request max 7.880, 62 paths)	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_addr_1[24]
+fast	NZB	rnw	FAIL	capture max 5.664 vs request min 1.962  (capture min 1.941, request max 7.880, 1 paths)	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_rnw_1
+fast	NZB	other	FAIL	capture max 9.425 vs request min 1.962  (capture min 1.566, request max 7.880, 60 paths)	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_addr_1[10]
+fast	NZB	SKEW-INFO	req_1 min 1.962 max 7.587 | cpend min 2.201 max 7.880
+STROBE_RACE FAIL (22 failing checks)

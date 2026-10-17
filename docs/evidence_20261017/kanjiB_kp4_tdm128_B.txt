@@ -1,0 +1,9 @@
+kprobe: 199 bytes over the BIOS at 0000000
+kprobe: phase 1 at 0.495 ms
+kprobe: phase 2 at 31.146 ms
+kprobe: phase 3 at 121.774 ms
+kprobe: phase 15 at 124.097 ms
+KPROBE phase 1: 4096 / 4096 reads correct
+KPROBE phase 2: 4096 / 4096 reads correct
+KPROBE phase 3: 4096 / 4096 reads correct
+KPROBE RESULT PASS

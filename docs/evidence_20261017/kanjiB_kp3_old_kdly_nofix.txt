@@ -1,0 +1,21 @@
+kprobe: 199 bytes over the BIOS at 0000000
+kprobe: phase 1 at 0.495 ms
+kprobe BAD ph1 #2 t=0.5347 ms addr 00b4001 got 7c want 00                       
+kprobe BAD ph1 #3 t=0.5411 ms addr 00b4002 got 70 want 00                       
+kprobe BAD ph1 #4 t=0.5476 ms addr 00b4003 got 80 want 00                       
+kprobe BAD ph1 #5 t=0.5540 ms addr 00b4004 got f8 want 07                       
+kprobe BAD ph1 #6 t=0.5604 ms addr 00b4005 got f8 want 04                       
+kprobe BAD ph1 #7 t=0.5668 ms addr 00b4006 got 00 want 04                       
+kprobe BAD ph1 #8 t=0.5733 ms addr 00b4007 got 32 want 07                       
+kprobe BAD ph1 #9 t=0.5797 ms addr 00b4008 got 2f want 00                       
+kprobe BAD ph1 #10 t=0.5861 ms addr 00b4009 got 15 want 00                       
+kprobe BAD ph1 #11 t=0.5925 ms addr 00b400a got 18 want 00                       
+kprobe BAD ph1 #12 t=0.5990 ms addr 00b400b got 06 want 00                       
+kprobe BAD ph1 #13 t=0.6054 ms addr 00b400c got cd want c0                       
+kprobe: phase 2 at 31.146 ms
+kprobe: phase 3 at 121.774 ms
+kprobe: phase 15 at 124.084 ms
+KPROBE phase 1: 85 / 4096 reads correct
+KPROBE phase 2: 48 / 4096 reads correct
+KPROBE phase 3: 85 / 4096 reads correct
+KPROBE RESULT FAIL

@@ -36,6 +36,19 @@ set_false_path -from [get_clocks {pll_audio|pll_audio_inst|altera_pll_i|*|divclk
 # hold 5.  Applies to captured ch2 fields (addr/rnw/din); ch2_req_1 is
 # the edge-detect signal and stays single-cycle.
 #
+# CORRECTION (2026-10-17, sdram128-study): two statements above are not what the
+# code does.  (1) "ch2_addr_1 captures ~2 clk_sdram after the req edge": sdram.sv
+# and sdram_tdm both capture ch2_addr on the FIRST clk_sdram edge that sees the
+# request (sdram.sv:254-257, sdram_tdm request-edge block).  (2) "ch2_req_1 ...
+# stays single-cycle": the {*sdram*ch2_*} pattern below matches ch2_req_1 too, and
+# the comment further down says so.  So the premise is only that the captured
+# fields are on the bus BEFORE the strobe that makes the request.  That holds for
+# a memory cycle's A bus.  It did not hold for the kanji port read, where IORQ_n
+# both raises the request and switches ram_addr (board: 0-8/4096 bytes at 128.86
+# MHz); kanji.sv now raises that request one clk21m after the select, which makes
+# the premise true for that path as well.  tools/buildgate/strobe_race.tcl prints
+# the strobe -> request / capture arrivals the 6-cycle exception hides.
+#
 # Use -to pin patterns only (no -from clock) so Quartus matches any
 # source feeding the captured ch2 registers.  Use ~ wildcards to handle
 # Quartus's hierarchical naming (emu:emu|sdram:sdram|...).

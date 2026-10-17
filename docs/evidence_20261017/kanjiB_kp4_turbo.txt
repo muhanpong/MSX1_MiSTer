@@ -1,0 +1,8 @@
+tb_turbo_clock: PASS (0 errors)
+  -> tb_turbo_clock PASS
+tb_turbo_guard: 56 checks, 0 errors
+  -> tb_turbo_guard PASS
+tb_turbo_slowdev: PASS - 0 writes lost in every shipped configuration
+  -> tb_turbo_slowdev PASS
+  -> tb_fdc_edge PASS
+run_turbo: ALL PASS

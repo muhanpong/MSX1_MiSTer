@@ -204,7 +204,24 @@ wire         [17:0] base_sram  = lookup_SRAM[ref_sram].addr;
 wire                sram_denied = external & cart_num & (mapper != MAPPER_FMPAC) & (mapper != MAPPER_GM2);
 wire         [15:0] size_sram  = sram_denied ? 16'd0 : lookup_SRAM[ref_sram].size;
 
-assign ram_addr   = device_kanji_ram_ce ? device_kanji_addr                                   :
+`ifndef KNOB
+wire kanji_sdram_rq = device_kanji_ram_req;   // kanji.sv: rise one clk21m after the select
+`else
+wire kanji_sdram_rq = device_kanji_ram_ce;    // sim only: the request as before the fix
+`endif
+`ifndef KDLY
+wire kanji_sel = device_kanji_ram_ce;
+`else
+//  sim only (sim/fullsys, -DKDLY): the address select one clk_sdram later than the
+//  request it comes with -- the board's suspected IORQ race, made explicit.  The
+//  clock is the bench's: msx.sv does not connect this module's clk_sdram port (it
+//  is 0 here), and the first KDLY run, clocked by it, never selected the kanji
+//  address at all.
+logic kanji_sel_d = 1'b0;
+always @(posedge tb.clk_sdram) kanji_sel_d <= device_kanji_ram_ce;
+wire kanji_sel = device_kanji_ram_ce & kanji_sel_d;
+`endif
+assign ram_addr   = kanji_sel           ? device_kanji_addr                                   :
                                           (sram_cs ? 27'(base_sram) : base_ram) + mapper_addr ;
 
 wire cart_ascii8  = mapper == MAPPER_ASCII8  | mapper == MAPPER_KOEI | mapper == MAPPER_WIZARDY;
@@ -258,7 +275,7 @@ assign cpu_din          = mapper_ram_dout                        //IO
                         & mapper_panasonic_dout                  //UNMAPPED (turbo R 3-3 mapper read-back)
                         & (mem_unmaped  ? 8'hFF : ram_dout);
 
-assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
+assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped) | kanji_sdram_rq | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
 assign bram_ce  = (sdram_size == 2'd0 | sram_cs)  & ((cpu_mreq & (cpu_rd | (cpu_wr & (~ram_ro | sram_cs))) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce);
 assign ram_rnw  = ~((sram_cs & sram_wr) | (~sram_cs & cpu_wr & cpu_mreq & ~ram_ro) | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
 
@@ -781,7 +798,8 @@ opll opll
 assign slow_dev = mapper_konami_scc_sccReq | mapper_mfrdsd1_sccReq | mapper_yamanooto_sccReq
                 | fmpac_opll_win;
 
-wire        device_kanji_ram_ce;
+wire        device_kanji_ram_ce;     // address select (ram_addr), bram_ce, the counters
+wire        device_kanji_ram_req;    // SDRAM request: ram_ce, rise one clk21m later (kanji.sv)
 wire [26:0] device_kanji_addr;
 kanji kanji
 (
@@ -792,6 +810,7 @@ kanji kanji
    .rom_size(lookup_RAM[msx_dev_ref_ram[0]].size),
    .mem_addr(device_kanji_addr),
    .ram_ce(device_kanji_ram_ce),
+   .ram_req(device_kanji_ram_req),
    .*
 );
 

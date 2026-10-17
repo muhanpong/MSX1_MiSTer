@@ -1217,6 +1217,16 @@ module tb;
    logic [7:0]  kp_d;
    logic [26:0] kp_a;
    int  kp_bad_shown = 0;
+   //  +kwave=N: per clk_sdram trace of the first N D9h reads (signals of the kanji path)
+   int  kp_wave = 0, kp_wave_rd = 0;
+   initial void'($value$plusargs("kwave=%d", kp_wave));
+   always @(posedge clk_sdram) if (kp_wave_rd < kp_wave && (~MSX.iorq_n & (MSX.a[7:0] == 8'hD9))) begin
+      $display("KW %0.5f c21=%b rd_n=%b ce=%b req=%b sel=%b ram_addr=%07x kaddr=%07x sdram_ce=%b rnw=%b dout=%02x hit=%b tog=%b d_to_cpu=%02x",
+               $realtime / 1e6, clk21m, MSX.rd_n, MSX.msx_slots.device_kanji_ram_ce, MSX.msx_slots.device_kanji_ram_req,
+               MSX.msx_slots.kanji_sel, MSX.msx_slots.ram_addr, MSX.msx_slots.device_kanji_addr, sdram_ce, ram_rnw,
+               sdram_dout, sdram_hit, sdram_rdtog, MSX.d_to_cpu);
+   end
+   always @(posedge clk21m) if (kp_rd_q & ~kp_rd) kp_wave_rd <= kp_wave_rd + 1;
    initial for (int i = 0; i < 16; i++) begin kp_n[i] = 0; kp_ok[i] = 0; end
    wire kp_rd = ~MSX.iorq_n & ~MSX.rd_n & MSX.m1_n & (MSX.a[7:0] == 8'hD9);
    wire kp_wr = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n & (MSX.a[7:0] == 8'h2E);

@@ -11,7 +11,8 @@ module kanji
    input  [26:0] base_ram,
    input  [15:0] rom_size,
    output [26:0] mem_addr,
-   output        ram_ce
+   output        ram_ce,
+   output        ram_req      // ram_ce whose RISE is one clk21m later: the SDRAM request
 );
 
 logic [26:0] addr1, addr2;
@@ -20,6 +21,23 @@ wire kanji_en = cpu_iorq & addr[7:2] == 6'b1101_10;
 
 assign mem_addr = base_ram + (addr[1] ? addr2 : addr1);
 assign ram_ce   = cs & addr[0] & cpu_rd & kanji_en & (rom_size == 16'd16 | ~addr[1]);
+
+//  The request to SDRAM rises one clk21m after ram_ce, and falls with it.
+//  ram_ce comes from the I/O strobe (cpu_iorq, cpu_rd), and the same ram_ce
+//  switches msx_slots' ram_addr over to mem_addr: request and address start from
+//  ONE edge.  The SDRAM controller latches the address on the first clk_sdram edge
+//  that sees the request (sdram_tdm and sdram.sv alike), and MSX1.sdc relaxes the
+//  CPU -> ch2_* paths to 6 cycles on the premise that the address was out first --
+//  true for a memory cycle's A bus, false here.  On the 128.86 MHz build the board
+//  read 0-8 of 4096 kanji bytes (2026-10-17); STA on that database put IORQ_n ->
+//  address at 14.07 ns against IORQ_n -> request 9.41 ns, and a sim-only one-clock
+//  delay of the select (msx_slots.sv -DKDLY) reproduces the old-address bytes.
+//  Holding the rise back a clk21m (6 clk_sdram) puts the address in place first, so
+//  the SDC premise holds for this path too.  Only the rise: a fall that waited
+//  would merge back-to-back reads into one request (INIR) and lose the edge.
+logic ram_ce_q = 1'b0;
+always @(posedge clk) ram_ce_q <= reset ? 1'b0 : ram_ce;
+assign ram_req = ram_ce & ram_ce_q;
 
 //  The post-read increment fires one clock AFTER ram_ce falls, and which counter
 //  it bumps used to be decided by addr[1] on THAT clock.  T80s still shows the
