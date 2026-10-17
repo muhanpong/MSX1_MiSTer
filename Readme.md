@@ -41,6 +41,8 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *Spare pad buttons press Space, Return or F1, or pause the machine.*
 - **Reset on ROM change** — 롬을 바꿀 때 리셋 대신 기계를 멈춰 두는 선택
   *Hold the machine instead of resetting it while a ROM is swapped.*
+- **OPL4 PCM 엔진 경량화 / Lighter OPL4 PCM engine** — 슬롯 상태를 MLAB으로, 당시 전체 설계 31,934 → 29,637 ALM. 플롭 기준 엔진과 lockstep 검증, 실기 확인
+  *Slot state in MLAB: the whole design went from 31,934 to 29,637 ALM at the time, verified in lockstep against the flop engine and confirmed on the board.*
 
 **곁들여 고친 것 / Also fixed**
 
@@ -58,6 +60,12 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *OPL4 wave registers read back what was written (all but reg 2 and 6 used to read 0), so a read-modify-write stop routine no longer wipes the pan (Neon Horizon).*
 - R#9 LN 전환으로 화면이 끝나지 않는 프레임(오버스캔)에서도 스프라이트 표시 — 위 보더 첫 줄들, LN 1→0 전환 직후
   *Sprites in frames where an R#9 LN switch keeps the display from ending (overscan): on the first top-border lines and right after an LN 1→0 switch.*
+- FW PACK 없이 켠 머신이 CONFIG·키보드 배치·`.sav` 자동 로드를 잃던 문제 (MoonSound 펌웨어 검색의 복귀 경로)
+  *A machine started without an FW PACK lost its CONFIG, keyboard layout and `.sav` auto-load (the MoonSound firmware search's return path).*
+- OPLL은 머신당 한 개 — 내장·슬롯 A·슬롯 B가 같은 7C/7D를 두 번 연주하던 문제
+  *One OPLL per machine: built-in, slot A and slot B all share 7C/7D and used to play twice.*
+- OSD 로드 중 OPL4 홀드가 플래시 카트 접근 뒤 풀리던 문제 (소스 수정, 실기 미확인)
+  *The OPL4 hold during an OSD load dropped once a flash cart had been touched (fixed in source, not yet confirmed on the board).*
 
 아래는 항목별 상세 / Details below.
 
@@ -113,6 +121,24 @@ Any other pack gets none of it, whatever the OSD says.
 - The R800 is NextZ80 run at the R800's clock: fast, but not cycle-exact R800 timing.
 - The `CPU` page shows the R800 rows only on a turbo R pack, and only the Z80 ladder on any
   other machine.
+- **The turbo R's own I/O** (`rtl/peripheral/turbor/`, register tables in its `README.md`):
+  the **PCM chip at A4h/A5h** (8-bit D/A, 15.7 kHz sample counter, BUFF/MUTE/FILT/SEL/SMPL,
+  comparator read-back; MUTE silences *all* sound, as on the real machine, once A5h has been
+  written), the **system timer at E6h/E7h** (16-bit up-counter at 3.579545 MHz / 14; a write
+  clears it without moving the tick grid) and the **pause port A7h** (bit 0 pause-key state,
+  toggling per press; writes: pause LED, hardware pause enable, turbo LED). **PCMPLY**, armed
+  by the opcode fetch at BIOS 0186h, streams samples through that D/A while the CPU waits, at
+  15.75 / 7.875 / 5.25 / 3.9375 kHz, and CTRL+STOP aborts it.
+- **Provenance**: the R800 is OpenCores **NextZ80 v1.0** (Nicolae Dumitrache, 2011, LGPL 2.1
+  or later), copied verbatim into `rtl/cpu/nextz80/`; the four patches in `patches/` (state
+  load/export and swap point, `LD R,A` counting its own fetch, R800 `MULUB`/`MULUW`,
+  block-repeat re-fetch) are applied into `patched/`, and `patches/check.sh` proves the two
+  agree.
+- Known gaps: the S1990's R800-**DRAM** mode is decoded but not wired (no current boot asks
+  for it); the hand-over does not carry WZ (MEMPTR) or Q, so the undocumented flag bits 3/5
+  may differ for the one instruction after a swap. Because the block follows the pack's
+  `002Dh` byte, its BIOS hooks at 0180h–018Bh can no longer land on machines whose ROM has
+  live code there (Daewoo CPC-300 / CPC-300E / CPC-400S, Canon V-8, Sanyo CF-2700 German).
 
 #### Machine packs
 Packs are built from your own ROM dumps with `tools/CreateMSXpack/createMSXpack.py`, or in a
@@ -214,8 +240,13 @@ the firmware's own `Advanced` button map does it without a core change.
 - `MIDI` (`On`/`Off`): an I/O-only MSX-MIDI (8251 + 8254) at `E8h-EFh` on any machine.
   The FS-A1GT's built-in MSX-MIDI comes from its pack, and `SLOT B` → `MU-PACK` puts a
   μ·PACK (Bit2) in slot B with its own MSX-MIDI; the menu says which one is active.
+- A machine pack can also declare the **E2h cartridge** kind (`MIDI_EXT`), which answers E2h
+  alone until software enables it.
 - MIDI OUT goes to the MiSTer's MIDI link (`UART`) and to the USER port at the same time.
-  MIDI IN is not connected at present.
+  The transmit side is verified against openMSX's `midi-out-logger`, including real `.mid`
+  streams and a strobe-width/phase sweep (an earlier bug sent a byte twice when a TxC edge
+  fell inside the I/O strobe). MIDI IN is not connected at present (held idle-high): a stray
+  byte on the receive line used to hang the machine on an RxRDY interrupt.
 - An **MT32-pi** on the USER port gets its own `MT32-pi` page while it is detected:
   `Use MT32-pi`, `Show Info` (its LCD as an overlay), the default `Synth` (Munt /
   FluidSynth), `Munt ROM`, `SoundFont`, and `Reset Hanging Notes`. A popup shows the
@@ -268,6 +299,25 @@ A per-source mixer in the OSD, all on one 2 dB ladder (`0` .. `±8 dB`). It is o
 - Volume, mute and (for SCC) per-channel mute for PSG, MSX-MUSIC, SCC, and MoonSound PCM/FM
 - Labels are dB versus unity, so `+8dB` is a real +8 dB
 
+### OPL4 PCM engine on MLAB
+The PCM slot state (header/dyn arrays, the per-slot register file by register byte) lives
+in MLAB instead of flops. At the time of the change the whole design went from 31,934 to
+29,637 ALM and u_pcm from 4,971 to 2,681. Validated in lockstep against the previous flop
+engine with register writes injected on the exact edge a slot is dispatched and warm resets
+during playback; four mutants that must fail do fail. Confirmed on the board. The MLAB clear
+needs the reset held ≥ 24 clk, which every path into `reset_ms` satisfies by a factor of
+ten — recorded in `tools/buildgate/landmines.tsv`.
+
+### Verification and build gates
+- **fullsys** (`sim/fullsys/`): the whole machine under Verilator (ghdl-converted VHDL),
+  boots a pack, serves a `.sav`, traces branches
+- **`sim/checkrun.sh`**: refuses a bench result unless the runner ran, reported every
+  case, and a named negative control changes the failure count — a bench that cannot go
+  red proves nothing
+- **buildgate** (`tools/buildgate/`): `landmines.tsv` (what this project already learned,
+  keyed by the files you touch) and `tools/check_pins.sh` (a new unconnected port fails;
+  the intended ones are baselined); new Quartus warnings after map stop the build
+
 ### VDP accuracy
 Several timing and behaviour fixes measured against real hardware and openMSX:
 
@@ -316,7 +366,7 @@ Load them manually from the menu
 - Support two cartridges
 - Cartridge emulation:
   - Slot A: `ROM, SCC, SCC+, FM-PAC, MegaFlashROM SCC+ SD, GameMaster2, FDC, Empty`
-  - Slot B: `ROM, SCC, SCC+, FM-PAC, Empty`
+  - Slot B: `ROM, SCC, SCC+, FM-PAC, Empty, MU-PACK`
   - Either slot can instead be expanded into four sub-slots (see *Expanded slots* above)
 - Automatic cartridge mapper detection
 - Manual select mapper: `none, ASCII8, ASCII16X, Konami, KonamiSCC, KOEI, linear64, R-TYPE, WIZARDRY, Yamanooto, NEO-8, NEO-16`
@@ -353,12 +403,33 @@ Copy bios files to Games/MSX1 folder or load them manually from the menu
   `SRAM(PAC/Turbo-R/...)` in the OSD — see [SRAM.NVR](#sramnvr--fm-pac-gamemaster2-machine-sram-rtc-settings).**
 
 ### FW PACK (cartridge / extension firmware)
-`Load FW PACK` supplies the firmware images used by the emulated cartridges — FM-PAC,
-Game Master 2, MegaFlashROM SCC+ SD (Nextor) and the MoonSound wavetable.
+`Load FW PACK` supplies the firmware images used by the emulated cartridges and
+extensions. Four packs are generated (`CART_FW_JP`, `CART_FW_EN`, and the `_2slot`
+variants); they differ only in the FM-PAC ROM and the MegaFlashROM image.
 
 | Extension | File | SHA1 |
 |---|---|---|
+| FM_PAC | `FM_PAC.ROM` (JP) / `FM_PAC_EN.ROM` (EN) | `9d789166e3caf28e4742fe933d962e99618c633d` / `6996489fcec52934b8beed87643cc33d02ecc301` |
+| GM2 | `GM2.ROM` | `5c00f9e3a48411e08fac89b1dfdd2a6e95853919` |
+| FDC | `VY010.ROM` | `8924e3e11eb1c8c1edcb7efa63c26d2bdc142473` |
+| MEGA_FLASH_ROM | `mfrsd_nextor214.rom` | `411c6d8cb5c9085f4ab405d0f16f16706f30d77f` (an alternate dump is also accepted) |
 | MOONSOUND | `yrw801.rom` | `32760893ce06dbe3930627755ba065cc3d8ec6ca` |
+| MU_PACK | `mu-pack.rom` | `e88ca790ab58e7709cd99cbbb23ff7d33631b71f` |
 
-Place the ROMs in `tools/CreateMSXPack/ROM/` and build the pack with `createMSXpack.py`,
-the same way as the BIOS pack.
+The pack is all-or-nothing: `createMSXpack.py` refuses to build it if any listed ROM is
+missing, so a FW PACK that exists always carries every extension. Place the ROMs in
+`tools/CreateMSXPack/ROM/` and build with `createMSXpack.py`, or use `packbuilder.html`
+in a browser, which shows which ROMs are still missing and accepts any of the listed
+dumps for each entry.
+
+Without an FW PACK the machine still boots, but MSX-MUSIC, MoonSound and the other
+extensions above are absent — in practice the FW PACK is standard equipment.
+
+# Features turbo R
+- Packs `Panasonic FS-A1ST` / `FS-A1GT` (DOS2 variants; the pack's BIOS byte 002Dh selects turbo R)
+- The packs need ROMs you supply: the slot 3-3 firmware ROM and your own disk-ROM dumps — `packbuilder.html` shows what is missing and synthesizes the disk ROM
+- CPU: Z80 (T80s) and R800 (NextZ80) with run-time hand-over; `CPU` page: Auto / Force Z80 / Force R800, Z80 and R800 speed ladders, R800 VDP access wait
+- S1990 modes Z80 and R800-ROM (R800-DRAM decoded, not wired)
+- Slot 3-3 Panasonic firmware mapper with battery SRAM, built-in MSX-MIDI, kanji
+- turbo R I/O: PCM chip A4h/A5h (with the PCMPLY hardware player), system timer E6h/E7h, pause port A7h
+- Slot B may hold a MU-PACK (RAM/ROM mapper + MSX-MIDI)
