@@ -1,0 +1,47 @@
+# field_race v4 on ae02602 (req split by destination register, REQSKEW); other lines identical to v3
+# field_race  2026-10-18T22:58  mode=tdm T=7.760
+slow	req@req_1	T80_MREQ_n  	late  14.126 ns k=2	early   6.696 ns k=1	   26 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_req_1~DUPLICATE
+slow	req@cpend	T80_MREQ_n  	late  14.551 ns k=2	early   6.709 ns k=1	   15 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@rq   	T80_MREQ_n  	late  14.414 ns k=2	early   6.926 ns k=1	   30 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+slow	req@bv   	T80_MREQ_n  	late  14.290 ns k=2	early   6.748 ns k=1	   15 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+slow	req@req_1	T80_RD_n    	late  13.973 ns k=2	early   5.227 ns k=1	   48 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_req_1~DUPLICATE
+slow	req@cpend	T80_RD_n    	late  14.398 ns k=2	early   5.550 ns k=1	   24 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@rq   	T80_RD_n    	late  14.261 ns k=2	early   5.966 ns k=1	   48 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+slow	req@bv   	T80_RD_n    	late  14.137 ns k=2	early   5.741 ns k=1	   24 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+slow	req@req_1	T80_WR_n    	late  13.738 ns k=2	early   4.997 ns k=1	   26 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_req_1~DUPLICATE
+slow	req@cpend	T80_WR_n    	late  14.081 ns k=2	early   5.320 ns k=1	   15 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@rq   	T80_WR_n    	late  14.028 ns k=2	early   5.504 ns k=1	   30 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+slow	req@bv   	T80_WR_n    	late  13.911 ns k=2	early   5.453 ns k=1	   15 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+slow	req@req_1	T80_IORQ_n  	late  10.336 ns k=2	early   6.400 ns k=1	    2 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_req_1~DUPLICATE
+slow	req@cpend	T80_IORQ_n  	late  10.634 ns k=2	early   6.723 ns k=1	    1 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@rq   	T80_IORQ_n  	late  11.304 ns k=2	early   7.139 ns k=1	    2 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+slow	req@bv   	T80_IORQ_n  	late  10.838 ns k=2	early   6.898 ns k=1	    1 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+slow	req@req_1	NZB_ph      	late  13.030 ns k=2	early   4.369 ns k=1	   78 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_req_1~DUPLICATE
+slow	req@cpend	NZB_ph      	late  13.435 ns k=2	early   4.692 ns k=1	   43 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@rq   	NZB_ph      	late  13.320 ns k=2	early   4.876 ns k=1	   86 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+slow	req@bv   	NZB_ph      	late  13.203 ns k=2	early   4.825 ns k=1	   43 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_bv
+fast	req@req_1	T80_MREQ_n  	late   6.465 ns k=1	early   2.988 ns k=1	   26 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_req_1~DUPLICATE
+fast	req@cpend	T80_MREQ_n  	late   6.758 ns k=1	early   3.135 ns k=1	   15 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@rq   	T80_MREQ_n  	late   6.669 ns k=1	early   3.132 ns k=1	   30 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+fast	req@bv   	T80_MREQ_n  	late   6.496 ns k=1	early   2.984 ns k=1	   15 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+fast	req@req_1	T80_RD_n    	late   6.393 ns k=1	early   2.516 ns k=1	   48 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_req_1~DUPLICATE
+fast	req@cpend	T80_RD_n    	late   6.686 ns k=1	early   2.755 ns k=1	   24 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@rq   	T80_RD_n    	late   6.597 ns k=1	early   2.874 ns k=1	   48 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+fast	req@bv   	T80_RD_n    	late   6.424 ns k=1	early   2.699 ns k=1	   24 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+fast	req@req_1	T80_WR_n    	late   6.317 ns k=1	early   2.271 ns k=1	   26 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_req_1~DUPLICATE
+fast	req@cpend	T80_WR_n    	late   6.610 ns k=1	early   2.510 ns k=1	   15 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@rq   	T80_WR_n    	late   6.521 ns k=1	early   2.520 ns k=1	   30 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+fast	req@bv   	T80_WR_n    	late   6.348 ns k=1	early   2.450 ns k=1	   15 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+fast	req@req_1	T80_IORQ_n  	late   4.956 ns k=1	early   3.126 ns k=1	    2 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_req_1~DUPLICATE
+fast	req@cpend	T80_IORQ_n  	late   5.189 ns k=1	early   3.338 ns k=1	    1 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@rq   	T80_IORQ_n  	late   5.391 ns k=1	early   3.484 ns k=1	    2 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+fast	req@bv   	T80_IORQ_n  	late   5.177 ns k=1	early   3.245 ns k=1	    1 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+fast	req@req_1	NZB_ph      	late   5.982 ns k=1	early   1.959 ns k=1	   78 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_req_1~DUPLICATE
+fast	req@cpend	NZB_ph      	late   6.275 ns k=1	early   2.198 ns k=1	   43 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@rq   	NZB_ph      	late   6.186 ns k=1	early   2.208 ns k=1	   86 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+fast	req@bv   	NZB_ph      	late   6.013 ns k=1	early   2.138 ns k=1	   43 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_bv
+REQSKEW	NZB_ph	RISK	k seen: 1 2	slow:req_1:2/1:13.030/4.369 slow:cpend:2/1:13.435/4.692 slow:rq:2/1:13.320/4.876 slow:bv:2/1:13.203/4.825 fast:req_1:1/1:5.982/1.959 fast:cpend:1/1:6.275/2.198 fast:rq:1/1:6.186/2.208 fast:bv:1/1:6.013/2.138
+REQSKEW	T80_IORQ_n	RISK	k seen: 1 2	slow:req_1:2/1:10.336/6.400 slow:cpend:2/1:10.634/6.723 slow:rq:2/1:11.304/7.139 slow:bv:2/1:10.838/6.898 fast:req_1:1/1:4.956/3.126 fast:cpend:1/1:5.189/3.338 fast:rq:1/1:5.391/3.484 fast:bv:1/1:5.177/3.245
+REQSKEW	T80_MREQ_n	RISK	k seen: 1 2	slow:req_1:2/1:14.126/6.696 slow:cpend:2/1:14.551/6.709 slow:rq:2/1:14.414/6.926 slow:bv:2/1:14.290/6.748 fast:req_1:1/1:6.465/2.988 fast:cpend:1/1:6.758/3.135 fast:rq:1/1:6.669/3.132 fast:bv:1/1:6.496/2.984
+REQSKEW	T80_RD_n	RISK	k seen: 1 2	slow:req_1:2/1:13.973/5.227 slow:cpend:2/1:14.398/5.550 slow:rq:2/1:14.261/5.966 slow:bv:2/1:14.137/5.741 fast:req_1:1/1:6.393/2.516 fast:cpend:1/1:6.686/2.755 fast:rq:1/1:6.597/2.874 fast:bv:1/1:6.424/2.699
+REQSKEW	T80_WR_n	RISK	k seen: 1 2	slow:req_1:2/1:13.738/4.997 slow:cpend:2/1:14.081/5.320 slow:rq:2/1:14.028/5.504 slow:bv:2/1:13.911/5.453 fast:req_1:1/1:6.317/2.271 fast:cpend:1/1:6.610/2.510 fast:rq:1/1:6.521/2.520 fast:bv:1/1:6.348/2.450

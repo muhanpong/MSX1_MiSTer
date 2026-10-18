@@ -41,6 +41,16 @@
 #           RNW2 PASS if k_late <= 2 (= 2 T, the second edge), else FAIL.  Only
 #           clk21m sources (the strobes).  NO-PATH on a DB without the recheck.
 #           rnw2_any (INFO): the same without the ram_rnw net filter.
+#   req@R   (core_builder 2026-10-18) the req class split by destination register R:
+#           ch2_req_1 (the edge detector's memory), ch2_cpend (cache lookup start),
+#           ch2_rq / ch2_bv (queue head / second entry).  All four must take one
+#           request on the SAME edge: if ch2_req_1 has it and ch2_cpend / ch2_rq do
+#           not yet, req & ~req_1 is never true there and the request is lost.
+#           REQSKEW verdict per source, over both corners: SAFE only if every
+#           register's late and early k is one and the same k.  Arrivals move
+#           continuously between the corners; if k differs anywhere, some operating
+#           point puts a capture edge between two of these registers (they arrive
+#           ~0.3-1 ns apart), so RISK.  Conservative by construction.
 #   din     data registers (T80 DO, NextZ80 state) -> {ch2_din_1*, ch2_bdin*}
 #   addr    address-side registers (T80 u0 except DO, NextZ80 state) -> {ch2_addr_1*,
 #           ch2_caddr*, ch2_hl*, ch2_baddr*}, NOT through sdram_ce, the unmap gate,
@@ -118,6 +128,8 @@ proc line {f model cls src r} {
 }
 
 set T80S {*T80s:T80|IORQ_n *T80s:T80|MREQ_n *T80s:T80|RD_n *T80s:T80|WR_n}
+set DECR [list req_1 $M|ch2_req_1* cpend $M|ch2_cpend* rq $M|ch2_rq* bv $M|ch2_bv*]
+array set KS {}
 foreach model {slow fast} {
     create_timing_netlist -model $model
     read_sdc
@@ -127,6 +139,11 @@ foreach model {slow fast} {
         set src [get_registers -nowarn $sp]
         if {[get_collection_size $src] == 0} { puts $f "$model\tsrc\t$sn\tNO-SOURCE"; continue }
         line $f $model req  $sn [span $src $REQ {emu|MSX|msx_slots|sdram_ce*} $GATEX]
+        foreach {rn rp} $DECR {
+            set r [span $src [list $rp] {emu|MSX|msx_slots|sdram_ce*} $GATEX]
+            line $f $model "req@$rn" $sn $r
+            if {[lindex $r 0] > 0} { lappend KS($sn) "$model:$rn:[lindex $r 3]/[lindex $r 4]:[format %.3f [lindex $r 1]]/[format %.3f [lindex $r 2]]"; lappend KS($sn,k) [lindex $r 3] [lindex $r 4] }
+        }
         line $f $model gate_ffff $sn [span $src $REQ {emu|MSX|msx_slots|sdram_ce*} {} $FFFFX]
         line $f $model gate_any  $sn [span $src $REQ {emu|MSX|msx_slots|sdram_ce*} {} $GATEX]
         line $f $model rnw  $sn [span $src $RNWD {emu|MSX|msx_slots|ram_rnw*} {*msx_slots|sdram_ce*}]
@@ -154,6 +171,11 @@ foreach model {slow fast} {
     line $f $model addr NZ_state [span $nzs $ADRD {} $AX]
     line $f $model kanji T80_IORQ_n [span [get_registers {*T80s:T80|IORQ_n}] $ADRD {emu|MSX|msx_slots|kanji|ram_ce*} {*msx_slots|sdram_ce*}]
     delete_timing_netlist
+}
+foreach sn [lsort [array names KS]] {
+    if {[string match *,k $sn]} continue
+    set ks [lsort -unique -integer $KS($sn,k)]
+    puts $f "REQSKEW\t$sn\t[expr {[llength $ks] == 1 ? "SAFE" : "RISK"}]\tk seen: $ks\t$KS($sn)"
 }
 close $f
 project_close
