@@ -109,7 +109,9 @@ CL3/BL2 칩 모델 `sdram_big_tdm`(tb_msx.sv `-DTDM`). `prep.sh`가 `tb/mkshim_t
     포트 A가 입력으로 남아(ppi_out_a=0) `OUT (A8h)`가 무효, 모든 페이지가 슬롯 0이다. 첫 RPROBE 20판은 이것
     때문에 전부(주입 없음 포함) 같은 FAIL이었고, "FFFF←0Fh → RST 38"도 같은 원인(FFFF가 슬롯 0 레지스터)이었다.
     `+rwave=N`(8000-BFFF 읽기/쓰기 + 슬롯·매퍼·ram_addr), EDGEHIST(입력이 바뀌는 clk_sdram 위상)로 확인.
-- **지연 주입**(`-DINJ_RNW/_DIN/_ADDR/_UNMAP`, `-DKDLY`, `-DKMUT`, `-DKNOB`): clk21m 상승 직후 첫
+- **지연 주입**(`-DINJ_RNW/_DIN/_ADDR/_UNMAP/_REQ`, `-DKDLY`, `-DKMUT`, `-DKNOB`; `INJ_REQ` = 요청+주소+rnw+din을
+  한꺼번에 = "컨트롤러가 모든 요청을 둘째 에지에서 처음 봄", 128 MHz slow corner 모사. 자체 검사: 요청 상승 뒤
+  컨트롤러가 본 에지 수 히스토그램이 전부 1이어야 함): clk21m 상승 직후 첫
   clk_sdram 주기에만 컨트롤러가 그 신호를 직전 값으로 본다 = "그 경로가 clk_sdram 하나 늦다". 그 사이엔
   clk_sdram 논리만 표본을 잡으므로 내부 넷도 `force`로 같은 효과. 각 주입은 실제로 값이 달랐던 횟수를
   찍는다(0이면 주입기가 죽은 것). **`msx.sv`는 `msx_slots`의 `clk_sdram` 포트를 연결하지 않는다(0)** —

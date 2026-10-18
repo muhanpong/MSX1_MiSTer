@@ -279,32 +279,80 @@ module tb;
    //  clk21m-domain net there is "this path arrives one clk_sdram late" and nothing
    //  else.  INJ_ADDR is the negative control: a memory cycle's address is out a
    //  T-state before the strobe, so delaying it must change nothing.
+   //  -DINJ_REQ (core_builder 2026-10-18): the request AND its fields (sdram_ce, ram_addr,
+   //  ram_rnw, ram_din) all held for that first clk_sdram cycle = the controller first sees
+   //  every CPU request on the second edge after the clk21m rise, as the 128.86 MHz fit
+   //  does in the slow corner (request 13.7-14.6 ns vs 7.76).  The question it answers:
+   //  does detection on edge 2 alone break the stock T80 deadline / the picture?
+`ifdef INJ_RNW
+ `define INJ_H_RNW
+`endif
+`ifdef INJ_DIN
+ `define INJ_H_DIN
+`endif
+`ifdef INJ_ADDR
+ `define INJ_H_ADDR
+`endif
+`ifdef INJ_REQ
+ `define INJ_H_RNW
+ `define INJ_H_DIN
+ `define INJ_H_ADDR
+ `define INJ_H_REQ
+`endif
    logic inj_win = 1'b0, inj_c21 = 1'b0;
    always @(negedge clk_sdram) begin
       inj_win <= clk21m & ~inj_c21;          // open from the negedge after the rise
       inj_c21 <= clk21m;                     // to the next negedge
    end
-   logic        pre_rnw;  logic [7:0] pre_din;  logic [26:0] pre_addr;  logic pre_unmap;
+   logic        pre_rnw;  logic [7:0] pre_din;  logic [26:0] pre_addr;  logic pre_unmap;  logic pre_ce;
    always @(posedge clk_sdram) begin
       //  sampled before the clk21m logic of this edge has run (it runs a delta later)
       pre_rnw <= ram_rnw; pre_din <= ram_din; pre_addr <= ram_addr; pre_unmap <= MSX.msx_slots.mem_unmaped;
+      pre_ce <= sdram_ce;
    end
-   logic        hold_rnw; logic [7:0] hold_din; logic [26:0] hold_addr; logic hold_unmap;
+   logic        hold_rnw; logic [7:0] hold_din; logic [26:0] hold_addr; logic hold_unmap; logic hold_ce;
    always @(negedge clk_sdram) if (clk21m & ~inj_c21) begin
       hold_rnw <= pre_rnw; hold_din <= pre_din; hold_addr <= pre_addr; hold_unmap <= pre_unmap;
+      hold_ce <= pre_ce;
    end
+   wire inj_req;
+`ifdef INJ_H_REQ
+   assign inj_req = inj_win ? hold_ce : sdram_ce;
+   int inj_rq_rise = 0, inj_rq_fall = 0, inj_rq_req = 0;
+   logic inj_rq_q = 1'b0;
+   always @(posedge clk_sdram) begin
+      inj_rq_q <= sdram_ce;
+      if (sdram_ce & ~inj_rq_q) inj_rq_req++;
+      if (inj_win && hold_ce != sdram_ce) begin if (sdram_ce) inj_rq_rise++; else inj_rq_fall++; end
+   end
+   //  the injector's own check: how many clk_sdram edges after the live request rose did
+   //  the controller see it (must be exactly 1 for every request)
+   int inj_lag [4]; int inj_cnt = -1; logic inj_iq = 1'b0;
+   initial for (int i = 0; i < 4; i++) inj_lag[i] = 0;
+   always @(posedge clk_sdram) begin
+      inj_iq <= inj_req;
+      if (sdram_ce & ~inj_rq_q) inj_cnt = 0; else if (inj_cnt >= 0) inj_cnt++;
+      if (inj_req & ~inj_iq & inj_cnt >= 0) begin inj_lag[inj_cnt > 3 ? 3 : inj_cnt]++; inj_cnt = -1; end
+   end
+   final $display("INJ_REQ: request rises %0d; windows where the held request differed: rise delayed %0d, fall delayed %0d",
+                  inj_rq_req, inj_rq_rise, inj_rq_fall);
+   final $display("INJ_REQ: controller saw the rise 0/1/2/3+ edges after the live request: %0d %0d %0d %0d",
+                  inj_lag[0], inj_lag[1], inj_lag[2], inj_lag[3]);
+`else
+   assign inj_req = sdram_ce;
+`endif
    wire        inj_rnw;  wire [7:0] inj_din;  wire [26:0] inj_addr;
-`ifdef INJ_RNW
+`ifdef INJ_H_RNW
    assign inj_rnw  = inj_win ? hold_rnw  : ram_rnw;
 `else
    assign inj_rnw  = ram_rnw;
 `endif
-`ifdef INJ_DIN
+`ifdef INJ_H_DIN
    assign inj_din  = inj_win ? hold_din  : ram_din;
 `else
    assign inj_din  = ram_din;
 `endif
-`ifdef INJ_ADDR
+`ifdef INJ_H_ADDR
    assign inj_addr = inj_win ? hold_addr : ram_addr;
 `else
    assign inj_addr = ram_addr;
@@ -377,7 +425,7 @@ module tb;
       .ch1_addr(ch1_addr), .ch1_dout(ch1_dout), .ch1_din(ch1_din),
       .ch1_req(ch1_req), .ch1_rnw(ch1_rnw), .ch1_ready(sdram_ready),
       .ch2_addr(inj_addr), .ch2_dout(sdram_dout_c), .ch2_din(inj_din),
-      .ch2_req(sdram_ce), .ch2_rnw(inj_rnw), .ch2_ready(ch2_ready),
+      .ch2_req(inj_req), .ch2_rnw(inj_rnw), .ch2_ready(ch2_ready),
       .ch2_rdtog(sdram_rdtog), .ch2_hit(sdram_hit),
       .ch3_addr(flash_addr), .ch3_din(flash_din), .ch3_req(flash_req),
       .ch3_rnw(1'b0), .ch3_ready(flash_ready),
