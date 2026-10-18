@@ -15,3 +15,16 @@ none_x1_i0_r0: initph=0 rstph=0  ph at request edge: 0:76406 6:228827 | p1 Z80 R
 none_x1_i5_r0: initph=5 rstph=0  ph at request edge: 1:228827 7:76406 | p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0
 
 # all PASS, LATE 0 -- no late read reaches the T80 in this traffic (no MoonSound / flash / upload channel traffic; tb_tdm's +busy=30 has it)
+
+# tb_msx rdl summary (request -> ch2 completion latency max; slack min = completion -> the edge the T80 latched D)
+rx/inj_x1_i5_r0: M1 latency max 163.0 ns, slack min 349.2 ns | other latency max 163.0 ns, slack min 69.8 ns | SLOW(>24 clk) lines 10102
+rx/inj_x1_i0_r0: M1 latency max 124.2 ns, slack min 388.0 ns | other latency max 124.2 ns, slack min 108.6 ns | SLOW(>24 clk) lines 0
+rx/none_x1_i5_r0: M1 latency max 100.9 ns, slack min 411.3 ns | other latency max 100.9 ns, slack min 131.9 ns | SLOW(>24 clk) lines 0
+rx/inj_x0_i5_r0: M1 latency max 163.0 ns, slack min 349.2 ns | other latency max 163.0 ns, slack min 69.8 ns | SLOW(>24 clk) lines 10102
+fpinj/i5_r0: M1 latency max 163.0 ns, slack min 349.2 ns | other latency max 163.0 ns, slack min 69.8 ns | SLOW(>24 clk) lines 10102
+fpinj/i0_r0: M1 latency max 124.2 ns, slack min 388.0 ns | other latency max 124.2 ns, slack min 108.6 ns | SLOW(>24 clk) lines 0
+# inj_x1_i5_r0 SLOW reads by length (clk) and ph at the edge:    9987 25@ph@edge=3;     91 29@ph@edge=7;      9 35@ph@edge=7;     15 41@ph@edge=7;
+# Reading: edge-2 detection at the bad phase lengthens the stock Z80 read to 25 clk (9,987 reads, ph@edge=3;
+# the 29-41 clk ones are R800 phases, paced) and takes 39 ns off the T80's margin, but 69.8 ns (9 clk) stay.
+# So the whole-machine deadline is >= E0+37 for the worst read seen; tb_tdm's E0+28 is conservative by ~9 clk
+# and its +29 does not reach the T80.  Identical numbers in the 128 MB map (fpinj) and with rowxor 0/1.
