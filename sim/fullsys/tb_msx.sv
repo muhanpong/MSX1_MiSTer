@@ -409,11 +409,11 @@ module tb;
 `ifndef TDM
    sdram u_sdram
    (
-      .init(rst_n_cnt != 0), .clk(clk_sdram), .doRefresh(1'b1),
+      .init(init_tb), .clk(clk_sdram), .doRefresh(1'b1),
 `else
    sdram_tdm u_sdram
    (
-      .init(rst_n_cnt != 0), .clk(clk_sdram), .mode128(`ifdef TDM128 1'b1 `else 1'b0 `endif), .mode64(1'b0),
+      .init(init_tb), .clk(clk_sdram), .mode128(`ifdef TDM128 1'b1 `else 1'b0 `endif), .mode64(1'b0),
       .v_en(1'b0), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
       .v_grant(), .v_rdata(), .v_rvalid(),
       .ch2_busy(sdram_busy),
@@ -891,6 +891,38 @@ module tb;
    //  ── reset / pacing ───────────────────────────────────────────────────────
    int rst_n_cnt = 256;
    always @(posedge clk21m) if (rst_n_cnt) rst_n_cnt <= rst_n_cnt - 1;
+   //  +initph=N: the SDRAM controller's init drops N clk_sdram cycles after the clk21m
+   //  edge that ends rst_n_cnt (on the board init is ~locked_sdram, asynchronous to
+   //  clk21m, so the frame counter ph can start on any of the 6 clk_sdram phases).
+   //  +rstph=M: the MSX reset is released M clk21m edges later than usual (the
+   //  3.58 MHz T-state grid restarts at reset: clock.sv clkdiv6).  Together they
+   //  set where a stock CPU request falls in the 12-clock TDM frame.
+   int initph = 0, rstph = 0, iph_cnt = 0;
+   initial begin void'($value$plusargs("initph=%d", initph)); void'($value$plusargs("rstph=%d", rstph)); end
+   always @(posedge clk_sdram) if (rst_n_cnt == 0 && iph_cnt < 64) iph_cnt <= iph_cnt + 1;
+   wire init_tb = (rst_n_cnt != 0) | (iph_cnt < initph);
+`ifdef TDM
+   //  FRAMEPOS: the frame counter ph on the edge the controller takes a CPU memory
+   //  request (ch2_req & ~ch2_req_1), and ph on clk21m rises -- one value each if
+   //  the phase is fixed for the run
+   int fp_req [12], fp_c21 [12];
+   logic fp_c21q = 1'b0;
+   initial for (int i = 0; i < 12; i++) begin fp_req[i] = 0; fp_c21[i] = 0; end
+   wire [3:0] fp_ph = u_sdram.ph; wire fp_rq = u_sdram.ch2_req, fp_rq1 = u_sdram.ch2_req_1, fp_run = u_sdram.run, fp_mem = MSX.iorq_n;
+   always @(posedge clk_sdram) if (fp_run) begin
+      fp_c21q <= clk21m;
+      if (fp_rq & ~fp_rq1 & fp_mem) fp_req[fp_ph]++;
+      if (clk21m & ~fp_c21q) fp_c21[fp_ph]++;
+   end
+   final begin
+      automatic string a = "", b = "";
+      for (int i = 0; i < 12; i++) begin
+         if (fp_req[i]) a = {a, $sformatf(" %0d:%0d", i, fp_req[i])};
+         if (fp_c21[i]) b = {b, $sformatf(" %0d:%0d", i, fp_c21[i])};
+      end
+      $display("FRAMEPOS initph=%0d rstph=%0d  ph at request edge:%s  | ph at clk21m rise:%s", initph, rstph, a, b);
+   end
+`endif
 
    clock u_clock
    (
@@ -1080,6 +1112,7 @@ module tb;
          repeat (200) @(posedge clk21m);      // the request is already out by now
          mount_sav();
       end
+      repeat (rstph) @(posedge clk21m);
       reset = 1'b0; reset_ms = 1'b0;
       trace_on = 1;
       t_release = $realtime;

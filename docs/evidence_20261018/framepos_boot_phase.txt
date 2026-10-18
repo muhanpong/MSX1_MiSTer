@@ -1,0 +1,37 @@
+# FRAMEPOS: where a stock (3.58 MHz) CPU request lands in the 12-clock TDM frame, per boot phase
+# fullsys tdm128, GT DOS2 RPROBE phase 1 (mapper RAM writes/reads), 3 ms, no injection (detection on
+# the first edge after the clk21m rise).  +initph=N: controller init drops N clk_sdram after the
+# clk21m edge (board: init = ~locked_sdram, asynchronous).  +rstph=M: MSX reset released M clk21m
+# later (clock.sv clkdiv6 restarts at reset, so the T-state grid moves with it).
+# "ph at request edge" = u_sdram.ph on the edge ch2_req & ~ch2_req_1 (memory requests only);
+# "c21" = ph on clk21m rises.  ONE value per run = the position is fixed for the whole boot.
+FRAMEPOS initph=0 rstph=0  ph at request edge: 6:2099  | ph at clk21m rise: 0:35012 6:35011
+FRAMEPOS initph=0 rstph=1  ph at request edge: 0:2099  | ph at clk21m rise: 0:35012 6:35012
+FRAMEPOS initph=0 rstph=2  ph at request edge: 6:2099  | ph at clk21m rise: 0:35013 6:35012
+FRAMEPOS initph=0 rstph=3  ph at request edge: 0:2099  | ph at clk21m rise: 0:35013 6:35013
+FRAMEPOS initph=1 rstph=0  ph at request edge: 5:2099  | ph at clk21m rise: 0:1 5:35011 11:35011
+FRAMEPOS initph=1 rstph=1  ph at request edge: 11:2099  | ph at clk21m rise: 0:1 5:35012 11:35011
+FRAMEPOS initph=1 rstph=2  ph at request edge: 5:2099  | ph at clk21m rise: 0:1 5:35012 11:35012
+FRAMEPOS initph=1 rstph=3  ph at request edge: 11:2099  | ph at clk21m rise: 0:1 5:35013 11:35012
+FRAMEPOS initph=2 rstph=0  ph at request edge: 4:2099  | ph at clk21m rise: 0:1 4:35011 10:35011
+FRAMEPOS initph=2 rstph=1  ph at request edge: 10:2099  | ph at clk21m rise: 0:1 4:35012 10:35011
+FRAMEPOS initph=2 rstph=2  ph at request edge: 4:2099  | ph at clk21m rise: 0:1 4:35012 10:35012
+FRAMEPOS initph=2 rstph=3  ph at request edge: 10:2099  | ph at clk21m rise: 0:1 4:35013 10:35012
+FRAMEPOS initph=3 rstph=0  ph at request edge: 3:2099  | ph at clk21m rise: 3:35011 9:35011
+FRAMEPOS initph=3 rstph=1  ph at request edge: 9:2099  | ph at clk21m rise: 3:35012 9:35011
+FRAMEPOS initph=3 rstph=2  ph at request edge: 3:2099  | ph at clk21m rise: 3:35012 9:35012
+FRAMEPOS initph=3 rstph=3  ph at request edge: 9:2099  | ph at clk21m rise: 3:35013 9:35012
+FRAMEPOS initph=4 rstph=0  ph at request edge: 2:2099  | ph at clk21m rise: 2:35011 8:35011
+FRAMEPOS initph=4 rstph=1  ph at request edge: 8:2099  | ph at clk21m rise: 2:35012 8:35011
+FRAMEPOS initph=4 rstph=2  ph at request edge: 2:2099  | ph at clk21m rise: 2:35012 8:35012
+FRAMEPOS initph=4 rstph=3  ph at request edge: 8:2099  | ph at clk21m rise: 2:35013 8:35012
+FRAMEPOS initph=5 rstph=0  ph at request edge: 1:2099  | ph at clk21m rise: 1:35011 7:35011
+FRAMEPOS initph=5 rstph=1  ph at request edge: 7:2099  | ph at clk21m rise: 1:35012 7:35011
+FRAMEPOS initph=5 rstph=2  ph at request edge: 1:2099  | ph at clk21m rise: 1:35012 7:35012
+FRAMEPOS initph=5 rstph=3  ph at request edge: 7:2099  | ph at clk21m rise: 1:35013 7:35012
+
+# reading: position = (6 - initph + 6*(rstph mod 2)) mod 12.  initph covers 6 positions, the reset
+# parity the other 6 -> all 12 frame positions, uniform if the PLL lock instant is.  On the board the
+# init phase is set once per core load / PLL lock; an OSD reset can only toggle the parity (6 apart).
+# core_builder's tb_tdm: the stock deadline fails at g3/g15/g27 (one residue mod 12) when the request
+# is first seen on edge 2 -- i.e. one boot in twelve, for the whole boot, under edge-2 detection.
