@@ -1345,6 +1345,46 @@ module tb;
       $display("EDGEHIST din   %0d %0d %0d %0d %0d %0d", eh_din[0], eh_din[1], eh_din[2], eh_din[3], eh_din[4], eh_din[5]);
       $display("EDGEHIST unmap %0d %0d %0d %0d %0d %0d", eh_unm[0], eh_unm[1], eh_unm[2], eh_unm[3], eh_unm[4], eh_unm[5]);
    end
+   //  LEAD: at every rise of the CPU's SDRAM request, how many clk_sdram edges ago
+   //  each field last changed (0 = on the same edge as the request; 1 = one edge
+   //  before ...; capped at 31).  The launch offset STA cannot give: a field that
+   //  leads by L edges may arrive up to L edges later than the request.  Split by
+   //  CPU (T80 / NextZ80) and by read / write.
+   int ld_addr [2][2][32], ld_din [2][32], ld_rnw [2][2][32];
+   int ld_ea = 99, ld_ed = 99, ld_er = 99;
+   logic ld_ce_q = 1'b0;
+   logic [26:0] ld_a_q = '0; logic [7:0] ld_d_q = '0; logic ld_r_q = 1'b1;
+   initial for (int c = 0; c < 2; c++) for (int i = 0; i < 32; i++) begin
+      ld_addr[c][0][i] = 0; ld_addr[c][1][i] = 0; ld_din[c][i] = 0; ld_rnw[c][0][i] = 0; ld_rnw[c][1][i] = 0; end
+   wire ld_nz = MSX.use_nz, ld_mem = MSX.iorq_n;
+   always @(posedge clk_sdram) begin
+      automatic int c = ld_nz ? 1 : 0;
+      ld_ea = (ram_addr != ld_a_q) ? 0 : (ld_ea < 31 ? ld_ea + 1 : 31);
+      ld_ed = (ram_din  != ld_d_q) ? 0 : (ld_ed < 31 ? ld_ed + 1 : 31);
+      ld_er = (ram_rnw  != ld_r_q) ? 0 : (ld_er < 31 ? ld_er + 1 : 31);
+      if (sdram_ce & ~ld_ce_q & ld_mem) begin
+         ld_addr[c][ram_rnw ? 0 : 1][ld_ea]++;
+         ld_rnw[c][ram_rnw ? 0 : 1][ld_er]++;
+         if (~ram_rnw) ld_din[c][ld_ed]++;
+      end
+      ld_ce_q <= sdram_ce; ld_a_q <= ram_addr; ld_d_q <= ram_din; ld_r_q <= ram_rnw;
+   end
+   final for (int c = 0; c < 2; c++) begin
+      automatic string s0 = "", s1 = "", s2 = "", s3 = "", s4 = "";
+      for (int i = 0; i < 32; i++) begin
+         if (ld_addr[c][0][i]) s0 = {s0, $sformatf(" %0d:%0d", i, ld_addr[c][0][i])};
+         if (ld_addr[c][1][i]) s1 = {s1, $sformatf(" %0d:%0d", i, ld_addr[c][1][i])};
+         if (ld_din[c][i])     s2 = {s2, $sformatf(" %0d:%0d", i, ld_din[c][i])};
+         if (ld_rnw[c][0][i])  s3 = {s3, $sformatf(" %0d:%0d", i, ld_rnw[c][0][i])};
+         if (ld_rnw[c][1][i])  s4 = {s4, $sformatf(" %0d:%0d", i, ld_rnw[c][1][i])};
+      end
+      $display("LEAD %s memory request rise, edges since last change (lead:count)", c ? "NextZ80" : "T80");
+      $display("LEAD %s addr read :%s", c ? "NZ " : "T80", s0);
+      $display("LEAD %s addr write:%s", c ? "NZ " : "T80", s1);
+      $display("LEAD %s din  write:%s", c ? "NZ " : "T80", s2);
+      $display("LEAD %s rnw  read :%s", c ? "NZ " : "T80", s3);
+      $display("LEAD %s rnw  write:%s", c ? "NZ " : "T80", s4);
+   end
    //  +rwave=N: the first N memory reads/writes in 8000h-BFFFh, one line each, sampled
    //  on the clk21m before the strobe goes away (what the CPU takes).
    int  rp_wave = 0, rp_wave_n = 0;
