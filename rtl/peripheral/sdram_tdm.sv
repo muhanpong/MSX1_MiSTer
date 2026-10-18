@@ -199,6 +199,7 @@ reg        run = 1'b0;           // init sequence done
 
 // ─── requests (as sdram.sv) and the ch2 read cache ─────────────────────────
 reg        ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1;
+reg        ch2_req_2;            // second edge of a ch2 request: rnw looked at again
 reg        ch1_rq, ch2_rq, ch3_rq, ch4_rq;
 reg        ch1_rnw_1, ch2_rnw_1, ch3_rnw_1, ch4_rnw_1;
 reg [26:0] ch1_addr_1, ch2_addr_1, ch3_addr_1, ch4_addr_1;
@@ -208,7 +209,7 @@ reg        ch1_saved_a0, ch2_saved_a0, ch3_saved_a0, ch4_saved_a0;
 initial begin
     {ch1_rq, ch2_rq, ch3_rq, ch4_rq} = '0;
     {ch1_ready, ch2_ready, ch3_ready, ch4_ready, ch3_done, ch2_rdtog} = '0;
-    {ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1} = '0;
+    {ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1, ch2_req_2} = '0;
     v_grant = 0; v_rvalid = 0;
 end
 assign ch1_dout   = ch1_saved_a0 ? ch1_saved_data[15:8] : ch1_saved_data[7:0];
@@ -415,6 +416,7 @@ always @(posedge clk) begin
     loc_t   vl;
 
     ch1_req_1 <= ch1_req; ch2_req_1 <= ch2_req; ch3_req_1 <= ch3_req; ch4_req_1 <= ch4_req;
+    ch2_req_2 <= ch2_req_1;
     c_we     <= 1'b0;
     v_rvalid <= 1'b0;
     command  <= CMD_NOP;
@@ -452,6 +454,23 @@ always @(posedge clk) begin
             enq = 1'b1; enq_rnw = ch2_rnw; enq_addr = ch2_addr; enq_din = ch2_din;
         end
     end
+    //  A write whose rnw came late.  The request and ram_rnw start from the same
+    //  strobe, and on the 128.86 MHz fit rnw reaches the controller after the first
+    //  edge the request can be seen on (T80 WR_n 13.5 ns, NextZ80 12.8 ns, slow
+    //  model, against 7.76; docs/evidence_20261018/field_race_ae02602.txt), so that
+    //  edge can take a write for a cache read and the write is lost (fullsys
+    //  INJ_RNW).  STA puts rnw in by the second edge: look again there, and if the
+    //  request turned out to be a write, drop the lookup and queue the write.  Reads
+    //  keep their first-edge start -- the stock T80 takes its byte at a fixed time
+    //  (sim/sdram_tdm +stock) and one edge later misses a slot at 3 of 36 phases.
+    //  rnw only goes 1 -> 0 inside a request (a read's rnw does not move), so only
+    //  this direction exists.
+`ifndef SDRAM_NO_RNW2       // sim only: the first edge decides, as before
+    if (ch2_cpend & ch2_req & ch2_req_1 & ~ch2_req_2 & ~ch2_rnw) begin
+        ch2_cpend <= 0;
+        enq = 1'b1; enq_rnw = 1'b0; enq_addr = ch2_addr; enq_din = ch2_din;
+    end else
+`endif
     if (ch2_cpend) begin
         ch2_cpend <= 0;
         c_pend2   <= 1;

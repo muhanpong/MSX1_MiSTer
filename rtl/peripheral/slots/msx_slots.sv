@@ -275,7 +275,15 @@ assign cpu_din          = mapper_ram_dout                        //IO
                         & mapper_panasonic_dout                  //UNMAPPED (turbo R 3-3 mapper read-back)
                         & (mem_unmaped  ? 8'hFF : ram_dout);
 
-assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped) | kanji_sdram_rq | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
+//  ~ffff_reg: the expander register at FFFF by its address, which is out a clk21m
+//  before the strobe.  mem_unmaped also covers it (mapper_rd/mapper_wr), but those
+//  are qualified by the strobe, and on the 128.86 MHz fit that gate settles after
+//  the request (T80 MREQ_n 16.3 ns, NextZ80 15.3 ns, slow model): the controller's
+//  first edge saw a request and an FFFF write landed on the page-3 segment's 3FFFh
+//  (fullsys INJ_UNMAP; docs/evidence_20261018/field_race_ae02602.txt).  Same
+//  decode as mapper_en without cpu_mreq, so the value of sdram_ce does not change.
+wire ffff_reg = cpu_addr == 16'hFFFF & bios_config.slot_expander_en[active_slot] & mapper_mask[active_slot];
+assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped & ~ffff_reg) | kanji_sdram_rq | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
 assign bram_ce  = (sdram_size == 2'd0 | sram_cs)  & ((cpu_mreq & (cpu_rd | (cpu_wr & (~ram_ro | sram_cs))) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce);
 assign ram_rnw  = ~((sram_cs & sram_wr) | (~sram_cs & cpu_wr & cpu_mreq & ~ram_ro) | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
 

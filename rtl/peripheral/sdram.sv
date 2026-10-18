@@ -227,6 +227,7 @@ always @(posedge clk) begin
     reg  [3:0] state = STATE_STARTUP;
 
     reg       ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1;
+    reg       ch2_req_2;    // second edge of a ch2 request: rnw looked at again
     reg       ch1_rq, ch2_rq, ch3_rq, ch4_rq;
     reg [1:0] ch;
 
@@ -238,6 +239,7 @@ always @(posedge clk) begin
     
     ch1_req_1 <= ch1_req;
     ch2_req_1 <= ch2_req;
+    ch2_req_2 <= ch2_req_1;
     ch3_req_1 <= ch3_req;
     ch4_req_1 <= ch4_req;
       
@@ -262,6 +264,18 @@ always @(posedge clk) begin
             ch2_din_1  <= ch2_din;
         end
     end
+    //  A write whose rnw came late: rnw starts from the same strobe as the request
+    //  and can miss the first edge, which then takes the write for a cache read.
+    //  Look again on the second edge and queue the write (sdram_tdm.sv, same fix).
+`ifndef SDRAM_NO_RNW2       // sim only: the first edge decides, as before
+    if (ch2_cpend & ch2_req & ch2_req_1 & ~ch2_req_2 & ~ch2_rnw) begin
+        ch2_cpend  <= 0;
+        ch2_rq     <= 1;
+        ch2_rnw_1  <= 0;
+        ch2_addr_1 <= ch2_addr;
+        ch2_din_1  <= ch2_din;
+    end else
+`endif
     if (ch2_cpend) begin
         ch2_cpend <= 0;
         c_pend2   <= 1;
