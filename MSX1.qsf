@@ -317,6 +317,7 @@ set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to BTN_*
 source files.qip
 set_global_assignment -name QIP_FILE rtl/files.qip
 set_global_assignment -name SDC_FILE MSX1.sdc
+set_global_assignment -name SDC_FILE tools/sdram128/sdram_io.sdc
 set_global_assignment -name SYSTEMVERILOG_FILE MSX1.sv
 # Fitter seed.  Placement only -- it changes no behaviour, but this design sits
 # close enough to the edge that an unrelated ascal (framework video scaler) path

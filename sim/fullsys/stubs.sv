@@ -111,8 +111,12 @@ module altsyncram #(parameter operation_mode = "", width_a = 1, widthad_a = 1,
    assign eccstatus = '0;
 endmodule
 
-//  altddio_out: sdram.sv uses one to forward the clock to the chip.  The bench
-//  does not model the clock pin, so this only has to exist.
+//  altddio_out: sdram.sv / sdram_tdm.sv use one to forward the clock to the
+//  chip.  The bench does not model the clock pin, so this only has to exist --
+//  but every input here must be one altera_mf's has (17.1 eda/sim_lib), or
+//  tools/check_pins.sh reports an unconnected pin Quartus does not have.  It
+//  used to declare `outclock_ena`, which is not one.  (oe_out, the real one's
+//  other output, is left out: nothing reads it.)
 module altddio_out #(parameter intended_device_family = "", lpm_type = "", width = 1,
                      parameter power_up_high = "OFF", oe_reg = "UNREGISTERED",
                      parameter extend_oe_disable = "OFF", invert_output = "OFF",
@@ -120,6 +124,6 @@ module altddio_out #(parameter intended_device_family = "", lpm_type = "", width
 (input outclock, input outclocken, input aclr, input aset,
  input sclr, input sset,
  input [width-1:0] datain_h, input [width-1:0] datain_l,
- input oe, input outclock_ena, output [width-1:0] dataout);
+ input oe, output [width-1:0] dataout);
    assign dataout = '0;
 endmodule

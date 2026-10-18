@@ -14,20 +14,27 @@ set csd {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk
 #  The last field is optional: a source register filter, for rules that have -from.
 set EXPECT [list \
   [list NZ_intra       $c21     $c21     "*msx:MSX|NextZ80:NZ|*"            93.132 "NextZ80 -> NextZ80, -end 2 (writes >= 2 clk21m apart, nz_bus)" "*msx:MSX|NextZ80:NZ|*"] \
-  [list NZ_to_SD_ch2   $c21     $csd     "*sdram*ch2_*"                     69.846 "NextZ80 address -> ch2 capture, generic -end 6" "*msx:MSX|NextZ80:NZ|*"] \
+  [list NZ_to_SD_ch2   $c21     $csd     "*sdram*ch2_*"                     46.560 "NextZ80 address -> ch2 capture, generic -end 6 (6 x 7.760 at 128.86 MHz; was 69.846 at 85.9)" "*msx:MSX|NextZ80:NZ|*"] \
+  [list RNW2_c_pend2   $c21     $csd     "*sdram_tdm:sdram|c_pend2"         15.520 "rnw looked at again on the second edge of a ch2 lookup, -end 2 (MSX1.sdc)"] \
   [list NZ_to_fabric   $c21     $c21     "*systemRAM*"                      93.132 "NextZ80 -> clk21m fabric, clock-based -end 2" "*msx:MSX|NextZ80:NZ|*"] \
   [list NZ_to_SCC_fall $c21     $c21     "*IKASCC_player_memory_s*"         69.849 "NextZ80 -> SCC wave RAM falling edge, -end 2" "*msx:MSX|NextZ80:NZ|*"] \
   [list NZ_to_ctl_exc  $c21     $c21     "*msx:MSX|cpuswap_ctl:CPUSWAP|*"   46.566 "exception: SWAPPT -> controller single-cycle" "*msx:MSX|NextZ80:NZ|*"] \
   [list NZ_to_cheat_exc $c21    $c21     "*msx:MSX|a_q[*]"                  46.566 "exception: cheat address register single-cycle" "*msx:MSX|NextZ80:NZ|*"] \
   [list SD_int_to_ch2  $csd     $csd     "*sdram*ch2_*"                     11.641 "sdram-internal -> ch2_* single-cycle (read-cache stage 2, FSM); the generic -end 6 must not cover it" "*sdram:sdram|*"] \
   [list T80_to_NZ      $c21     $c21     "*msx:MSX|NextZ80:NZ|*"            93.132 "T80s REG -> NextZ80 LOAD, -end 2" "*msx:MSX|T80s:T80|*"] ]
+#  A filter that matches nothing is a tcl ERROR in get_timing_paths, not an empty
+#  result, and build.sh drops stderr: on sdram128 SD_int_to_ch2 (then naming the
+#  old sdram:sdram) killed the script there and T80_to_NZ never ran, with no
+#  GATE line printed (2026-10-18).  Every rule is caught and fails by name.
 set fail 0
 foreach e $EXPECT {
   lassign $e lbl f t filt want why ffilt
   set args [list -from_clock $f -to_clock $t -npaths 1 -setup]
-  if {$filt ne ""}                           { lappend args -to   [get_registers $filt] }
-  if {[info exists ffilt] && $ffilt ne ""}   { lappend args -from [get_registers $ffilt] }
-  set p [get_timing_paths {*}$args]
+  if {[catch {
+    if {$filt ne ""}                           { lappend args -to   [get_registers $filt] }
+    if {[info exists ffilt] && $ffilt ne ""}   { lappend args -from [get_registers $ffilt] }
+    set p [get_timing_paths {*}$args]
+  } err]} { puts "GATE-FAIL $lbl: [lindex [split $err \n] 0]"; set fail 1; unset -nocomplain ffilt; continue }
   unset -nocomplain ffilt
   set got ""; set sl ""
   foreach_in_collection x $p { set got [expr {[get_path_info $x -latch_time] - [get_path_info $x -launch_time]}]; set sl [get_path_info $x -slack] }

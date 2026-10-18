@@ -75,6 +75,20 @@ set_multicycle_path -hold  -end 5 -to [get_registers {*sdram*ch2_*}]
 set_multicycle_path -setup -end 1 -from [get_registers {*sdram_tdm:sdram|*}] -to [get_registers {*sdram*ch2_*}]
 set_multicycle_path -hold  -end 0 -from [get_registers {*sdram_tdm:sdram|*}] -to [get_registers {*sdram*ch2_*}]
 
+# rnw looked at again on the second edge of a ch2 cache lookup (sdram_tdm.sv,
+# "A write whose rnw came late", 2026-10-18).  c_pend2 is the one register outside
+# ch2_* that reads ch2_rnw live, and only while ch2_cpend is high -- the edge after
+# the one that saw the request.  The request is seen at the earliest one edge after
+# the clk21m edge that launched it, so -end 2 is that check's own deadline: if rnw
+# misses it, this fails here instead of being taken for a read.  Only clk21m
+# sources: the sdram-internal paths into c_pend2 stay single-cycle.
+set_multicycle_path -setup -end 2 \
+    -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+    -to   [get_registers {*sdram_tdm:sdram|c_pend2}]
+set_multicycle_path -hold  -end 1 \
+    -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+    -to   [get_registers {*sdram_tdm:sdram|c_pend2}]
+
 # OPL4 CPU register write path (opl4latch → pcm_engine decode registers).
 # CPU writes the OPL4 latch on ce_3m58_p ticks; address decode goes through
 # a deep chain (Add + Divider op_5..op_8 + Decoder + reg_upd + hf_upd) before

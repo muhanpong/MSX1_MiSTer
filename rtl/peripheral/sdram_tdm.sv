@@ -199,7 +199,6 @@ reg        run = 1'b0;           // init sequence done
 
 // ─── requests (as sdram.sv) and the ch2 read cache ─────────────────────────
 reg        ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1;
-reg        ch2_req_2;            // second edge of a ch2 request: rnw looked at again
 reg        ch1_rq, ch2_rq, ch3_rq, ch4_rq;
 reg        ch1_rnw_1, ch2_rnw_1, ch3_rnw_1, ch4_rnw_1;
 reg [26:0] ch1_addr_1, ch2_addr_1, ch3_addr_1, ch4_addr_1;
@@ -209,7 +208,7 @@ reg        ch1_saved_a0, ch2_saved_a0, ch3_saved_a0, ch4_saved_a0;
 initial begin
     {ch1_rq, ch2_rq, ch3_rq, ch4_rq} = '0;
     {ch1_ready, ch2_ready, ch3_ready, ch4_ready, ch3_done, ch2_rdtog} = '0;
-    {ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1, ch2_req_2} = '0;
+    {ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1} = '0;
     v_grant = 0; v_rvalid = 0;
 end
 assign ch1_dout   = ch1_saved_a0 ? ch1_saved_data[15:8] : ch1_saved_data[7:0];
@@ -416,7 +415,6 @@ always @(posedge clk) begin
     loc_t   vl;
 
     ch1_req_1 <= ch1_req; ch2_req_1 <= ch2_req; ch3_req_1 <= ch3_req; ch4_req_1 <= ch4_req;
-    ch2_req_2 <= ch2_req_1;
     c_we     <= 1'b0;
     v_rvalid <= 1'b0;
     command  <= CMD_NOP;
@@ -464,15 +462,19 @@ always @(posedge clk) begin
     //  keep their first-edge start -- the stock T80 takes its byte at a fixed time
     //  (sim/sdram_tdm +stock) and one edge later misses a slot at 3 of 36 phases.
     //  rnw only goes 1 -> 0 inside a request (a read's rnw does not move), so only
-    //  this direction exists.
-`ifndef SDRAM_NO_RNW2       // sim only: the first edge decides, as before
-    if (ch2_cpend & ch2_req & ch2_req_1 & ~ch2_req_2 & ~ch2_rnw) begin
-        ch2_cpend <= 0;
-        enq = 1'b1; enq_rnw = 1'b0; enq_addr = ch2_addr; enq_din = ch2_din;
-    end else
-`endif
+    //  this direction exists.  ch2_cpend is high on exactly the second edge, so
+    //  ch2_req is not looked at, and the check sits INSIDE the ch2_cpend branch:
+    //  091ba37 had it in front of the whole chain, which put the live CPU
+    //  address -> sdram_ce cone on c_hit_q's enable (-22.6 ns slow).  Live
+    //  ch2_rnw now reaches c_pend2 and the queue (ch2_*); MSX1.sdc gives c_pend2
+    //  the second edge (-end 2), which is what this check assumes.
     if (ch2_cpend) begin
         ch2_cpend <= 0;
+`ifndef SDRAM_NO_RNW2       // sim only: the first edge decides, as before
+        if (~ch2_rnw) begin
+            enq = 1'b1; enq_rnw = 1'b0; enq_addr = ch2_addr; enq_din = ch2_din;
+        end else
+`endif
         c_pend2   <= 1;
     end else if (c_pend2) begin
         //  compare registered (RAM out -> tag compare -> ch2_saved_data was -1.2 ns);
