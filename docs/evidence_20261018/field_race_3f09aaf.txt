@@ -1,0 +1,130 @@
+# Per-path arrival in clk_sdram edges, sdram.sv 85.909 MHz (T = 11.640 ns, clk21m = 4 T, PLL phase 0)
+# DB: nextz80 3f09aaf, unmodified RTL/SDC, built 2026-10-18 on this machine with tools/buildgate/build.sh
+#   whose Q= line was pointed (locally, reverted after) at Quartus 17.0.2 -- the script's own path is
+#   another machine's 17.1 volume.  User approved this build (2026-10-18).  fit.rpt 2026-10-18 11:22:20,
+#   revision MSX1.  precheck: cpuswap bench needed sjasmplus on PATH (it was "SJASMPLUS: set SJASMPLUS"
+#   in 0 s); with it: RESULT PASS, then the whole gate:
+#   precheck: diff against 03f7653 (fullsys: VRAM stub port defaults, and T_first / interrupt-so)
+#   precheck: clear (8 record(s) tripped)
+#   stage map rc=0 elapsed=374s errors=0
+#   stage fit rc=0 elapsed=1131s errors=0
+#   stage asm rc=0 elapsed=30s errors=0
+#   artifacts: fit.rpt 2026-10-18 11:22:20  rbf 2026-10-18 11:22:51
+#   WORST_slow_setup 0.409
+#   WORST_slow_hold 0.248
+#   WORST_slow_recovery 3.585
+#   WORST_slow_removal 0.898
+#   WORST_fast_setup 3.745
+#   WORST_fast_hold 0.061
+#   WORST_fast_recovery 5.098
+#   WORST_fast_removal 0.377
+#   REL NZ_intra       rel=93.132 slack=45.122 ok
+#   REL NZ_to_SD_ch2   rel=69.846 slack=23.050 ok
+#   REL NZ_to_fabric   rel=93.132 slack=45.103 ok
+#   REL NZ_to_SCC_fall rel=69.849 slack=35.908 ok
+#   REL NZ_to_ctl_exc  rel=46.566 slack=41.820 ok
+#   REL NZ_to_cheat_exc rel=46.566 slack=24.873 ok
+#   REL SD_int_to_ch2  rel=11.641 slack=2.045 ok
+#   REL T80_to_NZ      rel=93.132 slack=58.279 ok
+#   ; Logic utilization (in ALMs) ; 29,739 / 41,910 ( 71 % ) ;
+#   ; M10K blocks ; 435 / 553 ; 79 % ;
+#   BUILDGATE: PASS
+# Script: tools/sdram128/field_race.tcl <out> sdram   (same rule as field_race_ae02602.txt)
+
+## raw STA
+# field_race  2026-10-18T12:16  mode=sdram T=11.640
+slow	req      	T80_MREQ_n  	late  14.460 ns k=2	early   3.871 ns k=1	   26 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram:sdram|ch2_rq
+slow	gate_ffff	T80_MREQ_n  	late  13.956 ns k=2	early   8.588 ns k=1	    4 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram:sdram|ch2_rq
+slow	gate_any 	T80_MREQ_n  	late  15.863 ns k=2	early   6.085 ns k=1	   88 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram:sdram|ch2_rq
+slow	rnw      	T80_MREQ_n  	late  13.140 ns k=2	early   4.365 ns k=1	   96 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram:sdram|ch2_caddr[1]
+slow	req      	T80_RD_n    	late  12.438 ns k=2	early   3.781 ns k=1	   32 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram:sdram|ch2_rq
+slow	gate_ffff	T80_RD_n	NO-PATH	
+slow	gate_any 	T80_RD_n    	late  18.016 ns k=2	early   5.748 ns k=1	  152 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram:sdram|ch2_rq
+slow	rnw      	T80_RD_n    	late  13.542 ns k=2	early   6.632 ns k=1	  128 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram:sdram|ch2_caddr[1]
+slow	req      	T80_WR_n    	late  14.381 ns k=2	early   3.878 ns k=1	   26 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram:sdram|ch2_rq
+slow	gate_ffff	T80_WR_n	NO-PATH	
+slow	gate_any 	T80_WR_n    	late  17.863 ns k=2	early   5.118 ns k=1	   72 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram:sdram|ch2_rq
+slow	rnw      	T80_WR_n    	late  12.550 ns k=2	early   4.231 ns k=1	   96 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram:sdram|ch2_caddr[1]
+slow	req      	T80_IORQ_n  	late  12.767 ns k=2	early   6.935 ns k=1	    4 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram:sdram|ch2_rq
+slow	gate_ffff	T80_IORQ_n	NO-PATH	
+slow	gate_any 	T80_IORQ_n	NO-PATH	
+slow	rnw      	T80_IORQ_n	NO-PATH	
+slow	req      	NZB_ph      	late  16.654 ns k=2	early   5.454 ns k=1	   72 paths	emu:emu|msx:MSX|nz_bus:NZB|ph~DUPLICATE -> emu:emu|sdram:sdram|ch2_rq
+slow	gate_ffff	NZB_ph      	late  15.794 ns k=2	early  10.171 ns k=1	    4 paths	emu:emu|msx:MSX|nz_bus:NZB|ph~DUPLICATE -> emu:emu|sdram:sdram|ch2_rq
+slow	gate_any 	NZB_ph      	late  20.027 ns k=2	early   7.266 ns k=1	  236 paths	emu:emu|msx:MSX|nz_bus:NZB|ph~DUPLICATE -> emu:emu|sdram:sdram|ch2_rq
+slow	rnw      	NZB_ph      	late  15.014 ns k=2	early   5.948 ns k=1	  256 paths	emu:emu|msx:MSX|nz_bus:NZB|ph~DUPLICATE -> emu:emu|sdram:sdram|ch2_caddr[0]
+slow	din      	T80_DO      	late   7.789 ns k=1	early   2.144 ns k=1	    8 paths	emu:emu|msx:MSX|T80s:T80|T80:u0|DO[5] -> emu:emu|sdram:sdram|ch2_din_1[5]
+slow	din      	NZ_state    	late  44.519 ns k=4	early   2.139 ns k=1	 3200 paths	emu:emu|msx:MSX|NextZ80:NZ|FETCH[2]~DUPLICATE -> emu:emu|sdram:sdram|ch2_din_1[3]
+slow	addr     	T80_u0      	late  33.261 ns k=3	early   1.725 ns k=1	19621 paths	emu:emu|msx:MSX|T80s:T80|T80:u0|MCycle[1]~DUPLICATE -> emu:emu|sdram:sdram|ch2_addr_1[22]
+slow	addr     	NZ_state    	late  46.796 ns k=5	early   3.946 ns k=1	19598 paths	emu:emu|msx:MSX|NextZ80:NZ|FETCH[2]~DUPLICATE -> emu:emu|sdram:sdram|ch2_addr_1[22]
+slow	kanji    	T80_IORQ_n  	late  17.810 ns k=2	early   4.921 ns k=1	 2050 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram:sdram|ch2_addr_1[22]
+fast	req      	T80_MREQ_n  	late   6.861 ns k=1	early   1.849 ns k=1	   26 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram:sdram|ch2_rq
+fast	gate_ffff	T80_MREQ_n  	late   6.402 ns k=1	early   3.904 ns k=1	    4 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram:sdram|ch2_rq
+fast	gate_any 	T80_MREQ_n  	late   7.519 ns k=1	early   2.722 ns k=1	   88 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram:sdram|ch2_rq
+fast	rnw      	T80_MREQ_n  	late   5.986 ns k=1	early   2.050 ns k=1	   96 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram:sdram|ch2_caddr[0]
+fast	req      	T80_RD_n    	late   5.697 ns k=1	early   1.760 ns k=1	   32 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram:sdram|ch2_rq
+fast	gate_ffff	T80_RD_n	NO-PATH	
+fast	gate_any 	T80_RD_n    	late   8.405 ns k=1	early   2.567 ns k=1	  152 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram:sdram|ch2_rq
+fast	rnw      	T80_RD_n    	late   6.186 ns k=1	early   3.117 ns k=1	  128 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram:sdram|ch2_caddr[0]
+fast	req      	T80_WR_n    	late   6.852 ns k=1	early   1.756 ns k=1	   26 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram:sdram|ch2_rq
+fast	gate_ffff	T80_WR_n	NO-PATH	
+fast	gate_any 	T80_WR_n    	late   8.370 ns k=1	early   2.237 ns k=1	   72 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram:sdram|ch2_rq
+fast	rnw      	T80_WR_n    	late   5.842 ns k=1	early   1.974 ns k=1	   96 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram:sdram|ch2_caddr[0]
+fast	req      	T80_IORQ_n  	late   6.175 ns k=1	early   3.249 ns k=1	    4 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram:sdram|ch2_rq
+fast	gate_ffff	T80_IORQ_n	NO-PATH	
+fast	gate_any 	T80_IORQ_n	NO-PATH	
+fast	rnw      	T80_IORQ_n	NO-PATH	
+fast	req      	NZB_ph      	late   7.950 ns k=1	early   2.525 ns k=1	   72 paths	emu:emu|msx:MSX|nz_bus:NZB|ph~DUPLICATE -> emu:emu|sdram:sdram|ch2_rq
+fast	gate_ffff	NZB_ph      	late   7.239 ns k=1	early   4.634 ns k=1	    4 paths	emu:emu|msx:MSX|nz_bus:NZB|ph~DUPLICATE -> emu:emu|sdram:sdram|ch2_rq
+fast	gate_any 	NZB_ph      	late   9.333 ns k=1	early   3.274 ns k=1	  236 paths	emu:emu|msx:MSX|nz_bus:NZB|ph~DUPLICATE -> emu:emu|sdram:sdram|ch2_rq
+fast	rnw      	NZB_ph      	late   6.805 ns k=1	early   2.780 ns k=1	  256 paths	emu:emu|msx:MSX|nz_bus:NZB|ph~DUPLICATE -> emu:emu|sdram:sdram|ch2_caddr[0]
+fast	din      	T80_DO      	late   3.818 ns k=1	early   1.007 ns k=1	    8 paths	emu:emu|msx:MSX|T80s:T80|T80:u0|DO[5] -> emu:emu|sdram:sdram|ch2_din_1[5]
+fast	din      	NZ_state    	late  21.137 ns k=2	early   0.947 ns k=1	 3200 paths	emu:emu|msx:MSX|NextZ80:NZ|FETCH[2]~DUPLICATE -> emu:emu|sdram:sdram|ch2_din_1[3]
+fast	addr     	T80_u0      	late  15.660 ns k=2	early   0.849 ns k=1	19991 paths	emu:emu|msx:MSX|T80s:T80|T80:u0|IR[1]~DUPLICATE -> emu:emu|sdram:sdram|ch2_addr_1[22]
+fast	addr     	NZ_state    	late  22.325 ns k=2	early   1.928 ns k=1	19973 paths	emu:emu|msx:MSX|NextZ80:NZ|FETCH[2]~DUPLICATE -> emu:emu|sdram:sdram|ch2_addr_1[22]
+fast	kanji    	T80_IORQ_n  	late   8.932 ns k=1	early   2.276 ns k=1	 2050 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram:sdram|ch2_addr_1[23]
+
+## LEAD (bench, nz_3f09aaf old = sdram.sv, RPROBE GT)
+# zspeed 0
+RPROBE RESULT PASS
+LEAD     T80 memory request rise, edges since last change (lead:count)
+LEAD T80 addr read : 24:143890 31:580
+LEAD T80 addr write: 24:8193
+LEAD T80 din  write: 0:8161 31:32
+LEAD T80 rnw  read : 31:144470
+LEAD T80 rnw  write: 0:8193
+LEAD NextZ80 memory request rise, edges since last change (lead:count)
+LEAD NZ  addr read : 4:144376 31:1
+LEAD NZ  addr write: 4:8193
+LEAD NZ  din  write: 4:7937 16:255 28:1
+LEAD NZ  rnw  read : 4:8450 16:8384 28:8384 31:119159
+LEAD NZ  rnw  write: 0:8193
+# zspeed 3
+RPROBE RESULT PASS
+LEAD     T80 memory request rise, edges since last change (lead:count)
+LEAD T80 addr read : 8:143890 24:579 31:1
+LEAD T80 addr write: 8:8193
+LEAD T80 din  write: 0:8161 31:32
+LEAD T80 rnw  read : 16:8451 31:136019
+LEAD T80 rnw  write: 0:8193
+LEAD NextZ80 memory request rise, edges since last change (lead:count)
+LEAD NZ  addr read : 4:144376 31:1
+LEAD NZ  addr write: 4:8193
+LEAD NZ  din  write: 4:7937 16:255 28:1
+LEAD NZ  rnw  read : 4:8450 16:8384 28:8384 31:119159
+LEAD NZ  rnw  write: 0:8193
+
+## verdict (request early k = 1 for every strobe, both corners)
+| item | source | LEAD | slow late | fast late | verdict |
+|---|---|---|---|---|---|
+| a rnw (write) | T80 WR_n | 0 | 12.550 ns k=2 | 5.842 k=1 | RISK (slow) |
+| a rnw (write) | NZB ph | 0 | 15.014 k=2 | 6.805 k=1 | RISK (slow) |
+| b din | T80 DO | 0 | 7.789 k=1 (3.851 ns to edge 1) | 3.818 k=1 | ok |
+| b din | NextZ80 state | 4 | 44.519 k=4 | 21.137 k=2 | ok (4-4) |
+| c FFFF gate | T80 MREQ_n | 0 | 13.956 k=2 | 6.402 k=1 | RISK (slow) |
+| c FFFF gate | NZB ph | 0 | 15.794 k=2 | 7.239 k=1 | RISK (slow) |
+| d addr (control) | T80 u0 | 8 | 33.261 k=3 | 15.660 k=2 | PASS -> method valid |
+| d addr (control) | NextZ80 state | 4 | 46.796 k=5 | 22.325 k=2 | PASS (5-4 = 1, edge 5 at 58.2 ns) |
+| e kanji select | T80 IORQ_n | 0 | 17.810 k=2 | 8.932 k=1 | RISK (slow only) |
+# Calibration against the board: the kanji select is RISK at both corners on 128.86 MHz (fast k=2 vs 1)
+# and read 0-8/4096 there; on 85.9 MHz it is RISK in the slow corner only and read 4096/4096 (1008a).

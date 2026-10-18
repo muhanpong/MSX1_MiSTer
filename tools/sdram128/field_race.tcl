@@ -1,7 +1,9 @@
 # field_race.tcl -- per field, on which clk_sdram edge after its launch the ch2
 # capture registers of sdram_tdm see a new value, against the request.
 #
-#   quartus_sta -t tools/sdram128/field_race.tcl <out_file>      (project dir, fitted DB)
+#   quartus_sta -t tools/sdram128/field_race.tcl <out_file> [tdm|sdram]   (project dir, fitted DB)
+#     tdm   (default) sdram_tdm, 128.86 MHz, T = 7.760, clk21m = 6 T
+#     sdram sdram.sv (nextz80 / release), 85.909 MHz, T = 11.640, clk21m = 4 T
 #   then: git checkout -- MSX1.qsf   (project_open touches it)
 #
 # core_builder's request 2026-10-18.  sdram_tdm takes the CPU request on the first
@@ -38,15 +40,20 @@
 #   kanji   T80 IORQ_n -> kanji|ram_ce* -> the address regs, NOT through sdram_ce
 #           (repeat of kanji_race3 / strobe_race on the same DB)
 set out [lindex $argv 0]
+set mode [expr {[llength $argv] > 1 ? [lindex $argv 1] : "tdm"}]
 project_open MSX1 -revision MSX1
 set f [open $out w]
-set T 7.760
-puts $f "# field_race  [clock format [clock seconds] -format %Y-%m-%dT%H:%M]  T=$T"
-
-set REQ   {*sdram_tdm:sdram|ch2_req_1* *sdram_tdm:sdram|ch2_cpend* *sdram_tdm:sdram|ch2_rq*}
-set RNWD  {*sdram_tdm:sdram|ch2_rnw_1* *sdram_tdm:sdram|ch2_brnw* *sdram_tdm:sdram|ch2_cpend* *sdram_tdm:sdram|ch2_caddr[*] *sdram_tdm:sdram|ch2_rq*}
-set DIND  {*sdram_tdm:sdram|ch2_din_1[*] *sdram_tdm:sdram|ch2_bdin[*]}
-set ADRD  {*sdram_tdm:sdram|ch2_addr_1[*] *sdram_tdm:sdram|ch2_caddr[*] *sdram_tdm:sdram|ch2_hl* *sdram_tdm:sdram|ch2_baddr[*]}
+if {$mode eq "sdram"} {
+    set T 11.640; set M {*sdram:sdram}
+} else {
+    set T 7.760;  set M {*sdram_tdm:sdram}
+}
+puts $f "# field_race  [clock format [clock seconds] -format %Y-%m-%dT%H:%M]  mode=$mode T=$T"
+#  (patterns that match nothing in one controller -- ch2_b*, ch2_hl in sdram.sv -- are dropped)
+set REQ   [list $M|ch2_req_1* $M|ch2_cpend* $M|ch2_rq*]
+set RNWD  [list $M|ch2_rnw_1* $M|ch2_brnw* $M|ch2_cpend* "$M|ch2_caddr\[*\]" $M|ch2_rq*]
+set DIND  [list "$M|ch2_din_1\[*\]" "$M|ch2_bdin\[*\]"]
+set ADRD  [list "$M|ch2_addr_1\[*\]" "$M|ch2_caddr\[*\]" $M|ch2_hl* "$M|ch2_baddr\[*\]"]
 set GATEN {emu|MSX|msx_slots|mem_unmaped* emu|MSX|msx_slots|mapper_wr emu|MSX|msx_slots|mapper_en}
 set GATEX {*mem_unmaped* *msx_slots|mapper_wr* *msx_slots|mapper_en*}
 set FFFFX {*msx_slots|mapper_wr* *msx_slots|mapper_en*}
@@ -121,7 +128,10 @@ foreach model {slow fast} {
     set nzs [get_registers -nowarn {*NextZ80:NZ|*}]
     line $f $model din NZ_state [span $nzs $DIND {} {}]
     set t80a [remove_from_collection [get_registers -nowarn {*T80s:T80|T80:u0|*}] $t80do]
-    set AX [concat {*msx_slots|sdram_ce* *msx_slots|kanji|ram_ce* *msx_slots|ram_rnw*} $GATEX]
+    #  address sources may pass the unmap mux (mapper_addr = mem_unmaped ? DEAD : raw):
+    #  that is the address value's own route.  In the sdram.sv DB every address bit
+    #  goes through a mem_unmaped~ node, so excluding the gate here left NO-PATH.
+    set AX {*msx_slots|sdram_ce* *msx_slots|kanji|ram_ce* *msx_slots|ram_rnw*}
     line $f $model addr T80_u0 [span $t80a $ADRD {} $AX]
     line $f $model addr NZ_state [span $nzs $ADRD {} $AX]
     line $f $model kanji T80_IORQ_n [span [get_registers {*T80s:T80|IORQ_n}] $ADRD {emu|MSX|msx_slots|kanji|ram_ce*} {*msx_slots|sdram_ce*}]

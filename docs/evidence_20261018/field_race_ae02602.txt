@@ -99,9 +99,12 @@ RPROBE RESULT PASS
 | b din | NextZ80 state | 6 | 35.061 k=5 | 15.803 k=3 | ok (5-6 <= 1) |
 | c FFFF gate | T80 MREQ_n via mapper_en/wr | 0 | 16.306 k=3 | 7.591 k=1 | RISK (slow: glitch request edges 1-2) |
 | c FFFF gate | NZB ph via mapper_en/wr | 0 | 15.262 k=2 | 7.120 k=1 | RISK (slow) |
-| d addr (control) | T80 u0 | 12 | 29.836 k=4 | 13.349 k=2 | PASS (4-12) -> method valid |
-| d addr (control) | NextZ80 state | 6 | 36.767 k=5 | 16.433 k=3 | PASS (5-6) |
+| d addr (control) | T80 u0 | 12 | 31.036 k=4 | 13.966 k=2 | PASS (4-12) -> method valid |
+| d addr (control) | NextZ80 state | 6 | 37.967 k=5 | 17.050 k=3 | PASS (5-6) |
 | e kanji select | T80 IORQ_n | 0 | 17.193 k=3 | 8.102 k=2 | RISK; = kanji_race3 (17.193 / req min 6.403 -> 6.400) |
 # rnw on reads does not move (LEAD 24-31); gate_any (every mapper's unmap decode) is INFO.
 # gate_ffff has no WR_n path by name (mapper_wr merged into other LUTs); WR_n's gate routes are in gate_any (17.711 k=3).
 # Not built: nextz80 3f09aaf (sdram.sv 85.9 MHz) -- tools/buildgate/build.sh GATE-FAIL rc=3 (Quartus 17.1 path of another machine); stopped as instructed.
+# 2026-10-18 rerun (field_race.tcl v2): the address class no longer excludes the unmap mux (an address
+#   bit's own route, mapper_addr = mem_unmaped ? DEAD : raw); d values above are v2, every other line is
+#   byte-identical to the first run.
