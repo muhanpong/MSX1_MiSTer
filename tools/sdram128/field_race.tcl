@@ -33,6 +33,14 @@
 #           register decode; most do not move on a given access -- INFO)
 #   rnw     strobe -> msx_slots|ram_rnw* -> {ch2_rnw_1, ch2_brnw, ch2_cpend, ch2_caddr*,
 #           ch2_rq}, NOT through sdram_ce
+#   rnw2    strobe -> msx_slots|ram_rnw* -> c_pend2, NOT through sdram_ce (732de12: a
+#           cache lookup looks at rnw again on the edge after the one that saw the
+#           request -- ch2_cpend high -- and queues the request as a write if it
+#           turned).  c_pend2 is the register outside ch2_* that reads ch2_rnw live
+#           there; MSX1.sdc gives clk21m -> c_pend2 -end 2.  Verdict printed:
+#           RNW2 PASS if k_late <= 2 (= 2 T, the second edge), else FAIL.  Only
+#           clk21m sources (the strobes).  NO-PATH on a DB without the recheck.
+#           rnw2_any (INFO): the same without the ram_rnw net filter.
 #   din     data registers (T80 DO, NextZ80 state) -> {ch2_din_1*, ch2_bdin*}
 #   addr    address-side registers (T80 u0 except DO, NextZ80 state) -> {ch2_addr_1*,
 #           ch2_caddr*, ch2_hl*, ch2_baddr*}, NOT through sdram_ce, the unmap gate,
@@ -51,6 +59,7 @@ if {$mode eq "sdram"} {
 puts $f "# field_race  [clock format [clock seconds] -format %Y-%m-%dT%H:%M]  mode=$mode T=$T"
 #  (patterns that match nothing in one controller -- ch2_b*, ch2_hl in sdram.sv -- are dropped)
 set REQ   [list $M|ch2_req_1* $M|ch2_cpend* $M|ch2_rq*]
+set RNW2D [list $M|c_pend2*]
 set RNWD  [list $M|ch2_rnw_1* $M|ch2_brnw* $M|ch2_cpend* "$M|ch2_caddr\[*\]" $M|ch2_rq*]
 set DIND  [list "$M|ch2_din_1\[*\]" "$M|ch2_bdin\[*\]"]
 set ADRD  [list "$M|ch2_addr_1\[*\]" "$M|ch2_caddr\[*\]" $M|ch2_hl* "$M|ch2_baddr\[*\]"]
@@ -121,6 +130,15 @@ foreach model {slow fast} {
         line $f $model gate_ffff $sn [span $src $REQ {emu|MSX|msx_slots|sdram_ce*} {} $FFFFX]
         line $f $model gate_any  $sn [span $src $REQ {emu|MSX|msx_slots|sdram_ce*} {} $GATEX]
         line $f $model rnw  $sn [span $src $RNWD {emu|MSX|msx_slots|ram_rnw*} {*msx_slots|sdram_ce*}]
+        set r2 [span $src $RNW2D {emu|MSX|msx_slots|ram_rnw*} {*msx_slots|sdram_ce*}]
+        line $f $model rnw2 $sn $r2
+        #  INFO: every strobe -> c_pend2 route, no net filter -- if ram_rnw's name is
+        #  merged into another LUT in a new fit, rnw2 reads NO-PATH and this does not
+        line $f $model rnw2_any $sn [span $src $RNW2D {} {}]
+        if {[lindex $r2 0] > 0} {
+            set ok [expr {[lindex $r2 3] <= 2}]
+            puts $f [format "%s\tRNW2\t%-12s\t%s\tlate %.3f ns vs second edge %.3f ns (slack %.3f)" $model $sn [expr {$ok ? "PASS" : "FAIL"}] [lindex $r2 1] [expr {2 * $T}] [expr {2 * $T - [lindex $r2 1]}]]
+        }
     }
     #  data and address sources
     set t80do [get_registers -nowarn {*T80s:T80|T80:u0|DO[*]}]
