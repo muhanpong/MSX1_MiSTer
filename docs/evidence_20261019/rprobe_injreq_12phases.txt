@@ -1,0 +1,24 @@
+# RPROBE under -DINJ_REQ (every request and field first seen on the second edge) at all 12 boot
+# phases: fullsys tdm128, GT DOS2, stock 3.58 MHz Z80 (+ R800 phases), 1500 ms each.
+# Columns: FRAMEPOS (ph on the edge the controller takes a memory request; the large count is the
+# Z80 part, the small one the R800 part) | RPROBE errors | result | tb_msx rdl summary (reads the CPU
+# latched, those from SDRAM, LATE = ch2 not complete when the T80/NextZ80 latched).
+# core_builder's mapping: tb_tdm g3/g15/g27 (stock deadline E0+28 missed by 1 under REQ_EDGE2) = request
+# edge ph=1 without injection = ph=2 under injection = initph 5, rstph 0 here.
+initph=0 rstph=0  ph at request edge: 1:76406 7:228827 | p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0
+initph=0 rstph=1  ph at request edge: 1:229146 7:76087 | p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0
+initph=1 rstph=0  ph at request edge: 0:76406 6:228827 | p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0
+initph=1 rstph=1  ph at request edge: 0:229146 6:76087 | p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0
+initph=2 rstph=0  ph at request edge: 5:228827 11:76406 | p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0
+initph=2 rstph=1  ph at request edge: 5:76087 11:229146 | p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0
+initph=3 rstph=0  ph at request edge: 4:228827 10:76406 | p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0
+initph=3 rstph=1  ph at request edge: 4:76087 10:229146 | p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0
+initph=4 rstph=0  ph at request edge: 3:228530 9:76703 | p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0
+initph=4 rstph=1  ph at request edge: 3:75830 9:229403 | p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0
+initph=5 rstph=0  ph at request edge: 2:228538 8:76695 | p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0
+initph=5 rstph=1  ph at request edge: 2:75838 8:229395 | p1 Z80 RAM errors 0 | p2 Z80 FFFF: bad 8000h reads 0, sentinel lost 0 | p3 R800 RAM errors 0 | p4 R800 FFFF: bad reads 0, sentinel lost 0 | RPROBE RESULT PASS | cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0
+
+# Every phase: RAM errors 0, sentinel 0, LATE 0 of 288,847 SDRAM reads -- including initph 5 / rstph 0.
+# Caveat: RPROBE's mapper RAM is at 0x010000-0x090000; in the 128 MB map (map(), m=1: row[12:11] =
+# a[26:25]) everything below 32 MB has row bits 00, tb_tdm's cpulow=2 (0x240000) included.
+# Baselines without INJ_REQ (same probe, 1500 ms): LATE 0 as well (strobe_inj_732de12 runs).
