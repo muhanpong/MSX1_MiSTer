@@ -179,6 +179,16 @@ module tb;
       begin int sb; if ($value$plusargs("slotb=%d", sb)) cart_conf[1].typ = cart_typ_t'(sb); end
    end
 
+   //  +rowxor=N (N = 0..3): every CPU (ch2) SDRAM address and the preloaded image are
+   //  moved by N << 21, i.e. a[22:21] ^= N.  In the 32 MB map row[12:11] = a[22:21],
+   //  so N = 1 puts a machine that lives below 2 MB onto the DQM-sensitive rows a
+   //  bigger machine's RAM or a cart occupies there (sdram_tdm slot rules).  The
+   //  128 MB map keeps row bits 00 below 32 MB whatever N is.  Bench only.
+   int rowxor = 0;
+   initial void'($value$plusargs("rowxor=%d", rowxor));
+   function automatic int rxa(input int a);
+      return a ^ (rowxor << 21);
+   endfunction
 `ifndef PRELOAD
    memory_upload u_upload
    (
@@ -228,8 +238,8 @@ module tb;
       if (fd == 0) $fatal(1, "cannot open %s.sdram.bin", pfx);
       a = 0; c = $fgetc(fd);
       while (c >= 0) begin
-         if (a & 1) u_chip.mem[`MEMW'(a >> 1)][15:8] = 8'(c);
-         else       u_chip.mem[`MEMW'(a >> 1)][7:0]  = 8'(c);
+         if (a & 1) u_chip.mem[`MEMW'(rxa(a) >> 1)][15:8] = 8'(c);
+         else       u_chip.mem[`MEMW'(rxa(a) >> 1)][7:0]  = 8'(c);
          a++; c = $fgetc(fd);
       end
       $fclose(fd);
@@ -315,6 +325,11 @@ module tb;
       hold_rnw <= pre_rnw; hold_din <= pre_din; hold_addr <= pre_addr; hold_unmap <= pre_unmap;
       hold_ce <= pre_ce;
    end
+   wire [26:0] rx_addr = inj_addr ^ (27'(rowxor) << 21);   // +rowxor, see above
+   //  self-check: how many CPU requests the controller saw with a[22:21] != 0
+   int rx_hi = 0, rx_all = 0; logic rx_q = 1'b0;
+   always @(posedge clk_sdram) begin rx_q <= sdram_ce; if (sdram_ce & ~rx_q) begin rx_all++; if (rx_addr[22:21] != 2'b00) rx_hi++; end end
+   final $display("ROWXOR %0d: ch2 requests %0d, with a[22:21] != 0: %0d", rowxor, rx_all, rx_hi);
    wire inj_req;
 `ifdef INJ_H_REQ
    assign inj_req = inj_win ? hold_ce : sdram_ce;
@@ -424,7 +439,7 @@ module tb;
       .SDRAM_DQ_o(dq_o), .SDRAM_DQ_oe(dq_oe), .SDRAM_DQ_i(dq_i),
       .ch1_addr(ch1_addr), .ch1_dout(ch1_dout), .ch1_din(ch1_din),
       .ch1_req(ch1_req), .ch1_rnw(ch1_rnw), .ch1_ready(sdram_ready),
-      .ch2_addr(inj_addr), .ch2_dout(sdram_dout_c), .ch2_din(inj_din),
+      .ch2_addr(rx_addr), .ch2_dout(sdram_dout_c), .ch2_din(inj_din),
       .ch2_req(inj_req), .ch2_rnw(inj_rnw), .ch2_ready(ch2_ready),
       .ch2_rdtog(sdram_rdtog), .ch2_hit(sdram_hit),
       .ch3_addr(flash_addr), .ch3_din(flash_din), .ch3_req(flash_req),
@@ -1357,15 +1372,15 @@ module tb;
       //  only the bytes in the file (the first version patched 512 and, 2-state,
       //  wrote zeros past the end of the image)
       while ($fscanf(fd, "%h", v) == 1) begin
-         if ((base + n) & 1) u_chip.mem[`MEMW'((base + n) >> 1)][15:8] = 8'(v);
-         else                u_chip.mem[`MEMW'((base + n) >> 1)][7:0]  = 8'(v);
+         if ((base + n) & 1) u_chip.mem[`MEMW'(rxa(base + n) >> 1)][15:8] = 8'(v);
+         else                u_chip.mem[`MEMW'(rxa(base + n) >> 1)][7:0]  = 8'(v);
          n++;
       end
       $fclose(fd);
       $display("kprobe: %0d bytes over the BIOS at %07x", n, base);
    endtask
    function automatic logic [7:0] sd_byte(input int a);
-      logic [15:0] w = u_chip.mem[`MEMW'(a >> 1)];
+      logic [15:0] w = u_chip.mem[`MEMW'(rxa(a) >> 1)];
       return (a & 1) ? w[15:8] : w[7:0];
    endfunction
 `endif
@@ -1599,7 +1614,7 @@ module tb;
       for (int i = 0; i < 32768 && 16 + i < pack_bytes; i++) begin
          logic [15:0] w;
          logic  [7:0] b;
-         w = u_chip.mem[`MEMW'((base + i) >> 1)];
+         w = u_chip.mem[`MEMW'(rxa(base + i) >> 1)];
          b = ((base + i) & 1) ? w[15:8] : w[7:0];
          if (b !== packmem[16 + i]) begin bad++; if (first < 0) first = base + i; end
       end

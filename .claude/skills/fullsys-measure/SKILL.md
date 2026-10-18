@@ -117,6 +117,11 @@ CL3/BL2 칩 모델 `sdram_big_tdm`(tb_msx.sv `-DTDM`). `prep.sh`가 `tb/mkshim_t
   찍는다(0이면 주입기가 죽은 것). **`msx.sv`는 `msx_slots`의 `clk_sdram` 포트를 연결하지 않는다(0)** —
   그 모듈 안에 시뮬 플롭을 걸려면 `tb.clk_sdram`을 쓸 것. 첫 KDLY는 이걸 몰라 선택이 영구히 꺼진 채로
   "재현"을 보고했다가 철회했다. 주입을 넣은 직후 `+kwave`로 파형이 의도대로인지 먼저 볼 것.
+- **부팅 위상·행 비트**(2026-10-19): `+initph=N`(컨트롤러 init 해제를 N clk_sdram 늦춤, 실기 init=~locked 비동기
+  모사), `+rstph=M`(MSX 리셋 해제 M clk21m 늦춤, T-state 격자 이동) → `FRAMEPOS`(요청이 잡히는 에지의 TDM ph,
+  한 판에 하나; 위치 = (6−initph+6·(rstph mod 2)) mod 12). `+rowxor=N`: ch2 주소와 프리로드 이미지의 a[22:21]
+  ^= N (32 MB 맵에서 민감한 행으로 기계를 옮김; `ROWXOR` 자체 검사 줄). `cpu latched reads ... LATE` 합계 줄이
+  "T80이 잡을 때 ch2 미완료" 수.
 - 결과 비교: `cmp_io.sh`(+iolog 값 순서열), `cmp_time.sh`(분기 시각).
 
 ## VDP 단독 재생 (`sim/run_vdp_replay.sh`)
