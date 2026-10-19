@@ -18,6 +18,7 @@
 #     vibrato table that replaces two multiplies) counts only non-zero vibrato;
 #     sweep (the invalidate clear a cycle after its compare) checks, at the end
 #     of every sweep that hit, that no valid entry still covers the written word.
+#     tag (CHIT0's two tag compares, 2026-10-20) counts only valid entries.
 #     The frame output a cycle later is covered by the golden byte identity.
 #     Then one mutant per split, each must be caught on its own check kind.
 #
@@ -106,7 +107,7 @@ echo "== 4. PIPECHK, PIPE=1: the splits, and one mutant per split"
 #  sum "<kind>=checks/bad" over a set of logs: prints "checks bad"
 pcsum() { cat "$@" 2>/dev/null | grep "^PIPECHK" | grep -oE "$K=[0-9]+/[0-9]+" \
           | awk -F'[=/]' '{c+=$2; b+=$3} END{print c+0, b+0}'; }
-for K in decode need_b attack inv vib sweep; do
+for K in decode need_b attack inv vib sweep tag; do
     read c b < <(pcsum "$O"/snap/eng_*.log)
     echo "  engine $K: checks=$c bad=$b"
     [ "$c" -gt 0 ] || fail "PIPECHK $K never fired (no exposure is not a pass)"
@@ -116,7 +117,7 @@ rm -rf "$O/pcm"; mkdir -p "$O/pcm"
 #  scenarios that expose each split: 16-bit odd starts and 12-bit (byte picks
 #  across words, need_b), memwrite (the invalidate sweep), attack everywhere
 PSC="sc_odd16:300 sc_tri12_loop:300 sc_memhit:400 sc_memwrite:440 sc_multi:300 sc_lfo:300"   # vibrato comes from memwrite, not lfo
-for m in BSEL:decode NEEDB:need_b ATT:attack INV:inv VIB:vib CLR:sweep; do
+for m in BSEL:decode NEEDB:need_b ATT:attack INV:inv VIB:vib CLR:sweep TAG:tag; do
     M=${m%%:*}
     rm -f "$O/pc_$M.vvp"
     iverilog -g2012 -DPIPECHK -DPC_MUT_$M -Ptb_lockstep_pcm.DUT_PIPE=1 -o "$O/pc_$M.vvp" \
@@ -124,11 +125,11 @@ for m in BSEL:decode NEEDB:need_b ATT:attack INV:inv VIB:vib CLR:sweep; do
         ymf278_pcm_engine2_ref.sv tb_lockstep_pcm.sv 2>&1 | grep -v "sorry:"
     [ -x "$O/pc_$M.vvp" ] || fail "PIPECHK mutant $M did not build"
 done
-for m in BSEL NEEDB ATT INV VIB CLR; do for sc in $PSC; do echo "$m ${sc%%:*} ${sc##*:}"; done; done \
+for m in BSEL NEEDB ATT INV VIB CLR TAG; do for sc in $PSC; do echo "$m ${sc%%:*} ${sc##*:}"; done; done \
   | xargs -P "$P" -L1 bash -c '
     vvp -n '"$O"'/pc_$0.vvp +script=../golden/$1.txt +mem=../golden/mem.hex +frames=$2 \
         +lat=6 +out=/dev/null +stress=1 +seed=1 2>&1 | grep "^PIPECHK [a-z]" > '"$O"'/pcm/$0_$1.log'
-for m in BSEL:decode NEEDB:need_b ATT:attack INV:inv VIB:vib CLR:sweep; do
+for m in BSEL:decode NEEDB:need_b ATT:attack INV:inv VIB:vib CLR:sweep TAG:tag; do
     M=${m%%:*}; K=${m##*:}
     read c b < <(pcsum "$O"/pcm/${M}_*.log)
     echo "  mutant $M on $K: checks=$c bad=$b"

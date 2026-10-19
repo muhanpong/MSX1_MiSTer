@@ -329,6 +329,12 @@ logic [9:0]   eg_att_r, eg_dl_r;
 logic [10:0]  eg_add_r;
 logic signed [20:0] eg_prod_r;         // calc_attack_step's product (EGPRE -> EGPRE2)
 logic         c_need_b;                // CHIT0: need_b, registered for CHIT
+//  CHIT0: the two tag compares, registered for CHIT (2026-10-20).  The 21-bit
+//  compare on the tag MLABs' output fed w_word's load enable in CHIT, the one
+//  path that moved -0.04 .. +0.6 ns with the fitter seed (481569a, SEED 8/9).
+//  Nothing writes cache_tagA/B between CHIT0 and CHIT (only F_WAIT does, in this
+//  FSM) and w_a0/w_b0 hold still; cache_vld / cache_hasb stay live in CHIT.
+logic         c_tagA_eq, c_tagB_eq;
 logic [1:0]   bsel [0:5];              // CHIT0: word holding a0,a1,a2,b0,b1,b2 (pick_byte)
 logic         g_e_zero, g_t_zero;
 logic [7:0]   g_vmul_e, g_vmul_t;
@@ -891,6 +897,12 @@ always_ff @(posedge clk or negedge rst_n) begin
                 bsel[4] <= pick_sel(w_b0, w_a0, w_b0);
 `endif
                 bsel[5] <= pick_sel(w_b2, w_a0, w_b0);
+                c_tagA_eq <= (cache_tagA[w_slot] == w_a0[21:1]);
+`ifndef PC_MUT_TAG
+                c_tagB_eq <= (cache_tagB[w_slot] == w_b0[21:1]);
+`else           // negative control for PIPECHK
+                c_tagB_eq <= (cache_tagB[w_slot] == w_a0[21:1]);
+`endif
                 sl_state <= SL_CHIT;
             end
 
@@ -909,9 +921,9 @@ always_ff @(posedge clk or negedge rst_n) begin
                 w_need_b <= need_b_c;
                 w_fidx   <= 2'd0;
                 hit_c = cache_vld[w_slot]
-                      && (cache_tagA[w_slot] == w_a0[21:1])
+                      && (PIPE ? c_tagA_eq : (cache_tagA[w_slot] == w_a0[21:1]))
                       && (!need_b_c || (cache_hasb[w_slot]
-                                        && cache_tagB[w_slot] == w_b0[21:1]));
+                                        && (PIPE ? c_tagB_eq : (cache_tagB[w_slot] == w_b0[21:1]))));
                 if (hit_c) begin
                     w_word[0] <= cache_w0[w_slot];
                     w_word[1] <= cache_w1[w_slot];
@@ -1802,7 +1814,7 @@ endgenerate
 //  PC_MUT_* are the negative controls (each breaks one split).  The compares are
 //  4-state (===): an X in both (slot 23 of sc_st02/st04 dispatches with X
 //  addresses) is the same value, and == would turn it into a false failure.
-longint pc_n[6] = '{0,0,0,0,0,0}, pc_bad[6] = '{0,0,0,0,0,0};
+longint pc_n[7] = '{0,0,0,0,0,0,0}, pc_bad[7] = '{0,0,0,0,0,0,0};
 task automatic pc(input int k, input bit ok, input string what);
     pc_n[k]++;
     if (!ok) begin
@@ -1835,6 +1847,11 @@ always @(negedge clk) if (rst_n && PIPE) begin
         "decode");
     if (sl_state == SL_CHIT) pc(1, c_need_b ===
         !((w_b0[21:1] >= w_a0[21:1]) && (pc_blast[21:1] <= w_a0[21:1] + 21'd1)), "need_b");
+    //  counted where the cache is valid for the slot: an invalid entry's compare
+    //  decides nothing
+    if (sl_state == SL_CHIT && cache_vld[w_slot]) pc(6,
+        c_tagA_eq === (cache_tagA[w_slot] == w_a0[21:1])
+        && c_tagB_eq === (cache_tagB[w_slot] == w_b0[21:1]), "tag");
     if (sl_state == SL_EGSTEP) pc(2, eg_att_r === calc_attack_step(w_dyn.env_vol, w_inc), "attack");
     if (inv_run && !cpu_wr_issue) pc(3, inv_word_m1 + 21'd1 === inv_word, "inv");
     //  counted only where vibrato is non-zero: a run with no vibrato is no exposure
@@ -1859,9 +1876,9 @@ always @(negedge clk) if (rst_n && PIPE) begin
     end
     pc_busy_d = inv_busy;
 end
-final $display("PIPECHK decode=%0d/%0d need_b=%0d/%0d attack=%0d/%0d inv=%0d/%0d vib=%0d/%0d sweep=%0d/%0d (checks/bad)",
+final $display("PIPECHK decode=%0d/%0d need_b=%0d/%0d attack=%0d/%0d inv=%0d/%0d vib=%0d/%0d sweep=%0d/%0d tag=%0d/%0d (checks/bad)",
                pc_n[0], pc_bad[0], pc_n[1], pc_bad[1], pc_n[2], pc_bad[2], pc_n[3], pc_bad[3],
-               pc_n[4], pc_bad[4], pc_n[5], pc_bad[5]);
+               pc_n[4], pc_bad[4], pc_n[5], pc_bad[5], pc_n[6], pc_bad[6]);
 `endif
 
 endmodule
