@@ -19,6 +19,8 @@ set EXPECT [list \
   [list RNW2_NZB_pend2 $c21     $csd     "*sdram_tdm:sdram|c_pend2"         15.520 "nz_bus ph (NextZ80 strobe) -> c_pend2, -end 2" "*msx:MSX|nz_bus:NZB|ph*"] \
   [list REQS_T80       $c21     $csd     "*sdram_tdm:sdram|ch2_req_s"       15.520 "T80s strobe -> ch2_req_s, the single request sample, -end 2 (MSX1.sdc 2026-10-19)" "*msx:MSX|T80s:T80|*_n"] \
   [list REQS_NZB       $c21     $csd     "*sdram_tdm:sdram|ch2_req_s"       15.520 "nz_bus ph -> ch2_req_s, -end 2" "*msx:MSX|nz_bus:NZB|ph*"] \
+  [list RNW_T80_ch2    $c21     $csd     "*sdram_tdm:sdram|ch2_rnw_1"       15.520 "T80 WR_n -> ram_rnw -> ch2_rnw_1, MSX1.sdc -through *msx_slots|ram_rnw* -end 2; if that net name stops matching after synthesis the path falls back to the generic 46.560 and this fails" "*msx:MSX|T80s:T80|WR_n"] \
+  [list RNW_NZB_ch2    $c21     $csd     "*sdram_tdm:sdram|ch2_brnw"        15.520 "nz_bus ph -> ram_rnw -> ch2_brnw, same -through rule" "*msx:MSX|nz_bus:NZB|ph*"] \
   [list DIN_T80        $c21     $csd     "*sdram_tdm:sdram|ch2_din_1[*]"    15.520 "T80 DO -> ch2_din_1, taken one edge after ch2_req_s, -end 2" "*msx:MSX|T80s:T80|T80:u0|DO[*]"] \
   [list ADDR_NZ_pend2  $c21     $csd     "*sdram_tdm:sdram|c_pend2"         62.080 "NextZ80 state (address side, leads the strobe by one clk21m) -> c_pend2, -end 8" "*msx:MSX|NextZ80:NZ|*"] \
   [list ADDR_T80_pend2 $c21     $csd     "*sdram_tdm:sdram|c_pend2"         62.080 "T80 core registers (address side) -> c_pend2, -end 8" "*msx:MSX|T80s:T80|T80:u0|*"] \

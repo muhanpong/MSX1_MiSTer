@@ -484,9 +484,9 @@ always @(posedge clk) begin
     //  INJ_RNW).  STA puts rnw in by the second edge: look again there, and if the
     //  request turned out to be a write, drop the lookup and queue the write.  Reads
     //  keep their first-edge start -- the stock T80 takes its byte at a fixed time
-    //  (2026-10-19: with ch2_req_s every request starts one edge later anyway, and
-    //  this recheck reads ram_rnw yet one edge after that -- kept, it is harmless)
     //  (sim/sdram_tdm +stock) and one edge later misses a slot at 3 of 36 phases.
+    //  (2026-10-19: with ch2_req_s every request starts one edge later anyway, and
+    //  this recheck reads ram_rnw yet one edge after that -- kept, it is harmless.)
     //  rnw only goes 1 -> 0 inside a request (a read's rnw does not move), so only
     //  this direction exists.  ch2_cpend is high on exactly the second edge, so
     //  ch2_req is not looked at, and the check sits INSIDE the ch2_cpend branch:
