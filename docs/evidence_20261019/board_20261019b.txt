@@ -1,0 +1,10 @@
+# Board result, MSX1_20261019b_sdram128_481569a.rbf (md5 170441aa520a33084a922efc8e70da32, verified on the board)
+# run by the mister-super-expert session on the user's 128 MB board, 2026-10-20 01:0x
+kanji KPROBE (D9h): all four methods 4096/4096, 0 wrong; sums ZI/ZS/RI/RS 0085 0B06 0878 005C 00DA 03BD 0336 0972
+  (= 20261008a); kpcheck vs the GT pack's 256 KB kanji ROM: 8/8 ok.  Pack FS-A1GT DOS2, slot A MFRSD, KPROBE3.DSK.
+Neon Horizon v1.0 (slot A ROM, FS-A1GT DOS2, no .sav, board CFG MoonSound as is): 3 runs, title -> start -> ~6 s
+  into the first race: no background tile corruption in any run.  Run 1 needed the slot A mapper changed in the OSD
+  (CFG had Konami from an earlier test); runs 2-3 with mapper auto and a core reload each.
+Limits: core reloads, not power cycles; 582x242 screenshots; only the first seconds of the race.
+Previous boards: 20261014b corrupt "almost every time"; 20261019a (601e17d) kanji OK, Neon worse.
+The only difference 20261019a -> 20261019b in logic: ch2_req_s (b1b2d7f) -- the single request sample.
