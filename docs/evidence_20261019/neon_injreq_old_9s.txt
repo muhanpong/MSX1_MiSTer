@@ -1,0 +1,10 @@
+# Neon Horizon, C-BIOS MSX2 + MoonSound, 9 s, fullsys old (sdram.sv) with -DINJ_REQ (every CPU request and
+# its fields first seen on the second clk_sdram edge), default boot phase; reference = the same run without
+# injection (evidence_20261017/fullsys_nc/nc_old_ms1.io.gz, 2026-10-17).
+INJ_REQ: request rises 3851917; windows where the held request differed: rise delayed 3851917, fall delayed 3851917
+INJ_REQ: controller saw the rise 0/1/2/3+ edges after the live request: 0 3851917 0 0
+- Verilator: $finish at 9s; walltime 48948.704 s; speed 183.876 us/s
+cmp_io.sh VDP writes only : RESULT PASS: same 41292 events (ref to 8996.532 ms, cand to 8996.532 ms)
+cmp_io.sh ALL=1 (VDP+MoonSound): RESULT PASS: same 291382 events (ref to 8996.532 ms, cand to 8996.532 ms)
+# identical to the last event and to the millisecond: edge-2 detection changes nothing the VDP or MoonSound sees on sdram.sv.
+# tdm128 runs (default phase 6.8 s, bad phase initph5/rstph0 6.4 s at 13:24) identical so far as well; still running.
