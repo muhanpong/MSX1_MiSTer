@@ -1452,7 +1452,10 @@ module tb;
    logic [26:0] ld_a_q = '0; logic [7:0] ld_d_q = '0; logic ld_r_q = 1'b1;
    initial for (int c = 0; c < 2; c++) for (int i = 0; i < 32; i++) begin
       ld_addr[c][0][i] = 0; ld_addr[c][1][i] = 0; ld_din[c][i] = 0; ld_rnw[c][0][i] = 0; ld_rnw[c][1][i] = 0; end
-   wire ld_nz = MSX.use_nz, ld_mem = MSX.iorq_n;
+   //  +leadio: count I/O-cycle requests too (the kanji port is the only one; with
+   //  fix B its request lags the IORQ by one clk21m) -- otherwise memory cycles only
+   logic ld_io = 1'b0; initial ld_io = $test$plusargs("leadio");
+   wire ld_nz = MSX.use_nz, ld_mem = MSX.iorq_n | ld_io;
    always @(posedge clk_sdram) begin
       automatic int c = ld_nz ? 1 : 0;
       ld_ea = (ram_addr != ld_a_q) ? 0 : (ld_ea < 31 ? ld_ea + 1 : 31);

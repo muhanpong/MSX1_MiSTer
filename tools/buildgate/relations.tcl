@@ -15,12 +15,15 @@ set csd {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk
 set EXPECT [list \
   [list NZ_intra       $c21     $c21     "*msx:MSX|NextZ80:NZ|*"            93.132 "NextZ80 -> NextZ80, -end 2 (writes >= 2 clk21m apart, nz_bus)" "*msx:MSX|NextZ80:NZ|*"] \
   [list NZ_to_SD_ch2   $c21     $csd     "*sdram*ch2_*"                     46.560 "NextZ80 address -> ch2 capture, generic -end 6 (6 x 7.760 at 128.86 MHz; was 69.846 at 85.9)" "*msx:MSX|NextZ80:NZ|*"] \
-  [list RNW2_c_pend2   $c21     $csd     "*sdram_tdm:sdram|c_pend2"         15.520 "rnw looked at again on the second edge of a ch2 lookup, -end 2 (MSX1.sdc)"] \
+  [list RNW2_T80_pend2 $c21     $csd     "*sdram_tdm:sdram|c_pend2"         15.520 "T80s strobe -> c_pend2: rnw looked at again on the second edge, -end 2 (MSX1.sdc 601e17d)" "*msx:MSX|T80s:T80|*_n"] \
+  [list RNW2_NZB_pend2 $c21     $csd     "*sdram_tdm:sdram|c_pend2"         15.520 "nz_bus ph (NextZ80 strobe) -> c_pend2, -end 2" "*msx:MSX|nz_bus:NZB|ph*"] \
+  [list ADDR_NZ_pend2  $c21     $csd     "*sdram_tdm:sdram|c_pend2"         62.080 "NextZ80 state (address side, leads the strobe by one clk21m) -> c_pend2, -end 8" "*msx:MSX|NextZ80:NZ|*"] \
+  [list ADDR_T80_pend2 $c21     $csd     "*sdram_tdm:sdram|c_pend2"         62.080 "T80 core registers (address side) -> c_pend2, -end 8" "*msx:MSX|T80s:T80|T80:u0|*"] \
   [list NZ_to_fabric   $c21     $c21     "*systemRAM*"                      93.132 "NextZ80 -> clk21m fabric, clock-based -end 2" "*msx:MSX|NextZ80:NZ|*"] \
   [list NZ_to_SCC_fall $c21     $c21     "*IKASCC_player_memory_s*"         69.849 "NextZ80 -> SCC wave RAM falling edge, -end 2" "*msx:MSX|NextZ80:NZ|*"] \
   [list NZ_to_ctl_exc  $c21     $c21     "*msx:MSX|cpuswap_ctl:CPUSWAP|*"   46.566 "exception: SWAPPT -> controller single-cycle" "*msx:MSX|NextZ80:NZ|*"] \
   [list NZ_to_cheat_exc $c21    $c21     "*msx:MSX|a_q[*]"                  46.566 "exception: cheat address register single-cycle" "*msx:MSX|NextZ80:NZ|*"] \
-  [list SD_int_to_ch2  $csd     $csd     "*sdram*ch2_*"                     11.641 "sdram-internal -> ch2_* single-cycle (read-cache stage 2, FSM); the generic -end 6 must not cover it" "*sdram:sdram|*"] \
+  [list SD_int_to_ch2  $csd     $csd     "*sdram*ch2_*"                     7.760 "sdram_tdm-internal -> ch2_* single-cycle (read-cache stage 2, FSM); the generic -end 6 must not cover it (7.760 at 128.86 MHz)" "*sdram_tdm:sdram|*"] \
   [list T80_to_NZ      $c21     $c21     "*msx:MSX|NextZ80:NZ|*"            93.132 "T80s REG -> NextZ80 LOAD, -end 2" "*msx:MSX|T80s:T80|*"] ]
 #  A filter that matches nothing is a tcl ERROR in get_timing_paths, not an empty
 #  result, and build.sh drops stderr: on sdram128 SD_int_to_ch2 (then naming the
