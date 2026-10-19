@@ -106,17 +106,19 @@ set_multicycle_path -hold  -end 1 \
     -to   [get_registers {*sdram_tdm:sdram|c_pend2}]
 
 # The MSX reset (MSX1.sv rst_meta / rst_hold, clk21m) is a level held for 63
-# clk21m (~3 us) and read as a level by the clk_sdram side too (sd_card's SPI
-# half, clk_spi = clk_sdram).  It is not synchronised there; a register that sees
-# the edge one clk_sdram late changes nothing (reset lasts 36x longer), so give
-# that crossing two cycles instead of one.  20261019a: rst_hold[4] -> sd_buf was
-# the worst internal path at +0.095 ns.  Same-clock consumers stay single-cycle.
+# clk21m (~3 us).  sd_card's SPI half runs on clk_spi = clk_sdram and reads it
+# unsynchronised; its state machines only idle while reset is high, so a register
+# that sees the release one clk_sdram late changes nothing.  20261019a: rst_hold[4]
+# -> sd_buf was the worst internal path at +0.095 ns; two cycles for sd_card only.
+# NOT for the other clk_sdram consumers (the PCM engine's MLAB sweep counts reset
+# clocks and must see one release edge; sdram_tdm): those stay single-cycle --
+# a first version used -to the clk_sdram clock and covered them too (core_builder).
 set_multicycle_path -setup -end 2 \
     -from [get_registers {emu|rst_hold[*] emu|rst_meta[*]}] \
-    -to   [get_clocks {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}]
+    -to   [get_registers {*sd_card:sd_card|*}]
 set_multicycle_path -hold  -end 1 \
     -from [get_registers {emu|rst_hold[*] emu|rst_meta[*]}] \
-    -to   [get_clocks {emu|pll|pll_inst|altera_pll_i|general[0].gpll~PLL_OUTPUT_COUNTER|divclk}]
+    -to   [get_registers {*sd_card:sd_card|*}]
 
 # OPL4 CPU register write path (opl4latch → pcm_engine decode registers).
 # CPU writes the OPL4 latch on ce_3m58_p ticks; address decode goes through
