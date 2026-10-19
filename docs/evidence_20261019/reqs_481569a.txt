@@ -1,0 +1,58 @@
+# ch2_req_s (b1b2d7f) + SEED 10 (481569a), Quartus 17.0.2 -> MSX1_20261019b_sdram128_481569a.rbf md5 170441aa520a33084a922efc8e70da32
+## signoff
+setup, clk_sdram: slack 0.331 TNS 0.000 
+failing endpoints: 0
+TIMING PASS: clk_sdram setup slack 0.331 ns
+Info (332146): Worst-case setup slack is 0.110
+Info (332146): Worst-case hold slack is 0.245
+Info (332146): Worst-case recovery slack is 1.838
+Info (332146): Worst-case removal slack is 0.643
+## relations.tcl
+REL NZ_intra       rel=93.126 slack=53.189 ok
+REL NZ_to_SD_ch2   rel=46.560 slack=8.396 ok
+REL RNW2_T80_pend2 rel=15.520 slack=2.944 ok
+REL RNW2_NZB_pend2 rel=15.520 slack=3.310 ok
+REL REQS_T80       rel=15.520 slack=3.630 ok
+REL REQS_NZB       rel=15.520 slack=4.007 ok
+REL DIN_T80        rel=15.520 slack=6.566 ok
+REL ADDR_NZ_pend2  rel=62.080 slack=30.109 ok
+REL ADDR_T80_pend2 rel=62.080 slack=36.869 ok
+REL NZ_to_fabric   rel=93.126 slack=52.446 ok
+REL NZ_to_SCC_fall rel=69.844 slack=40.364 ok
+REL NZ_to_ctl_exc  rel=46.563 slack=42.112 ok
+REL NZ_to_cheat_exc rel=46.563 slack=29.951 ok
+REL SD_int_to_ch2  rel=7.760 slack=0.524 ok
+REL T80_to_NZ      rel=93.126 slack=59.949 ok
+## request-sample paths
+slow setup strobe->req_s    slack   3.630 rel  15.520  emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_req_s
+slow hold  strobe->req_s    slack   3.733 rel  -0.003  emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_req_s
+slow setup req_s->decide    slack   2.014 rel   7.760  emu:emu|sdram_tdm:sdram|ch2_req_s -> emu:emu|sdram_tdm:sdram|ch2_rq
+slow hold  req_s->decide    slack   1.376 rel   0.000  emu:emu|sdram_tdm:sdram|ch2_req_s -> emu:emu|sdram_tdm:sdram|ch2_req_1~DUPLICATE
+slow setup strobe-rnw->ch2  slack   2.633 rel  15.520  emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_din_1[6]
+slow hold  strobe-rnw->ch2  slack   3.767 rel  -0.003  emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_req_s
+slow setup DO->din          slack   6.566 rel  15.520  emu:emu|msx:MSX|T80s:T80|T80:u0|DO[5] -> emu:emu|sdram_tdm:sdram|ch2_din_1[5]
+slow hold  DO->din          slack   2.718 rel  -0.003  emu:emu|msx:MSX|T80s:T80|T80:u0|DO[2] -> emu:emu|sdram_tdm:sdram|ch2_din_1[2]~DUPLICATE
+fast setup strobe->req_s    slack  10.155 rel  15.520  emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_req_s
+fast hold  strobe->req_s    slack   1.801 rel  -0.003  emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_req_s
+fast setup req_s->decide    slack   4.874 rel   7.760  emu:emu|sdram_tdm:sdram|ch2_req_s -> emu:emu|sdram_tdm:sdram|ch2_rq
+fast hold  req_s->decide    slack   0.694 rel   0.000  emu:emu|sdram_tdm:sdram|ch2_req_s -> emu:emu|sdram_tdm:sdram|ch2_req_1~DUPLICATE
+fast setup strobe-rnw->ch2  slack   9.451 rel  15.520  emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_din_1[6]
+fast hold  strobe-rnw->ch2  slack   1.814 rel  -0.003  emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_req_s
+fast setup DO->din          slack  11.258 rel  15.520  emu:emu|msx:MSX|T80s:T80|T80:u0|DO[1] -> emu:emu|sdram_tdm:sdram|ch2_din_1[1]
+fast hold  DO->din          slack   1.244 rel  -0.003  emu:emu|msx:MSX|T80s:T80|T80:u0|DO[2] -> emu:emu|sdram_tdm:sdram|ch2_din_1[2]~DUPLICATE
+## SEED 9 fit of the same netlist (b1b2d7f): -0.027 ns, 1 endpoint pcm w_word <- rdaddr_reg; ch2 paths all passing
+## fullsys tdm128 RPROBE/KPROBE on b1b2d7f (gen shims regenerated)
+== ADDR_z0: p1 Z80 RAM errors 0 | p2 bad 0, sent 0 | p3 R800 RAM errors 0 | p4 bad 0, sent 0 RPROBE RESULT PASS | INJ_ADDR: windows with a request where the held address differed: 0  | reads: 289359, from sdram 288847, LATE (ch2 not complete) 0 other lat max 124.2 ns, slack min 108.6 ns 
+== DIN_z0: p1 Z80 RAM errors 0 | p2 bad 0, sent 0 | p3 R800 RAM errors 0 | p4 bad 0, sent 0 RPROBE RESULT PASS | INJ_DIN: windows with a request where the held din differed: 124420  | reads: 289359, from sdram 288847, LATE (ch2 not complete) 0 other lat max 124.2 ns, slack min 108.6 ns 
+== DIN_z3: p1 Z80 RAM errors 0 | p2 bad 0, sent 0 | p3 R800 RAM errors 0 | p4 bad 0, sent 0 RPROBE RESULT PASS | INJ_DIN: windows with a request where the held din differed: 124420  | reads: 289359, from sdram 288847, LATE (ch2 not complete) 0 other lat max 124.2 ns, slack min 38.8 ns 
+== KPROBE:  KPROBE RESULT PASS |  | reads: 75560, from sdram 75560, LATE (ch2 not complete) 0 other lat max 124.2 ns, slack min 108.6 ns 
+== NEG-NOREQS-DIN_z0: p1 Z80 RAM errors 8160 | p2 bad 0, sent 1 | p3 R800 RAM errors 0 | p4 bad 0, sent 0 RPROBE RESULT FAIL | INJ_DIN: windows with a request where the held din differed: 123981  | reads: 297776, from sdram 297264, LATE (ch2 not complete) 0 other lat max 124.2 ns, slack min 108.6 ns 
+== none_z0: p1 Z80 RAM errors 0 | p2 bad 0, sent 0 | p3 R800 RAM errors 0 | p4 bad 0, sent 0 RPROBE RESULT PASS |  | reads: 289359, from sdram 288847, LATE (ch2 not complete) 0 other lat max 124.2 ns, slack min 108.6 ns 
+== none_z3: p1 Z80 RAM errors 0 | p2 bad 0, sent 0 | p3 R800 RAM errors 0 | p4 bad 0, sent 0 RPROBE RESULT PASS |  | reads: 289359, from sdram 288847, LATE (ch2 not complete) 0 other lat max 124.2 ns, slack min 38.8 ns 
+== REQbad_z0: p1 Z80 RAM errors 0 | p2 bad 0, sent 0 | p3 R800 RAM errors 0 | p4 bad 0, sent 0 RPROBE RESULT PASS | INJ_REQ: request rises 305233; windows where the held request differed: rise delayed 305233, fall delayed 305233 INJ_REQ: controller saw the rise 0/1/2/3+ edges after the live request: 0 305233 0 0  | reads: 289359, from sdram 288847, LATE (ch2 not complete) 0 other lat max 163.0 ns, slack min 69.8 ns 
+== REQ_z0: p1 Z80 RAM errors 0 | p2 bad 0, sent 0 | p3 R800 RAM errors 0 | p4 bad 0, sent 0 RPROBE RESULT PASS | INJ_REQ: request rises 305233; windows where the held request differed: rise delayed 305233, fall delayed 305233 INJ_REQ: controller saw the rise 0/1/2/3+ edges after the live request: 0 305233 0 0  | reads: 289359, from sdram 288847, LATE (ch2 not complete) 0 other lat max 124.2 ns, slack min 108.6 ns 
+== REQ_z3: p1 Z80 RAM errors 0 | p2 bad 0, sent 0 | p3 R800 RAM errors 0 | p4 bad 0, sent 0 RPROBE RESULT PASS | INJ_REQ: request rises 305233; windows where the held request differed: rise delayed 305233, fall delayed 305233 INJ_REQ: controller saw the rise 0/1/2/3+ edges after the live request: 0 305233 0 0  | reads: 289359, from sdram 288847, LATE (ch2 not complete) 0 other lat max 124.2 ns, slack min 38.8 ns 
+== RNW_z0: p1 Z80 RAM errors 0 | p2 bad 0, sent 0 | p3 R800 RAM errors 0 | p4 bad 0, sent 0 RPROBE RESULT PASS | INJ_RNW: windows where the held rnw differed: 33802  | reads: 289359, from sdram 288847, LATE (ch2 not complete) 0 other lat max 124.2 ns, slack min 108.6 ns 
+== UNMAP_z0: p1 Z80 RAM errors 0 | p2 bad 0, sent 0 | p3 R800 RAM errors 0 | p4 bad 0, sent 0 RPROBE RESULT PASS | INJ_UNMAP: windows where the held mem_unmaped differed from the live one: 2054  | reads: 289359, from sdram 288847, LATE (ch2 not complete) 0 other lat max 124.2 ns, slack min 108.6 ns 
+
+## sim/sdram_tdm quick: RESULT PASS, stock LATE 0, completion max E0+27 (deadline 28), 13 mutants caught
