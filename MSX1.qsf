@@ -340,7 +340,9 @@ set_global_assignment -name SYSTEMVERILOG_FILE MSX1.sv
 # ascal o_div[0][20] -> o_div[1][20] in the pll_hdmi domain again, none of ours; moved to 8.
 # 2026-10-14 sdram128-study: SEED 8 gave -0.042 ns (pcm w_word <- rdaddr_reg) at ae02602;
 # SEED 9 +0.057 ns, 0 endpoints, same netlist.
-set_global_assignment -name SEED 9
+# 2026-10-19 b1b2d7f (ch2_req_s): SEED 9 gave -0.027 ns on the same pcm w_word <- rdaddr_reg
+# path, 1 endpoint, every ch2 path passing; moved to 10.
+set_global_assignment -name SEED 10
 
 
 
