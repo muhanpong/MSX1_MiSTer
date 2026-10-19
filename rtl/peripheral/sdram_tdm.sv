@@ -199,6 +199,29 @@ reg        run = 1'b0;           // init sequence done
 
 // ─── requests (as sdram.sv) and the ch2 read cache ─────────────────────────
 reg        ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1;
+//  ch2_req_s: the CPU request, sampled ONCE (2026-10-19).  Every ch2 decision
+//  below -- the edge detector ch2_req_1, the cache lookup ch2_cpend, the queue
+//  ch2_rq / ch2_bv, the hit level -- used to read the live ch2_req.  That input
+//  comes from the clk21m strobes through msx_slots' sdram_ce, 14-15.5 ns in the
+//  slow model, and reaches those registers up to 1.1 ns apart (20261019a fit,
+//  docs/evidence_20261019/field_race_601e17d.txt): an edge inside that window
+//  gave req_1 the request and cpend not, req & ~req_1 was never true, and the
+//  request was lost (the stock T80 then took whatever byte the bus held).  Now
+//  only ch2_req_s looks at ch2_req; MSX1.sdc gives the strobe -> ch2_req_s path
+//  the second edge (-end 2), so STA proves it is 1 by then.  On the first edge it
+//  can still go metastable -- one register instead of four, with a whole
+//  clk_sdram cycle to settle before anything reads it.  The fields (addr, rnw,
+//  din) are captured one edge after ch2_req_s rose, i.e. on edge 2 at the
+//  earliest, which also covers T80 DO (9.5 ns on 20261019a) and ram_rnw.
+//  Cost: one clk_sdram (7.76 ns) on every CPU access; fullsys measured 69.8 ns of
+//  T80 margin left in the worst frame position with this exact delay (0d7da22).
+//  -DSDRAM_NO_REQS (sim only): the live ch2_req, as before (negative control).
+reg        ch2_req_s;
+`ifndef SDRAM_NO_REQS
+wire       ch2_rqv = ch2_req_s;
+`else
+wire       ch2_rqv = ch2_req;
+`endif
 reg        ch1_rq, ch2_rq, ch3_rq, ch4_rq;
 reg        ch1_rnw_1, ch2_rnw_1, ch3_rnw_1, ch4_rnw_1;
 reg [26:0] ch1_addr_1, ch2_addr_1, ch3_addr_1, ch4_addr_1;
@@ -208,7 +231,7 @@ reg        ch1_saved_a0, ch2_saved_a0, ch3_saved_a0, ch4_saved_a0;
 initial begin
     {ch1_rq, ch2_rq, ch3_rq, ch4_rq} = '0;
     {ch1_ready, ch2_ready, ch3_ready, ch4_ready, ch3_done, ch2_rdtog} = '0;
-    {ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1} = '0;
+    {ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1, ch2_req_s} = '0;
     v_grant = 0; v_rvalid = 0;
 end
 assign ch1_dout   = ch1_saved_a0 ? ch1_saved_data[15:8] : ch1_saved_data[7:0];
@@ -414,7 +437,8 @@ always @(posedge clk) begin
     logic   took;
     loc_t   vl;
 
-    ch1_req_1 <= ch1_req; ch2_req_1 <= ch2_req; ch3_req_1 <= ch3_req; ch4_req_1 <= ch4_req;
+    ch2_req_s <= ch2_req;
+    ch1_req_1 <= ch1_req; ch2_req_1 <= ch2_rqv; ch3_req_1 <= ch3_req; ch4_req_1 <= ch4_req;
     c_we     <= 1'b0;
     v_rvalid <= 1'b0;
     command  <= CMD_NOP;
@@ -432,7 +456,7 @@ always @(posedge clk) begin
         ch1_ready <= 0;
 `endif
     end
-    if (~ch2_req) ch2_hit_r <= 0;
+    if (~ch2_rqv) ch2_hit_r <= 0;
     //  ch2 queue: the head is ch2_rq / ch2_*_1 (what the slots pick), behind it one
     //  more entry, ch2_b*.  A paced CPU writes with no completion handshake (msx.sv
     //  GUARD_WR, 2 clk21m) and its next request follows 12-18 clocks later; a TDM
@@ -440,7 +464,7 @@ always @(posedge clk) begin
     //  queued one (a lost write; sdram.sv picked within a clock or two).  At most
     //  one request enters per edge: a write, a cache miss, or a read that waited.
     enq = 1'b0; enq_rnw = 1'b1; enq_addr = ch2_caddr; enq_din = ch2_din_1; enq_rd = 1'b0;
-    if (ch2_req & ~ch2_req_1) begin
+    if (ch2_rqv & ~ch2_req_1) begin
         ch2_hl <= gmap(ch2_addr, m128, m64);
         if (CACHE_LINES != 0 && ch2_rnw) begin
             ch2_cpend <= 1;
@@ -460,6 +484,8 @@ always @(posedge clk) begin
     //  INJ_RNW).  STA puts rnw in by the second edge: look again there, and if the
     //  request turned out to be a write, drop the lookup and queue the write.  Reads
     //  keep their first-edge start -- the stock T80 takes its byte at a fixed time
+    //  (2026-10-19: with ch2_req_s every request starts one edge later anyway, and
+    //  this recheck reads ram_rnw yet one edge after that -- kept, it is harmless)
     //  (sim/sdram_tdm +stock) and one edge later misses a slot at 3 of 36 phases.
     //  rnw only goes 1 -> 0 inside a request (a read's rnw does not move), so only
     //  this direction exists.  ch2_cpend is high on exactly the second edge, so

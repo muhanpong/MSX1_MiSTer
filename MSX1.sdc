@@ -120,6 +120,25 @@ set_multicycle_path -hold  -end 1 \
     -from [get_registers {emu|rst_hold[*] emu|rst_meta[*]}] \
     -to   [get_registers {*sd_card:sd_card|*}]
 
+# ch2_req_s (sdram_tdm.sv, 2026-10-19): the one register that samples the CPU
+# request.  The request starts from the strobes and arrives 14-15.5 ns slow, so
+# its deadline is the second edge (-end 2); STA then proves ch2_req_s is 1 there.
+# On the first edge it is inside the transition window and may go metastable --
+# it is read only on the next edge (ch2_req_s -> req_1/cpend/rq/bv is internal and
+# single-cycle by the rule above), so the settle time is that path's slack.
+set ch2_strobes [get_registers {*T80s:T80|MREQ_n *T80s:T80|WR_n *T80s:T80|RD_n *T80s:T80|IORQ_n *nz_bus:NZB|ph*}]
+set_multicycle_path -setup -end 2 -from $ch2_strobes -to [get_registers {*sdram_tdm:sdram|ch2_req_s}]
+set_multicycle_path -hold  -end 1 -from $ch2_strobes -to [get_registers {*sdram_tdm:sdram|ch2_req_s}]
+# The fields are taken one edge after ch2_req_s rose, i.e. on edge 2 at the
+# earliest.  The parts that start with the strobe -- ram_rnw (cpu_wr & cpu_mreq),
+# and the T80's write data (DO changes on the WR_n edge, fullsys LEAD 0) -- get
+# that second edge; the address side leads by a clk21m and keeps the generic 6
+# (with kanji fix B the D9h select also leads its request by a clk21m).
+set_multicycle_path -setup -end 2 -from $ch2_strobes -through [get_nets {*msx_slots|ram_rnw*}] -to [get_registers {*sdram_tdm:sdram|ch2_*}]
+set_multicycle_path -hold  -end 1 -from $ch2_strobes -through [get_nets {*msx_slots|ram_rnw*}] -to [get_registers {*sdram_tdm:sdram|ch2_*}]
+set_multicycle_path -setup -end 2 -from [get_registers {*T80s:T80|T80:u0|DO[*]}] -to [get_registers {*sdram_tdm:sdram|ch2_din_1[*] *sdram_tdm:sdram|ch2_bdin[*]}]
+set_multicycle_path -hold  -end 1 -from [get_registers {*T80s:T80|T80:u0|DO[*]}] -to [get_registers {*sdram_tdm:sdram|ch2_din_1[*] *sdram_tdm:sdram|ch2_bdin[*]}]
+
 # OPL4 CPU register write path (opl4latch → pcm_engine decode registers).
 # CPU writes the OPL4 latch on ce_3m58_p ticks; address decode goes through
 # a deep chain (Add + Divider op_5..op_8 + Decoder + reg_upd + hf_upd) before

@@ -17,6 +17,9 @@ set EXPECT [list \
   [list NZ_to_SD_ch2   $c21     $csd     "*sdram*ch2_*"                     46.560 "NextZ80 address -> ch2 capture, generic -end 6 (6 x 7.760 at 128.86 MHz; was 69.846 at 85.9)" "*msx:MSX|NextZ80:NZ|*"] \
   [list RNW2_T80_pend2 $c21     $csd     "*sdram_tdm:sdram|c_pend2"         15.520 "T80s strobe -> c_pend2: rnw looked at again on the second edge, -end 2 (MSX1.sdc 601e17d)" "*msx:MSX|T80s:T80|*_n"] \
   [list RNW2_NZB_pend2 $c21     $csd     "*sdram_tdm:sdram|c_pend2"         15.520 "nz_bus ph (NextZ80 strobe) -> c_pend2, -end 2" "*msx:MSX|nz_bus:NZB|ph*"] \
+  [list REQS_T80       $c21     $csd     "*sdram_tdm:sdram|ch2_req_s"       15.520 "T80s strobe -> ch2_req_s, the single request sample, -end 2 (MSX1.sdc 2026-10-19)" "*msx:MSX|T80s:T80|*_n"] \
+  [list REQS_NZB       $c21     $csd     "*sdram_tdm:sdram|ch2_req_s"       15.520 "nz_bus ph -> ch2_req_s, -end 2" "*msx:MSX|nz_bus:NZB|ph*"] \
+  [list DIN_T80        $c21     $csd     "*sdram_tdm:sdram|ch2_din_1[*]"    15.520 "T80 DO -> ch2_din_1, taken one edge after ch2_req_s, -end 2" "*msx:MSX|T80s:T80|T80:u0|DO[*]"] \
   [list ADDR_NZ_pend2  $c21     $csd     "*sdram_tdm:sdram|c_pend2"         62.080 "NextZ80 state (address side, leads the strobe by one clk21m) -> c_pend2, -end 8" "*msx:MSX|NextZ80:NZ|*"] \
   [list ADDR_T80_pend2 $c21     $csd     "*sdram_tdm:sdram|c_pend2"         62.080 "T80 core registers (address side) -> c_pend2, -end 8" "*msx:MSX|T80s:T80|T80:u0|*"] \
   [list NZ_to_fabric   $c21     $c21     "*systemRAM*"                      93.132 "NextZ80 -> clk21m fabric, clock-based -end 2" "*msx:MSX|NextZ80:NZ|*"] \
