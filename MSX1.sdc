@@ -82,11 +82,27 @@ set_multicycle_path -hold  -end 0 -from [get_registers {*sdram_tdm:sdram|*}] -to
 # the clk21m edge that launched it, so -end 2 is that check's own deadline: if rnw
 # misses it, this fails here instead of being taken for a read.  Only clk21m
 # sources: the sdram-internal paths into c_pend2 stay single-cycle.
-set_multicycle_path -setup -end 2 \
+#
+# The second-edge deadline belongs to the STROBES only (T80s MREQ_n/WR_n/RD_n/
+# IORQ_n, nz_bus ph): they launch on the clk21m edge whose request ch2_cpend saw.
+# ram_rnw also depends on the address (slot/mapper decode -> sram_cs, ram_ro),
+# and the address is out one clk21m before the strobe (fullsys LEAD, 2026-10-18:
+# NextZ80 6 clk_sdram, T80 >= 12), so those sources have 6 + 2 = 8 edges.  With
+# one -end 2 for every clk21m source, 732de12 failed at -7.82 ns slow on exactly
+# such a path (NextZ80 FETCH -> slot/mapper mux -> sram_cs -> ram_rnw -> c_pend2);
+# with the split the same fit signs off (+0.095 ns worst, strobes +4.99 at edge 2).
+# Node -from outranks clock -from: the strobe pair below wins for those registers.
+set_multicycle_path -setup -end 8 \
     -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
     -to   [get_registers {*sdram_tdm:sdram|c_pend2}]
-set_multicycle_path -hold  -end 1 \
+set_multicycle_path -hold  -end 7 \
     -from [get_clocks {emu|pll|pll_inst|altera_pll_i|general[1].gpll~PLL_OUTPUT_COUNTER|divclk}] \
+    -to   [get_registers {*sdram_tdm:sdram|c_pend2}]
+set_multicycle_path -setup -end 2 \
+    -from [get_registers {*T80s:T80|MREQ_n *T80s:T80|WR_n *T80s:T80|RD_n *T80s:T80|IORQ_n *nz_bus:NZB|ph*}] \
+    -to   [get_registers {*sdram_tdm:sdram|c_pend2}]
+set_multicycle_path -hold  -end 1 \
+    -from [get_registers {*T80s:T80|MREQ_n *T80s:T80|WR_n *T80s:T80|RD_n *T80s:T80|IORQ_n *nz_bus:NZB|ph*}] \
     -to   [get_registers {*sdram_tdm:sdram|c_pend2}]
 
 # OPL4 CPU register write path (opl4latch → pcm_engine decode registers).
