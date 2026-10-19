@@ -12,10 +12,11 @@
 | Neon Horizon 배경 깨짐 (128 MB 보드) | **해결**. ch2_req_s(b1b2d7f) | 실기 19a 악화 → 19b 3회 깨짐 없음. 논리 차이는 ch2_req_s 하나 |
 | 배포 후보 rbf | `output_files/MSX1_20261019b_sdram128_481569a.rbf` md5 170441aa520a33084a922efc8e70da32 | Quartus 17.0.2, SEED 10, TIMING PASS |
 | 남은 확인 | 사용자 보드 전원 사이클·긴 플레이(복원한 진행 세이브로 뒤쪽 장면) | mister-super-expert는 코어 재로드만 함 |
-| 툴체인 교차 | core_builder 17.1 buildgate로 1f4a7e0 재fit 제안함(미실시) | 이 rbf는 17.0 + compile.sh, buildgate 미경유 |
-| 32/64 MB 보드 | stock 기한(tb_tdm E0+28)이 둘째 에지 감지에서 3/36 위상 LATE — fullsys에선 무해(T80 여유 69.8 ns) | 0d7da22, 68ce6cd; 기한 상수 재정의 필요 |
+| 툴체인 교차 | core_builder가 2026-10-20 buildgate를 17.0.2로 전환(자기 워크트리만, 미커밋). 이 워크트리 build.sh는 그대로 | 이 rbf는 17.0 + compile.sh, buildgate 미경유 |
+| 32/64 MB 보드 | **v_en=0(현재 빌드)에선 36위상·세 맵 모두 통과.** g3/15/27 E0+29 LATE는 v_en=1일 때만(ch2_req_s 한 클록). E0+28은 실제 창 232.8 ns라 보수적이지 않음 → V9968 통합 과제 | 432de57, docs/evidence_20261020/tdm_stock_deadline_ven.txt |
 | 준안정 원리적 제거 | 미착수. (d) 고정 위상 표본 또는 2플롭 | ch2_req_s는 1플롭 동기화기, 해소 시간 = req_s→결정 slack +2.0 ns |
-| PCM w_word ← rdaddr_reg | seed에 따라 −0.04 ~ +0.6 ns 오가는 배치 운 경로 | SEED 8/9/10 이력은 MSX1.qsf 주석 |
+| PCM w_word ← rdaddr_reg | 출처는 태그 MLAB 비교 → CHIT0에서 레지스터로(사이클 수 그대로, PIPE=1만). pcm128 verify PASS, **미fit** | 13e72cd |
+| sdram.sv REQSKEW | 출하판 3f09aaf에도 같은 모양(쓰기 req_1→rq 1.36 ns slow). 이 브랜치는 sdram.sv를 안 씀 → nextz80 결정 | 43872c3 |
 | V9968 + geo3d | **미통합**. sdram_tdm V 포트는 있으나 MSX1.sv에서 v_en=0 | 원본 `~/data/V9968_Cartridge`, `_alexmoncks`(geo3d) |
 
 ## 1. 무엇이 원인이었나 (판정 순서)
