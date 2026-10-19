@@ -124,6 +124,22 @@ CL3/BL2 칩 모델 `sdram_big_tdm`(tb_msx.sv `-DTDM`). `prep.sh`가 `tb/mkshim_t
   "T80이 잡을 때 ch2 미완료" 수.
 - 결과 비교: `cmp_io.sh`(+iolog 값 순서열), `cmp_time.sh`(분기 시각).
 
+## 시뮬이 못 보는 것과 STA 짝 (2026-10-20, sdram128-study)
+
+- **fullsys는 신호 지연 0이다.** 한 넷이 여러 레지스터에 서로 다른 시각에 닿는 경쟁(REQSKEW: ch2_req가 req_1과
+  cpend에 0.4~1.1 ns 차이로 도착 → 요청 유실)은 재현되지 않는다. Neon은 시뮬 9 s 스트림이 기준판과 타임스탬프까지
+  같았는데 실기는 깨졌고, ch2_req_s(단일 표본) 빌드에서 사라졌다. 그런 문제는 아래로 잰다:
+  - `quartus_sta -t tools/sdram128/field_race.tcl <out> [tdm|sdram]`: 출발 클래스(스트로브, T80 DO, NextZ80 상태,
+    주소 쪽)별로 ch2 캡처 레지스터에 몇 번째 에지에 닿는지(k), req@req_1/cpend/rq/bv, rnw2(c_pend2), REQSKEW 판정.
+  - `quartus_sta -t tools/buildgate/relations.tcl`: SDC 다중 사이클이 의도한 관계(15.520 = 둘째 에지 등)로 실제 걸렸는지.
+    -through 넷 이름이 합성 뒤 사라지면 기본 관계로 돌아가 GATE-FAIL.
+- 지연 주입 `INJ_REQ`(요청+필드 전부 한 에지 늦게): 자체 검사 줄 "controller saw the rise 0/1/2/3+ edges" 가 전부 1이어야.
+- **LEAD**(tb_msx, RPROBE 빌드): 요청 상승 때 주소·din·rnw가 몇 에지 전에 바뀌었는지(`+leadio`면 IO 사이클 포함).
+  T80 쓰기 din·rnw는 0(스트로브와 같이), 주소는 T80 ≥12 / NextZ80 6(3.58 MHz 128 MB 맵). SDC 예외 폭의 근거.
+- **EDGEHIST**: 컨트롤러 입력이 clk21m 상승 뒤 몇 번째 clk_sdram에서 바뀌는지 — 주입 창이 맞는지 확인용.
+- 컨트롤러 RTL을 바꾸면 `python3 tb/mkshim_tdm.py rtl/peripheral/sdram_tdm.sv sim/fullsys/gen/sdram_tdm_sim.sv`
+  (sdram.sv는 tb/mkshim.py). 안 하면 옛 컨트롤러로 돈다(머지 뒤 한 번 그럴 뻔함).
+
 ## VDP 단독 재생 (`sim/run_vdp_replay.sh`)
 
 openMSX 녹화(포트 98h-9Bh, clk21m 단위 + 0.5 s마다 physical VRAM/레지스터/포인터/래치)를 VDP RTL에
