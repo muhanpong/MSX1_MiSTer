@@ -1,0 +1,34 @@
+# sim/sdram_tdm stock deadline on the 32/64/128 MB maps, current RTL (ch2_req_s, b1b2d7f..a78ecb1),
+# all 36 grid phases, +stock=1 +cpulow=2 (CPU at 2.25-2.36 MB, row bits 01), seed 3, busy 30,
+# 400k cycles.  New bench switch +ven=0: v_en = 0, as MSX1.sv has it today (no V9968).
+#
+# Question (handoff_20261020_reqs.md 0 / 3.3): "32/64 MB: the stock deadline (E0+28) is LATE at
+# 3/36 phases under edge-2 detection -- redefine the deadline constant".
+#
+# Answer: the LATE needs the VRAM port.  With v_en = 0 (the build as it is) every map passes at
+# every phase; with v_en = 1 the 32 and 64 MB maps fail at g3/g15/g27, every late read at E0+29,
+# one clock over.  The 128 MB map passes both ways.
+b32 ven=0: pass 36/36, LATE at g: | completion max E0+25 | V: granted=0
+b32 ven=1: pass 33/36, LATE at g: 3 15 27 | completion max E0+28 | V: granted=27374
+b64 ven=0: pass 36/36, LATE at g: | completion max E0+25 | V: granted=0
+b64 ven=1: pass 33/36, LATE at g: 3 15 27 | completion max E0+28 | V: granted=27313
+b128 ven=0: pass 36/36, LATE at g: | completion max E0+25 | V: granted=0
+b128 ven=1: pass 36/36, LATE at g: | completion max E0+25 | V: granted=27337
+late completions, b32 ven=1 g3:  291 complete at E0+29
+#
+# Negative control: the same bench built with -DONECHIP -DSDRAM_NO_REQS (the live ch2_req, no
+# ch2_req_s), v_en = 1, row bits 01, g3/g15/g27, busy 30:
+  ch2 stock: grid phase 3: LATE=0  completion max E0+17 (deadline E0+28)
+  ch2 stock: grid phase 15: LATE=0  completion max E0+17 (deadline E0+28)
+  ch2 stock: grid phase 27: LATE=0  completion max E0+17 (deadline E0+28)
+# -> ch2_req_s's one clock is what moves these reads past E0+28 (and only with V slots in the frame).
+# Load does not matter: busy 2/5/10/15/20 at g3/15/27 gave LATE 202-294 each (v_en = 1).
+#
+# The deadline itself is not conservative.  tb_msx's rdl window (MREQ & RD & sdram_ce & ram_rnw up
+# to the edge the T80 latches D) is fixed at 232.8 ns = 30 clk: latency max + slack min = 232.8 in
+# every run on record (124.2 + 108.6, 163.0 + 69.8; reqs_481569a.txt, rprobe_injreq_32mb...txt),
+# and tb_tdm's E0+28 is that window (W+30 = E0+29, complete by E0+28).  0d7da22's "E0+28 is ~9 clk
+# conservative" read the 9 clk of slack left in a run with no V traffic as slack in the deadline;
+# it is the margin of that traffic, not of the constant.  So: nothing to redefine for 32/64 MB
+# while v_en = 0; with V9968 on a 32/64 MB board this is a real one-clock miss to be designed out
+# (part of the V9968 integration, not of the merge).

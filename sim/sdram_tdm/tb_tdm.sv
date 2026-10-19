@@ -31,6 +31,7 @@ module tb;
     int m64 = 0;
     int r800wr = 0;                       // +r800wr=1: ch2 writes do not wait (R800 GUARD_WR)                          // +m64=1: 64 MB board (build with -DCHIP64)
     int m128 = 0, ncyc = 200000, seed = 1, busy = 30, stock = 0, dl = 28, cpulow = 0;
+    int ven = 1;                          // +ven=0: no VRAM port (MSX1.sv today: v_en = 0)
     initial begin
         void'($value$plusargs("m128=%d", m128));
         void'($value$plusargs("cycles=%d", ncyc));
@@ -41,6 +42,7 @@ module tb;
         void'($value$plusargs("cpulow=%d", cpulow));
         void'($value$plusargs("m64=%d", m64));
         void'($value$plusargs("r800wr=%d", r800wr));
+        void'($value$plusargs("ven=%d", ven));
         void'($urandom(seed));
     end
 
@@ -67,7 +69,7 @@ module tb;
     wire  [31:0] v_rdata;
 
     sdram_tdm #(.CACHE_LINES(1024)) dut (
-        .init(init), .clk(clk), .mode128(m128[0]), .mode64(m64[0]), .v_en(1'b1),
+        .init(init), .clk(clk), .mode128(m128[0]), .mode64(m64[0]), .v_en(ven[0]),
         .SDRAM_DQ(DQ), .SDRAM_A(A), .SDRAM_DQML(DQML), .SDRAM_DQMH(DQMH), .SDRAM_BA(BA),
         .SDRAM_nCS(nCS), .SDRAM_nWE(nWE), .SDRAM_nRAS(nRAS), .SDRAM_nCAS(nCAS), .SDRAM_CKE(CKE),
         .SDRAM_CLK(SCLK),
@@ -329,7 +331,7 @@ module tb;
                  chip2.nact, chip2.nrd, chip2.nwr, chip2.nref, chip2.ras_lockout, chip2.errs);
         if (dut.ch2_ovf) $display("  ch2 queue overflow: a write was lost");
         if (bad == 0 && !dut.ch2_ovf && chip2.errs == 0 && done[0] > 0 && done[1] > 0 && done[2] > 0 && done[3] > 0
-            && vreads > 0 && chip2.nref > 0 && nread[1] > 0)
+            && (vreads > 0 || ven == 0) && chip2.nref > 0 && nread[1] > 0)
             $display("TDM RESULT PASS");
         else
             $display("TDM RESULT FAIL (tb errors %0d, chip errors %0d)", bad, chip2.errs);
