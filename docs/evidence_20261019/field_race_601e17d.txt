@@ -1,0 +1,132 @@
+# field_race on the 20261019a fit (601e17d, Quartus 17.0.2, the rbf the board ran 2026-10-19):
+# board result: kanji D9h correct (fix B confirmed on hardware), Neon Horizon corruption WORSE than 20261014b.
+# req_1 -> cpend arrival gap (the band in which one register has the request and the other not yet):
+#   ae02602 (20261014b): slow late 0.34-0.43 ns, fast late 0.29, early 0.01-0.32
+#   601e17d (20261019a): slow late 1.09 ns (all four strobes), fast late 0.60, early 0.61-0.75
+#   -> a 2.5-3x wider request-loss band; WR_n cpend late 15.612 = k 3 vs req_1 k 2 in the slow corner alone.
+# T80 DO -> ch2_din_1: 7.457 ns k=1 (ae02602) -> 9.503 ns k=2 (601e17d): write data one edge late in a band too.
+# RNW2 (732de12 recheck) PASS +5.3..5.7 ns; kanji select 16.660 k=3 (irrelevant with fix B: the request lags it).
+# field_race  2026-10-19T19:24  mode=tdm T=7.760
+slow	req      	T80_MREQ_n  	late  15.265 ns k=2	early   6.390 ns k=1	   58 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@req_1	T80_MREQ_n  	late  14.174 ns k=2	early   6.390 ns k=1	   13 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_req_1
+slow	req@cpend	T80_MREQ_n  	late  15.265 ns k=2	early   7.004 ns k=1	   15 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@rq   	T80_MREQ_n  	late  14.498 ns k=2	early   6.498 ns k=1	   30 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+slow	req@bv   	T80_MREQ_n  	late  14.628 ns k=2	early   6.743 ns k=1	   34 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+slow	gate_ffff	T80_MREQ_n	NO-PATH	
+slow	gate_any 	T80_MREQ_n  	late  18.665 ns k=3	early   8.174 ns k=2	   56 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	rnw      	T80_MREQ_n  	late  14.373 ns k=2	early   6.164 ns k=1	  105 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_caddr[6]
+slow	rnw2     	T80_MREQ_n  	late   9.860 ns k=2	early   4.278 ns k=1	    3 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|c_pend2
+slow	rnw2_any 	T80_MREQ_n  	late   9.860 ns k=2	early   4.278 ns k=1	    5 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|c_pend2
+slow	RNW2	T80_MREQ_n  	PASS	late 9.860 ns vs second edge 15.520 ns (slack 5.660)
+slow	req      	T80_RD_n    	late  15.353 ns k=2	early   6.677 ns k=1	   48 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@req_1	T80_RD_n    	late  14.262 ns k=2	early   6.677 ns k=1	   12 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_req_1
+slow	req@cpend	T80_RD_n    	late  15.353 ns k=2	early   7.427 ns k=1	   12 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@rq   	T80_RD_n    	late  14.586 ns k=2	early   6.721 ns k=1	   24 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+slow	req@bv   	T80_RD_n    	late  14.716 ns k=2	early   6.805 ns k=1	   24 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+slow	gate_ffff	T80_RD_n	NO-PATH	
+slow	gate_any 	T80_RD_n    	late  18.385 ns k=3	early   8.181 ns k=2	   36 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	rnw      	T80_RD_n    	late  14.461 ns k=2	early   7.343 ns k=1	   70 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_caddr[6]
+slow	rnw2     	T80_RD_n    	late   9.948 ns k=2	early   5.457 ns k=1	    2 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|c_pend2
+slow	rnw2_any 	T80_RD_n    	late   9.948 ns k=2	early   5.457 ns k=1	    2 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|c_pend2
+slow	RNW2	T80_RD_n    	PASS	late 9.948 ns vs second edge 15.520 ns (slack 5.572)
+slow	req      	T80_WR_n    	late  15.612 ns k=3	early   6.077 ns k=1	   58 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@req_1	T80_WR_n    	late  14.521 ns k=2	early   6.077 ns k=1	   13 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_req_1
+slow	req@cpend	T80_WR_n    	late  15.612 ns k=3	early   6.827 ns k=1	   15 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@rq   	T80_WR_n    	late  14.845 ns k=2	early   6.121 ns k=1	   30 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+slow	req@bv   	T80_WR_n    	late  14.975 ns k=2	early   6.205 ns k=1	   34 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+slow	gate_ffff	T80_WR_n	NO-PATH	
+slow	gate_any 	T80_WR_n    	late  19.583 ns k=3	early   9.211 ns k=2	   32 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	rnw      	T80_WR_n    	late  14.720 ns k=2	early   6.908 ns k=1	  105 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_caddr[6]
+slow	rnw2     	T80_WR_n    	late  10.207 ns k=2	early   5.022 ns k=1	    3 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|c_pend2
+slow	rnw2_any 	T80_WR_n    	late  10.527 ns k=2	early   5.022 ns k=1	    5 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|c_pend2
+slow	RNW2	T80_WR_n    	PASS	late 10.207 ns vs second edge 15.520 ns (slack 5.313)
+slow	req      	T80_IORQ_n  	late  12.417 ns k=2	early   7.346 ns k=1	    4 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@req_1	T80_IORQ_n  	late  11.380 ns k=2	early   7.346 ns k=1	    1 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_req_1
+slow	req@cpend	T80_IORQ_n  	late  12.417 ns k=2	early   8.264 ns k=2	    1 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@rq   	T80_IORQ_n  	late  11.983 ns k=2	early   7.615 ns k=1	    2 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+slow	req@bv   	T80_IORQ_n  	late  11.717 ns k=2	early   7.451 ns k=1	    2 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+slow	gate_ffff	T80_IORQ_n	NO-PATH	
+slow	gate_any 	T80_IORQ_n	NO-PATH	
+slow	rnw      	T80_IORQ_n	NO-PATH	
+slow	rnw2     	T80_IORQ_n	NO-PATH	
+slow	rnw2_any 	T80_IORQ_n	NO-PATH	
+slow	req      	NZB_ph      	late  15.457 ns k=2	early   5.368 ns k=1	  168 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@req_1	NZB_ph      	late  14.366 ns k=2	early   5.368 ns k=1	   39 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_req_1
+slow	req@cpend	NZB_ph      	late  15.457 ns k=2	early   6.118 ns k=1	   43 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	req@rq   	NZB_ph      	late  14.690 ns k=2	early   5.412 ns k=1	   86 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+slow	req@bv   	NZB_ph      	late  14.820 ns k=2	early   5.496 ns k=1	   94 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_bv
+slow	gate_ffff	NZB_ph	NO-PATH	
+slow	gate_any 	NZB_ph      	late  18.758 ns k=3	early   7.795 ns k=2	  124 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_cpend
+slow	rnw      	NZB_ph      	late  14.565 ns k=2	early   5.599 ns k=1	  280 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_caddr[6]
+slow	rnw2     	NZB_ph      	late  10.052 ns k=2	early   3.713 ns k=1	    8 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|c_pend2
+slow	rnw2_any 	NZB_ph      	late  10.052 ns k=2	early   3.713 ns k=1	   12 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|c_pend2
+slow	RNW2	NZB_ph      	PASS	late 10.052 ns vs second edge 15.520 ns (slack 5.468)
+slow	din      	T80_DO      	late   9.503 ns k=2	early   2.854 ns k=1	   33 paths	emu:emu|msx:MSX|T80s:T80|T80:u0|DO[3] -> emu:emu|sdram_tdm:sdram|ch2_din_1[3]
+slow	din      	NZ_state    	late  36.150 ns k=5	early   1.886 ns k=1	 8400 paths	emu:emu|msx:MSX|NextZ80:NZ|FETCH[5]~DUPLICATE -> emu:emu|sdram_tdm:sdram|ch2_din_1[0]
+slow	addr     	T80_u0      	late  32.773 ns k=5	early   1.949 ns k=1	19687 paths	emu:emu|msx:MSX|T80s:T80|T80:u0|IntCycle -> emu:emu|sdram_tdm:sdram|ch2_addr_1[12]
+slow	addr     	NZ_state    	late  37.447 ns k=5	early   3.851 ns k=1	19782 paths	emu:emu|msx:MSX|NextZ80:NZ|FETCH[5]~DUPLICATE -> emu:emu|sdram_tdm:sdram|ch2_addr_1[12]
+slow	kanji    	T80_IORQ_n  	late  16.660 ns k=3	early   5.583 ns k=1	 5243 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_addr_1[12]
+fast	req      	T80_MREQ_n  	late   7.166 ns k=1	early   2.926 ns k=1	   58 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@req_1	T80_MREQ_n  	late   6.570 ns k=1	early   2.926 ns k=1	   13 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_req_1
+fast	req@cpend	T80_MREQ_n  	late   7.166 ns k=1	early   3.194 ns k=1	   15 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@rq   	T80_MREQ_n  	late   6.842 ns k=1	early   2.984 ns k=1	   30 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+fast	req@bv   	T80_MREQ_n  	late   6.905 ns k=1	early   3.087 ns k=1	   34 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+fast	gate_ffff	T80_MREQ_n	NO-PATH	
+fast	gate_any 	T80_MREQ_n  	late   8.666 ns k=2	early   3.720 ns k=1	   56 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	rnw      	T80_MREQ_n  	late   6.654 ns k=1	early   2.782 ns k=1	  105 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|ch2_caddr[6]
+fast	rnw2     	T80_MREQ_n  	late   4.579 ns k=1	early   1.866 ns k=1	    3 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|c_pend2
+fast	rnw2_any 	T80_MREQ_n  	late   4.579 ns k=1	early   1.866 ns k=1	    5 paths	emu:emu|msx:MSX|T80s:T80|MREQ_n -> emu:emu|sdram_tdm:sdram|c_pend2
+fast	RNW2	T80_MREQ_n  	PASS	late 4.579 ns vs second edge 15.520 ns (slack 10.941)
+fast	req      	T80_RD_n    	late   7.353 ns k=1	early   3.180 ns k=1	   48 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@req_1	T80_RD_n    	late   6.757 ns k=1	early   3.212 ns k=1	   12 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_req_1
+fast	req@cpend	T80_RD_n    	late   7.353 ns k=1	early   3.531 ns k=1	   12 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@rq   	T80_RD_n    	late   7.029 ns k=1	early   3.180 ns k=1	   24 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+fast	req@bv   	T80_RD_n    	late   7.092 ns k=1	early   3.220 ns k=1	   24 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+fast	gate_ffff	T80_RD_n	NO-PATH	
+fast	gate_any 	T80_RD_n    	late   8.802 ns k=2	early   3.799 ns k=1	   36 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	rnw      	T80_RD_n    	late   6.841 ns k=1	early   3.343 ns k=1	   70 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|ch2_caddr[6]
+fast	rnw2     	T80_RD_n    	late   4.766 ns k=1	early   2.427 ns k=1	    2 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|c_pend2
+fast	rnw2_any 	T80_RD_n    	late   4.766 ns k=1	early   2.427 ns k=1	    2 paths	emu:emu|msx:MSX|T80s:T80|RD_n -> emu:emu|sdram_tdm:sdram|c_pend2
+fast	RNW2	T80_RD_n    	PASS	late 4.766 ns vs second edge 15.520 ns (slack 10.754)
+fast	req      	T80_WR_n    	late   7.277 ns k=1	early   2.860 ns k=1	   58 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@req_1	T80_WR_n    	late   6.681 ns k=1	early   2.892 ns k=1	   13 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_req_1
+fast	req@cpend	T80_WR_n    	late   7.277 ns k=1	early   3.211 ns k=1	   15 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@rq   	T80_WR_n    	late   6.953 ns k=1	early   2.860 ns k=1	   30 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+fast	req@bv   	T80_WR_n    	late   7.016 ns k=1	early   2.900 ns k=1	   34 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+fast	gate_ffff	T80_WR_n	NO-PATH	
+fast	gate_any 	T80_WR_n    	late   9.247 ns k=2	early   4.229 ns k=1	   32 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	rnw      	T80_WR_n    	late   6.765 ns k=1	early   3.264 ns k=1	  105 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|ch2_caddr[6]
+fast	rnw2     	T80_WR_n    	late   4.690 ns k=1	early   2.348 ns k=1	    3 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|c_pend2
+fast	rnw2_any 	T80_WR_n    	late   4.933 ns k=1	early   2.348 ns k=1	    5 paths	emu:emu|msx:MSX|T80s:T80|WR_n -> emu:emu|sdram_tdm:sdram|c_pend2
+fast	RNW2	T80_WR_n    	PASS	late 4.690 ns vs second edge 15.520 ns (slack 10.830)
+fast	req      	T80_IORQ_n  	late   5.798 ns k=1	early   3.436 ns k=1	    4 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@req_1	T80_IORQ_n  	late   5.317 ns k=1	early   3.436 ns k=1	    1 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_req_1
+fast	req@cpend	T80_IORQ_n  	late   5.798 ns k=1	early   3.872 ns k=1	    1 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@rq   	T80_IORQ_n  	late   5.620 ns k=1	early   3.558 ns k=1	    2 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+fast	req@bv   	T80_IORQ_n  	late   5.496 ns k=1	early   3.482 ns k=1	    2 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_bv
+fast	gate_ffff	T80_IORQ_n	NO-PATH	
+fast	gate_any 	T80_IORQ_n	NO-PATH	
+fast	rnw      	T80_IORQ_n	NO-PATH	
+fast	rnw2     	T80_IORQ_n	NO-PATH	
+fast	rnw2_any 	T80_IORQ_n	NO-PATH	
+fast	req      	NZB_ph      	late   7.267 ns k=1	early   2.515 ns k=1	  168 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@req_1	NZB_ph      	late   6.671 ns k=1	early   2.547 ns k=1	   39 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_req_1
+fast	req@cpend	NZB_ph      	late   7.267 ns k=1	early   2.866 ns k=1	   43 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	req@rq   	NZB_ph      	late   6.943 ns k=1	early   2.515 ns k=1	   86 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_rq~DUPLICATE
+fast	req@bv   	NZB_ph      	late   7.006 ns k=1	early   2.555 ns k=1	   94 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_bv
+fast	gate_ffff	NZB_ph	NO-PATH	
+fast	gate_any 	NZB_ph      	late   8.850 ns k=2	early   3.559 ns k=1	  124 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_cpend
+fast	rnw      	NZB_ph      	late   6.755 ns k=1	early   2.594 ns k=1	  280 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|ch2_caddr[6]
+fast	rnw2     	NZB_ph      	late   4.680 ns k=1	early   1.678 ns k=1	    8 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|c_pend2
+fast	rnw2_any 	NZB_ph      	late   4.680 ns k=1	early   1.678 ns k=1	   12 paths	emu:emu|msx:MSX|nz_bus:NZB|ph -> emu:emu|sdram_tdm:sdram|c_pend2
+fast	RNW2	NZB_ph      	PASS	late 4.680 ns vs second edge 15.520 ns (slack 10.840)
+fast	din      	T80_DO      	late   4.677 ns k=1	early   1.298 ns k=1	   33 paths	emu:emu|msx:MSX|T80s:T80|T80:u0|DO[3] -> emu:emu|sdram_tdm:sdram|ch2_din_1[3]
+fast	din      	NZ_state    	late  16.560 ns k=3	early   0.878 ns k=1	 8400 paths	emu:emu|msx:MSX|NextZ80:NZ|FETCH[5]~DUPLICATE -> emu:emu|sdram_tdm:sdram|ch2_din_1[0]
+fast	addr     	T80_u0      	late  15.217 ns k=2	early   0.880 ns k=1	19987 paths	emu:emu|msx:MSX|T80s:T80|T80:u0|IntCycle -> emu:emu|sdram_tdm:sdram|ch2_addr_1[25]
+fast	addr     	NZ_state    	late  17.426 ns k=3	early   1.843 ns k=1	20000 paths	emu:emu|msx:MSX|NextZ80:NZ|FETCH[5]~DUPLICATE -> emu:emu|sdram_tdm:sdram|ch2_addr_1[25]
+fast	kanji    	T80_IORQ_n  	late   7.745 ns k=1	early   2.672 ns k=1	 5243 paths	emu:emu|msx:MSX|T80s:T80|IORQ_n -> emu:emu|sdram_tdm:sdram|ch2_addr_1[12]
+REQSKEW	NZB_ph	RISK	k seen: 1 2	slow:req_1:2/1:14.366/5.368 slow:cpend:2/1:15.457/6.118 slow:rq:2/1:14.690/5.412 slow:bv:2/1:14.820/5.496 fast:req_1:1/1:6.671/2.547 fast:cpend:1/1:7.267/2.866 fast:rq:1/1:6.943/2.515 fast:bv:1/1:7.006/2.555
+REQSKEW	T80_IORQ_n	RISK	k seen: 1 2	slow:req_1:2/1:11.380/7.346 slow:cpend:2/2:12.417/8.264 slow:rq:2/1:11.983/7.615 slow:bv:2/1:11.717/7.451 fast:req_1:1/1:5.317/3.436 fast:cpend:1/1:5.798/3.872 fast:rq:1/1:5.620/3.558 fast:bv:1/1:5.496/3.482
+REQSKEW	T80_MREQ_n	RISK	k seen: 1 2	slow:req_1:2/1:14.174/6.390 slow:cpend:2/1:15.265/7.004 slow:rq:2/1:14.498/6.498 slow:bv:2/1:14.628/6.743 fast:req_1:1/1:6.570/2.926 fast:cpend:1/1:7.166/3.194 fast:rq:1/1:6.842/2.984 fast:bv:1/1:6.905/3.087
+REQSKEW	T80_RD_n	RISK	k seen: 1 2	slow:req_1:2/1:14.262/6.677 slow:cpend:2/1:15.353/7.427 slow:rq:2/1:14.586/6.721 slow:bv:2/1:14.716/6.805 fast:req_1:1/1:6.757/3.212 fast:cpend:1/1:7.353/3.531 fast:rq:1/1:7.029/3.180 fast:bv:1/1:7.092/3.220
+REQSKEW	T80_WR_n	RISK	k seen: 1 2 3	slow:req_1:2/1:14.521/6.077 slow:cpend:3/1:15.612/6.827 slow:rq:2/1:14.845/6.121 slow:bv:2/1:14.975/6.205 fast:req_1:1/1:6.681/2.892 fast:cpend:1/1:7.277/3.211 fast:rq:1/1:6.953/2.860 fast:bv:1/1:7.016/2.900
