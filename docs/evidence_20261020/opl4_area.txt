@@ -14,3 +14,18 @@ mx_opl3    ALMs 1,000 (memory ALMs 160) | regs 1313 | M10K 11 | DSP 1
 # M10K; ours keeps slot state in 31 MLABs and runs a pipelined slot FSM at 128.86 MHz.
 # srg_pcm takes wave bytes at a fixed time (MA/MDI 8-bit, no wait): it needs a CE-stall wrapper
 # (as MSXimus src/opl4_pcm.v) or a guaranteed-latency SDRAM port.  Not fitted with timing (no SDC).
+
+# --- Ablation of our PCM engine (2026-10-21), same method; wrapper tools/sdram128/pcm_ablation/pcm_wrap.sv
+#     (functional ports as ymf278b_top; DBG=1 keeps the overlay taps the core reads).  Each variant is the
+#     repo engine with one edit, self-checked (base copy == repo file; edit count printed = 1 or 2).
+#     Function is NOT preserved -- this measures what a part costs, not a design.
+abl_base     2,806 ALM  regs 2280   (in-core u_pcm 2,852: control)
+abl_nodbg    2,830 ALM  regs 2236   every dbg output open            -> +24  (fit noise; the taps cost ~0)
+abl_notl     2,554 ALM  regs 2009   tl_cur writes -> 0 (array pruned) -> -252
+abl_nocache  2,488 ALM  regs 2155   hit_c forced 0 (cache pruned)     -> -318
+abl_nopipe   2,852 ALM  regs 1943   PIPE_FORCE=0 at 128.86 MHz        -> +46  (PIPE's -337 regs pack into
+                                                                           LUT ALMs: ~0 ALM)
+abl_all      2,243 ALM  regs 1519   all four                          -> -563 (= -252 -318 +/- noise: additive)
+# Reading: tl_cur (192 bits, 2 read + 1 write index + bulk clear) costs ~250 ALM; the wave cache ~320;
+# PIPE and the debug taps ~0.  With all of them gone the engine is still 2,243 ALM vs srg320's 960:
+# ~1,280 ALM of the gap is the slot datapath/control itself (not counters, not flop state, not PIPE).
