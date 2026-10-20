@@ -1,0 +1,26 @@
+# Standalone area of the VDP candidates on the MiSTer device (5CSEBA6U23I7), 2026-10-20.
+# tools/sdram128/vdp_area.sh: one Quartus 17.0.2 project per block, all ports virtual pins,
+# MSX1.qsf optimisation settings, map + fit, "ALMs needed".  No Quartus warning 10999 (every
+# array became RAM) in any of them.
+# Sources: V9958 = rtl/video/VDP (+ rtl/peripheral/ram.vhd); V9968/Geo3D = ~/data/V9968_Cartridge
+# 7820668 (v9968/*.v; geo3d_bus+engine+core); V9990 = ~/data/v9990_rampa 36170c5 (rampa069/v9990,
+# core without v9990_vram_bram; cache separately).
+v9968 (207s):  Logic utilization (ALMs needed / total ALMs on device) 3,836 / 41,910 9 %  | regs  Total registers 5003  |  M10K blocks 13 / 553 2 %  |  Total block memory bits 102,144 / 5,662,720 ( 2 % )  |  Total DSP Blocks 8 / 112 ( 7 % ) 
+geo3d (203s):  Logic utilization (ALMs needed / total ALMs on device) 3,063 / 41,910 7 %  | regs  Total registers 3988  |  M10K blocks 34 / 553 6 %  |  Total block memory bits 317,440 / 5,662,720 ( 6 % )  |  Total DSP Blocks 6 / 112 ( 5 % ) 
+v9990 (202s):  Logic utilization (ALMs needed / total ALMs on device) 4,679 / 41,910 11 %  | regs  Total registers 4165  |  M10K blocks 17 / 553 3 %  |  Total block memory bits 87,696 / 5,662,720 ( 2 % )  |  Total DSP Blocks 1 / 112 ( < 1 % ) 
+v9990cache (67s):  Logic utilization (ALMs needed / total ALMs on device) 377 / 41,910 < 1 %  | regs  Total registers 346  |  M10K blocks 0 / 553 0 %  |  Total block memory bits 0 / 5,662,720 ( 0 % )  |  Total DSP Blocks 0 / 112 ( 0 % ) 
+
+v9958 (131s):  ALMs needed 1,483 | Total registers 1601 | M10K 9 | block bits 25,736 | DSP 0
+#
+# Control: V9958 in the 03a1f21 core fit = 1,140 ALM / M10K 5 (VDP:vdp_vdp).  Standalone reads 1,483
+# (x1.30): in the core its tied inputs (VDPSPEEDMODE, CENTERYJK) and open outputs are optimised away.
+# So standalone numbers are an upper bound; x0.77 is a one-point estimate of the in-core figure.
+#
+# Builds (core without V9958 + its VRAM, TMS9918's 16 KB kept: ~28.9k ALM, M10K ~318, DSP 53):
+#   build               ALM (x0.77 .. raw)        %          M10K   DSP
+#   V9958 (today)       30,118                    72         435    53
+#   V9968 only          31.9k .. 32.7k            76-78      331    61
+#   V9968 + Geo3D       34.2k .. 35.8k            82-85      365    67
+#   V9990 (+cache)      32.8k .. 33.9k            78-81      335    54
+#   V9958 + V9990       34.0k .. 35.2k            81-84      452    54   (+ superimpose mixer, not counted)
+# Not counted anywhere: the SDRAM bridges, PLL outputs, CPU bus adapters, video muxing.
