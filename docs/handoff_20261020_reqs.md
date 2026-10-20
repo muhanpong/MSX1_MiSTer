@@ -15,7 +15,7 @@
 | 툴체인 교차 | core_builder가 2026-10-20 buildgate를 17.0.2로 전환(자기 워크트리만, 미커밋). 이 워크트리 build.sh는 그대로 | 이 rbf는 17.0 + compile.sh, buildgate 미경유 |
 | 32/64 MB 보드 | **v_en=0(현재 빌드)에선 36위상·세 맵 모두 통과.** g3/15/27 E0+29 LATE는 v_en=1일 때만(ch2_req_s 한 클록). E0+28은 실제 창 232.8 ns라 보수적이지 않음 → V9968 통합 과제 | 432de57, docs/evidence_20261020/tdm_stock_deadline_ven.txt |
 | 준안정 원리적 제거 | 미착수. (d) 고정 위상 표본 또는 2플롭 | ch2_req_s는 1플롭 동기화기, 해소 시간 = req_s→결정 slack +2.0 ns |
-| PCM w_word ← rdaddr_reg | 출처는 태그 MLAB 비교 → CHIT0에서 레지스터로(사이클 수 그대로, PIPE=1만). pcm128 verify PASS, **미fit** | 13e72cd |
+| PCM w_word ← rdaddr_reg | **해결.** 태그 비교를 CHIT0로(13e72cd) → w_word +1.059. 그 fit에서 드러난 ch2_saved_a0 ← ps(−0.130)는 a0를 데이터와 함께 잡게(03a1f21). 03a1f21 fit: clk_sdram +0.235, 전 클록 setup +0.105 / hold +0.244, relations 전부 ok, fullsys PASS. rbf 없음(asm 안 돌림) | docs/evidence_20261020/fit_03a1f21.txt |
 | sdram.sv REQSKEW | 출하판 3f09aaf에도 같은 모양(쓰기 req_1→rq 1.36 ns slow). 이 브랜치는 sdram.sv를 안 씀 → nextz80 결정 | 43872c3 |
 | V9968 + geo3d | **미통합**. sdram_tdm V 포트는 있으나 MSX1.sv에서 v_en=0 | 원본 `~/data/V9968_Cartridge`, `_alexmoncks`(geo3d) |
 

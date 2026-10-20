@@ -1,0 +1,93 @@
+# Fit review 2026-10-20: PCM tag pipe (13e72cd) and chN_saved_a0 at capture (03a1f21).
+# Quartus 17.0.2, tools/sdram128/compile.sh (no asm, judgement only, no rbf), SEED 10.
+#
+# 1. b9bed45 (13e72cd PCM tag pipe; sdram_tdm RTL = 481569a):
+#    clk_sdram setup -0.130 ns, 2 endpoints: ch2_saved_a0 <- ps.  w_word worst +0.767 (was +0.607 on
+#    481569a, from cache_tagB rdaddr_reg); the tag MLABs are gone from the 400 worst w_word paths
+#    (sources now w_slot 217, cache_hasb 101, cache_vld 74, rst_hold, memory_upload).
+#    ch2_saved_a0's 400 worst: ps -0.130, c2_l.c -0.046, cand_l.b -0.003, ps~DUP -0.001, g1.v +0.024,
+#    rf_now +0.039 ... -- the slot-pick (cand_ok) cone, because the pick loaded the byte select.
+#
+# 2. 03a1f21 (saved_a0 taken with the data):
+#    stage sta rc=0 28s errors=0
+#    build: map 2026-10-20 10:44:32, sta 2026-10-20 11:03:56, HEAD 03a1f21
+#    clk_sdram period: 7.760 ns
+#    PCM pipeline states synthesised: 10 / 10
+#    PCM memories in MLAB: 31 distinct, 31 required
+#    PCM arrays Quartus could not infer as memory (10999): 0
+#    SDC constraints ignored by TimeQuest: none
+#    setup, clk_sdram: slack 0.235 TNS 0.000 
+#    failing endpoints: 0
+#    ════════════════════════════════
+#    RESULT PASS: the build is the 128.86 MHz PIPE study it claims to be
+#    TIMING PASS: clk_sdram setup slack 0.235 ns
+#    rc=0
+#    all clocks: Worst-case setup slack is 0.105
+#    all clocks: Worst-case hold slack is 0.244
+#    all clocks: Worst-case recovery slack is 1.656
+#    all clocks: Worst-case removal slack is 0.612
+#    all clocks: Worst-case minimum pulse width slack is 0.970
+#    two-path measure (slow, 400 worst):
+#    wword worst 1.059
+#        37    1.099  ymf278_pcm_engine2:u_pcm|cache_vld
+#        50    1.113  ymf278_pcm_engine2:u_pcm|w_slot
+#        29    1.371  memory_upload:memory_upload|state.STATE_IDLE
+#    saved worst 0.867
+#        72    0.867  sdram_tdm:sdram|ch2_caddr
+#         8    0.918  sdram_tdm:sdram|ch2_caddr~DUPLICATE
+#         6    0.965  sdram_tdm:sdram|g1.rnw
+#         2    1.049  sdram_tdm:sdram|c_pend3
+#         6    1.100  sdram_tdm:sdram|g1.v
+#        28    1.120  sdram_tdm:sdram|ps
+#        14    1.126  sdram_tdm:sdram|ps~DUPLICATE
+#         4    1.157  sdram_tdm:sdram|g2.v~DUPLICATE
+#        26    1.243  sdram_tdm:sdram|g2.word
+#         4    1.263  sdram_tdm:sdram|g2.rnw~DUPLICATE
+#         2    1.369  sdram_tdm:sdram|ch2_bv~DUPLICATE
+#        20    1.395  sdram_tdm:sdram|c_waddr
+#        26    1.457  sdram_tdm:sdram|g1.word
+#         2    1.546  sdram_tdm:sdram|g2.rnw
+#         8    1.602  sdram_tdm:sdram|g2.ch
+#    relations.tcl:
+#    REL NZ_intra       rel=93.126 slack=54.865 ok
+#    REL NZ_to_SD_ch2   rel=46.560 slack=9.587 ok
+#    REL RNW2_T80_pend2 rel=15.520 slack=4.740 ok
+#    REL RNW2_NZB_pend2 rel=15.520 slack=4.680 ok
+#    REL REQS_T80       rel=15.520 slack=3.199 ok
+#    REL REQS_NZB       rel=15.520 slack=3.276 ok
+#    REL RNW_T80_ch2    rel=15.520 slack=5.471 ok
+#    REL RNW_NZB_ch2    rel=15.520 slack=4.437 ok
+#    REL DIN_T80        rel=15.520 slack=6.383 ok
+#    REL ADDR_NZ_pend2  rel=62.080 slack=31.738 ok
+#    REL ADDR_T80_pend2 rel=62.080 slack=38.330 ok
+#    REL NZ_to_fabric   rel=93.126 slack=53.808 ok
+#    REL NZ_to_SCC_fall rel=69.844 slack=41.815 ok
+#    REL NZ_to_ctl_exc  rel=46.563 slack=41.496 ok
+#    REL NZ_to_cheat_exc rel=46.563 slack=31.486 ok
+#    REL SD_int_to_ch2  rel=7.760 slack=0.787 ok
+#    REL T80_to_NZ      rel=93.126 slack=61.479 ok
+#    field_race (tdm):
+#    slow	RNW2	T80_MREQ_n  	PASS	late 10.645 ns vs second edge 15.520 ns (slack 4.875)
+#    slow	RNW2	T80_RD_n    	PASS	late 9.765 ns vs second edge 15.520 ns (slack 5.755)
+#    slow	RNW2	T80_WR_n    	PASS	late 10.215 ns vs second edge 15.520 ns (slack 5.305)
+#    slow	RNW2	NZB_ph      	PASS	late 10.840 ns vs second edge 15.520 ns (slack 4.680)
+#    fast	RNW2	T80_MREQ_n  	PASS	late 4.892 ns vs second edge 15.520 ns (slack 10.628)
+#    fast	RNW2	T80_RD_n    	PASS	late 4.537 ns vs second edge 15.520 ns (slack 10.983)
+#    fast	RNW2	T80_WR_n    	PASS	late 4.753 ns vs second edge 15.520 ns (slack 10.767)
+#    fast	RNW2	NZB_ph      	PASS	late 5.023 ns vs second edge 15.520 ns (slack 10.497)
+#    REQSKEW	NZB_ph	RISK	k seen: 1 2	slow:cpend:2/1:8.798/4.459 slow:rq:2/1:9.630/4.956 slow:bv:2/1:10.835/6.054 fast:cpend:1/1:4.156/2.124 fast:rq:1/1:4.644/2.398 fast:bv:1/1:5.207/2.943
+#    REQSKEW	T80_MREQ_n	RISK	k seen: 1 2	slow:cpend:2/1:9.044/4.789 slow:rq:2/1:9.739/5.248 slow:bv:2/1:10.944/6.346 fast:cpend:1/1:4.309/2.292 fast:rq:1/1:4.794/2.526 fast:bv:1/1:5.357/3.071
+#    REQSKEW	T80_WR_n	RISK	k seen: 1 2	slow:cpend:2/1:8.467/4.360 slow:rq:2/1:9.232/4.727 slow:bv:2/1:10.437/5.825 fast:cpend:1/1:4.012/2.055 fast:rq:1/1:4.522/2.272 fast:bv:1/1:5.085/2.817
+#
+# 3. fullsys tdm128/tdm on 03a1f21 (shim regenerated with tb/mkshim_tdm.py), GT DOS2, RPROBE 1500 ms,
+#    KPROBE 300 ms:
+#    == none: RPROBE RESULT PASS ROWXOR 0: ch2 requests 305233, with a[22:21] != 0: 0 cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0 
+#    == req: RPROBE RESULT PASS ROWXOR 0: ch2 requests 305233, with a[22:21] != 0: 0 INJ_REQ: controller saw the rise 0/1/2/3+ edges after the live request: 0 305233 0 0 cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0 
+#    == m32: RPROBE RESULT PASS ROWXOR 1: ch2 requests 305233, with a[22:21] != 0: 305233 INJ_REQ: controller saw the rise 0/1/2/3+ edges after the live request: 0 305233 0 0 cpu latched reads: 289359, from sdram 288847, LATE (ch2 not complete) 0 
+#    == mut_a0: ROWXOR 0: ch2 requests 9866250, with a[22:21] != 0: 0 cpu latched reads: 9865346, from sdram 9862269, LATE (ch2 not complete) 0 
+#    == kp: KPROBE RESULT PASS ROWXOR 0: ch2 requests 87848, with a[22:21] != 0: 0 cpu latched reads: 75560, from sdram 75560, LATE (ch2 not complete) 0 
+#    mut_a0 (-DTDM_MUT_A0, negative control): no RPROBE RESULT line -- the machine ran to the 2 s
+#    limit fetching 9.8 M NextZ80 reads (vs 0.3 M in a passing run): it never got through the probe.
+#
+# sim/sdram_tdm quick on 03a1f21: 42/42, 14 mutants caught incl. ma0 (ch2 read 0a8222d = 00, expected d8).
+# PCM: run_pcm128_verify.sh quick PASS on 13e72cd (golden 8/8, PIPECHK tag 83,400 bad 0, TAG mutant caught).
