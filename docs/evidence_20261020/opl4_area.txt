@@ -1,0 +1,16 @@
+# Standalone area of OPL4 parts, same method as vdp_area.txt (tools/sdram128/vdp_area.sh, now with
+# PARAMS= and .sv), 2026-10-21.  No warning 10999 in any of them.
+#   ours_pcm  = ymf278_pcm_engine2 (+alu, eg_step), CLK_HZ=128863620 (PIPE=1), sdram128 03a1f21
+#   ours_opl3 = opl3 (gtaylormb opl3_fpga, our copy, sound.qip list)
+#   srg_pcm   = srg320/Arcade-PsikyoSH2_MiSTer 28ddb1b rtl/PSH2/YMF278B.sv (+pkg), Altera RAMs as-is
+#   mx_opl3   = MSXimus V3.5 8ad55cb fpga/opl3 (gtaylormb + mangOPL4 Gowin fixes)
+ours_pcm   ALMs 2,922 (memory ALMs 390) | regs 2278 | M10K 0  | DSP 7
+ours_opl3  ALMs 1,063 (memory ALMs 200) | regs 1315 | M10K 11 | DSP 1
+srg_pcm    ALMs   960 (memory ALMs   0) | regs  835 | M10K 23 | DSP 6
+mx_opl3    ALMs 1,000 (memory ALMs 160) | regs 1313 | M10K 11 | DSP 1
+# Control: in the 03a1f21 core u_pcm = 2,852 ALM, u_opl3 = 1,023 -> standalone x1.02 / x1.04 here
+# (these blocks have few tied inputs, unlike the V9958's x1.30).
+# srg_pcm is time-multiplexed: everything advances on CYCLE0/1_CE = CE & CLK_DIV==3, slot state in
+# M10K; ours keeps slot state in 31 MLABs and runs a pipelined slot FSM at 128.86 MHz.
+# srg_pcm takes wave bytes at a fixed time (MA/MDI 8-bit, no wait): it needs a CE-stall wrapper
+# (as MSXimus src/opl4_pcm.v) or a guaranteed-latency SDRAM port.  Not fitted with timing (no SDC).

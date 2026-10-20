@@ -15,8 +15,9 @@ echo 'set_global_assignment -name ADV_NETLIST_OPT_SYNTH_WYSIWYG_REMAP ON'
 echo 'set_global_assignment -name PRE_MAPPING_RESYNTHESIS ON'
 echo 'set_instance_assignment -name VIRTUAL_PIN ON -to *'
 echo 'set_global_assignment -name VERILOG_INPUT_VERSION SYSTEMVERILOG_2005'
+for kv in ${PARAMS:-}; do echo "set_parameter -name ${kv%%=*} ${kv#*=}"; done
 for f in "$@"; do
-  case $f in *.vhd) echo "set_global_assignment -name VHDL_FILE $f -hdl_version VHDL_2008";; *) echo "set_global_assignment -name VERILOG_FILE $f";; esac
+  case $f in *.sv) echo "set_global_assignment -name SYSTEMVERILOG_FILE $f";; *.vhd) echo "set_global_assignment -name VHDL_FILE $f -hdl_version VHDL_2008";; *) echo "set_global_assignment -name VERILOG_FILE $f";; esac
 done
 } > $n.qsf
 echo "PROJECT_REVISION = \"$n\"" > $n.qpf
