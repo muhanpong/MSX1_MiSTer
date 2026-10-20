@@ -25,6 +25,23 @@
 | 자원 (Gowin) | VDP: LUT 6.5k / ALU 0.75k / REG 4.2k / BSRAM 10 / DSP 11. Geo3D: LUT 5.2k / ALU 1.4k / REG 3.4k / BSRAM 20 / DSP 7 |
 | 라이선스 | v9968 파일은 HRA! 3조항(비상업)으로 지금 VDP와 같은 위치다. Geo3D는 MIT(Alex Moncks) |
 
+## 0b. upstream 상태 (2026-10-20 확인, 로컬 클론을 7820668로 fast-forward)
+
+- 최신 커밋은 7820668(10-19, Geo3D v2.0.0)이다. **VDP RTL의 마지막 변경은 f327563(10-10)**인데, R#20 비트 이름 주석 한 줄뿐이다.
+  실질적인 마지막 수정은 9월 말에 몰려 있다(`src/history.md`).
+  - 09-30: SCREEN2 CMD=1 명령 1바이트 건너뜀(이슈 #10), DIY 역주사 종료
+  - 09-29: Fleet Commander II(포트#1 래치를 98h 쓰기·모든 읽기에서 취소, openMSX 준거)
+  - 09-28: R#4
+  - 09-27: 수평 스크롤 R#26/27 동시 래치, 스프라이트 오버맵, MSX2+ 로고 왼쪽, VRAM 캐시
+- 호환 목록 pdf(2026-01)는 그 수정들 이전 것이다. Fleet Commander II NG는 09-29에 고쳐졌다.
+  나머지 NG 4개(元朝秘史, カオスエンジェルズ, XeGrader, ソーサリアン)는 고쳐졌는지 기록이 없다.
+- GitHub 이슈 중 열린 버그:
+  - #7 ドラスレファミリー(MSX2) 던전 진입 시 멈춤. 제3자(MSXimus)가 원인으로 LMMC/HMMC의 CPU→R#44 핸드셰이크가
+    1비트(`ff_transfer_ready`)라 바이트를 잃는다고 보고, 8바이트 FIFO 수정을 자기 저장소(V3.5 브랜치)에 공개했다.
+    **upstream에는 아직 들어가지 않았다**(7820668 vdp_command.v에 FIFO 없음).
+  - #2 Royal Blood가 인터레이스로 바뀜.
+- 통합 기준은 7820668로 둔다. #7 수정은 S6(호환 검증)에서 그 게임으로 재현한 뒤, upstream 반영을 기다릴지 우리가 가져올지 정한다.
+
 ## 1. 코어 쪽 사실
 
 - 현재 fit(03a1f21): ALM 30,118/41,910(72%), M10K 435/553, DSP 53/112.
