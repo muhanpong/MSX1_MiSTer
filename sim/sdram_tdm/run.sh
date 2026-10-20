@@ -19,7 +19,7 @@ build() {  # name defines...
     [ -x "$O/$n/tb" ] || fail "$n did not build: $(grep -m2 %Error "$O/$n.build.log")"
 }
 for v in "b128:" "b32:-DONECHIP" "i32:-DONECHIP" "msens:-DONECHIP -DTDM_MUT_SENS" "mbank:-DTDM_MUT_BANK" \
-         "mnoref:-DTDM_MUT_NOREF" "mcap:-DTDM_MUT_CAP" "mcape:-DTDM_MUT_CAPE" "mrdy:-DTDM_MUT_RDY" "mrfslow:-DONECHIP -DTDM_MUT_RFSLOW" "b64:-DCHIP64" "mno64:-DCHIP64 -DTDM_MUT_NO64" "mrsv:-DONECHIP -DTDM_MUT_NORSV" "mlate:-DONECHIP -DTDM_MUT_LATEHOLD" "mrdover:-DTDM_MUT_RDOVER" "mdropgap:-DONECHIP -DTDM_MUT_DROPGAP" "mnobusy:-DONECHIP -DTDM_MUT_NOBUSY"; do
+         "mnoref:-DTDM_MUT_NOREF" "mcap:-DTDM_MUT_CAP" "mcape:-DTDM_MUT_CAPE" "mrdy:-DTDM_MUT_RDY" "mrfslow:-DONECHIP -DTDM_MUT_RFSLOW" "b64:-DCHIP64" "mno64:-DCHIP64 -DTDM_MUT_NO64" "mrsv:-DONECHIP -DTDM_MUT_NORSV" "mlate:-DONECHIP -DTDM_MUT_LATEHOLD" "mrdover:-DTDM_MUT_RDOVER" "mdropgap:-DONECHIP -DTDM_MUT_DROPGAP" "mnobusy:-DONECHIP -DTDM_MUT_NOBUSY" "ma0:-DTDM_MUT_A0"; do
     build ${v%%:*} ${v#*:} &
 done; wait
 CYC=${CYC:-400000}; [ "${1:-}" = quick ] && CYC=120000
@@ -28,7 +28,7 @@ jobs=()
 for sd in $SEEDS; do for bz in 15 50; do
     jobs+=("b128 1 $sd $bz" "b32 0 $sd $bz" "b128 1 $sd $bz +stock=1 +cpulow=1" "b32 0 $sd $bz +stock=1 +cpulow=1" "b64 0 $sd $bz +m64=1" "b32 0 $sd $bz +stock=1 +cpulow=2" "b128 1 $sd $bz +r800wr=1" "b32 0 $sd $bz +r800wr=1" "b32 0 $sd $bz +r800wr=2")
 done; done
-for m in "msens 0" "mbank 1" "mnoref 1" "mcap 1" "mcape 1" "mrdy 1"; do jobs+=("$m 1 50"); done
+for m in "msens 0" "mbank 1" "mnoref 1" "mcap 1" "mcape 1" "mrdy 1" "ma0 1"; do jobs+=("$m 1 50"); done
 #  a grid phase the refresh frame catches without cancellation (9 of 36 do)
 #  deadline mutants fail at some grid phases only (12-clock period): three phases
 #  each, a longer run, caught if any of them fails
@@ -60,7 +60,7 @@ grep -h "max latency\|cache hits\|chip:" "$O/run_b128_1_1_50.log" "$O/run_b32_0_
 n=$(grep -l "LATE=[1-9]" "$O"/run_i32_*.log 2>/dev/null | wc -l)
 echo "  INFO (open, V9968): 32 MB rows 01 with v_en = 1 at g3/15/27: $n of 3 phases LATE ($(grep -ho 'complete at E0+[0-9]*' "$O"/run_i32_*.log | sort | uniq -c | tr -s ' ' | tr '\n' ' '))"
 grep -h "stock:" "$O"/run_b*_stock*.log | sed 's/grid phase [0-9]*: //' | sort | uniq -c | sed 's/^/  /'
-for m in msens mbank mnoref mcap mcape mrdy mrfslow mno64 mrsv mlate mrdover mdropgap mnobusy; do
+for m in msens mbank mnoref mcap mcape mrdy mrfslow mno64 mrsv mlate mrdover mdropgap mnobusy ma0; do
     c=$(grep -L "TDM RESULT PASS" "$O"/run_${m}_*.log | head -1)
     if [ -z "$c" ]; then fail "mutant $m passed (negative control broken)"
     else echo "  mutant $m caught: $(grep -m1 'SDCHK ERR\|TDM ERR\|overflow' $c | cut -c1-110)"; fi

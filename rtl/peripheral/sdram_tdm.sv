@@ -666,12 +666,15 @@ always @(posedge clk) begin
                                        pick.din = ch3_din_1; pick.word = ch3_addr_1[26:1]; pick.l = cand_l[2]; end
             else if (cand_ok[3]) begin pick.v = 1; pick.ch = 2'd3; pick.rnw = ch4_rnw_1; pick.a0 = ch4_addr_1[0];
                                        pick.din = ch4_din_1; pick.word = ch4_addr_1[26:1]; pick.l = cand_l[3]; end
+            //  chN_saved_a0 is taken with the data (read capture below), not here: on
+            //  this edge it hung off the whole cand_ok cone (ch2_saved_a0 <- ps -0.130 ns
+            //  on the 13e72cd fit, 2026-10-20), and a0 and data now change together
             if (pick.v) begin
                 case (pick.ch)
-                    2'd0: begin ch1_rq <= 0; ch1_ready <= 0; ch1_saved_a0 <= pick.a0; end
-                    2'd1: begin ch2_rq <= 0; ch2_ready <= 0; ch2_saved_a0 <= pick.a0; end
-                    2'd2: begin ch3_rq <= 0; ch3_ready <= 0; ch3_saved_a0 <= pick.a0; end
-                    2'd3: begin ch4_rq <= 0; ch4_ready <= 0; ch4_saved_a0 <= pick.a0; end
+                    2'd0: begin ch1_rq <= 0; ch1_ready <= 0; end
+                    2'd1: begin ch2_rq <= 0; ch2_ready <= 0; end
+                    2'd2: begin ch3_rq <= 0; ch3_ready <= 0; end
+                    2'd3: begin ch4_rq <= 0; ch4_ready <= 0; end
                 endcase
             end
             if (ps[2]) g1 <= pick; else g2 <= pick;
@@ -728,13 +731,16 @@ always @(posedge clk) begin
             gslot_t g;
             g = (ps[1] | ps[2] | ps[3]) ? g1 : g2;
             case (g.ch)
-                2'd0: begin ch1_saved_data <= dq_p; ch1_ready <= 1; end
+                2'd0: begin ch1_saved_data <= dq_p; ch1_saved_a0 <= g.a0; ch1_ready <= 1; end
                 2'd1: begin
+`ifndef TDM_MUT_A0          // negative control: ch2's byte select left from the access before
+                    ch2_saved_a0 <= g.a0;
+`endif
                     ch2_saved_data <= dq_p; ch2_ready <= 1; ch2_rdtog <= ~ch2_rdtog;
                     c_we <= 1; c_waddr <= g.word[CW-1:0]; c_wdata <= {1'b1, g.word[25:CW], dq_p};
                 end
-                2'd2: begin ch3_saved_data <= dq_p; ch3_ready <= 1; end
-                2'd3: begin ch4_saved_data <= dq_p; ch4_ready <= 1; end
+                2'd2: begin ch3_saved_data <= dq_p; ch3_saved_a0 <= g.a0; ch3_ready <= 1; end
+                2'd3: begin ch4_saved_data <= dq_p; ch4_saved_a0 <= g.a0; ch4_ready <= 1; end
             endcase
         end
 
