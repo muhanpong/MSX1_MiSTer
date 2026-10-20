@@ -15,9 +15,13 @@
 # as a probable smart-recompile skip.  Ends with the 8-figure two-corner signoff
 # (read_sdc per model), the clock-pair relationship assertions, and the list of
 # SDC lines the analyser ignored.
+#
+# QUARTUS_BIN overrides the Quartus bin directory for a machine whose install
+# lives elsewhere, e.g.
+#   QUARTUS_BIN=~/data/intelFPGA_lite/17.0/quartus/bin tools/buildgate/build.sh
 set -u
 cd "$(dirname "$0")/../.."
-Q=/run/media/muhanpong/0eb4bebc-0644-4c2f-9a97-ddca5afcd8f3/intelFPGA_lite/17.1/quartus/bin
+Q=${QUARTUS_BIN:-/run/media/muhanpong/0eb4bebc-0644-4c2f-9a97-ddca5afcd8f3/intelFPGA_lite/17.1/quartus/bin}
 STAGES="map,fit,asm"; EXPECT=(); SIGNOFF_ONLY=0
 while [ $# -gt 0 ]; do case "$1" in
   --stages) STAGES="$2"; shift 2;; --expect) EXPECT+=("$2"); shift 2;; --signoff-only) SIGNOFF_ONLY=1; shift;;
@@ -25,8 +29,9 @@ while [ $# -gt 0 ]; do case "$1" in
 LOG=${BUILDGATE_LOG:-/tmp/buildgate}; mkdir -p "$LOG"; rm -f "$LOG/buildgate.out"
 fail=0
 if [ ! -x "$Q/quartus_map" ]; then
-  echo "GATE-FAIL: Quartus volume not mounted at $Q"
-  echo "           try: udisksctl mount -b /dev/disk/by-uuid/0eb4bebc-0644-4c2f-9a97-ddca5afcd8f3"; exit 3
+  echo "GATE-FAIL: no Quartus at $Q"
+  if [ -n "${QUARTUS_BIN:-}" ]; then echo "           check QUARTUS_BIN"
+  else echo "           try: udisksctl mount -b /dev/disk/by-uuid/0eb4bebc-0644-4c2f-9a97-ddca5afcd8f3"; fi; exit 3
 fi
 #  Before any Quartus stage: let the diff trip the records (landmines.tsv) and run
 #  the benches it is answerable to.  A failing bench refuses the build.
