@@ -20,7 +20,9 @@
 set -u
 cd "$(dirname "$0")/../.."
 Q=${Q:-/home/sysop/data/intelFPGA_lite/17.0/quartus/bin}
-STA=${STA:-output_files/MSX1.sta.rpt}; MAP=${MAP:-output_files/MSX1.map.rpt}   # override: negative controls on report copies
+REV=${REV:-MSX1}            # REV=MSX1_V9968: the V9968 build (MSX1_V9968.qsf)
+STA=${STA:-output_files/$REV.sta.rpt}; MAP=${MAP:-output_files/$REV.map.rpt}   # override: negative controls on report copies
+PLLV=rtl/pll/pll_0002.v; [ "$REV" = MSX1_V9968 ] && PLLV=rtl/pll/pll_v9968_0002.v
 FAIL=0; fail() { echo "  FAIL: $*"; FAIL=1; }
 MODE=${1:-all}
 case $MODE in all) NEED="$MAP $STA";; map) NEED=$MAP;; *) echo "usage: $0 [map]"; exit 2;; esac
@@ -34,8 +36,8 @@ if [ "$MODE" = all ]; then
 else
     echo "build: map $(date -r $MAP '+%F %T'), HEAD $(git log -1 --format=%h) (map only)"
     #  the period is set in the PLL, not synthesised: check the PLL parameter instead
-    grep -q 'output_clock_frequency0("128.863620 MHz")' rtl/pll/pll_0002.v \
-        || fail "PLL output 0 (rtl/pll/pll_0002.v) is not 128.863620 MHz"
+    grep -q 'output_clock_frequency0("128.863620 MHz")' $PLLV \
+        || fail "PLL output 0 ($PLLV) is not 128.863620 MHz"
 fi
 
 pipe=$(grep -o "sl_state\.SL_\(ADV0\|CHIT0\|INTERP2\|INTERP3\|EGPRE\|EGPRE2\|GAIN2\|MUL1B\|MUL2B\|PANB\)\b" $MAP | sort -u | wc -l)
@@ -83,8 +85,19 @@ TFAIL=0
 if [ -z "$SLK" ]; then TFAIL=1; TMSG="TIMING FAIL: no clk_sdram line in the Setup Summary"
 elif awk -v s="$SLK" 'BEGIN{exit !(s < 0)}'; then TFAIL=1; TMSG="TIMING FAIL: clk_sdram setup slack $SLK ns"
 else TMSG="TIMING PASS: clk_sdram setup slack $SLK ns"; fi
+#  Every clock, setup and hold: clk_sdram alone said nothing about clk21m paths, nor
+#  about clk_vdp in the V9968 build.
+for kind in Setup Hold; do
+    rows=$(awk "/; $kind Summary/,/^\$/" $STA | awk -F';' '{c=$2; v=$3; gsub(/^ +| +$/,"",c); gsub(/ /,"",v)} v ~ /^-?[0-9.]+$/ {print v"\t"c}')
+    while IFS=$'\t' read -r slk clk; do
+        echo "$kind slack $slk  $(sed 's/|altera_pll_i|.*general\[\([0-9]\)\].*/ general[\1]/' <<< "$clk")"
+    done <<< "$rows"
+    worst=$(cut -f1 <<< "$rows" | sort -g | head -1)
+    if [ -z "$worst" ]; then TFAIL=1; TMSG="TIMING FAIL: no $kind Summary rows"
+    elif awk -v s="$worst" 'BEGIN{exit !(s < 0)}'; then TFAIL=1; TMSG="TIMING FAIL: worst $kind slack $worst ns (any clock)"; fi
+done
 T=$(mktemp)
-"$Q/quartus_sta" -t tools/sdram128/sta_paths.tcl "$T" > /dev/null 2>&1 || fail "quartus_sta failed"
+"$Q/quartus_sta" -t tools/sdram128/sta_paths.tcl "$T" $REV > /dev/null 2>&1 || fail "quartus_sta failed"
 echo "failing endpoints: $(wc -l < "$T")"
 awk -F'\t' '{n=split($4,a,"|"); t=a[n]; sub(/\[.*/,"",t); sub(/~.*/,"",t);
              m=split($3,b,"|"); s=b[m]; sub(/\[.*/,"",s); sub(/~.*/,"",s);

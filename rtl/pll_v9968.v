@@ -13,7 +13,7 @@ module pll_v9968 (
 		output wire  outclk_2,
 		output wire  locked
 	);
-	pll_v9968_0002 pll_v9968_inst (
+	pll_v9968_0002 pll_inst (       // same instance name as rtl/pll.v: MSX1.sdc names emu|pll|pll_inst|...
 		.refclk   (refclk),
 		.rst      (rst),
 		.outclk_0 (outclk_0),
