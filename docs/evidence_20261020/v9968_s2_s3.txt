@@ -170,3 +170,37 @@ r_p5_32_s8_hs1: V9968 VRAM RESULT PASS (dropped 0: refresh, plan S3) |  SDCHK re
 r_p5_s5_hs0: V9968 VRAM RESULT PASS (dropped 0: refresh, plan S3) |  SDCHK refresh chip 0: max interval 7.356 us, max debt 0.22 (rule: debt <= 8)  SDCHK refresh chip 1: max interval 4.190 us, max debt 0.32 (rule: debt <= 8)  |  link: dropped (refresh) 0, off-grid 0
 r_p5_s5_hs1: V9968 VRAM RESULT PASS (dropped 0: refresh, plan S3) |  SDCHK refresh chip 0: max interval 7.356 us, max debt 0.22 (rule: debt <= 8)  SDCHK refresh chip 1: max interval 4.656 us, max debt 0.32 (rule: debt <= 8)  |  link: dropped (refresh) 0, off-grid 0
 r_p5_s8_hs1: V9968 VRAM RESULT PASS (dropped 0: refresh, plan S3) |  SDCHK refresh chip 0: max interval 7.356 us, max debt 0.22 (rule: debt <= 8)  SDCHK refresh chip 1: max interval 4.842 us, max debt 0.32 (rule: debt <= 8)  |  link: dropped (refresh) 0, off-grid 0
+
+# --- cpu_paced (2026-10-21) ---
+engine runs: 45, pass: 45
+    ch2 cache hits=630  V: granted=4668 reads checked=1262 refused=0
+    ch2 cache hits=566  V: granted=4654 reads checked=1274 refused=0
+  worst refresh interval over the engine runs (us): 10.616
+  worst refresh debt over the engine runs: 0.76
+  V port refused: 0 in every engine run
+  INFO (open, V9968): 32 MB rows 01 with v_en = 1 at g3/15/27: 3 of 3 phases LATE ( 75 complete at E0+29 )
+  mutant msens caught: SDCHK ERR t=202551520 read word masked by DQM=01 (row bits on A12:A11?)
+  mutant mbank caught: SDCHK ERR t=203094720 ACT to open bank c0 b3
+  mutant mnoref caught: SDCHK ERR t=263320080 chip 0 refresh debt 8.00 > 8
+  mutant mcap caught: TDM ERR t=202058762 ch2 read 0782ece = 00, expected 0a
+  mutant mcape caught: TDM ERR t=202136362 ch2 read 0782ece = 00, expected 0a
+  mutant mrdy caught: TDM ERR t=250915721 ch3 read 0e81440 = 00, expected e5
+  mutant mrfslow caught: TDM ERR t=540355961 ch2 LATE (stock): read 00416f9 complete at E0+30, deadline E0+28 (rf_now=00 rf_next=00 pre
+  mutant mno64 caught: TDM ERR t=217392520 ch4 stuck, addr 18806d3 rnw 0
+  mutant mrsv caught: TDM ERR t=1367727161 ch2 LATE (stock): read 024080d complete at E0+32, deadline E0+28 (rf_now=00 rf_next=00 pr
+  mutant mlate caught: TDM ERR t=320220281 ch2 LATE (stock): read 025ba37 complete at E0+29, deadline E0+28 (rf_now=00 rf_next=00 pre
+  mutant mrdover caught: TDM ERR t=350515321 ch2 stuck, addr 0883afa rnw 1
+  mutant mdropgap caught: TDM ERR t=2699607001 ch2 read 068196b = c4, expected fd
+  mutant mnobusy caught: TDM ERR t=1665338682 ch2 read 0983df5 = 00, expected 20
+  mutant ma0 caught: TDM ERR t=202516602 ch2 read 0a8222d = 00, expected d8
+  mutant mvnog2 caught: SDCHK ERR t=204258720 REFRESH with bank 0 busy (c0)
+  mutant mvnog1w caught: SDCHK ERR t=212639520 REFRESH with bank 0 busy (c0)
+  mutant mvlate caught: SDCHK ERR t=217280000 ACT during tRFC
+  mutant mvnocxl caught: TDM ERR t=542094201 ch2 LATE (stock): read 0040ac9 complete at E0+34, deadline E0+28 (rf_now=00 rf_next=00 pre
+  mutant mnogrid caught: TDM ERR t=542094201 ch2 LATE (stock): read 0040ac9 complete at E0+34, deadline E0+28 (rf_now=00 rf_next=00 pre
+  mutant mnopaced caught: TDM ERR t=372522681 ch2 LATE (stock): read 0083300 complete at E0+34, deadline E0+28 (rf_now=00 rf_next=00 pre
+RESULT PASS: sdram_tdm
+# speed switch every 8000 clocks, seed 2 busy 50 stock rows 00 (+refdebt=8), late stock reads:
+#   engine gph 0/6/12/18/24/30: 0/0/0/0/0/0; cpu_paced-blind mutant: 0/4/0/1/0/3
+#   (every 20000 clocks the mutant passed too: the 1024-frame relearn cleared the polluted grid early)
+# fullsys tdm128 KPROBE 300 ms after the change: KPROBE RESULT PASS, cpu latched reads 75560, LATE 0 (same as fit_03a1f21)

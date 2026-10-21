@@ -31,6 +31,11 @@ module tb;
     int m64 = 0;
     int r800wr = 0;                       // +r800wr=1: ch2 writes do not wait (R800 GUARD_WR)                          // +m64=1: 64 MB board (build with -DCHIP64)
     int m128 = 0, ncyc = 200000, seed = 1, busy = 30, stock = 0, dl = 28, cpulow = 0;
+    //  +switch=N (with +stock=1): the CPU alternates every N clocks between the stock
+    //  T80s (no handshake, deadline) and a handshaked one (turbo / NextZ80), as when the
+    //  speed is switched; cpu_paced follows.  Deadlines are judged in the stock periods.
+    int switch_n = 0;
+    bit stock_now = 0;
     int ven = 1, vbusy = 60, vrun = 12, vrun_n = 0;
     int e0_vcnt; bit e0_urg, e0_early; bit [2:0] e0_cmask;      // diagnosis of a LATE read                          // +ven=0: no VRAM port (MSX1.sv today: v_en = 0)
     initial begin
@@ -39,6 +44,7 @@ module tb;
         void'($value$plusargs("seed=%d", seed));
         void'($value$plusargs("busy=%d", busy));
         void'($value$plusargs("stock=%d", stock));
+        void'($value$plusargs("switch=%d", switch_n));
         void'($value$plusargs("dl=%d", dl));
         void'($value$plusargs("cpulow=%d", cpulow));
         void'($value$plusargs("m64=%d", m64));
@@ -72,7 +78,7 @@ module tb;
     wire  [31:0] v_rdata;
 
     sdram_tdm #(.CACHE_LINES(1024)) dut (
-        .init(init), .clk(clk), .mode128(m128[0]), .mode64(m64[0]), .v_en(ven[0]), .v_go(1'b1), .tdm_ph(),
+        .init(init), .clk(clk), .mode128(m128[0]), .mode64(m64[0]), .v_en(ven[0]), .v_go(1'b1), .tdm_ph(), .cpu_paced(!stock_now),
         .SDRAM_DQ(DQ), .SDRAM_A(A), .SDRAM_DQML(DQML), .SDRAM_DQMH(DQMH), .SDRAM_BA(BA),
         .SDRAM_nCS(nCS), .SDRAM_nWE(nWE), .SDRAM_nRAS(nRAS), .SDRAM_nCAS(nCAS), .SDRAM_CKE(CKE),
         .SDRAM_CLK(SCLK),
@@ -152,7 +158,7 @@ module tb;
             expect_v = have_expect ? ref_mem[int'(ad)] : 0;
             // a read of a never-written byte proves nothing; write it first
             if (rnw && !have_expect) rnw = 0;
-            if (stock && ag == 1) begin
+            if (stock_now && ag == 1) begin
                 //  next T-state boundary 3-5 T-states on (the grid has a fixed phase)
                 int k;
                 logic tog0, dn;
@@ -274,6 +280,14 @@ module tb;
                 $display("TDM SLOW t=%0t ch2 read %0d clk: queued +%0d picked +%0d, passed over [%s]",
                          $time, ts_cyc - ts_e0, ts_q - ts_e0, ts_p - ts_e0, ts_why);
             ts_e0 = -1;
+        end
+    end
+
+    initial begin
+        stock_now = stock != 0;
+        if (stock && switch_n > 0) begin
+            stock_now = 0;                                   // start handshaked (turbo)
+            forever begin repeat (switch_n) @(posedge clk); stock_now = !stock_now; end
         end
     end
 

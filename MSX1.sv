@@ -758,6 +758,7 @@ wire  [2:0] cpu_speed_osd = (msx_turbo_req & ~turbor_en & cpu_speed_sel == 3'd0)
 //  guard makes them.  clock.sv changes rate at a bus-idle point, as for any speed
 //  step.  Back on T80s the OSD speed returns the same way.
 wire        use_nz;                 // from msx.sv: NextZ80 owns the bus
+wire        cpu_paced;              // from msx.sv: 0 = stock T80s (sdram_tdm learns its T-state grid)
 wire  [2:0] cpu_speed = use_nz ? 3'd4 : cpu_speed_osd;
 wire        cpu_turbo;              // driven by clock.sv from the latched speed
 wire  [2:0] cpu_speed_q;            // latched speed, back out of clock.sv
@@ -1190,6 +1191,7 @@ msx MSX
    .r800_fast(status[70]),
    .r800_vdpw(status[38:36]),
    .use_nz   (use_nz),
+   .cpu_paced_o(cpu_paced),
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),
    .cpu_bus_idle(cpu_bus_idle),
@@ -1638,7 +1640,7 @@ sdram_tdm sdram
    .init(~locked_sdram),
    .clk(clk_sdram),
    .mode128(sdram_size == 2'd3), .mode64(sdram_size == 2'd2),
-   .v_en(1'b0), .v_go(1'b1), .tdm_ph(), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
+   .v_en(1'b0), .v_go(1'b1), .tdm_ph(), .cpu_paced(cpu_paced), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
    .v_grant(), .v_rdata(), .v_rvalid(),
 
    .ch1_dout(nvbak_sdram_dout),

@@ -18,6 +18,7 @@ module msx
    input                    r800_set_stb,      // OSD "CPU (turbo R)" changed: select through the S1990
    input                    r800_set,
    output                   use_nz,            // NextZ80 owns the bus (-> MSX1.sv: ce_cpu at full rate)
+   output                   cpu_paced_o,       // -> sdram_tdm: 0 = stock T80s (fixed deadline), 1 = handshaked
    input                    cpu_turbo,           // 1 while ce_cpu_* runs faster than ce_3m58_*
    input                    sdram_rdtog,         // flips once per completed SDRAM ch2 READ (P3 closed loop)
    input                    sdram_hit,           // level: this ch2 READ was answered from sdram.sv's word latch
@@ -433,6 +434,7 @@ end
 //  Everything that used to key on cpu_turbo (bus guard, SDRAM closed loop, VDP / SD /
 //  OPLL pacers) keys on this: NextZ80 always needs them, like T80s at turbo.
 wire cpu_paced = cpu_turbo | use_nz | resume_guard;
+assign cpu_paced_o = cpu_paced;
 
 //  Forensics (the dbg_* readers below): the register file of whichever core is
 //  actually running.  It used to be t80_reg_t80 unconditionally, which made every

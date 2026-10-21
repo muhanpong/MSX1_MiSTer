@@ -44,6 +44,10 @@ module sdram_tdm
     //  boundary lands 7.76 ns after a shared edge and a request launched on that
     //  shared edge has the whole clk period to arrive.  1'b1 = start as before.
     input             v_go,
+    //  cpu_paced (clk21m domain, msx.sv): 0 = the stock T80s at 3.58 MHz, no WAIT, a
+    //  fixed deadline; 1 = turbo T80s / NextZ80, handshaked.  Only the stock CPU's
+    //  T-state grid is learnt and used (S4); a change clears what was learnt.
+    input             cpu_paced,
     output     [3:0]  tdm_ph,      // the frame cycle 0..11 (v9968_link: VDP reset phase)
 
     inout      [15:0] SDRAM_DQ,
@@ -376,6 +380,13 @@ wire       rf_vurg = v_en && (rf_vcnt >= 11'(RFSH_URG_V));
 //  or G2, one seen later by the next frame's G1 (cleared every 1024 frames).  Before
 //  urgent, no early refresh in a masked position.  All three masked = not a stock grid (turbo,
 //  R800, NextZ80 pace themselves with a handshake): the mask is ignored.
+reg  [1:0] paced_s = 2'b11;      // cpu_paced through two flops (a level that changes rarely)
+reg        stock_d = 1'b0;
+`ifndef TDM_MUT_NOPACED         // negative control: learn and use the grid whatever the CPU mode
+wire       stock_cpu = ~paced_s[1];
+`else
+wire       stock_cpu = 1'b1;
+`endif
 reg  [1:0] cpos = 2'd0;          // this frame's position in the 3-frame T-state grid
 reg  [2:0] cmask = 3'b000;
 reg  [9:0] cmask_age = '0;
@@ -383,7 +394,7 @@ wire [1:0] cpos_next = (cpos == 2'd2) ? 2'd0 : cpos + 2'd1;
 //  The grid known (exactly one position p in cmask): the urgent refresh goes in frame
 //  p+2 and its G blocking (G2 off the chip, no G1 write to it) in frame p+1 only, so
 //  the frame the CPU asks in (p) keeps its G1 and G2.  Unknown: any frame, as before.
-wire       grid    = (cmask == 3'b001) | (cmask == 3'b010) | (cmask == 3'b100);
+wire       grid    = stock_cpu & ((cmask == 3'b001) | (cmask == 3'b010) | (cmask == 3'b100));
 wire [1:0] gp      = cmask[0] ? 2'd0 : cmask[1] ? 2'd1 : 2'd2;
 wire [1:0] gp1     = (gp == 2'd2) ? 2'd0 : gp + 2'd1;      // p+1
 wire [1:0] gp2     = (gp == 2'd0) ? 2'd2 : gp - 2'd1;      // p+2 (= p-1)
@@ -541,7 +552,7 @@ always @(posedge clk) begin
     //  one request enters per edge: a write, a cache miss, or a read that waited.
     enq = 1'b0; enq_rnw = 1'b1; enq_addr = ch2_caddr; enq_din = ch2_din_1; enq_rd = 1'b0;
 `ifndef TDM_MUT_NOGRID          // negative control: no T-state grid avoidance
-    if (ch2_rqv & ~ch2_req_1) begin
+    if (ch2_rqv & ~ch2_req_1 & stock_cpu) begin
         if (ph <= 4'd5) cmask[cpos] <= 1'b1; else cmask[cpos_next] <= 1'b1;
     end
 `endif
@@ -674,6 +685,11 @@ always @(posedge clk) begin
             cmask_age <= cmask_age + 10'd1;
             if (cmask_age == '1) cmask <= 3'b000;      // relearn (a mode change moves the grid)
         end
+        paced_s <= {paced_s[0], cpu_paced};
+        stock_d <= stock_cpu;
+`ifndef TDM_MUT_NOPACED
+        if (stock_cpu != stock_d) begin cmask <= 3'b000; cmask_age <= '0; end   // the CPU changed mode
+`endif
         ps <= {ps[10:0], ps[11]};
 
         // refresh timers
@@ -703,7 +719,7 @@ always @(posedge clk) begin
 `ifndef TDM_MUT_VREF_NOG2
             vgo = rf_vdue && !v_req && !(g2.v && g2.l.c == v_chip)
 `ifndef TDM_MUT_NOGRID
-                  && (rf_vurg ? (!grid || cpos_next == gp2) : (cmask == 3'b111 || !cmask[cpos_next]))
+                  && (rf_vurg ? (!grid || cpos_next == gp2) : (!stock_cpu || cmask == 3'b111 || !cmask[cpos_next]))
 `endif
 `ifndef TDM_MUT_VREF_NOG1W  // negative control: a G1 write on the chip may still be open
                   && !(g1.v && g1.l.c == v_chip && !g1.rnw)

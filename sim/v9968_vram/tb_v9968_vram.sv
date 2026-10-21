@@ -48,7 +48,7 @@ module tb #(parameter int RELEASE_PH = 0);
     wire [7:0] cd [4];
     sdram_tdm #(.CACHE_LINES(1024)) dut (
         .init(init), .clk(clk_sdram), .mode128(m128[0]), .mode64(1'b0), .v_en(1'b1),
-        .v_go(v_go), .tdm_ph(tdm_ph),
+        .v_go(v_go), .tdm_ph(tdm_ph), .cpu_paced(1'b1),
         .SDRAM_DQ(DQ), .SDRAM_A(A), .SDRAM_DQML(DQML), .SDRAM_DQMH(DQMH), .SDRAM_BA(BA),
         .SDRAM_nCS(nCS), .SDRAM_nWE(nWE), .SDRAM_nRAS(nRAS), .SDRAM_nCAS(nCAS), .SDRAM_CKE(CKE),
         .SDRAM_CLK(SCLK),
