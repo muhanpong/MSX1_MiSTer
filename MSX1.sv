@@ -1451,7 +1451,12 @@ video_freak video_freak
 	.SCALE(status[6:5])
 );
 
-debug_overlay u_overlay (
+`ifdef MSX_V9968
+localparam int OVL_V2X = 1;     // 31 kHz 800x480 video: the overlay counts every 2nd pixel/line
+`else
+localparam int OVL_V2X = 0;
+`endif
+debug_overlay #(.V2X(OVL_V2X)) u_overlay (
    .CLK_VIDEO      (CLK_VIDEO),
    .ce_pix         (ce_pix),
    .hblank         (hblank),

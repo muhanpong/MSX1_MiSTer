@@ -46,7 +46,8 @@ module tb #(parameter int RELEASE_PH = 0);
         void'($value$plusargs("satpre=%d", satpre));
         void'($value$plusargs("ct55=%d", ct55));
         void'($value$plusargs("offat=%d", offat));
-        void'($value$plusargs("wl=%d", wl));          // 0..6: the seven V9938-referenced workloads of rtl/video/VDP/sim/tb_vdpcmd7.vhd    // >=0: display on 20 ms, then R#1=00 lands offat clk_vdp after the selector's (phase 2, sub 0) edge, then the LRMM      // 1: sprite colour table 0FE00h..0FFFFh = 55h and SAT 10000h..1007Fh = 0 (the oracle's VRAM at the hang)  // 1: write the SAT bytes before the command, no display change (replay's exact state)
+        void'($value$plusargs("wl=%d", wl));
+        void'($value$plusargs("lnsw=%d", lnsw));      // >=0: km224's overscan trick: 212 lines, R#9 LN=0 written at screen line lnsw (0 = never: control)          // 0..6: the seven V9938-referenced workloads of rtl/video/VDP/sim/tb_vdpcmd7.vhd    // >=0: display on 20 ms, then R#1=00 lands offat clk_vdp after the selector's (phase 2, sub 0) edge, then the LRMM      // 1: sprite colour table 0FE00h..0FFFFh = 55h and SAT 10000h..1007Fh = 0 (the oracle's VRAM at the hang)  // 1: write the SAT bytes before the command, no display change (replay's exact state)
     end
 
     //  ── SDRAM controller + model ──────────────────────────────────────────
@@ -96,7 +97,7 @@ module tb #(parameter int RELEASE_PH = 0);
 
     logic [2:0] bus_address = 0; logic bus_ioreq = 0, bus_write = 0, bus_valid = 0;
     logic [7:0] bus_wdata = 0; wire bus_ready, bus_rdata_en; wire [7:0] bus_rdata;
-    string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1;
+    string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1;
     int scan = 0, sp3 = 0, demo = 0, r1 = 0, r20 = 8'h1F, r21 = 8'h3A, r25 = 3, r8 = 8;
     wire d_hs, d_en; wire [7:0] d_r, d_g, d_b;
     //  scanlines: the sum of r+g+b over displayed pixels per line parity (lines counted
@@ -144,6 +145,7 @@ module tb #(parameter int RELEASE_PH = 0);
         .button(2'b00),
         .pulse0(), .pulse1(), .pulse2(), .pulse3(), .pulse4(), .pulse5(), .pulse6(), .pulse7());
 
+    `define SSG vdp9968.u_timing_control.u_ssg
     //  ── VRAM port checker (clk_vdp) ───────────────────────────────────────
     logic [7:0] shadow [0:262143];
     bit         known  [0:262143];
@@ -296,6 +298,50 @@ module tb #(parameter int RELEASE_PH = 0);
         //  (HMMV over the whole 256x212 page, re-issued every 2 ms) -- its VRAM writes take
         //  every slot the screen leaves
         mon_on = 1;
+        //  +lnsw=N: display on in 212-line mode; in two consecutive frames R#9 = 00h (LN=0) is
+        //  written when the V9968 is on screen line N (N=0: never, the control), then 80h again in
+        //  the vertical blank.  Logged per line: screen_pos_y, so a jump is visible; and whether
+        //  the active area went on past 211 (the trick's purpose).
+        if (lnsw >= 0) begin
+            //  one monitor over 4 frames: per line (end of each 2nd 31 kHz line) screen_pos_y and
+            //  ff_v_active; a jump = any step other than +1 inside the visible part (0..250)
+            int fr = 0, jumps = 0, act_last = -1, act_lines = 0; logic [9:0] prev = 10'h3FF;
+            bit done = 0;
+            wreg(9, 8'h80); wreg(1, 8'h40);
+            wait (`SSG.w_screen_pos_y == 10'h3FF);
+            fork
+                begin
+                    while (!done) begin
+                        @(posedge clk_vdp);
+                        if (`SSG.w_h_count_end && `SSG.ff_v_count[0]) begin
+                            logic [9:0] y; y = `SSG.w_screen_pos_y;
+                            if (y == 10'h3FF && prev != 10'h3FF) begin
+                                $display("LNSW frame %0d (lnsw=%0d): jumps %0d, active lines %0d, last active line %0d", fr, lnsw, jumps, act_lines, act_last);
+                                fr++; jumps = 0; act_last = -1; act_lines = 0;
+                                if (fr == 4) done = 1;
+                            end else if (prev < 10'd250 && y < 10'd250 && y != prev + 10'd1) begin
+                                jumps++; $display("LNSW frame %0d: screen line %0d -> %0d", fr, prev, y);
+                            end
+                            if (`SSG.ff_v_active) begin act_lines++; act_last = int'(y); end
+                            prev = y;
+                        end
+                    end
+                end
+                begin
+                    for (int f = 1; f < 4; f++) begin
+                        wait (`SSG.w_screen_pos_y == 10'd1);
+                        if (lnsw > 0 && f >= 2) begin
+                            wait (`SSG.w_screen_pos_y == 10'(lnsw));
+                            wreg(9, 8'h00);
+                            $display("LNSW frame %0d: R#9=00 written at line %0d, now line %0d", fr, lnsw, `SSG.w_screen_pos_y);
+                            wait (`SSG.w_screen_pos_y == 10'd230);   // LN=0 tops out at 234
+                            wreg(9, 8'h80);
+                        end
+                        wait (`SSG.w_screen_pos_y == 10'h3FF);
+                    end
+                end
+            join
+        end
         //  +wl=K: tb_vdpcmd7's workloads (SCREEN5, display + sprites on, 192 lines), timed in
         //  scanlines (63.556 us) against openMSX 21.0-245: HMMV 722.18, HMMM 1466.82, LMMV 1476.01,
         //  LMMM 1744.90, YMMM 1204.82, LINE x32 897.35, SRCH x32 670.97.  HMMV runs first (fills y=128).

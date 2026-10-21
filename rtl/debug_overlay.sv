@@ -2,7 +2,13 @@
 // 4 indicator rows × 8px each + 2px border = 34px tall.
 `default_nettype none
 
-module debug_overlay (
+module debug_overlay #(
+    //  1: the video is line- and pixel-doubled relative to the 15 kHz layout (V9968 build:
+    //  31 kHz, 480 lines, 800 pixels).  The panel and the pause symbol then count every
+    //  second line and every second pixel, so they keep their size and appear once (the
+    //  8-bit line counter wrapped at 256 and drew them twice, 2026-10-22).
+    parameter int V2X = 0
+) (
     input  wire        CLK_VIDEO,
     input  wire        ce_pix,
     input  wire        hblank,
@@ -176,12 +182,13 @@ logic [10:0] h_cnt;
 logic [7:0]  v_cnt;
 logic hbl_prev, vbl_prev;
 logic drew_this_line;
+logic h_ph = 1'b0, v_ph = 1'b0;     // V2X: count every second pixel / line
 
 always_ff @(posedge CLK_VIDEO) begin
     hbl_prev <= hblank;  vbl_prev <= vblank;
     if (!vbl_prev && vblank) begin
         v_cnt <= '0; row <= 6'd0; lir <= 3'd0;
-    end else if (hbl_prev && !hblank && !vblank) begin
+    end else if (hbl_prev && !hblank && !vblank && (V2X == 0 || v_ph)) begin
         v_cnt <= v_cnt + 8'd1;
         // Row tracking for the panel: content rows are ROWH lines tall and
         // start at line 1 (line 0 is the top border).  `row` is the band
@@ -191,8 +198,13 @@ always_ff @(posedge CLK_VIDEO) begin
         else if (lir == ROWH-1) begin row <= row + 6'd1; lir <= 3'd0; end
         else lir <= lir + 3'd1;
     end
-    if (hblank) begin h_cnt <= '0; drew_this_line <= 1'b0; end
-    else if (ce_pix && h_cnt < 11'd2047) h_cnt <= h_cnt + 11'd1;
+    if (hblank) begin h_cnt <= '0; drew_this_line <= 1'b0; h_ph <= 1'b0; end
+    else if (ce_pix) begin
+        h_ph <= ~h_ph;
+        if ((V2X == 0 || h_ph) && h_cnt < 11'd2047) h_cnt <= h_cnt + 11'd1;
+    end
+    if (!vbl_prev && vblank) v_ph <= 1'b0;
+    else if (hbl_prev && !hblank && !vblank) v_ph <= ~v_ph;
 end
 
 // ─── Pause symbol (⏸, top-right) ─────────────────────────────────────────────
@@ -292,7 +304,7 @@ logic [10:0] line_w = 11'd256;
 always_ff @(posedge CLK_VIDEO) begin
     if (hblank && h_cnt != 11'd0) line_w <= h_cnt;
 end
-wire        sym_wide = (line_w >= 11'd384);
+wire        sym_wide = (line_w >= 11'd384) && (V2X == 0);   // V2X: h_cnt already counts display pixels (800/2)
 wire [10:0] sym_px   = sym_wide ? {1'b0, h_cnt[10:1]} : h_cnt;
 
 // Symbol geometry in display-pixel units (design §3.4):

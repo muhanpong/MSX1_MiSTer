@@ -318,6 +318,13 @@ module vdp_timing_control_ssg (
 		if( !reset_n ) begin
 			ff_top_line <= c_top_60hz_pos192;
 		end
+		else if( !(w_h_count_end && w_v_count_end) ) begin
+			//	MSX1 core: hold -- the display start is fixed once per frame, as on the V9958
+			//	(and ESE vdp_ssg / openMSX).  Upstream re-evaluated LN/50Hz on every clock, so
+			//	R#9 LN=0 written mid-frame (the 224-line overscan trick: Knightmare 224, ASO,
+			//	Fix-It Felix) moved screen_pos_y back 10 lines on the spot and shifted
+			//	everything after it down (sim/v9968_vram +lnsw=207: 206 -> 197).
+		end
 		else if( reg_212lines_mode ) begin
 			if( reg_50hz_mode ) begin
 				ff_top_line <= c_top_50hz_pos212;

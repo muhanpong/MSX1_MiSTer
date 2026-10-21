@@ -44,6 +44,10 @@
         endm
 
 start:  di
+    IFDEF R800
+        jp r800sw                       ; (the switch code sits past 0190h: no room here)
+r800ret:
+    ENDIF
         VREG 8, 08h                     ; VR = 1 (64K x 4 addressing), sprites on
         VREG 1, 00h                     ; display off: the CPU owns the VRAM port
         ld a,1 : out (2Eh),a
@@ -85,6 +89,14 @@ frok:   dec hl : ld a,h : or l : jr nz,fr
         ; turbor.sv overlays 0180h-018Bh (CHGCPU) in every pack this bench runs
         ; (seen: the FS-A1FX run fetched OUT (E5h),A / RET there and went off to 18FFh)
         ds 0190h - $, 0
+    IFDEF R800
+        ; R800 variant (-DR800, turbo R pack): S1990 reg 6 bit 5 = 0 selects the R800, so
+        ; the rest runs on NextZ80 with the handshaked V9968 WAIT path (vdp_gap_r800)
+r800sw: ld a,6 : out (0E4h),a : xor a : out (0E5h),a
+        ld b,0
+.sw:    djnz .sw                        ; let cpuswap_ctl hand the bus over
+        jp r800ret
+    ENDIF
 part2:  REPORT
 
         ld a,3 : out (2Eh),a

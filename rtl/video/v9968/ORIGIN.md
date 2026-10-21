@@ -41,3 +41,12 @@ Driven from the OSD "Scandoubler Fx" (MSX1.sv: CRT 25/50/75% -> 1/2/3, others 0)
   OSD "VDP command speed: V9938" (status[127]), a table calibrated per command to openMSX's
   V9938 (sim/v9968_vram +wl=0..6: 0.970-1.007 x; Go Figure's boot HMMM 269.1 lines, pass
   boundary 259.5).  HS=1 untouched.  Not for upstream: it changes the chip's defined speed.
+
+## Local change (2026-10-22, compatibility): display start fixed once per frame
+
+- `vdp_timing_control_ssg.v`: `ff_top_line` (display start from LN / 50 Hz) is updated only
+  at the frame boundary (`w_h_count_end && w_v_count_end`), as the V9958 does.  Upstream
+  re-evaluated it on every clock: R#9 LN=0 written mid-frame (the 224-line overscan trick)
+  moved `screen_pos_y` back 10 lines at once (sim/v9968_vram `+lnsw=207`: 206 -> 197, and
+  229 -> 240 when LN=1 comes back), so Knightmare 224's HUD showed 10 lines low.  The end
+  of the active area still follows LN live (the trick needs that).  Worth reporting upstream.
