@@ -1,0 +1,131 @@
+# Plan S2 + S3 on the real V9968 (sim/v9968_vram) and sim/sdram_tdm, 2026-10-21.
+#
+# S2 (link, alignment): 12 RELEASE_PH swept, refresh of the VRAM chip off (diagnostic,
+# -DTDM_SIM_NO_VCHIP_REFRESH): phase 5 -- 510 reads all answered 8 clk_vdp after the request,
+# 1384 bytes compared 0 bad, 1024 CPU read-backs right, 0 dropped, 0 off-grid; the other 11 hang
+# on the first read (the V9968 waits for ever).  The only fail line of phase 5 was the exposure floor.
+#
+# S3 (VRAM-chip refresh in V-idle frames, cycle 2, with v_en): real V9968, RELEASE_PH 5, 40 ms of
+# display after a 1 KB / 256 B CPU write+read-back test.  All runs RESULT PASS, chip model 0 errors
+# (tRFC 70 ns, tRP, banks closed, 7.8125 us interval), V port dropped 0, every read 8 clk_vdp.
+## run_p5_cmd0
+  V slot use from the display on: 429545 frames, 391045 idle (91.0%), longest busy run 1 frames
+  busy-run lengths 0:352545 1:38500 2:0 3:0 4-7:0 8-15:0 16-31:0 32-63:0 64-127:0 128+:0
+  7.8125 us windows (84 frames): 5113, fewest idle frames in one 66, windows with none 0
+V9968 VRAM  RELEASE_PH=5 m128=1
+  port: reads 39010, writes 256, bytes compared 4192
+  latency (clk_vdp, request -> rdata_en): 8:39010
+  bad latency 0, bad data 0, reads not answered 0, spurious 0
+  link: dropped (refresh) 0, off-grid 0
+  chip: errors=0 REFRESH=13117
+V9968 VRAM RESULT PASS (dropped 0: refresh, plan S3)
+## run_p5_cmd1
+  V slot use from the display on: 432075 frames, 388145 idle (89.8%), longest busy run 3 frames
+  busy-run lengths 0:345608 1:41149 2:1384 3:4 4-7:0 8-15:0 16-31:0 32-63:0 64-127:0 128+:0
+  7.8125 us windows (84 frames): 5143, fewest idle frames in one 65, windows with none 0
+V9968 VRAM  RELEASE_PH=5 m128=1
+  port: reads 39249, writes 5447, bytes compared 4226
+  latency (clk_vdp, request -> rdata_en): 8:39248
+  bad latency 0, bad data 0, reads not answered 0, spurious 0
+  link: dropped (refresh) 0, off-grid 0
+  chip: errors=0 REFRESH=13191
+V9968 VRAM RESULT PASS (dropped 0: refresh, plan S3)
+## run_p5_32_cmd0
+  V slot use from the display on: 429545 frames, 391045 idle (91.0%), longest busy run 1 frames
+  busy-run lengths 0:352545 1:38500 2:0 3:0 4-7:0 8-15:0 16-31:0 32-63:0 64-127:0 128+:0
+  7.8125 us windows (84 frames): 5113, fewest idle frames in one 66, windows with none 0
+V9968 VRAM  RELEASE_PH=5 m128=0
+  port: reads 39010, writes 256, bytes compared 4192
+  latency (clk_vdp, request -> rdata_en): 8:39010
+  bad latency 0, bad data 0, reads not answered 0, spurious 0
+  link: dropped (refresh) 0, off-grid 0
+  chip: errors=0 REFRESH=7489
+V9968 VRAM RESULT PASS (dropped 0: refresh, plan S3)
+## run_p5_32_cmd1
+  V slot use from the display on: 432075 frames, 388145 idle (89.8%), longest busy run 3 frames
+  busy-run lengths 0:345608 1:41149 2:1384 3:4 4-7:0 8-15:0 16-31:0 32-63:0 64-127:0 128+:0
+  7.8125 us windows (84 frames): 5143, fewest idle frames in one 65, windows with none 0
+V9968 VRAM  RELEASE_PH=5 m128=0
+  port: reads 39249, writes 5447, bytes compared 4226
+  latency (clk_vdp, request -> rdata_en): 8:39248
+  bad latency 0, bad data 0, reads not answered 0, spurious 0
+  link: dropped (refresh) 0, off-grid 0
+  chip: errors=0 REFRESH=7531
+V9968 VRAM RESULT PASS (dropped 0: refresh, plan S3)
+## hs_p5_s5
+  V slot use from the display on: 432075 frames, 258358 idle (59.8%), longest busy run 11 frames
+  busy-run lengths 0:132013 1:102833 2:10 3:23362 4-7:120 8-15:20 16-31:0 32-63:0 64-127:0 128+:0
+  7.8125 us windows (84 frames): 5143, fewest idle frames in one 24, windows with none 0
+V9968 VRAM  RELEASE_PH=5 m128=1
+  port: reads 38101, writes 135744, bytes compared 68896
+  latency (clk_vdp, request -> rdata_en): 8:38101
+  bad latency 0, bad data 0, reads not answered 0, spurious 0
+  link: dropped (refresh) 0, off-grid 0
+  chip: errors=0 REFRESH=12842
+V9968 VRAM RESULT PASS (dropped 0: refresh, plan S3)
+## hs_p5_s7
+  V slot use from the display on: 432075 frames, 211947 idle (49.1%), longest busy run 9 frames
+  busy-run lengths 0:119533 1:10125 2:46547 3:26607 4-7:9134 8-15:1 16-31:0 32-63:0 64-127:0 128+:0
+  7.8125 us windows (84 frames): 5143, fewest idle frames in one 29, windows with none 0
+V9968 VRAM  RELEASE_PH=5 m128=1
+  port: reads 55357, writes 164899, bytes compared 175512
+  latency (clk_vdp, request -> rdata_en): 8:55357
+  bad latency 0, bad data 0, reads not answered 0, spurious 0
+  link: dropped (refresh) 0, off-grid 0
+  chip: errors=0 REFRESH=12824
+V9968 VRAM RESULT PASS (dropped 0: refresh, plan S3)
+## hs_p5_s8
+  V slot use from the display on: 432075 frames, 211947 idle (49.1%), longest busy run 9 frames
+  busy-run lengths 0:119533 1:10125 2:46547 3:26607 4-7:9134 8-15:1 16-31:0 32-63:0 64-127:0 128+:0
+  7.8125 us windows (84 frames): 5143, fewest idle frames in one 29, windows with none 0
+V9968 VRAM  RELEASE_PH=5 m128=1
+  port: reads 55357, writes 164899, bytes compared 175512
+  latency (clk_vdp, request -> rdata_en): 8:55357
+  bad latency 0, bad data 0, reads not answered 0, spurious 0
+  link: dropped (refresh) 0, off-grid 0
+  chip: errors=0 REFRESH=12824
+V9968 VRAM RESULT PASS (dropped 0: refresh, plan S3)
+## hs_p5_32_s5
+  V slot use from the display on: 432075 frames, 258358 idle (59.8%), longest busy run 11 frames
+  busy-run lengths 0:132013 1:102833 2:10 3:23362 4-7:120 8-15:20 16-31:0 32-63:0 64-127:0 128+:0
+  7.8125 us windows (84 frames): 5143, fewest idle frames in one 24, windows with none 0
+V9968 VRAM  RELEASE_PH=5 m128=0
+  port: reads 38101, writes 135744, bytes compared 68896
+  latency (clk_vdp, request -> rdata_en): 8:38101
+  bad latency 0, bad data 0, reads not answered 0, spurious 0
+  link: dropped (refresh) 0, off-grid 0
+  chip: errors=0 REFRESH=7306
+V9968 VRAM RESULT PASS (dropped 0: refresh, plan S3)
+## hs_p5_32_s7
+  V slot use from the display on: 432075 frames, 211947 idle (49.1%), longest busy run 9 frames
+  busy-run lengths 0:119533 1:10125 2:46547 3:26607 4-7:9134 8-15:1 16-31:0 32-63:0 64-127:0 128+:0
+  7.8125 us windows (84 frames): 5143, fewest idle frames in one 29, windows with none 0
+V9968 VRAM  RELEASE_PH=5 m128=0
+  port: reads 55357, writes 164899, bytes compared 175512
+  latency (clk_vdp, request -> rdata_en): 8:55357
+  bad latency 0, bad data 0, reads not answered 0, spurious 0
+  link: dropped (refresh) 0, off-grid 0
+  chip: errors=0 REFRESH=7289
+V9968 VRAM RESULT PASS (dropped 0: refresh, plan S3)
+## hs_p5_32_s8
+  V slot use from the display on: 432075 frames, 211947 idle (49.1%), longest busy run 9 frames
+  busy-run lengths 0:119533 1:10125 2:46547 3:26607 4-7:9134 8-15:1 16-31:0 32-63:0 64-127:0 128+:0
+  7.8125 us windows (84 frames): 5143, fewest idle frames in one 29, windows with none 0
+V9968 VRAM  RELEASE_PH=5 m128=0
+  port: reads 55357, writes 164899, bytes compared 175512
+  latency (clk_vdp, request -> rdata_en): 8:55357
+  bad latency 0, bad data 0, reads not answered 0, spurious 0
+  link: dropped (refresh) 0, off-grid 0
+  chip: errors=0 REFRESH=7289
+V9968 VRAM RESULT PASS (dropped 0: refresh, plan S3)
+# names: run_* = SCREEN 5, cmd1 = HMMV re-issued every 2 ms at V9958 speed; hs_* = force_highspeed
+# (V9968 high-speed command engine) with HMMV, s5/s7/s8 = SCREEN 5/7/8; _32 = 32 MB map (one chip).
+# Reading: the V9968 never used more than 51% of the V slots, never more than 11 frames in a row,
+# and every 84-frame (7.8 us) window had >= 24 frames without a request.
+#
+# sim/sdram_tdm quick (random agents, V request 60% per frame, runs capped at 12): 32/42 engine runs
+# pass.  All v_en=0 runs pass (the build today is unchanged) and all 128 MB runs pass.  The 10 that
+# fail are v_en=1 on the 32/64 MB maps: the stock CPU's deadline (E0+35 > E0+28: a CPU request
+# arriving in cycles 2-6 of a refresh frame loses its G2 on the only chip) and a few refresh
+# intervals over 7.8 us under this synthetic traffic.  Mutants caught: NOG2 / NOG1W (REFRESH with a
+# bank busy), LATE (ACT during tRFC), NOCXL (stock CPU E0+40).  Open: plan R3/S4 (32/64 MB).

@@ -429,7 +429,7 @@ module tb;
    sdram_tdm u_sdram
    (
       .init(init_tb), .clk(clk_sdram), .mode128(`ifdef TDM128 1'b1 `else 1'b0 `endif), .mode64(1'b0),
-      .v_en(1'b0), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
+      .v_en(1'b0), .v_go(1'b1), .tdm_ph(), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
       .v_grant(), .v_rdata(), .v_rvalid(),
       .ch2_busy(sdram_busy),
 `endif

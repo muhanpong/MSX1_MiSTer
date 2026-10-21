@@ -1638,7 +1638,7 @@ sdram_tdm sdram
    .init(~locked_sdram),
    .clk(clk_sdram),
    .mode128(sdram_size == 2'd3), .mode64(sdram_size == 2'd2),
-   .v_en(1'b0), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
+   .v_en(1'b0), .v_go(1'b1), .tdm_ph(), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
    .v_grant(), .v_rdata(), .v_rvalid(),
 
    .ch1_dout(nvbak_sdram_dout),

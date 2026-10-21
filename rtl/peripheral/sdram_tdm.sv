@@ -38,6 +38,13 @@ module sdram_tdm
     input             mode128,     // 1: 128 MB board map (two 64 MB chips)
     input             mode64,      // 1: 64 MB board (one chip, 32 MB map): general 24-32 MB moves to 32-40 MB
     input             v_en,        // VRAM port in use: its bank is reserved, V slots run
+    //  v_go: the first frame starts on an edge where v_go is high (2026-10-21).  The
+    //  VRAM port's client (v9968_link) runs on 85.909 MHz = 2/3 of this clock; it
+    //  raises v_go one clk edge after an edge both clocks share, so every frame
+    //  boundary lands 7.76 ns after a shared edge and a request launched on that
+    //  shared edge has the whole clk period to arrive.  1'b1 = start as before.
+    input             v_go,
+    output     [3:0]  tdm_ph,      // the frame cycle 0..11 (v9968_link: VDP reset phase)
 
     inout      [15:0] SDRAM_DQ,
     output reg [12:0] SDRAM_A,
@@ -107,6 +114,17 @@ always @(posedge clk) begin m128 <= mode128; m64 <= mode64; end
 // ─── timing (CLK_HZ) ───────────────────────────────────────────────────────
 localparam int  PERIOD_PS   = 1000000000 / (CLK_HZ / 1000);
 localparam int  RFSH_EVERY  = (7800000 / PERIOD_PS) - 60;  // 7.8 us/row; margin for 3 deferred frames + 1
+//  The VRAM's chip with the V port in use (2026-10-21, plan S3): due this long after
+//  its last REFRESH, then issued in the first frame with no V request (cycle 2, over by
+//  the next frame's V ACT).  The rest, up to the 7.8125 us interval, is room to wait
+//  for such a frame: (7812.5 - 5400) ns = 310 clocks = 25 frames.
+localparam int  RFSH_EVERY_V = (5400000 / PERIOD_PS);
+//  From here the wait is urgent: G2 keeps off the chip and G1 does not write it, so the
+//  next frame without a V request can take the refresh.  Before it the refresh only
+//  takes a frame where those hold anyway (no cost to the CPU): 12 frames before 7.8 us.
+localparam int  RFSH_URG_V   = (7812500 / PERIOD_PS) - 12 * 12;
+//  (the 7.8125 us interval is the model's and the distributed-refresh figure; whether
+//  the parts allow postponing is not assumed)
 localparam int  INIT_CYCLES = (200000000 / PERIOD_PS);     // 200 us power-up
 localparam [12:0] MODE      = 13'b000_0_00_011_0_001;     // write burst, CL3, sequential, BL2
 localparam [26:0] VBASE128  = 27'h1C00000;                // 28 MB: chip 1, bank 3
@@ -194,6 +212,7 @@ endfunction
 
 // ─── frame ─────────────────────────────────────────────────────────────────
 reg  [3:0] ph = 4'd0;            // the frame cycle (kept for benches)
+assign tdm_ph = ph;
 reg [11:0] ps = 12'd1;           // the same, one-hot: every decode below is one bit
 reg        run = 1'b0;           // init sequence done
 
@@ -331,6 +350,22 @@ reg [10:0] rf_cnt [0:1];
 reg  [1:0] rf_due;
 reg  [1:0] rf_now, rf_next;
 reg  [1:0] rf_late;              // frames a due refresh has been deferred for the CPU      // chip blocked this frame / blocked for V,G1 next frame
+//  The VRAM chip's refresh with v_en (plan S3).  A REFRESH in cycle 10 (above) runs
+//  into the next frame and costs two V slots; the V9968 has no stall, so a refused V
+//  request is a lost write or a read it waits for for ever.  Instead, with v_en, the
+//  VRAM's chip refreshes only in a frame whose boundary saw no V request, in cycle 2:
+//  10 clocks (77.6 ns) to the next frame's V ACT, enough for tRFC 70 ns (the model's
+//  conservative value; the AS4C32M16SB -7 sheet says 63, other boards' chips may differ).
+//  Closed by cycle 2: the previous frame's V (ACT 0: 9/11) and a G1 read (ACT 4: 13 =
+//  cycle 1); not a G1 write (15 = cycle 3) or its G2 (ACT 8: 17/19).  So the boundary
+//  takes the refresh only if the previous frame's G2 was not on this chip and its G1
+//  did not write it, and while the refresh waits, G2 keeps off this chip and G1 does not
+//  write it.  The frame's own G1 and G2 are blocked on the chip (rf_now) as before; the
+//  next frame is not (rf_next stays 0).
+reg        rf_early = 1'b0;      // this frame's rf_now is a cycle-3 VRAM-chip refresh
+reg [10:0] rf_vcnt = '0;         // clocks since the VRAM chip's last REFRESH (v_en)
+wire       rf_vdue = v_en && (rf_vcnt >= 11'(RFSH_EVERY_V));
+wire       rf_vurg = v_en && (rf_vcnt >= 11'(RFSH_URG_V));
 wire       v_chip = m128;     // the VRAM's chip: 1 on 128 MB, 0 otherwise
 //  A CPU read that arrives inside a refresh frame cancels it, up to the edge that
 //  would issue the REFRESH (cycle 10): the frame's G slots open again and the
@@ -371,7 +406,7 @@ reg        c2_hold;              // registered CPU reservation
 //  on the slot decision path through rf_cxl, 29b9886 -0.110 ns)
 assign cpu_wait = ch2_rq | ch2_cpend | c_pend2 | c_pend3;
 `ifndef TDM_MUT_RFSLOW      // negative control: no cancellation (the 2026-10-13 controller)
-assign rf_cxl = cpu_wait && rf_late != 2'd3 && (c2_l.c ? rf_now[1] : rf_now[0]) && !(ps[10] | ps[11]);
+assign rf_cxl = cpu_wait && rf_late != 2'd3 && (c2_l.c ? rf_now[1] : rf_now[0]) && !(ps[10] | ps[11]) && !rf_early;
 `else
 assign rf_cxl = 1'b0;
 `endif
@@ -396,6 +431,9 @@ always_comb begin
 `endif
     b0   = (rf_now[0] & ~rf_cxl) | (ps[2] & rf_next[0]);
     b1   = (rf_now[1] & ~rf_cxl) | (ps[2] & rf_next[1]);
+`ifndef TDM_MUT_VREF_NOG2   // negative control: G2 may take the VRAM chip while its refresh waits
+    if (ps[6] && rf_vurg) begin if (v_chip) b1 = 1'b1; else b0 = 1'b1; end
+`endif
     cand_ok[0] = ch2_rq & rq_d[0] & ok(cand_l[0], sens, b0, b1, prev_v, prev_c, prev_b, m128);
     //  The CPU's hold and location from the edge after its request, not a clock
     //  later through c2_hold/c2_l: the decision on that edge used to give the CPU's
@@ -427,6 +465,15 @@ always_comb begin
     cand_ok[1] = ch1_rq & rq_d[1] & ok(cand_l[1], sens, b0, b1, prev_v, prev_c, prev_b, m128) & ~(hold & ~cand_ok[0] & cand_l[1].c == hl.c & cand_l[1].b == hl.b) & ~(rsv & ch1_rnw_1);
     cand_ok[2] = ch3_rq & rq_d[2] & ok(cand_l[2], sens, b0, b1, prev_v, prev_c, prev_b, m128) & ~(hold & ~cand_ok[0] & cand_l[2].c == hl.c & cand_l[2].b == hl.b) & ~(rsv & ch3_rnw_1);
     cand_ok[3] = ch4_rq & rq_d[3] & ok(cand_l[3], sens, b0, b1, prev_v, prev_c, prev_b, m128) & ~(hold & ~cand_ok[0] & cand_l[3].c == hl.c & cand_l[3].b == hl.b) & ~(rsv & ch4_rnw_1);
+`ifndef TDM_MUT_VREF_NOG1W
+    //  the VRAM chip's refresh is waiting: G1 does not write that chip (see rf_early)
+    if (ps[2] && rf_vurg) begin
+        if (cand_l[0].c == v_chip && !ch2_rnw_1) cand_ok[0] = 1'b0;
+        if (cand_l[1].c == v_chip && !ch1_rnw_1) cand_ok[1] = 1'b0;
+        if (cand_l[2].c == v_chip && !ch3_rnw_1) cand_ok[2] = 1'b0;
+        if (cand_l[3].c == v_chip && !ch4_rnw_1) cand_ok[3] = 1'b0;
+    end
+`endif
 end
 
 // ─── init ──────────────────────────────────────────────────────────────────
@@ -436,6 +483,8 @@ always @(posedge clk) begin
     gslot_t pick;
     logic   took;
     loc_t   vl;
+    logic [1:0] due_old;
+    logic   vgo;
 
     ch2_req_s <= ch2_req;
     ch1_req_1 <= ch1_req; ch2_req_1 <= ch2_rqv; ch3_req_1 <= ch3_req; ch4_req_1 <= ch4_req;
@@ -575,11 +624,13 @@ always @(posedge clk) begin
             default: ;
         endcase
         chip <= (init_cnt < 16'd100);
-        if (init_cnt == 0) begin
+        if (init_cnt == 0 && v_go) begin
             run <= 1'b1; ph <= 4'd0; ps <= 12'd1;
             ch1_ready <= 1; ch2_ready <= 1; ch3_ready <= 1; ch4_ready <= 1;
             g1.v <= 0; g2.v <= 0; prev_v <= 0; vs_v <= 0; v_grant <= 0;
-            rf_due <= 0; rf_now <= 0; rf_next <= 0; rf_late <= 0;
+            //  rf_vcnt starts a little in: the model (and the chip) count from the mode
+            //  register, ~100 clocks before the first frame (as rf_cnt[0] does)
+            rf_due <= 0; rf_now <= 0; rf_next <= 0; rf_late <= 0; rf_early <= 0; rf_vcnt <= 11'd200;
             //  first refresh soon after the mode register (the chip counts from its
             //  init refreshes: chip 0's are ~200 clocks back), the chips staggered
             rf_cnt[0] <= RFSH_EVERY[10:0] - 11'd100; rf_cnt[1] <= RFSH_EVERY[10:0] - 11'd600;
@@ -607,21 +658,41 @@ always @(posedge clk) begin
             //  the CPU has a fixed deadline at stock speed and a refresh frame costs
             //  it up to two slots.  rf_late bounds the deferral to three frames,
             //  inside RFSH_EVERY's 48-clock margin.
-            rf_next <= rf_now;
+            rf_next <= rf_early ? 2'b00 : rf_now;
             //  (chip 1 exists only on 128 MB: its timer still runs on 32 MB, and an
             //  unmasked rf_due[1] kept every boundary "deferring", rf_late pinned at 3)
-            if (((rf_due & {m128, 1'b1}) != 2'b00) && cpu_wait && rf_late != 2'd3) begin
-                rf_now  <= 2'b00;
+            //  With v_en the VRAM's chip is not in rf_due: it takes the early path below.
+            due_old = rf_due & {m128, 1'b1} & ~(v_en ? (v_chip ? 2'b10 : 2'b01) : 2'b00);
+`ifndef TDM_MUT_VREF_NOG2
+            vgo = rf_vdue && !v_req && !(g2.v && g2.l.c == v_chip)
+`ifndef TDM_MUT_VREF_NOG1W  // negative control: a G1 write on the chip may still be open
+                  && !(g1.v && g1.l.c == v_chip && !g1.rnw)
+`endif
+                  ;
+`else
+            vgo = rf_vdue && !v_req;
+`endif
+            //  The VRAM chip's early refresh is deferred for a waiting CPU only before it is
+            //  urgent: after that the CPU waits on the G blocking anyway, and deferring
+            //  would only spend the frames the refresh can use (they are scarce).
+            if ((due_old != 2'b00 || (vgo && !rf_vurg)) && cpu_wait && rf_late != 2'd3) begin
+                rf_now  <= 2'b00; rf_early <= 1'b0;
                 rf_late <= rf_late + 2'd1;
             end
             //  rf_late is cleared when the REFRESH is issued, not here: a frame
             //  started at the bound and then cancelled would restart the count
             //  and postpone the refresh without limit (7.822 us, sim/sdram_tdm)
-            else if (rf_due[0])            begin rf_now <= 2'b01; rf_due[0] <= 1'b0; end
-            else if (rf_due[1] && m128) begin rf_now <= 2'b10; rf_due[1] <= 1'b0; end
-            else                                 rf_now <= 2'b00;
+            //  the other chip first: its cycle-10 refresh has 48 clocks of margin, the
+            //  VRAM chip's early one 25 frames
+            else if (due_old[0])           begin rf_now <= 2'b01; rf_due[0] <= 1'b0; rf_early <= 1'b0; end
+            else if (due_old[1])           begin rf_now <= 2'b10; rf_due[1] <= 1'b0; rf_early <= 1'b0; end
+            else if (vgo)                  begin rf_now <= v_chip ? 2'b10 : 2'b01; rf_early <= 1'b1; end
+            //  (the deferral branch above may hold a frame where vgo was true: only for
+            //  the other chip's cycle-10 refresh; rf_late stays bounded by it)
+            else                           begin rf_now <= 2'b00; rf_early <= 1'b0; end
             vl = map((m128 ? VBASE128 : VBASE32) + {9'd0, v_addr, 2'b00}, m128);
-            took = v_en && v_req && !(rf_due[v_chip] | rf_now[v_chip]);
+            //  with v_en the VRAM's chip has no cycle-10 refresh: a V request is always taken
+            took = v_en && v_req;
             vs_v <= took; vs_we <= v_we; vs_l <= vl; vs_wdata <= v_wdata; vs_be <= v_be;
             v_grant <= took;
             if (took) begin
@@ -749,12 +820,37 @@ always @(posedge clk) begin
             rf_now  <= 2'b00;
             rf_late <= rf_late + 2'd1;
         end
-        for (int c = 0; c < 2; c++) if (rf_cnt[c] >= RFSH_EVERY[10:0]) rf_due[c] <= 1'b1;
+        for (int c = 0; c < 2; c++)
+            if (rf_cnt[c] >= RFSH_EVERY[10:0] && !(v_en && c == int'(v_chip))) rf_due[c] <= 1'b1;
+        if (rf_vcnt != '1) rf_vcnt <= rf_vcnt + 11'd1;
+
+        //  the VRAM chip's REFRESH, cycle 2 of a frame with no V request (see rf_early)
+`ifdef TDM_MUT_VREF_LATE       // negative control: a clock late (cycle 3: 70 ns tRFC overruns the next V ACT)
+        if (ps[2] && rf_early && rf_now != 2'b00) begin
+`else
+        if (ps[1] && rf_early && rf_now != 2'b00) begin
+`endif
+`ifndef TDM_MUT_VREF_NOCXL     // negative control: a CPU arriving in cycles 0-1 does not cancel it
+            if (cpu_wait && !rf_vurg) begin
+                //  a CPU request came in before the REFRESH went out and the refresh is not
+                //  urgent: give the frame's G slots back (G1 is decided on the next edge)
+                rf_now <= 2'b00; rf_early <= 1'b0;
+            end else
+`endif
+            begin
+`ifndef TDM_SIM_NO_VCHIP_REFRESH
+                command <= CMD_REF;
+                chip    <= rf_now[1];
+`endif
+                rf_late <= 2'd0;
+                rf_vcnt <= '0;
+            end
+        end
 
         // REFRESH in cycle 10 of a refresh frame, on the chip it is for.  Cycle 10
         // may owe G1's word1 mask (11): the REFRESH carries it on A12:A11.
 `ifndef TDM_MUT_NOREF
-        if (ps[9] && rf_now != 2'b00 && !rf_cxl) begin
+        if (ps[9] && rf_now != 2'b00 && !rf_cxl && !rf_early) begin
             rf_late <= 2'd0;
 `else           // negative control: refresh frames are kept but nothing is refreshed
         if (1'b0) begin

@@ -31,7 +31,7 @@ module tb;
     int m64 = 0;
     int r800wr = 0;                       // +r800wr=1: ch2 writes do not wait (R800 GUARD_WR)                          // +m64=1: 64 MB board (build with -DCHIP64)
     int m128 = 0, ncyc = 200000, seed = 1, busy = 30, stock = 0, dl = 28, cpulow = 0;
-    int ven = 1;                          // +ven=0: no VRAM port (MSX1.sv today: v_en = 0)
+    int ven = 1, vbusy = 60, vrun = 12, vrun_n = 0;                          // +ven=0: no VRAM port (MSX1.sv today: v_en = 0)
     initial begin
         void'($value$plusargs("m128=%d", m128));
         void'($value$plusargs("cycles=%d", ncyc));
@@ -43,6 +43,8 @@ module tb;
         void'($value$plusargs("m64=%d", m64));
         void'($value$plusargs("r800wr=%d", r800wr));
         void'($value$plusargs("ven=%d", ven));
+        void'($value$plusargs("vbusy=%d", vbusy));
+        void'($value$plusargs("vrun=%d", vrun));   // at most this many V-request frames in a row (0 = no cap)
         void'($urandom(seed));
     end
 
@@ -69,7 +71,7 @@ module tb;
     wire  [31:0] v_rdata;
 
     sdram_tdm #(.CACHE_LINES(1024)) dut (
-        .init(init), .clk(clk), .mode128(m128[0]), .mode64(m64[0]), .v_en(ven[0]),
+        .init(init), .clk(clk), .mode128(m128[0]), .mode64(m64[0]), .v_en(ven[0]), .v_go(1'b1), .tdm_ph(),
         .SDRAM_DQ(DQ), .SDRAM_A(A), .SDRAM_DQML(DQML), .SDRAM_DQMH(DQMH), .SDRAM_BA(BA),
         .SDRAM_nCS(nCS), .SDRAM_nWE(nWE), .SDRAM_nRAS(nRAS), .SDRAM_nCAS(nCAS), .SDRAM_CKE(CKE),
         .SDRAM_CLK(SCLK),
@@ -289,7 +291,15 @@ module tb;
             v_wdata = $urandom;
             v_be    = v_we ? ($urandom % 16) : 4'hF;
             if (v_we && v_be == 0) v_be = 4'h5;
-            v_req   = ($urandom % 100) < 90;
+            //  +vbusy=P: percent of frames with a V request.  60 by default: the real V9968
+            //  used at most 51% of the V slots in sim/v9968_vram (SCREEN 7/8 with the
+            //  high-speed command engine filling the page), and with v_en the VRAM chip
+            //  refreshes only in frames without one (plan S3).  90 was the old figure.
+            v_req   = ($urandom % 100) < vbusy;
+            //  +vrun: the real V9968's longest run of V-request frames was 11 (sim/v9968_vram,
+            //  high-speed command fill); a random agent makes 25-frame runs now and then
+            if (vrun != 0 && vrun_n >= vrun) v_req = 1'b0;
+            vrun_n = v_req ? vrun_n + 1 : 0;
             // wait for the frame boundary that samples it (dut ph 11 -> 0)
             forever begin @(posedge clk); #1; if (dut.ph == 4'd0) break; end
             if (v_req && v_grant) begin
@@ -316,6 +326,19 @@ module tb;
         end
     end
 
+`ifdef PEEK
+    always @(posedge clk) if (dut.run && dut.ph == 4'd11 && dut.rf_vdue && $time > 213000000 && $time < 221100000)
+        $display("BND t=%0t vcnt=%0d v_req=%0d g1=%0d/%0d/%0d g2=%0d/%0d cpu_wait=%0d rf_late=%0d rf_now=%b early=%0d due=%b",
+            $time, dut.rf_vcnt, v_req, dut.g1.v, dut.g1.l.c, dut.g1.rnw, dut.g2.v, dut.g2.l.c,
+            dut.cpu_wait, dut.rf_late, dut.rf_now, dut.rf_early, dut.rf_due);
+`endif
+    //  plan S3 diagnosis: the VRAM chip's refresh waiting past 900 clocks -- why
+    int vwait_log = 0;
+    always @(posedge clk) if (ven && dut.run && dut.rf_vcnt == 11'd900 && vwait_log < 6) begin
+        vwait_log++;
+        $display("TB VREF-WAIT t=%0t rf_vcnt=900 rf_late=%0d cpu_wait=%0d rf_now=%b rf_early=%0d g1.v=%0d g1.c=%0d g1.rnw=%0d g2.v=%0d g2.c=%0d",
+                 $time, dut.rf_late, dut.cpu_wait, dut.rf_now, dut.rf_early, dut.g1.v, dut.g1.l.c, dut.g1.rnw, dut.g2.v, dut.g2.l.c);
+    end
     initial begin
         for (int i = 0; i < 4; i++) begin c_req[i] = 0; c_addr[i] = 0; c_rnw[i] = 1; c_din[i] = 0; end
         repeat (10) @(posedge clk);

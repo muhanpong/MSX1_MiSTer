@@ -19,7 +19,7 @@ build() {  # name defines...
     [ -x "$O/$n/tb" ] || fail "$n did not build: $(grep -m2 %Error "$O/$n.build.log")"
 }
 for v in "b128:" "b32:-DONECHIP" "i32:-DONECHIP" "msens:-DONECHIP -DTDM_MUT_SENS" "mbank:-DTDM_MUT_BANK" \
-         "mnoref:-DTDM_MUT_NOREF" "mcap:-DTDM_MUT_CAP" "mcape:-DTDM_MUT_CAPE" "mrdy:-DTDM_MUT_RDY" "mrfslow:-DONECHIP -DTDM_MUT_RFSLOW" "b64:-DCHIP64" "mno64:-DCHIP64 -DTDM_MUT_NO64" "mrsv:-DONECHIP -DTDM_MUT_NORSV" "mlate:-DONECHIP -DTDM_MUT_LATEHOLD" "mrdover:-DTDM_MUT_RDOVER" "mdropgap:-DONECHIP -DTDM_MUT_DROPGAP" "mnobusy:-DONECHIP -DTDM_MUT_NOBUSY" "ma0:-DTDM_MUT_A0"; do
+         "mnoref:-DTDM_MUT_NOREF" "mcap:-DTDM_MUT_CAP" "mcape:-DTDM_MUT_CAPE" "mrdy:-DTDM_MUT_RDY" "mrfslow:-DONECHIP -DTDM_MUT_RFSLOW" "b64:-DCHIP64" "mno64:-DCHIP64 -DTDM_MUT_NO64" "mrsv:-DONECHIP -DTDM_MUT_NORSV" "mlate:-DONECHIP -DTDM_MUT_LATEHOLD" "mrdover:-DTDM_MUT_RDOVER" "mdropgap:-DONECHIP -DTDM_MUT_DROPGAP" "mnobusy:-DONECHIP -DTDM_MUT_NOBUSY" "ma0:-DTDM_MUT_A0" "mvnog2:-DONECHIP -DTDM_MUT_VREF_NOG2" "mvnog1w:-DONECHIP -DTDM_MUT_VREF_NOG1W" "mvlate:-DONECHIP -DTDM_MUT_VREF_LATE" "mvnocxl:-DONECHIP -DTDM_MUT_VREF_NOCXL"; do
     build ${v%%:*} ${v#*:} &
 done; wait
 CYC=${CYC:-400000}; [ "${1:-}" = quick ] && CYC=120000
@@ -28,7 +28,7 @@ jobs=()
 for sd in $SEEDS; do for bz in 15 50; do
     jobs+=("b128 1 $sd $bz" "b32 0 $sd $bz" "b128 1 $sd $bz +stock=1 +cpulow=1" "b32 0 $sd $bz +stock=1 +cpulow=1" "b64 0 $sd $bz +m64=1" "b32 0 $sd $bz +stock=1 +cpulow=2" "b128 1 $sd $bz +r800wr=1" "b32 0 $sd $bz +r800wr=1" "b32 0 $sd $bz +r800wr=2")
 done; done
-for m in "msens 0" "mbank 1" "mnoref 1" "mcap 1" "mcape 1" "mrdy 1" "ma0 1"; do jobs+=("$m 1 50"); done
+for m in "msens 0" "mbank 1" "mnoref 1" "mcap 1" "mcape 1" "mrdy 1" "ma0 1" "mvnog2 0" "mvnog1w 0" "mvlate 0"; do jobs+=("$m 1 50"); done
 #  a grid phase the refresh frame catches without cancellation (9 of 36 do)
 #  deadline mutants fail at some grid phases only (12-clock period): three phases
 #  each, a longer run, caught if any of them fails
@@ -37,6 +37,7 @@ jobs+=("mno64 0 1 50 +m64=1")
 #  rows 01 for the CPU: G1 read reservation off / CPU hold a clock late (phases that fail)
 for g in 0 12 24; do jobs+=("mrsv 0 3 30 +stock=1 +cpulow=2 +gph=$g +cycles=400000"); done
 for g in 3 15 27; do jobs+=("mlate 0 3 30 +stock=1 +cpulow=2 +gph=$g +cycles=400000"); done
+for g in 0 6 12 18 24 30; do jobs+=("mvnocxl 0 2 50 +stock=1 +cpulow=1 +gph=$g +cycles=400000"); done
 jobs+=("mrdover 1 1 50 +r800wr=1")
 #  rows 01 at the three grid phases where ch2_req_s's clock matters (2026-10-20,
 #  docs/evidence_20261020/tdm_stock_deadline_ven.txt): with v_en = 0 (MSX1.sv
@@ -57,10 +58,13 @@ for f in "$O"/run_b*.log; do
 done
 echo "engine runs: $n, pass: $p"
 grep -h "max latency\|cache hits\|chip:" "$O/run_b128_1_1_50.log" "$O/run_b32_0_1_50.log" | sed 's/^/  /'
+#  plan S3: with v_en the V port is never refused (the VRAM chip refreshes in V-idle frames)
+r=$(ls "$O"/run_b*.log | grep -v ven0 | xargs grep -ho 'refused=[0-9]*' | grep -v 'refused=0$' | wc -l)
+[ "$r" -eq 0 ] && echo "  V port refused: 0 in every engine run" || fail "V port refused in $r engine runs"
 n=$(grep -l "LATE=[1-9]" "$O"/run_i32_*.log 2>/dev/null | wc -l)
 echo "  INFO (open, V9968): 32 MB rows 01 with v_en = 1 at g3/15/27: $n of 3 phases LATE ($(grep -ho 'complete at E0+[0-9]*' "$O"/run_i32_*.log | sort | uniq -c | tr -s ' ' | tr '\n' ' '))"
 grep -h "stock:" "$O"/run_b*_stock*.log | sed 's/grid phase [0-9]*: //' | sort | uniq -c | sed 's/^/  /'
-for m in msens mbank mnoref mcap mcape mrdy mrfslow mno64 mrsv mlate mrdover mdropgap mnobusy ma0; do
+for m in msens mbank mnoref mcap mcape mrdy mrfslow mno64 mrsv mlate mrdover mdropgap mnobusy ma0 mvnog2 mvnog1w mvlate mvnocxl; do
     c=$(grep -L "TDM RESULT PASS" "$O"/run_${m}_*.log | head -1)
     if [ -z "$c" ]; then fail "mutant $m passed (negative control broken)"
     else echo "  mutant $m caught: $(grep -m1 'SDCHK ERR\|TDM ERR\|overflow' $c | cut -c1-110)"; fi
