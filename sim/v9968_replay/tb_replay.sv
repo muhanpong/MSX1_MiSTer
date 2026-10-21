@@ -273,6 +273,28 @@ module tb #(parameter int RELEASE_PH = 5);
         end
     end
 
+    //  ── VRAM shadow: every byte written through the V9968's VRAM port (CPU and commands);
+    //  +vdump=K1,K2: at the K-th R#2 write dump 00000-1FFFF to <out>/vram_K.bin, the same
+    //  moment as the oracle's flipvram.tcl (byte compare, palette- and render-independent)
+    logic [7:0] vsh [0:262143];
+    initial for (int i = 0; i < 262144; i++) vsh[i] = 8'h00;
+    always @(posedge clk_vdp) if (vdp_reset_n && vram_valid && vram_write)
+        for (int b = 0; b < 4; b++) if (!vram_wdata_mask[b]) vsh[{vram_address, 2'b00} + b] = vram_wdata[b*8 +: 8];
+    string vdumps = ""; int vd_list[$];
+    initial begin
+        void'($value$plusargs("vdump=%s", vdumps));
+        begin int v = 0; bit any = 0; foreach (vdumps[i]) begin
+            if (vdumps[i] >= "0" && vdumps[i] <= "9") begin v = v * 10 + (vdumps[i] - "0"); any = 1; end
+            else if (any) begin vd_list.push_back(v); v = 0; any = 0; end end
+          if (any) vd_list.push_back(v); end
+    end
+    task automatic vram_dump(input int k);
+        int f; f = $fopen($sformatf("%s/vram_%0d.bin", out, k), "wb");
+        for (int i = 0; i < 131072; i++) $fwrite(f, "%c", vsh[i]);
+        $fclose(f);
+        $display("REPLAY vram dump at flip %0d (t=%0t)", k, $time);
+    endtask
+
     //  ── the replay ────────────────────────────────────────────────────────
     int n_ev = 0, n_w = 0, n_r98 = 0, n_r99 = 0, rd_bad = 0, sync_miss = 0, sync_wait = 0, vr_fresh = 0;
     logic [7:0] last_99_w = 8'h00; bit second_byte = 0;     // R#2 detection: value then 82h
@@ -348,6 +370,7 @@ module tb #(parameter int RELEASE_PH = 5);
                         if (val[7:6] == 2'b10 && val[5:0] == 6'd2) begin   // R#2
                             flips++;
                             if (flips == want_flip) armed = 1;
+                            foreach (vd_list[j]) if (vd_list[j] == flips) vram_dump(flips);
                         end
                         second_byte = 0;
                     end else begin last_99_w = 8'(val); second_byte = 1; end

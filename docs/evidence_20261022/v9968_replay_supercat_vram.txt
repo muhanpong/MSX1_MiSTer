@@ -1,0 +1,17 @@
+REPLAY vram dump at flip 174 (t=6111448541580)
+REPLAY vram dump at flip 234 (t=7112735577300)
+V9968 REPLAY  events 734276 (writes 289810, reads 98h 0, 99h 444466), page flips 237, dumps 0
+V9968 REPLAY RESULT PASS (judge the frames with cmp.py)
+real	39m53.764s
+flip 100 page0: 0 of 27136 differ
+flip 100 page1: 0 of 27136 differ
+flip 100 all 128K: 0 of 131072 differ
+flip 174 page0: 0 of 27136 differ
+flip 174 page1: 0 of 27136 differ
+flip 174 all 128K: 0 of 131072 differ
+flip 234 page0: 0 of 27136 differ
+flip 234 page1: 0 of 27136 differ
+flip 234 all 128K: 0 of 131072 differ
+control rtl234 vs oracle174 pages: 45275
+
+[exited with code 0]

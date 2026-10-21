@@ -1,0 +1,14 @@
+VPROBE p1 port-98h VRAM errors 0 | p2 HMMV errors 0 | p3 VBLANK timeouts 0 | p4 interrupt timeouts 0
+V9968 VRAM: writes 1154 reads 44975 answered 44975 | latency !=8: 0, bad data 0, unwritten words read 17662, spurious 0
+V9968 link: dropped 0, off-grid 0 | CPU I/O: writes 2423 reads 11995, late reads 0
+== mut_relph: FAIL (want FAIL)
+V9968 VRAM: writes 2048 reads 1 answered 0 | latency !=8: 0, bad data 0, unwritten words read 0, spurious 0
+V9968 link: dropped 0, off-grid 2049 | CPU I/O: writes 2064 reads 1, late reads 18239
+== mut_nowait: FAIL (want FAIL)
+VPROBE p1 port-98h VRAM errors 1 | p2 HMMV errors 0 | p3 VBLANK timeouts 0 | p4 interrupt timeouts 0
+V9968 VRAM: writes 1154 reads 44975 answered 44975 | latency !=8: 0, bad data 0, unwritten words read 17662, spurious 0
+V9968 link: dropped 0, off-grid 0 | CPU I/O: writes 2423 reads 11995, late reads 0
+== mut_noint: FAIL (want FAIL)
+V9968 VRAM: writes 2176 reads 129913 answered 129913 | latency !=8: 0, bad data 0, unwritten words read 50662, spurious 0
+V9968 link: dropped 0, off-grid 0 | CPU I/O: writes 2175 reads 5392, late reads 0
+RESULT PASS

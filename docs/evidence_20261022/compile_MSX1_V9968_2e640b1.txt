@@ -1,0 +1,44 @@
+MSX1_V9968.qsf written (386 lines)
+compile MSX1_V9968 2e640b1 V9968: sprite request held across display-off freezes commands; V9938 command speed option at 2026-10-22 01:27:14
+stage map rc=0 379s errors=0
+build: map 2026-10-22 01:33:33, HEAD 2e640b1 (map only)
+PCM pipeline states synthesised: 10 / 10
+PCM memories in MLAB: 31 distinct, 31 required
+PCM arrays Quartus could not infer as memory (10999): 0
+════════════════════════════════
+RESULT PASS: map stage is the 128.86 MHz PIPE study (fit may go on)
+stage fit rc=0 1110s errors=0
+stage sta rc=0 26s errors=0
+build: map 2026-10-22 01:33:33, sta 2026-10-22 01:52:29, HEAD 2e640b1
+clk_sdram period: 7.760 ns
+PCM pipeline states synthesised: 10 / 10
+PCM memories in MLAB: 31 distinct, 31 required
+PCM arrays Quartus could not infer as memory (10999): 0
+SDC constraints ignored by TimeQuest: none
+setup, clk_sdram: slack 0.032 TNS 0.000 
+Setup slack 0.032  emu|pll|pll_inst general[0]
+Setup slack 0.064  emu|pll|pll_inst general[2]
+Setup slack 0.080  sdram_clk_pin
+Setup slack 0.483  pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk
+Setup slack 0.875  emu|pll|pll_inst general[1]
+Setup slack 5.683  spi_sck
+Setup slack 8.213  FPGA_CLK1_50
+Setup slack 8.856  altera_reserved_tck
+Setup slack 12.286  FPGA_CLK2_50
+Setup slack 15.146  pll_audio|pll_audio_inst general[0]
+Hold slack 0.150  pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk
+Hold slack 0.248  emu|pll|pll_inst general[1]
+Hold slack 0.248  emu|pll|pll_inst general[2]
+Hold slack 0.249  pll_audio|pll_audio_inst general[0]
+Hold slack 0.254  emu|pll|pll_inst general[0]
+Hold slack 0.374  spi_sck
+Hold slack 0.413  FPGA_CLK1_50
+Hold slack 0.419  FPGA_CLK2_50
+Hold slack 0.664  altera_reserved_tck
+Hold slack 2.512  sdram_clk_pin
+failing endpoints: 0
+════════════════════════════════
+RESULT PASS: the build is the 128.86 MHz PIPE study it claims to be
+TIMING PASS: clk_sdram setup slack 0.032 ns
+stage asm rc=0 29s errors=0
+-rw-rw-r-- 1 sysop sysop 3880564 Oct 22 01:53 output_files/MSX1_V9968.rbf

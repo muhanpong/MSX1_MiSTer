@@ -51,6 +51,22 @@ def diff(a, b, dx, dy, w, h, step=1):
             if d <= 6: eq += 1         # the V9968 palette's 5-bit DAC vs openMSX's 8-bit
     return s / (3 * n), eq / n
 
+def mapped_eq(a, b, dx, dy, w, h):
+    """Palette-independent agreement: map each oracle colour to the RTL colour it most
+    often lands on (the V9968's gamma table and openMSX's palette differ), then count
+    pixels whose RTL colour is the mapped one."""
+    from collections import Counter, defaultdict
+    co = defaultdict(Counter)
+    for y in range(8, h - 8):
+        for x in range(16, w - 16):
+            co[b[y + dy][x + dx]][a[y][x]] += 1
+    m = {k: v.most_common(1)[0][0] for k, v in co.items()}
+    n = eq = 0
+    for y in range(8, h - 8):
+        for x in range(16, w - 16):
+            n += 1; eq += (m[b[y + dy][x + dx]] == a[y][x])
+    return eq / n, len(m)
+
 if __name__ == '__main__':
     rtl = sys.argv[1]; orc = sys.argv[2]
     w, h, a = read_ppm(rtl); w2, h2, b = read_png(orc)
@@ -62,4 +78,5 @@ if __name__ == '__main__':
             if best is None or m < best[0]: best = (m, e, dx, dy)
     m, e, dx, dy = best
     m, e = diff(a, b, dx, dy, w, h, step=1)
-    print(f"{rtl} vs {orc}: shift dx={dx} dy={dy}  mean|diff| {m:.2f}/255  equal(<=6) {100*e:.1f}%")
+    me, nc = mapped_eq(a, b, dx, dy, w, h)
+    print(f"{rtl} vs {orc}: shift dx={dx} dy={dy}  mean|diff| {m:.2f}/255  equal(<=6) {100*e:.1f}%  colour-mapped agreement {100*me:.2f}% ({nc} colours)")

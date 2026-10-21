@@ -15,5 +15,5 @@ if [ ! -x "$O/bin/tb" ] || [ -n "${REBUILD:-}" ]; then
         $R/rtl/video/v9968/*.v $R/rtl/video/v9968_cmdwait.sv $HERE/tb_replay.sv > "$O/build.log" 2>&1
     [ -x "$O/bin/tb" ] || { echo "BUILD FAIL: $(grep -m3 %Error "$O/build.log")"; exit 1; }
 fi
-( time "$O/bin/tb" +trace="$TR" +out="$O" +dump="$DUMPS" ) > "$O/run.log" 2>&1
+( time "$O/bin/tb" +trace="$TR" +out="$O" +dump="$DUMPS" ${EXTRA:-} ) > "$O/run.log" 2>&1
 grep "REPLAY\|TB ERR\|RESULT" "$O/run.log"; grep real "$O/run.log"
