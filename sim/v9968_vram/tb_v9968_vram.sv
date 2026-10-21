@@ -37,6 +37,7 @@ module tb #(parameter int RELEASE_PH = 0);
         void'($value$plusargs("cmd=%d", cmd));
         void'($value$plusargs("hs=%d", hs));      // V9968 high-speed command mode (force_highspeed)
         void'($value$plusargs("scr=%d", scr));    // SCREEN 5, 7 or 8
+        void'($value$plusargs("scan=%d", scan));  // scanline_level 0..3 (MSX1 core change)
     end
 
     //  ── SDRAM controller + model ──────────────────────────────────────────
@@ -86,6 +87,20 @@ module tb #(parameter int RELEASE_PH = 0);
 
     logic [2:0] bus_address = 0; logic bus_ioreq = 0, bus_write = 0, bus_valid = 0;
     logic [7:0] bus_wdata = 0; wire bus_ready, bus_rdata_en; wire [7:0] bus_rdata;
+    int scan = 0;
+    wire d_hs, d_en; wire [7:0] d_r, d_g, d_b;
+    //  scanlines: the sum of r+g+b over displayed pixels per line parity (lines counted
+    //  at each hsync fall); the ratio dim/bright parity should be 1 - scan/4
+    longint sl_sum [2]; int sl_par = 0; logic d_hs_q = 1'b1;
+    always @(posedge clk_vdp) begin
+        d_hs_q <= d_hs;
+        if (d_hs_q && !d_hs) sl_par <= sl_par ^ 1;
+        if (d_en) sl_sum[sl_par] += d_r + d_g + d_b;
+    end
+    final if (sl_sum[0] + sl_sum[1] > 0)
+        $display("SCANLINE level %0d: line sums %0d / %0d, ratio %.3f (want %.3f)", scan, sl_sum[0], sl_sum[1],
+                 real'(sl_sum[0] < sl_sum[1] ? sl_sum[0] : sl_sum[1]) / real'(sl_sum[0] < sl_sum[1] ? sl_sum[1] : sl_sum[0]),
+                 1.0 - scan / 4.0);
     vdp vdp9968 (
         .reset_n(vdp_reset_n), .clk(clk_vdp), .initial_busy(1'b0),
         .bus_address(bus_address), .bus_ioreq(bus_ioreq), .bus_write(bus_write), .bus_valid(bus_valid),
@@ -94,9 +109,10 @@ module tb #(parameter int RELEASE_PH = 0);
         .vram_address(vram_address), .vram_write(vram_write), .vram_valid(vram_valid),
         .vram_wdata(vram_wdata), .vram_wdata_mask(vram_wdata_mask),
         .vram_rdata(vram_rdata), .vram_rdata_en(vram_rdata_en), .vram_refresh(),
-        .display_hs(), .display_vs(), .display_en(), .display_r(), .display_g(), .display_b(),
+        .display_hs(d_hs), .display_vs(), .display_en(d_en), .display_r(d_r), .display_g(d_g), .display_b(d_b),
         .force_highspeed(hs != 0),
         .ext_cmd_wr(1'b0), .ext_cmd_num(6'd0), .ext_cmd_data(8'd0), .ext_cmd_ce(),
+        .scanline_level(2'(scan)),
         .button(2'b00),
         .pulse0(), .pulse1(), .pulse2(), .pulse3(), .pulse4(), .pulse5(), .pulse6(), .pulse7());
 

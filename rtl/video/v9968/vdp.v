@@ -96,6 +96,9 @@ module vdp (
 	input		[7:0]	ext_cmd_data,
 	output				ext_cmd_ce,			//	geo3d: S#2 CE
 
+	//	MSX1 core: scanline strength, 0 off, 1/2/3 = 25/50/75% (vdp_video_out)
+	input		[ 1:0]	scanline_level,
+
 	// debug pulse
 	input		[ 1:0]	button,
 	output				pulse0,
@@ -592,7 +595,7 @@ module vdp (
 		.reset_n									( reset_n									),
 		.h_count									( w_h_count									),
 		.v_count									( w_v_count									),
-		.has_scanline								( 1'b1										),
+		.scanline_level								( scanline_level							),
 		.field										( w_status_field							),
 		.vdp_r										( w_upscan_r								),
 		.vdp_g										( w_upscan_g								),

@@ -64,6 +64,7 @@ module tb;
    localparam real TCK_NS = 7.76;
    logic c21 = 1'b0;
    int   g194 = 0;
+   initial v99_scanline = 2'd0;              // msx input (OSD scanlines); video is not checked here
    initial begin
       clk_sdram = 1'b0; clk_vdp = 1'b0; c21 = 1'b0;
       forever begin

@@ -62,7 +62,7 @@ module vdp_video_out (
 	input				reset_n,
 	input		[11:0]	h_count,
 	input		[ 9:0]	v_count,
-	input				has_scanline,
+	input		[1:0]	scanline_level,				//	MSX1 core: 0 off, 1/2/3 = 25/50/75% (was has_scanline, tied 1)
 	input				field,
 	// input pixel
 	input		[7:0]	vdp_r,
@@ -349,9 +349,13 @@ module vdp_video_out (
 	//	Scanline
 	// --------------------------------------------------------------------
 	assign w_scanline_gain	= { 2'd0, w_bilinear_r } + { 2'd0, w_bilinear_g } + { 2'd0, w_bilinear_b } + { 10'd128 };
-	assign w_gain			= (has_scanline == 1'b0  ) ? 8'd128:
+	//	MSX1 core: the dim line takes a fixed gain from scanline_level (128 = 1.0) instead of
+	//	upstream's brightness-dependent { 1'b0, w_scanline_gain[9:3] }.
+	assign w_gain			= (scanline_level == 2'd0) ? 8'd128:
 							  (w_interlace           ) ? ( (v_count[0] == ~field) ? 8'd128: 8'd0 ):
-							  (v_count[0]   == 1'b1  ) ? 8'd128: { 1'b0, w_scanline_gain[9:3] };
+							  (v_count[0]   == 1'b1  ) ? 8'd128:
+							  (scanline_level == 2'd1) ? 8'd96 :
+							  (scanline_level == 2'd2) ? 8'd64 : 8'd32;
 
 	assign w_display_r	= ff_bilinear_r * ff_gain;
 	assign w_display_g	= ff_bilinear_g * ff_gain;

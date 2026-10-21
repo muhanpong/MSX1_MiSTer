@@ -57,6 +57,7 @@ module msx
    input                    v99_vram_rdata_en,
    output            [15:0] v99_late_cnt,      // stock-CPU VDP reads not answered within the cycle
    output                   v99_video,         // 1: the video below is the V9968's (31 kHz, 800x480)
+   input              [1:0] v99_scanline,      // V9968 scanlines: 0 off, 1/2/3 = 25/50/75% (OSD, quasi-static)
 `endif
    //Video
    output             [7:0] R,
@@ -1444,6 +1445,8 @@ v9968_bus v99_bus (
    .bus_valid(v99_bus_valid), .bus_ready(v99_bus_ready), .bus_wdata(v99_bus_wdata),
    .bus_rdata(v99_bus_rdata), .bus_rdata_en(v99_bus_rdata_en)
 );
+logic [1:0] v99_scanline_v = 2'd0;           // OSD setting, re-registered on clk_vdp
+always @(posedge clk_vdp) v99_scanline_v <= v99_scanline;
 vdp v9968 (
    .reset_n(v99_reset_n), .clk(clk_vdp), .initial_busy(1'b0),
    .bus_address(v99_bus_address), .bus_ioreq(v99_bus_ioreq), .bus_write(v99_bus_write),
@@ -1457,6 +1460,7 @@ vdp v9968 (
    .display_r(v99_r), .display_g(v99_g), .display_b(v99_b),
    .force_highspeed(1'b0),
    .ext_cmd_wr(1'b0), .ext_cmd_num(6'd0), .ext_cmd_data(8'd0), .ext_cmd_ce(),
+   .scanline_level(v99_scanline_v),
    .button(2'b00),
    .pulse0(), .pulse1(), .pulse2(), .pulse3(), .pulse4(), .pulse5(), .pulse6(), .pulse7()
 );

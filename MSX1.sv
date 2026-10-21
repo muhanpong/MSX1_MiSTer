@@ -764,6 +764,12 @@ wire        cpu_paced;              // from msx.sv: 0 = stock T80s (sdram_tdm le
 wire [17:2] v99_vram_address; wire v99_vram_write, v99_vram_valid, v99_vram_rdata_en;
 wire [31:0] v99_vram_wdata, v99_vram_rdata; wire [3:0] v99_vram_wdata_mask;
 wire        v99_reset_n, v99_go, v99_tdm_run, v99_video;
+//  "Scandoubler Fx" (status[5:3]) drives the V9968's own scanlines in this build: the
+//  scandoubler is off (31 kHz), so video_mixer's CRT modes would do nothing.  None and
+//  HQ2x -> off, CRT 25/50/75% -> 1/2/3.
+wire  [1:0] v99_scanline = (status[5:3] == 3'd3) ? 2'd1 :
+                           (status[5:3] == 3'd4) ? 2'd2 :
+                           (status[5:3] == 3'd5) ? 2'd3 : 2'd0;
 wire  [3:0] v99_tdm_ph;
 wire        v99_req, v99_we, v99_grant, v99_rvalid;
 wire [15:0] v99_addr; wire [31:0] v99_wdata, v99_rdata; wire [3:0] v99_be;
@@ -1225,7 +1231,7 @@ msx MSX
    .v99_vram_address(v99_vram_address), .v99_vram_write(v99_vram_write), .v99_vram_valid(v99_vram_valid),
    .v99_vram_wdata(v99_vram_wdata), .v99_vram_wdata_mask(v99_vram_wdata_mask),
    .v99_vram_rdata(v99_vram_rdata), .v99_vram_rdata_en(v99_vram_rdata_en),
-   .v99_late_cnt(v99_late_cnt), .v99_video(v99_video),
+   .v99_late_cnt(v99_late_cnt), .v99_video(v99_video), .v99_scanline(v99_scanline),
 `endif
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),
