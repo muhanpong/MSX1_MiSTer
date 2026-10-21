@@ -1,0 +1,44 @@
+MSX1_V9968.qsf written (386 lines)
+compile MSX1_V9968 18e0496 V9968 build: register the CPU side of v9968_bus on clk21m; overlay CDC false path at 2026-10-21 22:31:15
+stage map rc=0 379s errors=0
+build: map 2026-10-21 22:37:34, HEAD 18e0496 (map only)
+PCM pipeline states synthesised: 10 / 10
+PCM memories in MLAB: 31 distinct, 31 required
+PCM arrays Quartus could not infer as memory (10999): 0
+════════════════════════════════
+RESULT PASS: map stage is the 128.86 MHz PIPE study (fit may go on)
+stage fit rc=0 1100s errors=0
+stage sta rc=0 26s errors=0
+build: map 2026-10-21 22:37:34, sta 2026-10-21 22:56:20, HEAD 18e0496
+clk_sdram period: 7.760 ns
+PCM pipeline states synthesised: 10 / 10
+PCM memories in MLAB: 31 distinct, 31 required
+PCM arrays Quartus could not infer as memory (10999): 0
+SDC constraints ignored by TimeQuest: none
+setup, clk_sdram: slack 0.052 TNS 0.000 
+Setup slack 0.029  emu|pll|pll_inst general[2]
+Setup slack 0.052  emu|pll|pll_inst general[0]
+Setup slack 0.080  sdram_clk_pin
+Setup slack 0.455  pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk
+Setup slack 0.502  emu|pll|pll_inst general[1]
+Setup slack 5.646  spi_sck
+Setup slack 7.204  FPGA_CLK1_50
+Setup slack 10.068  altera_reserved_tck
+Setup slack 12.434  FPGA_CLK2_50
+Setup slack 15.822  pll_audio|pll_audio_inst general[0]
+Hold slack 0.246  emu|pll|pll_inst general[2]
+Hold slack 0.255  emu|pll|pll_inst general[1]
+Hold slack 0.258  emu|pll|pll_inst general[0]
+Hold slack 0.269  FPGA_CLK1_50
+Hold slack 0.271  pll_audio|pll_audio_inst general[0]
+Hold slack 0.328  pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk
+Hold slack 0.347  spi_sck
+Hold slack 0.418  FPGA_CLK2_50
+Hold slack 0.513  altera_reserved_tck
+Hold slack 2.512  sdram_clk_pin
+failing endpoints: 0
+════════════════════════════════
+RESULT PASS: the build is the 128.86 MHz PIPE study it claims to be
+TIMING PASS: clk_sdram setup slack 0.052 ns
+stage asm rc=0 30s errors=0
+-rw-rw-r-- 1 sysop sysop 3869424 Oct 21 22:57 output_files/MSX1_V9968.rbf
