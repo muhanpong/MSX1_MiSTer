@@ -8,10 +8,13 @@
 ;      done (error = timeout), read the 512 bytes back through port 98h
 ;   3  two VBLANKs (S#0 F set) with the display on -- the V9968 fetching VRAM
 ;      through the V slot while the bench checks every read (error = timeout)
+;   4  IM 1 interrupt: R#1 IE0 on, EI, wait for the jump to 0038h (error = timeout)
 ;   0Fh done
 ; No stack and no RAM.  The code starts at 0040h and skips 0180h-018Bh (turbor.sv).
         org 0
         jr start
+        ds 38h - $, 0
+        jp vint                         ; IM 1 (phase 4).  No RAM: the pushed PC is lost
         ds 40h - $, 0
 
         macro VREG reg, val
@@ -94,6 +97,21 @@ vw:     in a,(99h) : rlca : jr c,vgot
         inc de : jr vto                 ; no VBLANK in ~65536 polls
 vgot:   dec c : jr nz,vbl
 vto:    REPORT
+
+        ld a,4 : out (2Eh),a
+        ld de,0
+        in a,(99h)                      ; S#0: clear F
+        VREG 1, 60h                     ; display on, IE0 on
+        im 1 : ei
+        ld hl,0
+iw:     dec hl : ld a,h : or l : jr nz,iw
+        di
+        inc de                          ; no interrupt in ~65536 loops
+        jr idone
+vint:   di
+        in a,(99h)                      ; S#0: acknowledge
+idone:  VREG 1, 40h
+        REPORT
 
         ld a,0Fh : out (2Eh),a
 park:   jr park

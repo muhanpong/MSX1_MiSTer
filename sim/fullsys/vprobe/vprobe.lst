@@ -9,304 +9,339 @@
   8   0000              ;      done (error = timeout), read the 512 bytes back through port 98h
   9   0000              ;   3  two VBLANKs (S#0 F set) with the display on -- the V9968 fetching VRAM
  10   0000              ;      through the V slot while the bench checks every read (error = timeout)
- 11   0000              ;   0Fh done
- 12   0000              ; No stack and no RAM.  The code starts at 0040h and skips 0180h-018Bh (turbor.sv).
- 13   0000                      org 0
- 14   0000 18 3E                jr start
- 15   0002 00 00 00...          ds 40h - $, 0
- 16   0040
- 17   0040                      macro VREG reg, val
- 18   0040 ~                    ld a,val
- 18   0040 ~              out (99h),a
- 18   0040 ~              ld a,80h | reg
- 18   0040 ~              out (99h),a
- 19   0040                      endm
- 20   0040                      ; VRAM address: R#14 = bank, then A7..0, A13..8 (| 40h for write)
- 21   0040                      macro VADDR bank, a13, wr
- 22   0040 ~                    VREG 14, bank
- 23   0040 ~                    xor a
- 23   0040 ~              out (99h),a
- 23   0040 ~              ld a,a13 | (wr * 40h)
- 23   0040 ~              out (99h),a
- 24   0040                      endm
- 25   0040                      macro REPORT
- 26   0040 ~                    ld a,e
- 26   0040 ~              out (2Fh),a
- 26   0040 ~              ld a,d
- 26   0040 ~              out (2Fh),a
+ 11   0000              ;   4  IM 1 interrupt: R#1 IE0 on, EI, wait for the jump to 0038h (error = timeout)
+ 12   0000              ;   0Fh done
+ 13   0000              ; No stack and no RAM.  The code starts at 0040h and skips 0180h-018Bh (turbor.sv).
+ 14   0000                      org 0
+ 15   0000 18 3E                jr start
+ 16   0002 00 00 00...          ds 38h - $, 0
+ 17   0038 C3 DA 01             jp vint                         ; IM 1 (phase 4).  No RAM: the pushed PC is lost
+ 18   003B 00 00 00...          ds 40h - $, 0
+ 19   0040
+ 20   0040                      macro VREG reg, val
+ 21   0040 ~                    ld a,val
+ 21   0040 ~              out (99h),a
+ 21   0040 ~              ld a,80h | reg
+ 21   0040 ~              out (99h),a
+ 22   0040                      endm
+ 23   0040                      ; VRAM address: R#14 = bank, then A7..0, A13..8 (| 40h for write)
+ 24   0040                      macro VADDR bank, a13, wr
+ 25   0040 ~                    VREG 14, bank
+ 26   0040 ~                    xor a
+ 26   0040 ~              out (99h),a
+ 26   0040 ~              ld a,a13 | (wr * 40h)
+ 26   0040 ~              out (99h),a
  27   0040                      endm
- 28   0040
- 29   0040                      ; write 1 KB: byte = L xor H xor salt
- 30   0040                      macro VWRITE4K salt
- 31   0040 ~                    ld hl,0
- 32   0040 ~            .w:     ld a,l
- 32   0040 ~              xor h
- 32   0040 ~              xor salt
- 32   0040 ~              out (98h),a
- 33   0040 ~                    inc hl
- 33   0040 ~              ld a,h
- 33   0040 ~              cp 04h
- 33   0040 ~              jr nz,.w
- 34   0040                      endm
- 35   0040                      macro VCHECK4K salt
- 36   0040 ~                    ld hl,0
- 37   0040 ~            .r:     in a,(98h)
- 37   0040 ~              ld b,a
- 38   0040 ~                    ld a,l
- 38   0040 ~              xor h
- 38   0040 ~              xor salt
- 38   0040 ~              cp b
- 38   0040 ~              jr z,.ok
- 39   0040 ~                    inc de
- 40   0040 ~            .ok:    inc hl
- 40   0040 ~              ld a,h
- 40   0040 ~              cp 04h
- 40   0040 ~              jr nz,.r
- 41   0040                      endm
- 42   0040
- 43   0040 F3           start:  di
- 44   0041                      VREG 8, 08h                     ; VR = 1 (64K x 4 addressing), sprites on
- 44   0041 3E 08       >        ld a,08h
- 44   0043 D3 99       >  out (99h),a
- 44   0045 3E 88       >  ld a,80h | 8
- 44   0047 D3 99       >  out (99h),a
- 45   0049                      VREG 1, 00h                     ; display off: the CPU owns the VRAM port
- 45   0049 3E 00       >        ld a,00h
- 45   004B D3 99       >  out (99h),a
- 45   004D 3E 81       >  ld a,80h | 1
- 45   004F D3 99       >  out (99h),a
- 46   0051 3E 01                ld a,1
- 46   0053 D3 2E          out (2Eh),a
- 47   0055 11 00 00             ld de,0
- 48   0058                      VADDR 0, 0, 1
- 48   0058             >        VREG 14, 0
- 48   0058 3E 00       >        ld a,0
- 48   005A D3 99       >  out (99h),a
- 48   005C 3E 8E       >  ld a,80h | 14
- 48   005E D3 99       >  out (99h),a
- 48   0060 AF          >        xor a
- 48   0061 D3 99       >  out (99h),a
- 48   0063 3E 40       >  ld a,0 | (1 * 40h)
- 48   0065 D3 99       >  out (99h),a
- 49   0067                      VWRITE4K 0A5h
- 49   0067 21 00 00    >        ld hl,0
- 49   006A 7D          >.w:     ld a,l
- 49   006B AC          >  xor h
- 49   006C EE A5       >  xor 0A5h
- 49   006E D3 98       >  out (98h),a
- 49   0070 23          >        inc hl
- 49   0071 7C          >  ld a,h
- 49   0072 FE 04       >  cp 04h
- 49   0074 20 F4       >  jr nz,.w
- 50   0076                      VADDR 7, 0, 1
- 50   0076             >        VREG 14, 7
- 50   0076 3E 07       >        ld a,7
- 50   0078 D3 99       >  out (99h),a
- 50   007A 3E 8E       >  ld a,80h | 14
- 50   007C D3 99       >  out (99h),a
- 50   007E AF          >        xor a
- 50   007F D3 99       >  out (99h),a
- 50   0081 3E 40       >  ld a,0 | (1 * 40h)
- 50   0083 D3 99       >  out (99h),a
- 51   0085                      VWRITE4K 3Ch
- 51   0085 21 00 00    >        ld hl,0
- 51   0088 7D          >.w:     ld a,l
- 51   0089 AC          >  xor h
- 51   008A EE 3C       >  xor 3Ch
- 51   008C D3 98       >  out (98h),a
- 51   008E 23          >        inc hl
- 51   008F 7C          >  ld a,h
- 51   0090 FE 04       >  cp 04h
- 51   0092 20 F4       >  jr nz,.w
- 52   0094                      VADDR 0, 0, 0
- 52   0094             >        VREG 14, 0
- 52   0094 3E 00       >        ld a,0
- 52   0096 D3 99       >  out (99h),a
- 52   0098 3E 8E       >  ld a,80h | 14
- 52   009A D3 99       >  out (99h),a
- 52   009C AF          >        xor a
- 52   009D D3 99       >  out (99h),a
- 52   009F 3E 00       >  ld a,0 | (0 * 40h)
- 52   00A1 D3 99       >  out (99h),a
- 53   00A3                      VCHECK4K 0A5h
- 53   00A3 21 00 00    >        ld hl,0
- 53   00A6 DB 98       >.r:     in a,(98h)
- 53   00A8 47          >  ld b,a
- 53   00A9 7D          >        ld a,l
- 53   00AA AC          >  xor h
- 53   00AB EE A5       >  xor 0A5h
- 53   00AD B8          >  cp b
- 53   00AE 28 01       >  jr z,.ok
- 53   00B0 13          >        inc de
- 53   00B1 23          >.ok:    inc hl
- 53   00B2 7C          >  ld a,h
- 53   00B3 FE 04       >  cp 04h
- 53   00B5 20 EF       >  jr nz,.r
- 54   00B7                      VADDR 7, 0, 0
- 54   00B7             >        VREG 14, 7
- 54   00B7 3E 07       >        ld a,7
- 54   00B9 D3 99       >  out (99h),a
- 54   00BB 3E 8E       >  ld a,80h | 14
- 54   00BD D3 99       >  out (99h),a
- 54   00BF AF          >        xor a
- 54   00C0 D3 99       >  out (99h),a
- 54   00C2 3E 00       >  ld a,0 | (0 * 40h)
- 54   00C4 D3 99       >  out (99h),a
- 55   00C6                      VCHECK4K 3Ch
- 55   00C6 21 00 00    >        ld hl,0
- 55   00C9 DB 98       >.r:     in a,(98h)
- 55   00CB 47          >  ld b,a
- 55   00CC 7D          >        ld a,l
- 55   00CD AC          >  xor h
- 55   00CE EE 3C       >  xor 3Ch
- 55   00D0 B8          >  cp b
- 55   00D1 28 01       >  jr z,.ok
- 55   00D3 13          >        inc de
- 55   00D4 23          >.ok:    inc hl
- 55   00D5 7C          >  ld a,h
- 55   00D6 FE 04       >  cp 04h
- 55   00D8 20 EF       >  jr nz,.r
- 56   00DA                      VADDR 0, 0, 0
- 56   00DA             >        VREG 14, 0
- 56   00DA 3E 00       >        ld a,0
- 56   00DC D3 99       >  out (99h),a
- 56   00DE 3E 8E       >  ld a,80h | 14
- 56   00E0 D3 99       >  out (99h),a
- 56   00E2 AF          >        xor a
- 56   00E3 D3 99       >  out (99h),a
- 56   00E5 3E 00       >  ld a,0 | (0 * 40h)
- 56   00E7 D3 99       >  out (99h),a
- 57   00E9                      VCHECK4K 0A5h
- 57   00E9 21 00 00    >        ld hl,0
- 57   00EC DB 98       >.r:     in a,(98h)
- 57   00EE 47          >  ld b,a
- 57   00EF 7D          >        ld a,l
- 57   00F0 AC          >  xor h
- 57   00F1 EE A5       >  xor 0A5h
- 57   00F3 B8          >  cp b
- 57   00F4 28 01       >  jr z,.ok
- 57   00F6 13          >        inc de
- 57   00F7 23          >.ok:    inc hl
- 57   00F8 7C          >  ld a,h
- 57   00F9 FE 04       >  cp 04h
- 57   00FB 20 EF       >  jr nz,.r
- 58   00FD                      REPORT
- 58   00FD 7B          >        ld a,e
- 58   00FE D3 2F       >  out (2Fh),a
- 58   0100 7A          >  ld a,d
- 58   0101 D3 2F       >  out (2Fh),a
- 59   0103
- 60   0103 3E 02                ld a,2
- 60   0105 D3 2E          out (2Eh),a
- 61   0107 11 00 00             ld de,0
- 62   010A                      VREG 0, 06h                     ; SCREEN 5
- 62   010A 3E 06       >        ld a,06h
- 62   010C D3 99       >  out (99h),a
- 62   010E 3E 80       >  ld a,80h | 0
- 62   0110 D3 99       >  out (99h),a
- 63   0112                      VREG 1, 40h                     ; display on, no interrupts
- 63   0112 3E 40       >        ld a,40h
- 63   0114 D3 99       >  out (99h),a
- 63   0116 3E 81       >  ld a,80h | 1
- 63   0118 D3 99       >  out (99h),a
- 64   011A                      VREG 2, 1Fh                     ; pattern name table at 00000h
- 64   011A 3E 1F       >        ld a,1Fh
- 64   011C D3 99       >  out (99h),a
- 64   011E 3E 82       >  ld a,80h | 2
- 64   0120 D3 99       >  out (99h),a
- 65   0122                      VREG 9, 00h
- 65   0122 3E 00       >        ld a,00h
- 65   0124 D3 99       >  out (99h),a
- 65   0126 3E 89       >  ld a,80h | 9
- 65   0128 D3 99       >  out (99h),a
- 66   012A                      VREG 17, 36                     ; R#36.. auto-increment through port 9Bh
- 66   012A 3E 24       >        ld a,36
- 66   012C D3 99       >  out (99h),a
- 66   012E 3E 91       >  ld a,80h | 17
- 66   0130 D3 99       >  out (99h),a
- 67   0132 21 C0 01             ld hl,hmmv
- 67   0135 06 0B          ld b,11
- 67   0137 0E 9B          ld c,9Bh
- 68   0139 ED B3                otir
- 69   013B 01 00 00             ld bc,0
- 70   013E              ce:     VREG 15, 2
- 70   013E 3E 02       >        ld a,2
- 70   0140 D3 99       >  out (99h),a
- 70   0142 3E 8F       >  ld a,80h | 15
- 70   0144 D3 99       >  out (99h),a
- 71   0146 DB 99                in a,(99h)
- 71   0148 E6 01          and 1
- 71   014A 28 06          jr z,cedone
- 72   014C 0B                   dec bc
- 72   014D 78             ld a,b
- 72   014E B1             or c
- 72   014F 20 ED          jr nz,ce
- 73   0151 13                   inc de                          ; CE never cleared
- 74   0152              cedone: VREG 15, 0
- 74   0152 3E 00       >        ld a,0
- 74   0154 D3 99       >  out (99h),a
- 74   0156 3E 8F       >  ld a,80h | 15
- 74   0158 D3 99       >  out (99h),a
- 75   015A                      VADDR 0, 0, 0
- 75   015A             >        VREG 14, 0
- 75   015A 3E 00       >        ld a,0
- 75   015C D3 99       >  out (99h),a
- 75   015E 3E 8E       >  ld a,80h | 14
- 75   0160 D3 99       >  out (99h),a
- 75   0162 AF          >        xor a
- 75   0163 D3 99       >  out (99h),a
- 75   0165 3E 00       >  ld a,0 | (0 * 40h)
- 75   0167 D3 99       >  out (99h),a
- 76   0169 21 00 02             ld hl,200h
- 77   016C DB 98        fr:     in a,(98h)
- 77   016E FE 5A          cp 5Ah
- 77   0170 28 01          jr z,frok
- 78   0172 13                   inc de
- 79   0173 2B           frok:   dec hl
- 79   0174 7C             ld a,h
- 79   0175 B5             or l
- 79   0176 20 F4          jr nz,fr
- 80   0178 C3 90 01             jp part2
- 81   017B                      assert $ <= 0180h
- 82   017B                      ; turbor.sv overlays 0180h-018Bh (CHGCPU) in every pack this bench runs
- 83   017B                      ; (seen: the FS-A1FX run fetched OUT (E5h),A / RET there and went off to 18FFh)
- 84   017B 00 00 00...          ds 0190h - $, 0
- 85   0190              part2:  REPORT
- 85   0190 7B          >        ld a,e
- 85   0191 D3 2F       >  out (2Fh),a
- 85   0193 7A          >  ld a,d
- 85   0194 D3 2F       >  out (2Fh),a
- 86   0196
- 87   0196 3E 03                ld a,3
- 87   0198 D3 2E          out (2Eh),a
- 88   019A 11 00 00             ld de,0
- 89   019D DB 99                in a,(99h)                      ; S#0: clear F
- 90   019F 0E 02                ld c,2
- 91   01A1 21 00 00     vbl:    ld hl,0
- 92   01A4 DB 99        vw:     in a,(99h)
- 92   01A6 07             rlca
- 92   01A7 38 08          jr c,vgot
- 93   01A9 2B                   dec hl
- 93   01AA 7C             ld a,h
- 93   01AB B5             or l
- 93   01AC 20 F6          jr nz,vw
- 94   01AE 13                   inc de
- 94   01AF 18 03          jr vto                 ; no VBLANK in ~65536 polls
- 95   01B1 0D           vgot:   dec c
- 95   01B2 20 ED          jr nz,vbl
- 96   01B4              vto:    REPORT
- 96   01B4 7B          >        ld a,e
- 96   01B5 D3 2F       >  out (2Fh),a
- 96   01B7 7A          >  ld a,d
- 96   01B8 D3 2F       >  out (2Fh),a
- 97   01BA
- 98   01BA 3E 0F                ld a,0Fh
- 98   01BC D3 2E          out (2Eh),a
- 99   01BE 18 FE        park:   jr park
-100   01C0
-101   01C0 00 00 00 00  hmmv:   db 0,0, 0,0, 0,1, 4,0, 5Ah, 0, 0C0h   ; DX DY NX=256 NY=4 CLR ARG HMMV
-101   01C4 00 01 04 00
-101   01C8 5A 00 C0
-102   01CB                      assert $ < 4000h
-103   01CB
+ 28   0040                      macro REPORT
+ 29   0040 ~                    ld a,e
+ 29   0040 ~              out (2Fh),a
+ 29   0040 ~              ld a,d
+ 29   0040 ~              out (2Fh),a
+ 30   0040                      endm
+ 31   0040
+ 32   0040                      ; write 1 KB: byte = L xor H xor salt
+ 33   0040                      macro VWRITE4K salt
+ 34   0040 ~                    ld hl,0
+ 35   0040 ~            .w:     ld a,l
+ 35   0040 ~              xor h
+ 35   0040 ~              xor salt
+ 35   0040 ~              out (98h),a
+ 36   0040 ~                    inc hl
+ 36   0040 ~              ld a,h
+ 36   0040 ~              cp 04h
+ 36   0040 ~              jr nz,.w
+ 37   0040                      endm
+ 38   0040                      macro VCHECK4K salt
+ 39   0040 ~                    ld hl,0
+ 40   0040 ~            .r:     in a,(98h)
+ 40   0040 ~              ld b,a
+ 41   0040 ~                    ld a,l
+ 41   0040 ~              xor h
+ 41   0040 ~              xor salt
+ 41   0040 ~              cp b
+ 41   0040 ~              jr z,.ok
+ 42   0040 ~                    inc de
+ 43   0040 ~            .ok:    inc hl
+ 43   0040 ~              ld a,h
+ 43   0040 ~              cp 04h
+ 43   0040 ~              jr nz,.r
+ 44   0040                      endm
+ 45   0040
+ 46   0040 F3           start:  di
+ 47   0041                      VREG 8, 08h                     ; VR = 1 (64K x 4 addressing), sprites on
+ 47   0041 3E 08       >        ld a,08h
+ 47   0043 D3 99       >  out (99h),a
+ 47   0045 3E 88       >  ld a,80h | 8
+ 47   0047 D3 99       >  out (99h),a
+ 48   0049                      VREG 1, 00h                     ; display off: the CPU owns the VRAM port
+ 48   0049 3E 00       >        ld a,00h
+ 48   004B D3 99       >  out (99h),a
+ 48   004D 3E 81       >  ld a,80h | 1
+ 48   004F D3 99       >  out (99h),a
+ 49   0051 3E 01                ld a,1
+ 49   0053 D3 2E          out (2Eh),a
+ 50   0055 11 00 00             ld de,0
+ 51   0058                      VADDR 0, 0, 1
+ 51   0058             >        VREG 14, 0
+ 51   0058 3E 00       >        ld a,0
+ 51   005A D3 99       >  out (99h),a
+ 51   005C 3E 8E       >  ld a,80h | 14
+ 51   005E D3 99       >  out (99h),a
+ 51   0060 AF          >        xor a
+ 51   0061 D3 99       >  out (99h),a
+ 51   0063 3E 40       >  ld a,0 | (1 * 40h)
+ 51   0065 D3 99       >  out (99h),a
+ 52   0067                      VWRITE4K 0A5h
+ 52   0067 21 00 00    >        ld hl,0
+ 52   006A 7D          >.w:     ld a,l
+ 52   006B AC          >  xor h
+ 52   006C EE A5       >  xor 0A5h
+ 52   006E D3 98       >  out (98h),a
+ 52   0070 23          >        inc hl
+ 52   0071 7C          >  ld a,h
+ 52   0072 FE 04       >  cp 04h
+ 52   0074 20 F4       >  jr nz,.w
+ 53   0076                      VADDR 7, 0, 1
+ 53   0076             >        VREG 14, 7
+ 53   0076 3E 07       >        ld a,7
+ 53   0078 D3 99       >  out (99h),a
+ 53   007A 3E 8E       >  ld a,80h | 14
+ 53   007C D3 99       >  out (99h),a
+ 53   007E AF          >        xor a
+ 53   007F D3 99       >  out (99h),a
+ 53   0081 3E 40       >  ld a,0 | (1 * 40h)
+ 53   0083 D3 99       >  out (99h),a
+ 54   0085                      VWRITE4K 3Ch
+ 54   0085 21 00 00    >        ld hl,0
+ 54   0088 7D          >.w:     ld a,l
+ 54   0089 AC          >  xor h
+ 54   008A EE 3C       >  xor 3Ch
+ 54   008C D3 98       >  out (98h),a
+ 54   008E 23          >        inc hl
+ 54   008F 7C          >  ld a,h
+ 54   0090 FE 04       >  cp 04h
+ 54   0092 20 F4       >  jr nz,.w
+ 55   0094                      VADDR 0, 0, 0
+ 55   0094             >        VREG 14, 0
+ 55   0094 3E 00       >        ld a,0
+ 55   0096 D3 99       >  out (99h),a
+ 55   0098 3E 8E       >  ld a,80h | 14
+ 55   009A D3 99       >  out (99h),a
+ 55   009C AF          >        xor a
+ 55   009D D3 99       >  out (99h),a
+ 55   009F 3E 00       >  ld a,0 | (0 * 40h)
+ 55   00A1 D3 99       >  out (99h),a
+ 56   00A3                      VCHECK4K 0A5h
+ 56   00A3 21 00 00    >        ld hl,0
+ 56   00A6 DB 98       >.r:     in a,(98h)
+ 56   00A8 47          >  ld b,a
+ 56   00A9 7D          >        ld a,l
+ 56   00AA AC          >  xor h
+ 56   00AB EE A5       >  xor 0A5h
+ 56   00AD B8          >  cp b
+ 56   00AE 28 01       >  jr z,.ok
+ 56   00B0 13          >        inc de
+ 56   00B1 23          >.ok:    inc hl
+ 56   00B2 7C          >  ld a,h
+ 56   00B3 FE 04       >  cp 04h
+ 56   00B5 20 EF       >  jr nz,.r
+ 57   00B7                      VADDR 7, 0, 0
+ 57   00B7             >        VREG 14, 7
+ 57   00B7 3E 07       >        ld a,7
+ 57   00B9 D3 99       >  out (99h),a
+ 57   00BB 3E 8E       >  ld a,80h | 14
+ 57   00BD D3 99       >  out (99h),a
+ 57   00BF AF          >        xor a
+ 57   00C0 D3 99       >  out (99h),a
+ 57   00C2 3E 00       >  ld a,0 | (0 * 40h)
+ 57   00C4 D3 99       >  out (99h),a
+ 58   00C6                      VCHECK4K 3Ch
+ 58   00C6 21 00 00    >        ld hl,0
+ 58   00C9 DB 98       >.r:     in a,(98h)
+ 58   00CB 47          >  ld b,a
+ 58   00CC 7D          >        ld a,l
+ 58   00CD AC          >  xor h
+ 58   00CE EE 3C       >  xor 3Ch
+ 58   00D0 B8          >  cp b
+ 58   00D1 28 01       >  jr z,.ok
+ 58   00D3 13          >        inc de
+ 58   00D4 23          >.ok:    inc hl
+ 58   00D5 7C          >  ld a,h
+ 58   00D6 FE 04       >  cp 04h
+ 58   00D8 20 EF       >  jr nz,.r
+ 59   00DA                      VADDR 0, 0, 0
+ 59   00DA             >        VREG 14, 0
+ 59   00DA 3E 00       >        ld a,0
+ 59   00DC D3 99       >  out (99h),a
+ 59   00DE 3E 8E       >  ld a,80h | 14
+ 59   00E0 D3 99       >  out (99h),a
+ 59   00E2 AF          >        xor a
+ 59   00E3 D3 99       >  out (99h),a
+ 59   00E5 3E 00       >  ld a,0 | (0 * 40h)
+ 59   00E7 D3 99       >  out (99h),a
+ 60   00E9                      VCHECK4K 0A5h
+ 60   00E9 21 00 00    >        ld hl,0
+ 60   00EC DB 98       >.r:     in a,(98h)
+ 60   00EE 47          >  ld b,a
+ 60   00EF 7D          >        ld a,l
+ 60   00F0 AC          >  xor h
+ 60   00F1 EE A5       >  xor 0A5h
+ 60   00F3 B8          >  cp b
+ 60   00F4 28 01       >  jr z,.ok
+ 60   00F6 13          >        inc de
+ 60   00F7 23          >.ok:    inc hl
+ 60   00F8 7C          >  ld a,h
+ 60   00F9 FE 04       >  cp 04h
+ 60   00FB 20 EF       >  jr nz,.r
+ 61   00FD                      REPORT
+ 61   00FD 7B          >        ld a,e
+ 61   00FE D3 2F       >  out (2Fh),a
+ 61   0100 7A          >  ld a,d
+ 61   0101 D3 2F       >  out (2Fh),a
+ 62   0103
+ 63   0103 3E 02                ld a,2
+ 63   0105 D3 2E          out (2Eh),a
+ 64   0107 11 00 00             ld de,0
+ 65   010A                      VREG 0, 06h                     ; SCREEN 5
+ 65   010A 3E 06       >        ld a,06h
+ 65   010C D3 99       >  out (99h),a
+ 65   010E 3E 80       >  ld a,80h | 0
+ 65   0110 D3 99       >  out (99h),a
+ 66   0112                      VREG 1, 40h                     ; display on, no interrupts
+ 66   0112 3E 40       >        ld a,40h
+ 66   0114 D3 99       >  out (99h),a
+ 66   0116 3E 81       >  ld a,80h | 1
+ 66   0118 D3 99       >  out (99h),a
+ 67   011A                      VREG 2, 1Fh                     ; pattern name table at 00000h
+ 67   011A 3E 1F       >        ld a,1Fh
+ 67   011C D3 99       >  out (99h),a
+ 67   011E 3E 82       >  ld a,80h | 2
+ 67   0120 D3 99       >  out (99h),a
+ 68   0122                      VREG 9, 00h
+ 68   0122 3E 00       >        ld a,00h
+ 68   0124 D3 99       >  out (99h),a
+ 68   0126 3E 89       >  ld a,80h | 9
+ 68   0128 D3 99       >  out (99h),a
+ 69   012A                      VREG 17, 36                     ; R#36.. auto-increment through port 9Bh
+ 69   012A 3E 24       >        ld a,36
+ 69   012C D3 99       >  out (99h),a
+ 69   012E 3E 91       >  ld a,80h | 17
+ 69   0130 D3 99       >  out (99h),a
+ 70   0132 21 F1 01             ld hl,hmmv
+ 70   0135 06 0B          ld b,11
+ 70   0137 0E 9B          ld c,9Bh
+ 71   0139 ED B3                otir
+ 72   013B 01 00 00             ld bc,0
+ 73   013E              ce:     VREG 15, 2
+ 73   013E 3E 02       >        ld a,2
+ 73   0140 D3 99       >  out (99h),a
+ 73   0142 3E 8F       >  ld a,80h | 15
+ 73   0144 D3 99       >  out (99h),a
+ 74   0146 DB 99                in a,(99h)
+ 74   0148 E6 01          and 1
+ 74   014A 28 06          jr z,cedone
+ 75   014C 0B                   dec bc
+ 75   014D 78             ld a,b
+ 75   014E B1             or c
+ 75   014F 20 ED          jr nz,ce
+ 76   0151 13                   inc de                          ; CE never cleared
+ 77   0152              cedone: VREG 15, 0
+ 77   0152 3E 00       >        ld a,0
+ 77   0154 D3 99       >  out (99h),a
+ 77   0156 3E 8F       >  ld a,80h | 15
+ 77   0158 D3 99       >  out (99h),a
+ 78   015A                      VADDR 0, 0, 0
+ 78   015A             >        VREG 14, 0
+ 78   015A 3E 00       >        ld a,0
+ 78   015C D3 99       >  out (99h),a
+ 78   015E 3E 8E       >  ld a,80h | 14
+ 78   0160 D3 99       >  out (99h),a
+ 78   0162 AF          >        xor a
+ 78   0163 D3 99       >  out (99h),a
+ 78   0165 3E 00       >  ld a,0 | (0 * 40h)
+ 78   0167 D3 99       >  out (99h),a
+ 79   0169 21 00 02             ld hl,200h
+ 80   016C DB 98        fr:     in a,(98h)
+ 80   016E FE 5A          cp 5Ah
+ 80   0170 28 01          jr z,frok
+ 81   0172 13                   inc de
+ 82   0173 2B           frok:   dec hl
+ 82   0174 7C             ld a,h
+ 82   0175 B5             or l
+ 82   0176 20 F4          jr nz,fr
+ 83   0178 C3 90 01             jp part2
+ 84   017B                      assert $ <= 0180h
+ 85   017B                      ; turbor.sv overlays 0180h-018Bh (CHGCPU) in every pack this bench runs
+ 86   017B                      ; (seen: the FS-A1FX run fetched OUT (E5h),A / RET there and went off to 18FFh)
+ 87   017B 00 00 00...          ds 0190h - $, 0
+ 88   0190              part2:  REPORT
+ 88   0190 7B          >        ld a,e
+ 88   0191 D3 2F       >  out (2Fh),a
+ 88   0193 7A          >  ld a,d
+ 88   0194 D3 2F       >  out (2Fh),a
+ 89   0196
+ 90   0196 3E 03                ld a,3
+ 90   0198 D3 2E          out (2Eh),a
+ 91   019A 11 00 00             ld de,0
+ 92   019D DB 99                in a,(99h)                      ; S#0: clear F
+ 93   019F 0E 02                ld c,2
+ 94   01A1 21 00 00     vbl:    ld hl,0
+ 95   01A4 DB 99        vw:     in a,(99h)
+ 95   01A6 07             rlca
+ 95   01A7 38 08          jr c,vgot
+ 96   01A9 2B                   dec hl
+ 96   01AA 7C             ld a,h
+ 96   01AB B5             or l
+ 96   01AC 20 F6          jr nz,vw
+ 97   01AE 13                   inc de
+ 97   01AF 18 03          jr vto                 ; no VBLANK in ~65536 polls
+ 98   01B1 0D           vgot:   dec c
+ 98   01B2 20 ED          jr nz,vbl
+ 99   01B4              vto:    REPORT
+ 99   01B4 7B          >        ld a,e
+ 99   01B5 D3 2F       >  out (2Fh),a
+ 99   01B7 7A          >  ld a,d
+ 99   01B8 D3 2F       >  out (2Fh),a
+100   01BA
+101   01BA 3E 04                ld a,4
+101   01BC D3 2E          out (2Eh),a
+102   01BE 11 00 00             ld de,0
+103   01C1 DB 99                in a,(99h)                      ; S#0: clear F
+104   01C3                      VREG 1, 60h                     ; display on, IE0 on
+104   01C3 3E 60       >        ld a,60h
+104   01C5 D3 99       >  out (99h),a
+104   01C7 3E 81       >  ld a,80h | 1
+104   01C9 D3 99       >  out (99h),a
+105   01CB ED 56                im 1
+105   01CD FB             ei
+106   01CE 21 00 00             ld hl,0
+107   01D1 2B           iw:     dec hl
+107   01D2 7C             ld a,h
+107   01D3 B5             or l
+107   01D4 20 FB          jr nz,iw
+108   01D6 F3                   di
+109   01D7 13                   inc de                          ; no interrupt in ~65536 loops
+110   01D8 18 03                jr idone
+111   01DA F3           vint:   di
+112   01DB DB 99                in a,(99h)                      ; S#0: acknowledge
+113   01DD              idone:  VREG 1, 40h
+113   01DD 3E 40       >        ld a,40h
+113   01DF D3 99       >  out (99h),a
+113   01E1 3E 81       >  ld a,80h | 1
+113   01E3 D3 99       >  out (99h),a
+114   01E5                      REPORT
+114   01E5 7B          >        ld a,e
+114   01E6 D3 2F       >  out (2Fh),a
+114   01E8 7A          >  ld a,d
+114   01E9 D3 2F       >  out (2Fh),a
+115   01EB
+116   01EB 3E 0F                ld a,0Fh
+116   01ED D3 2E          out (2Eh),a
+117   01EF 18 FE        park:   jr park
+118   01F1
+119   01F1 00 00 00 00  hmmv:   db 0,0, 0,0, 0,1, 4,0, 5Ah, 0, 0C0h   ; DX DY NX=256 NY=4 CLR ARG HMMV
+119   01F5 00 01 04 00
+119   01F9 5A 00 C0
+120   01FC                      assert $ < 4000h
+121   01FC
 # file closed: vprobe.asm

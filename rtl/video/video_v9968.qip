@@ -1,7 +1,6 @@
-# The V9968 build (MSX_V9968): TMS9918 for MSX1 machines, the V9968 (upstream, unmodified)
-# for MSX2 machines, and its glue.  The ESE VDP (V9958) is not in this build: its VHDL
+# The V9968 build (MSX_V9968): the V9968 (upstream, unmodified) for every machine type
+# (no TMS9918), and its glue.  The ESE VDP (V9958) is not in this build: its VHDL
 # entity is also called vdp.
-set_global_assignment -name QIP_FILE           [file join $::quartus(qip_path) vdp18/vdp18.qip ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) v9968_link.sv ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) v9968_bus.sv ]
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) v9968/vdp_color_palette_ram.v ]

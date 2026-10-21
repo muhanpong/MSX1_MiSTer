@@ -1695,13 +1695,19 @@ module tb;
 `ifdef MSX_V9968
    //  V9968 (plan S5): the VRAM port as the V9968 sees it (every read answered exactly
    //  8 clk_vdp after its request, data = the last write to that word as a shadow keeps
-   //  it), the link's monitors, and the CPU's VDP I/O.
+   //  it), the link's monitors, and the CPU's VDP I/O.  VRAM writes < port-98h writes is
+   //  not a loss: the V9968's vdp_command_cache (8 lines, write-back) merges CPU bytes of
+   //  one 32-bit word -- turbo, FS-A1FX phase 1: 2048 accepted, 1536 to VRAM, errors 0.
    logic [31:0] v99_shadow [logic [15:0]];
    int   v99_nwr = 0, v99_nrd = 0, v99_nans = 0, v99_badlat = 0, v99_baddata = 0, v99_unk = 0, v99_spur = 0;
    int   v99_lat_hist [16];
    int   v99_q_t [$]; logic [15:0] v99_q_a [$];
    int   v99_tv = 0, v99_rel_t = -1;
-   int   v99_io_wr = 0, v99_io_rd = 0;
+   int   v99_io_wr = 0, v99_io_rd = 0, v99_w98_st = 0, v99_w98_acc = 0;
+   always @(posedge clk_vdp) begin
+      if (MSX.v99_bus.st == 2'd0 && MSX.v99_bus.io_cyc && !MSX.v99_bus.cyc_q && MSX.v99_bus.io_wr && MSX.v99_bus.io_a == 3'd0) v99_w98_st++;
+      if (MSX.v99_bus_valid && MSX.v99_bus_ready && MSX.v99_bus_write && MSX.v99_bus_address == 3'd0) v99_w98_acc++;
+   end
    logic v99_bv_q = 1'b0;
    always @(posedge clk_vdp) begin
       v99_tv <= v99_tv + 1;
@@ -1749,7 +1755,13 @@ module tb;
    //  -DVPROBE (sim/fullsys/vprobe/vprobe.asm through +kprobe=<hex>): the probe's
    //  phase error counts (OUT 2Eh / 2Fh, the RPROBE protocol) and the VRAM port checks
    //  above decide.  The display fetches of phase 3 must have happened (reads > 0).
-   int vp_phase = 0, vp_nb = 0, vp_lo = 0;
+   int vp_phase = 0, vp_nb = 0, vp_lo = 0, vp_cyc = 0, vp_waitclk = 0;
+   logic vp_bus_q = 1'b0;
+   always @(posedge clk21m) begin
+      vp_bus_q <= MSX.vdp_bus;
+      if (MSX.vdp_bus & ~vp_bus_q) vp_cyc++;
+      if (~MSX.vdp_pace_n) vp_waitclk++;
+   end
    int vp_err [16];
    logic vp_q2e = 1'b0, vp_q2f = 1'b0;
    wire vp_w2e = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n & (MSX.a[7:0] == 8'h2E);
@@ -1757,13 +1769,15 @@ module tb;
    always @(posedge clk21m) begin
       vp_q2e <= vp_w2e; vp_q2f <= vp_w2f;
       if (vp_w2e & ~vp_q2e) begin
+         if (vp_phase != 0) $display("vprobe: phase %0d errors %0d", vp_phase, vp_err[vp_phase & 15]);
          vp_phase = int'(MSX.d_from_cpu); vp_nb = 0;
-         $display("vprobe: phase %0d at %.3f ms (VRAM writes %0d reads %0d)", vp_phase, $realtime / 1e6, v99_nwr, v99_nrd);
+         $display("vprobe: phase %0d at %.3f ms (VRAM writes %0d reads %0d) | V9968 bus: 98h writes started %0d accepted %0d | CPU cycles on 98h-9Bh %0d, clk21m with WAIT from the V9968 pacer %0d",
+                  vp_phase, $realtime / 1e6, v99_nwr, v99_nrd, v99_w98_st, v99_w98_acc, vp_cyc, vp_waitclk);
          if (vp_phase == 15) begin
-            automatic bit ok = (vp_err[1] | vp_err[2] | vp_err[3]) == 0 && v99_badlat == 0 && v99_baddata == 0
+            automatic bit ok = (vp_err[1] | vp_err[2] | vp_err[3] | vp_err[4]) == 0 && v99_badlat == 0 && v99_baddata == 0
                                && v99_spur == 0 && v99_nans == v99_nrd && v99_nrd > 0 && v99_mon_drop == 0 && v99_late_cnt == 0;
-            $display("VPROBE p1 port-98h VRAM errors %0d | p2 HMMV errors %0d | p3 VBLANK timeouts %0d",
-                     vp_err[1], vp_err[2], vp_err[3]);
+            $display("VPROBE p1 port-98h VRAM errors %0d | p2 HMMV errors %0d | p3 VBLANK timeouts %0d | p4 interrupt timeouts %0d",
+                     vp_err[1], vp_err[2], vp_err[3], vp_err[4]);
             $display("VPROBE RESULT %s", ok ? "PASS" : "FAIL");
             $finish;
          end

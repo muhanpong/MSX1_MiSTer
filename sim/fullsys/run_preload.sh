@@ -34,7 +34,7 @@ DEFS="-DPRELOAD -DPRELOAD_SVH=\"$OUT/pre.state.svh\""
 #  V9968=1 (plan S5): the MSX_V9968 build -- the V9968 instead of the ESE VDP, its VRAM in
 #  sdram_tdm's V slot (needs tdm / tdm128)
 if [ -n "${V9968:-}" ]; then
-   FILES=$(echo "$FILES" | tr ' ' '\n' | grep -v '/gen/vdp\.v$' | tr '\n' ' ')
+   FILES=$(echo "$FILES" | tr ' ' '\n' | grep -v '/gen/vdp\(18_core\)\?\.v$' | tr '\n' ' ')
    FILES="$FILES $(ls rtl/video/v9968/*.v | tr '\n' ' ') rtl/video/v9968_link.sv rtl/video/v9968_bus.sv"
    DEFS="$DEFS -DMSX_V9968"
 fi

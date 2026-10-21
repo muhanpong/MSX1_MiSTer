@@ -826,7 +826,13 @@ always_comb case (r800_vdpw)
    3'd6: vdp_gap_r800 = 8'd254;   // 11.8 us
    3'd7: vdp_gap_r800 = 8'd100;   //  4.7 us
 endcase
+`ifndef MSX_V9968
 wire  [7:0] vdp_gap_rld = use_nz ? vdp_gap_r800 : (vdp18 ? VDP_GAP18 : VDP_GAP38);
+`else
+//  V9968 build: the spacing is kept -- it is what ASO's split screen needs from a fast
+//  CPU, whatever VDP takes the writes (no TMS9918 here, so no VDP_GAP18)
+wire  [7:0] vdp_gap_rld = use_nz ? vdp_gap_r800 : VDP_GAP38;
+`endif
 wire        vdp_bus     = ~iorq_n & m1_n & vdp_en & (~rd_n | ~wr_n);
 
 logic [7:0] vdp_gap   = 8'd0;
@@ -875,17 +881,19 @@ always @(posedge clk21m) vdp_grant_d <= vdp_grant & vdp_bus;
 `ifndef MSX_V9968
 wire vdp_pace_n = ~(cpu_paced & vdp_bus & (~vdp_grant_d | (vdp18 & (vdp_hcnt < 3'd4))));
 `else
-//  V9968 build: a handshaked CPU waits on a V9968 access until the adapter says this
-//  cycle's transaction is done (done_tog moved since the cycle began); the TMS9918
-//  keeps its pacer.  The stock CPU never waits (v99_late_cnt counts if it should have).
-logic v99_tog0 = 1'b0, vdp_bus_q = 1'b0;
-always @(posedge clk21m) begin
-   vdp_bus_q <= vdp_bus;
-   if (vdp_bus & ~vdp_bus_q) v99_tog0 <= v99_done_tog;
-end
-wire v99_pending = vdp_bus & (vdp_bus_q ? (v99_done_tog == v99_tog0) : 1'b1);
-wire vdp_pace_n  = vdp18 ? ~(cpu_paced & vdp_bus & (~vdp_grant_d | (vdp_hcnt < 3'd4)))
-                         : ~(cpu_paced & v99_pending);
+//  V9968 build: a handshaked CPU waits on a V9968 access until the spacing pacer has
+//  granted it (vdp_grant_d, as above) and the adapter says this cycle's transaction is
+//  done (v9968_bus done: a level, see there).  The stock CPU never waits
+//  (v99_late_cnt counts if it should have).
+wire  [7:0] v99_rdata;        // v9968_bus / the V9968, instanced further down
+wire        v99_int_n;
+wire        v99_done;
+wire v99_pending = vdp_bus & ~v99_done;
+`ifndef V99_MUT_NOWAIT
+wire vdp_pace_n  = ~(cpu_paced & ((vdp_bus & ~vdp_grant_d) | v99_pending));
+`else   // negative control (sim/fullsys/vprobe): no wait for the transaction
+wire vdp_pace_n  = ~(cpu_paced & (vdp_bus & ~vdp_grant_d));
+`endif
 `endif
 
 wire opll_pace_n;   // turbo OPLL write pacer, from msx_slots (spec inter-write gaps)
@@ -1269,31 +1277,14 @@ always @(posedge clk21m) begin
          hblank_vdp_cor <= 1'b0;
 end
 `else
-//  V9968 build: MSX1 machines keep the TMS9918 (clk21m), MSX2 machines get the V9968
-//  (clk_vdp).  CPU data and interrupt are read in clk21m; video leaves in clk_vdp.
-assign d_to_cpu_vdp   = vdp18 ? d_from_vdp18                : v99_rdata;
-assign vdp_int_n      = vdp18 ? int_n_vdp18                 : v99_int_n_21;
+//  V9968 build: the V9968 for every machine type, MSX1 included (no TMS9918 in this
+//  build).  CPU data and interrupt are read in clk21m; video leaves in clk_vdp.
 logic v99_int_n_21 = 1'b1;
+assign d_to_cpu_vdp   = v99_rdata;
+assign vdp_int_n      = v99_int_n_21;
+`ifndef V99_MUT_NOINT
 always @(posedge clk21m) v99_int_n_21 <= v99_int_n;
-
-//  The TMS9918's clk21m outputs re-timed into clk_vdp: t21 flips on every clk21m edge;
-//  a clk_vdp edge that sees it differ from its last sample is the one 11.64 ns after a
-//  clk21m edge (the shared edge still sees the old value), and takes the TMS9918's
-//  outputs there.  ce_pix keeps its clk21m meaning (ce_5m39_n) on that clk_vdp cycle.
-logic t21 = 1'b0;
-always @(posedge clk21m) t21 <= ~t21;
-logic t21_s = 1'b0;
-logic [7:0] R18_v, G18_v, B18_v;
-logic HS18_v, VS18_v, DE18_v, hb18_v, vb18_v, ce18_v;
-always @(posedge clk_vdp) begin
-   t21_s  <= t21;
-   ce18_v <= 1'b0;
-   if (t21 != t21_s) begin
-      R18_v <= R_vdp18; G18_v <= G_vdp18; B18_v <= B_vdp18;
-      HS18_v <= ~HS_n_vdp18; VS18_v <= ~VS_n_vdp18; DE18_v <= DE_vdp18;
-      hb18_v <= hblank_vdp18; vb18_v <= vblank_vdp18; ce18_v <= ce_5m39_n;
-   end
-end
+`endif  // V99_MUT_NOINT: negative control (sim/fullsys/vprobe), the interrupt never arrives
 
 //  The V9968's video (clk_vdp, 31.4 kHz, 800x480 active, a pixel every 2 clocks).
 //  Its syncs are active low; hblank = no DE on the line so far / after, vblank = a
@@ -1311,16 +1302,16 @@ always @(posedge clk_vdp) begin
    end
 end
 
-assign R      = vdp18 ? R18_v  : v99_r;
-assign G      = vdp18 ? G18_v  : v99_g;
-assign B      = vdp18 ? B18_v  : v99_b;
-assign HS     = vdp18 ? HS18_v : ~v99_hs;
-assign VS     = vdp18 ? VS18_v : ~v99_vs;
-assign DE     = vdp18 ? DE18_v : v99_de;
-assign hblank = vdp18 ? hb18_v : ~v99_de & ~v99_vb;
-assign vblank = vdp18 ? vb18_v : v99_vb;
-assign ce_pix = vdp18 ? ce18_v : v99_ce;
-assign v99_video = ~vdp18;
+assign R      = v99_r;
+assign G      = v99_g;
+assign B      = v99_b;
+assign HS     = ~v99_hs;
+assign VS     = ~v99_vs;
+assign DE     = v99_de;
+assign hblank = ~v99_de & ~v99_vb;
+assign vblank = v99_vb;
+assign ce_pix = v99_ce;
+assign v99_video = 1'b1;
 `endif
 
 
@@ -1338,12 +1329,6 @@ assign VRAM_do        = vdp18 ? VRAM_do_vdp18               : VRAM_do_vdp;
 // still toggled: commands completed having written nothing.
 assign VRAM_we_lo_vdp = ~VRAM_we_n_vdp & ~VRAM_address_vdp[16];
 assign VRAM_we_hi_vdp = ~VRAM_we_n_vdp &  VRAM_address_vdp[16];
-`else
-//  V9968 build: the BRAM VRAM is the TMS9918's 16 KB only
-assign VRAM_address   = {2'b00, VRAM_address_vdp18};
-assign VRAM_we_lo     = VRAM_we_vdp18;
-assign VRAM_we_hi     = 1'b0;
-assign VRAM_do        = VRAM_do_vdp18;
 `endif
 
 logic iack;
@@ -1361,6 +1346,7 @@ end
 // accesses can never land closer than one VRAM slot.  Zero at stock speed.
 wire req = ~((iorq_n & mreq_n) | (wr_n & rd_n) | iack | vdp_hold);
 
+`ifndef MSX_V9968
 wire        int_n_vdp18;
 wire  [7:0] d_from_vdp18;
 wire  [7:0] R_vdp18, G_vdp18, B_vdp18;
@@ -1395,7 +1381,6 @@ vdp18_core #(.compat_rgb_g(0)) vdp_vdp18
    .is_pal_i(msxConfig.video_mode == PAL)
 );
 
-`ifndef MSX_V9968
 wire        int_n_vdp;
 wire  [7:0] d_from_vdp;
 wire  [5:0] R_vdp, G_vdp, B_vdp;
@@ -1446,17 +1431,15 @@ vdp vdp_vdp
 //  from v9968_link (released on a fixed TDM cycle so its VRAM requests line up with
 //  the V slot); the core reset holds the link.  Geo3D is not in this build yet: the
 //  external command port is tied off.
-wire  [7:0] v99_rdata;
-wire        v99_int_n;
-wire        v99_busy, v99_done_tog;
+wire        v99_busy;
 wire  [2:0] v99_bus_address;
 wire        v99_bus_ioreq, v99_bus_write, v99_bus_valid, v99_bus_ready, v99_bus_rdata_en;
 wire  [7:0] v99_bus_wdata, v99_bus_rdata;
-wire        v99_io_cyc = vdp_en & vdp & (~rd_n | ~wr_n);
+wire        v99_io_cyc = vdp_en & (~rd_n | ~wr_n);
 v9968_bus v99_bus (
    .clk_vdp(clk_vdp), .reset_n(v99_reset_n),
    .io_cyc(v99_io_cyc), .io_wr(~wr_n), .io_a(a[2:0]), .io_d(d_from_cpu),
-   .rdata(v99_rdata), .busy(v99_busy), .done_tog(v99_done_tog), .late_cnt(v99_late_cnt),
+   .rdata(v99_rdata), .busy(v99_busy), .done(v99_done), .late_cnt(v99_late_cnt),
    .bus_address(v99_bus_address), .bus_ioreq(v99_bus_ioreq), .bus_write(v99_bus_write),
    .bus_valid(v99_bus_valid), .bus_ready(v99_bus_ready), .bus_wdata(v99_bus_wdata),
    .bus_rdata(v99_bus_rdata), .bus_rdata_en(v99_bus_rdata_en)
@@ -1499,10 +1482,10 @@ vdp_regprobe u_regprobe (
    .p_r2(probe_r2), .p_r23(probe_r23), .p_r0(probe_r0), .p_r1(probe_r1), .p_r9(probe_r9), .p_r19(probe_r19), .p_frame(probe_frame)
 );
 
+`ifndef MSX_V9968
 wire [15:0] VRAM_address;
 wire  [7:0] VRAM_do, VRAM_di_lo, VRAM_di_hi;
 wire        VRAM_we_lo, VRAM_we_hi;
-`ifndef MSX_V9968
 spram #(.addr_width(16),.mem_name("VRA2")) vram_lo
 (
    .clock(clk21m),
@@ -1520,16 +1503,7 @@ spram #(.addr_width(16),.mem_name("VRA3")) vram_hi
    .q(VRAM_di_hi)
 );
 `else
-//  V9968 build: the TMS9918's 16 KB (the V9968's VRAM is in SDRAM)
-spram #(.addr_width(14),.mem_name("VRA2")) vram_lo
-(
-   .clock(clk21m),
-   .address(VRAM_address[13:0]),
-   .wren(VRAM_we_lo),
-   .data(VRAM_do),
-   .q(VRAM_di_lo)
-);
-assign VRAM_di_hi = 8'h00;
+//  V9968 build: no BRAM VRAM (the V9968's VRAM is in SDRAM)
 `endif
 
 wire         [7:0] d_from_slots;
