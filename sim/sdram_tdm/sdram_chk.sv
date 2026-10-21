@@ -23,6 +23,19 @@ module sdram_chk #(parameter int NCHIP = 1, parameter int COLS = 512, parameter 
                    T_RRD = 14000, T_RFC = 70000, T_AC = 5400, T_OH = 2500,
                    T_REFI = 7812500;
     int errs = 0, nact = 0, nrd = 0, nwr = 0, nref = 0, ras_lockout = 0;
+    //  Refresh rule.  Default: every interval <= T_REFI (7.8125 us = 64 ms / 8192, the
+    //  distributed figure -- stricter than the part).  +refdebt=N: the datasheet's
+    //  "Refresh Period (8192 cycles) 64 ms" (AS4C32M16SA v2.0 table, item 22) as a
+    //  running debt: elapsed/T_REFI - REFRESHes issued, error above N.  N = 8 keeps every
+    //  row far inside 64 ms (8 postponed = 62.5 us late).  Max interval and max debt are
+    //  printed either way (sdram_tdm's VRAM-chip refresh waits for V-idle frames).
+    int refdebt = 0;
+    real dbt [2] = '{0.0, 0.0}, dbt_max [2] = '{0.0, 0.0};
+    realtime gap_max [2] = '{0, 0}, t_dbt [2] = '{-1, -1};
+    initial void'($value$plusargs("refdebt=%d", refdebt));
+    final for (int c = 0; c < NCHIP; c++)
+        $display("  SDCHK refresh chip %0d: max interval %0.3f us, max debt %0.2f%s", c, gap_max[c] / 1e6, dbt_max[c],
+                 refdebt ? $sformatf(" (rule: debt <= %0d)", refdebt) : " (rule: interval <= 7.8125 us)");
     task automatic err(input string s);
         errs++;
         if (errs <= 20) $display("SDCHK ERR t=%0t %s", $time, s);
@@ -172,8 +185,12 @@ module sdram_chk #(parameter int NCHIP = 1, parameter int COLS = 512, parameter 
                 for (int b = 0; b < 4; b++)
                     if (open_[c][b] || $realtime < t_idle[c][b]) err($sformatf("REFRESH with bank %0d busy (c%0d)", b, c));
                 if ($realtime < t_refbusy[c]) err("REFRESH during tRFC");
-                if (moded[c] && t_lastref[c] >= 0 && $realtime - t_lastref[c] > T_REFI)
-                    err($sformatf("refresh interval %0t on chip %0d", $realtime - t_lastref[c], c));
+                if (moded[c] && t_lastref[c] >= 0) begin
+                    if ($realtime - t_lastref[c] > gap_max[c]) gap_max[c] = $realtime - t_lastref[c];
+                    if (!refdebt && $realtime - t_lastref[c] > T_REFI)
+                        err($sformatf("refresh interval %0t on chip %0d", $realtime - t_lastref[c], c));
+                end
+                if (moded[c] && t_dbt[c] >= 0) dbt[c] = dbt[c] - 1.0;
                 t_refbusy[c] = $realtime + T_RFC;
                 if (moded[c]) t_lastref[c] = $realtime;
             end
@@ -186,12 +203,24 @@ module sdram_chk #(parameter int NCHIP = 1, parameter int COLS = 512, parameter 
                 //  the refresh watch starts here: a controller that never refreshes
                 //  after init must still trip it (it did not, first version)
                 if (t_lastref[c] < 0) t_lastref[c] = $realtime;
+                if (t_dbt[c] < 0) t_dbt[c] = $realtime;
             end
             default: ;
         endcase
 
+        for (int cc = 0; cc < NCHIP; cc++) if (moded[cc] && t_dbt[cc] >= 0) begin
+            //  debt accrues one REFRESH every T_REFI; a debt below zero (refreshes ahead) is
+            //  not banked beyond one, as a part's counter cannot be pre-paid for long
+            dbt[cc] = dbt[cc] + ($realtime - t_dbt[cc]) / T_REFI; t_dbt[cc] = $realtime;
+            if (dbt[cc] < -1.0) dbt[cc] = -1.0;
+            if (dbt[cc] > dbt_max[cc]) dbt_max[cc] = dbt[cc];
+            if (refdebt && dbt[cc] > refdebt) begin
+                err($sformatf("chip %0d refresh debt %0.2f > %0d", cc, dbt[cc], refdebt));
+                dbt[cc] = 0;
+            end
+        end
         for (int cc = 0; cc < NCHIP; cc++)
-            if (moded[cc] && t_lastref[cc] >= 0 && $realtime - t_lastref[cc] > T_REFI + TCK) begin
+            if (!refdebt && moded[cc] && t_lastref[cc] >= 0 && $realtime - t_lastref[cc] > T_REFI + TCK) begin
                 err($sformatf("chip %0d not refreshed for %0t", cc, $realtime - t_lastref[cc]));
                 t_lastref[cc] = $realtime;
             end

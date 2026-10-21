@@ -31,7 +31,8 @@ module tb;
     int m64 = 0;
     int r800wr = 0;                       // +r800wr=1: ch2 writes do not wait (R800 GUARD_WR)                          // +m64=1: 64 MB board (build with -DCHIP64)
     int m128 = 0, ncyc = 200000, seed = 1, busy = 30, stock = 0, dl = 28, cpulow = 0;
-    int ven = 1, vbusy = 60, vrun = 12, vrun_n = 0;                          // +ven=0: no VRAM port (MSX1.sv today: v_en = 0)
+    int ven = 1, vbusy = 60, vrun = 12, vrun_n = 0;
+    int e0_vcnt; bit e0_urg, e0_early; bit [2:0] e0_cmask;      // diagnosis of a LATE read                          // +ven=0: no VRAM port (MSX1.sv today: v_en = 0)
     initial begin
         void'($value$plusargs("m128=%d", m128));
         void'($value$plusargs("cycles=%d", ncyc));
@@ -162,6 +163,7 @@ module tb;
                 @(negedge clk);
                 c_addr[ag] = ad; c_rnw[ag] = rnw; c_din[ag] = d; c_req[ag] = 1;
                 @(posedge clk);                       // E0
+                e0_vcnt = dut.rf_vcnt; e0_urg = dut.rf_vurg; e0_early = dut.rf_early; e0_cmask = dut.cmask;
                 #1 tog0 = ch2_rdtog; dn = 0; tdone = -1;
                 for (int e = 1; e <= dl; e++) begin
                     @(posedge clk); #1;
@@ -174,7 +176,7 @@ module tb;
                         //  how late, and what the controller was doing (diagnosis only)
                         int e2;
                         string why;
-                        why = $sformatf("rf_now=%b rf_next=%b prev_b=%0d prev_v=%0d", dut.rf_now, dut.rf_next, dut.prev_b, dut.prev_v);
+                        why = $sformatf("rf_now=%b rf_next=%b prev_b=%0d prev_v=%0d | at E0: vcnt=%0d urg=%0d early=%0d cmask=%b", dut.rf_now, dut.rf_next, dut.prev_b, dut.prev_v, e0_vcnt, e0_urg, e0_early, e0_cmask);
                         for (e2 = dl + 1; e2 < 120; e2++) begin @(posedge clk); #1; if (ch2_rdtog != tog0) break; end
                         nlate++;
                         fail($sformatf("ch2 LATE (stock): read %h complete at E0+%0d, deadline E0+%0d (%s)", ad, e2, dl, why));

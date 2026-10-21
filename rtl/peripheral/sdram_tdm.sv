@@ -117,12 +117,13 @@ localparam int  RFSH_EVERY  = (7800000 / PERIOD_PS) - 60;  // 7.8 us/row; margin
 //  The VRAM's chip with the V port in use (2026-10-21, plan S3): due this long after
 //  its last REFRESH, then issued in the first frame with no V request (cycle 2, over by
 //  the next frame's V ACT).  The rest, up to the 7.8125 us interval, is room to wait
-//  for such a frame: (7812.5 - 5400) ns = 310 clocks = 25 frames.
-localparam int  RFSH_EVERY_V = (5400000 / PERIOD_PS);
+//  for such a frame: (7812.5 - 3900) ns = 504 clocks = 42 frames.
+localparam int  RFSH_EVERY_V = (3900000 / PERIOD_PS);
 //  From here the wait is urgent: G2 keeps off the chip and G1 does not write it, so the
 //  next frame without a V request can take the refresh.  Before it the refresh only
-//  takes a frame where those hold anyway (no cost to the CPU): 12 frames before 7.8 us.
-localparam int  RFSH_URG_V   = (7812500 / PERIOD_PS) - 12 * 12;
+//  takes a frame where those hold anyway (no cost to the CPU): 24 frames before 7.8 us
+//  (with a known CPU grid only every third frame can take it: 8 chances).
+localparam int  RFSH_URG_V   = (7812500 / PERIOD_PS) - 24 * 12;
 //  (the 7.8125 us interval is the model's and the distributed-refresh figure; whether
 //  the parts allow postponing is not assumed)
 localparam int  INIT_CYCLES = (200000000 / PERIOD_PS);     // 200 us power-up
@@ -366,6 +367,27 @@ reg        rf_early = 1'b0;      // this frame's rf_now is a cycle-3 VRAM-chip r
 reg [10:0] rf_vcnt = '0;         // clocks since the VRAM chip's last REFRESH (v_en)
 wire       rf_vdue = v_en && (rf_vcnt >= 11'(RFSH_EVERY_V));
 wire       rf_vurg = v_en && (rf_vcnt >= 11'(RFSH_URG_V));
+//  Plan S4: a stock CPU (no handshake, fixed deadline) asks on a fixed grid: one T-state
+//  of 3.58 MHz is exactly 3 frames, so its requests come in the same frame of every
+//  three.  An early refresh in that frame costs the request its G slot (the chip is
+//  busy cycles 2-11; a request seen in cycles 0-1 cancels it, later ones lose G2, and
+//  E0+28 is missed).  cpos counts frames mod 3; cmask[k] = the CPU needed a G slot in a
+//  frame at position k: a request first seen in cycles 0-5 is served by that frame's G1
+//  or G2, one seen later by the next frame's G1 (cleared every 1024 frames).  Before
+//  urgent, no early refresh in a masked position.  All three masked = not a stock grid (turbo,
+//  R800, NextZ80 pace themselves with a handshake): the mask is ignored.
+reg  [1:0] cpos = 2'd0;          // this frame's position in the 3-frame T-state grid
+reg  [2:0] cmask = 3'b000;
+reg  [9:0] cmask_age = '0;
+wire [1:0] cpos_next = (cpos == 2'd2) ? 2'd0 : cpos + 2'd1;
+//  The grid known (exactly one position p in cmask): the urgent refresh goes in frame
+//  p+2 and its G blocking (G2 off the chip, no G1 write to it) in frame p+1 only, so
+//  the frame the CPU asks in (p) keeps its G1 and G2.  Unknown: any frame, as before.
+wire       grid    = (cmask == 3'b001) | (cmask == 3'b010) | (cmask == 3'b100);
+wire [1:0] gp      = cmask[0] ? 2'd0 : cmask[1] ? 2'd1 : 2'd2;
+wire [1:0] gp1     = (gp == 2'd2) ? 2'd0 : gp + 2'd1;      // p+1
+wire [1:0] gp2     = (gp == 2'd0) ? 2'd2 : gp - 2'd1;      // p+2 (= p-1)
+wire       urg_blk = rf_vurg && (!grid || cpos == gp1);
 wire       v_chip = m128;     // the VRAM's chip: 1 on 128 MB, 0 otherwise
 //  A CPU read that arrives inside a refresh frame cancels it, up to the edge that
 //  would issue the REFRESH (cycle 10): the frame's G slots open again and the
@@ -432,7 +454,6 @@ always_comb begin
     b0   = (rf_now[0] & ~rf_cxl) | (ps[2] & rf_next[0]);
     b1   = (rf_now[1] & ~rf_cxl) | (ps[2] & rf_next[1]);
 `ifndef TDM_MUT_VREF_NOG2   // negative control: G2 may take the VRAM chip while its refresh waits
-    if (ps[6] && rf_vurg) begin if (v_chip) b1 = 1'b1; else b0 = 1'b1; end
 `endif
     cand_ok[0] = ch2_rq & rq_d[0] & ok(cand_l[0], sens, b0, b1, prev_v, prev_c, prev_b, m128);
     //  The CPU's hold and location from the edge after its request, not a clock
@@ -466,12 +487,18 @@ always_comb begin
     cand_ok[2] = ch3_rq & rq_d[2] & ok(cand_l[2], sens, b0, b1, prev_v, prev_c, prev_b, m128) & ~(hold & ~cand_ok[0] & cand_l[2].c == hl.c & cand_l[2].b == hl.b) & ~(rsv & ch3_rnw_1);
     cand_ok[3] = ch4_rq & rq_d[3] & ok(cand_l[3], sens, b0, b1, prev_v, prev_c, prev_b, m128) & ~(hold & ~cand_ok[0] & cand_l[3].c == hl.c & cand_l[3].b == hl.b) & ~(rsv & ch4_rnw_1);
 `ifndef TDM_MUT_VREF_NOG1W
-    //  the VRAM chip's refresh is waiting: G1 does not write that chip (see rf_early)
-    if (ps[2] && rf_vurg) begin
-        if (cand_l[0].c == v_chip && !ch2_rnw_1) cand_ok[0] = 1'b0;
+    //  the VRAM chip's refresh is urgent: in the frame before the one it is meant for,
+    //  G2 keeps off that chip and G1 does not write it -- except for the CPU, whose
+    //  stock deadline outranks the refresh's next chance three frames on (see rf_early)
+    if (ps[2] && urg_blk) begin
         if (cand_l[1].c == v_chip && !ch1_rnw_1) cand_ok[1] = 1'b0;
         if (cand_l[2].c == v_chip && !ch3_rnw_1) cand_ok[2] = 1'b0;
         if (cand_l[3].c == v_chip && !ch4_rnw_1) cand_ok[3] = 1'b0;
+    end
+    if (ps[6] && urg_blk) begin
+        if (cand_l[1].c == v_chip) cand_ok[1] = 1'b0;
+        if (cand_l[2].c == v_chip) cand_ok[2] = 1'b0;
+        if (cand_l[3].c == v_chip) cand_ok[3] = 1'b0;
     end
 `endif
 end
@@ -513,6 +540,11 @@ always @(posedge clk) begin
     //  queued one (a lost write; sdram.sv picked within a clock or two).  At most
     //  one request enters per edge: a write, a cache miss, or a read that waited.
     enq = 1'b0; enq_rnw = 1'b1; enq_addr = ch2_caddr; enq_din = ch2_din_1; enq_rd = 1'b0;
+`ifndef TDM_MUT_NOGRID          // negative control: no T-state grid avoidance
+    if (ch2_rqv & ~ch2_req_1) begin
+        if (ph <= 4'd5) cmask[cpos] <= 1'b1; else cmask[cpos_next] <= 1'b1;
+    end
+`endif
     if (ch2_rqv & ~ch2_req_1) begin
         ch2_hl <= gmap(ch2_addr, m128, m64);
         if (CACHE_LINES != 0 && ch2_rnw) begin
@@ -637,6 +669,11 @@ always @(posedge clk) begin
         end
     end else begin
         ph <= (ph == 4'd11) ? 4'd0 : ph + 4'd1;
+        if (ps[11]) begin
+            cpos <= cpos_next;
+            cmask_age <= cmask_age + 10'd1;
+            if (cmask_age == '1) cmask <= 3'b000;      // relearn (a mode change moves the grid)
+        end
         ps <= {ps[10:0], ps[11]};
 
         // refresh timers
@@ -665,6 +702,9 @@ always @(posedge clk) begin
             due_old = rf_due & {m128, 1'b1} & ~(v_en ? (v_chip ? 2'b10 : 2'b01) : 2'b00);
 `ifndef TDM_MUT_VREF_NOG2
             vgo = rf_vdue && !v_req && !(g2.v && g2.l.c == v_chip)
+`ifndef TDM_MUT_NOGRID
+                  && (rf_vurg ? (!grid || cpos_next == gp2) : (cmask == 3'b111 || !cmask[cpos_next]))
+`endif
 `ifndef TDM_MUT_VREF_NOG1W  // negative control: a G1 write on the chip may still be open
                   && !(g1.v && g1.l.c == v_chip && !g1.rnw)
 `endif
