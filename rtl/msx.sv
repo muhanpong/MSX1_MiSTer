@@ -1437,7 +1437,7 @@ wire        v99_bus_ioreq, v99_bus_write, v99_bus_valid, v99_bus_ready, v99_bus_
 wire  [7:0] v99_bus_wdata, v99_bus_rdata;
 wire        v99_io_cyc = vdp_en & (~rd_n | ~wr_n);
 v9968_bus v99_bus (
-   .clk_vdp(clk_vdp), .reset_n(v99_reset_n),
+   .clk21m(clk21m), .clk_vdp(clk_vdp), .reset_n(v99_reset_n),
    .io_cyc(v99_io_cyc), .io_wr(~wr_n), .io_a(a[2:0]), .io_d(d_from_cpu),
    .rdata(v99_rdata), .busy(v99_busy), .done(v99_done), .late_cnt(v99_late_cnt),
    .bus_address(v99_bus_address), .bus_ioreq(v99_bus_ioreq), .bus_write(v99_bus_write),

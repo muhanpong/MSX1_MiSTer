@@ -1705,7 +1705,7 @@ module tb;
    int   v99_tv = 0, v99_rel_t = -1;
    int   v99_io_wr = 0, v99_io_rd = 0, v99_w98_st = 0, v99_w98_acc = 0;
    always @(posedge clk_vdp) begin
-      if (MSX.v99_bus.st == 2'd0 && MSX.v99_bus.io_cyc && !MSX.v99_bus.cyc_q && MSX.v99_bus.io_wr && MSX.v99_bus.io_a == 3'd0) v99_w98_st++;
+      if (MSX.v99_bus.st == 2'd0 && MSX.v99_bus.io_cyc_r && !MSX.v99_bus.cyc_q && MSX.v99_bus.io_wr_r && MSX.v99_bus.io_a_r == 3'd0) v99_w98_st++;
       if (MSX.v99_bus_valid && MSX.v99_bus_ready && MSX.v99_bus_write && MSX.v99_bus_address == 3'd0) v99_w98_acc++;
    end
    logic v99_bv_q = 1'b0;

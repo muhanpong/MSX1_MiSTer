@@ -243,3 +243,10 @@ set_multicycle_path -hold  -end 1 \
 #  timing it only produces placement-luck hold misses (20260920e: -0.102 ns on
 #  u_pcm ram_regs[6].keyon -> u_overlay keyon_s1[6], general[0] -> general[1]).
 set_false_path -to [get_registers {*u_overlay|*_s1[*]}]
+
+#  debug_overlay's CDC: the first stage of each two-flop synchroniser (and lvl_sync1)
+#  takes signals from other clock domains on CLK_VIDEO.  In the V9968 build CLK_VIDEO is
+#  clk_vdp, from the same PLL as clk_sdram, so TimeQuest times these as ordinary paths
+#  (pcm_sync <- pcm_valid failed by 0.01 ns in MSX1_V9968 75c48e2).  They are
+#  synchronisers by design: not timed.
+set_false_path -to [get_registers {*debug_overlay:u_overlay|*_sync[0] *debug_overlay:u_overlay|lvl_sync1[*]}]

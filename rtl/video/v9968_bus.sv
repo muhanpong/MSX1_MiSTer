@@ -3,9 +3,12 @@
 //
 //  clk21m (the CPU side) and clk_vdp (85.909 MHz, the V9968) come from one PLL at phase
 //  0 and clk_vdp = 4 x clk21m: every clk21m edge is a clk_vdp edge.  The CPU-side
-//  signals are sampled on clk_vdp directly (a register launched on clk21m reaches the
-//  clk_vdp edge 11.64 ns later; the edge they share sees the old value), and the
-//  results go back the same way -- timed paths, no synchronisers.
+//  signals are first registered on clk21m (io_*_r), then sampled on clk_vdp (a register
+//  launched on clk21m reaches the clk_vdp edge 11.64 ns later; the edge they share sees
+//  the old value), and the results go back the same way -- timed paths, no
+//  synchronisers.  Sampling the CPU decode itself on clk_vdp failed STA by 3.8 ns
+//  (MSX1_V9968 75c48e2: T80 FETCH -> port decode -> these registers in 11.64 ns); the
+//  clk21m stage costs one clk21m (~4 clk_vdp) at the start of each transaction.
 //
 //  One CPU I/O cycle to the V9968 = one V9968 bus transaction, started on the first
 //  clk_vdp edge that sees the strobe (IORQ with RD or WR, M1 high) and the port in
@@ -26,6 +29,7 @@
 //  there by the cycle's end (sim/v9968_vram: data <= 38 clk_vdp after acceptance, the
 //  stock IN window is ~60).
 module v9968_bus (
+    input  wire        clk21m,
     input  wire        clk_vdp,
     input  wire        reset_n,        // clk_vdp domain (the V9968's own reset)
 
@@ -49,6 +53,14 @@ module v9968_bus (
     input  wire  [7:0] bus_rdata,
     input  wire        bus_rdata_en
 );
+    //  the clk21m stage
+    logic       io_cyc_r = 1'b0, io_wr_r = 1'b0;
+    logic [2:0] io_a_r = 3'd0;
+    logic [7:0] io_d_r = 8'd0;
+    always_ff @(posedge clk21m) begin
+        io_cyc_r <= io_cyc; io_wr_r <= io_wr; io_a_r <= io_a; io_d_r <= io_d;
+    end
+
     typedef enum logic [1:0] { S_IDLE, S_REQ, S_RDWAIT, S_DONE } st_t;
     st_t st;
     logic cyc_q;
@@ -61,11 +73,11 @@ module v9968_bus (
             bus_write <= 1'b0; bus_address <= 3'd0; bus_wdata <= 8'd0; late_cnt <= '0;
             rdata <= 8'hFF;
         end else begin
-            cyc_q <= io_cyc;
+            cyc_q <= io_cyc_r;
             case (st)
             S_IDLE:
-                if (io_cyc && !cyc_q) begin            // a new CPU I/O cycle to the VDP
-                    bus_address <= io_a; bus_write <= io_wr; bus_wdata <= io_d;
+                if (io_cyc_r && !cyc_q) begin          // a new CPU I/O cycle to the VDP
+                    bus_address <= io_a_r; bus_write <= io_wr_r; bus_wdata <= io_d_r;
                     bus_valid <= 1'b1; busy <= 1'b1; st <= S_REQ;
                 end
             S_REQ:
@@ -79,11 +91,11 @@ module v9968_bus (
             S_DONE: ;
             endcase
             //  the CPU's cycle ended: back to idle (a read still pending is late)
-            if (!io_cyc && cyc_q && st != S_IDLE) begin
+            if (!io_cyc_r && cyc_q && st != S_IDLE) begin
                 if (busy && !bus_write && late_cnt != '1) late_cnt <= late_cnt + 1'b1;
                 if (st == S_DONE) st <= S_IDLE;
             end
-            if (st == S_DONE && !io_cyc) st <= S_IDLE;
+            if (st == S_DONE && !io_cyc_r) st <= S_IDLE;
         end
     end
 endmodule
