@@ -191,7 +191,14 @@ module vdp_sprite_select_visible_planes (
 			ff_vram_valid			<= 1'b0;
 		end
 		else if( !screen_v_active || !screen_h_active || !reg_display_on || w_screen_pos_x[9]  ) begin
-			//	hold
+			//	hold -- except the VRAM request: upstream held it too, and a request set on the
+			//	clock before the display is turned off (R#1 landing right after the (phase 2|4,
+			//	sub 0) set: 2 of 128 clocks) then stays asserted until the display is on again.
+			//	vdp_vram_interface issues the sprite request ahead of the command and CPU paths
+			//	on every slot, so a VDP command that reads VRAM never gets its data and the
+			//	VDP freezes (MSX1 core, 2026-10-22: SUPER CAT / COASTAL FLIGHT's first LRMM in
+			//	sim/v9968_replay, reproduced in sim/v9968_vram +offat=29/125).
+			ff_vram_valid			<= 1'b0;
 		end
 		else if( !reg_sprite_mode3 && ff_plane_count[5] && !(w_phase == 3'd2 && w_sub_phase == 4'd0 && screen_pos_x[13:7] == 7'd0) ) begin
 			ff_vram_valid			<= 1'b0;

@@ -3,6 +3,7 @@
 # entity is also called vdp.
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) v9968_link.sv ]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) v9968_bus.sv ]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) v9968_cmdwait.sv ]
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) v9968/vdp_color_palette_ram.v ]
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) v9968/vdp_color_palette.v ]
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) v9968/vdp_command_cache.v ]

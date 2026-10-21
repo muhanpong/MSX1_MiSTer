@@ -98,6 +98,8 @@ module vdp (
 
 	//	MSX1 core: scanline strength, 0 off, 1/2/3 = 25/50/75% (vdp_video_out)
 	input		[ 1:0]	scanline_level,
+	//	MSX1 core: per-command waits for the normal-speed mode (vdp_command.v; 12 x 40 = upstream)
+	input		[95:0]	cmd_wait,
 
 	// debug pulse
 	input		[ 1:0]	button,
@@ -454,6 +456,7 @@ module vdp (
 		.reg_command_high_speed_mode				( reg_command_high_speed_mode				),
 		.reg_ext_command_mode						( reg_ext_command_mode						),
 		.reg_vram256k_mode							( reg_vram256k_mode							),
+		.cmd_wait									( cmd_wait									),
 		.vram_access_mask							( w_vram_access_mask						),
 		.intr_command_end							( w_intr_command_end						)
 	);

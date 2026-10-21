@@ -10,6 +10,14 @@
 // after edge k+2, held tOH after k+3), word1 at k+4.  DQM latency 2: the DQM at
 // edge e masks the word valid at e+2.  Write: words at edges w, w+1, DQM latency 0.
 // Numbers: AS4C32M16SB-7 class, conservative.
+//  Unwritten locations read as x (the default) or as 0 with -DCHK_UNWRITTEN_ZERO: a real
+//  SDRAM holds some defined value there; x lets a consumer's logic misbehave in ways the
+//  board cannot (sim/v9968_replay, 2026-10-22).
+`ifdef CHK_UNWRITTEN_ZERO
+`define UNWRITTEN 16'h0000
+`else
+`define UNWRITTEN 16'hxxxx
+`endif
 module sdram_chk #(parameter int NCHIP = 1, parameter int COLS = 512, parameter int TCK = 7760)
 (
     input        clk,          // SDRAM_CLK pin
@@ -87,7 +95,7 @@ module sdram_chk #(parameter int NCHIP = 1, parameter int COLS = 512, parameter 
         longint kk;
         logic [15:0] old;
         kk  = key(c, b, r, k);
-        if (mem.exists(kk)) old = mem[kk]; else old = 16'hxxxx;
+        if (mem.exists(kk)) old = mem[kk]; else old = `UNWRITTEN;
         if (m != 2'b11) begin
             if (!fpga_oe) err("write word but the FPGA is not driving");
             if ((!m[0] && $isunknown(dq[7:0])) || (!m[1] && $isunknown(dq[15:8]))) err("write data X/Z");
@@ -130,7 +138,7 @@ module sdram_chk #(parameter int NCHIP = 1, parameter int COLS = 512, parameter 
         if (rdq.exists(e)) begin
             rd_w  = rdq[e];
             rd_kk = key(rd_w.c, rd_w.b, rd_w.r, rd_w.k);
-            if (mem.exists(rd_kk)) nx_v = mem[rd_kk]; else nx_v = 16'hxxxx;
+            if (mem.exists(rd_kk)) nx_v = mem[rd_kk]; else nx_v = `UNWRITTEN;
             rd_m  = 2'b00;
             if (dqm_at.exists(e - 2)) rd_m = dqm_at[e - 2];     // DQM latency 2
             if (rd_m[0]) nx_v[7:0]  = 8'hzz;

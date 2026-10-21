@@ -86,6 +86,11 @@ module vdp_command (
 	input				reg_command_high_speed_mode,
 	input				reg_ext_command_mode,
 	input				reg_vram256k_mode,
+	//	MSX1 core: per-command wait for the normal-speed mode (HS=0), 12 x 8 bits in the order
+	//	hmmc ymmm hmmm hmmv lmmc lmcm lmmm lmmv line srch pset point (bits 95:88 = hmmc).
+	//	Upstream fixes every one at 40; rtl/video/v9968_cmdwait.sv drives 40 (identical
+	//	behaviour) or a table calibrated to the V9938 (OSD option).
+	input		[95:0]	cmd_wait,
 	output				vram_access_mask,
 	output				intr_command_end
 );
@@ -106,18 +111,18 @@ module vdp_command (
 	localparam	c_lfmm		= 4'b0001;
 	localparam	c_stop		= 4'b0000;
 
-	localparam	c_wait_hmmc	= 6'd40;
-	localparam	c_wait_ymmm	= 6'd40;
-	localparam	c_wait_hmmm	= 6'd40;
-	localparam	c_wait_hmmv	= 6'd40;
-	localparam	c_wait_lmmc	= 6'd40;
-	localparam	c_wait_lmcm	= 6'd40;
-	localparam	c_wait_lmmm	= 6'd40;
-	localparam	c_wait_lmmv	= 6'd40;
-	localparam	c_wait_line	= 6'd40;
-	localparam	c_wait_srch	= 6'd40;
-	localparam	c_wait_pset	= 6'd40;
-	localparam	c_wait_point= 6'd40;
+	wire	[7:0]	c_wait_hmmc	= cmd_wait[95:88];
+	wire	[7:0]	c_wait_ymmm	= cmd_wait[87:80];
+	wire	[7:0]	c_wait_hmmm	= cmd_wait[79:72];
+	wire	[7:0]	c_wait_hmmv	= cmd_wait[71:64];
+	wire	[7:0]	c_wait_lmmc	= cmd_wait[63:56];
+	wire	[7:0]	c_wait_lmcm	= cmd_wait[55:48];
+	wire	[7:0]	c_wait_lmmm	= cmd_wait[47:40];
+	wire	[7:0]	c_wait_lmmv	= cmd_wait[39:32];
+	wire	[7:0]	c_wait_line	= cmd_wait[31:24];
+	wire	[7:0]	c_wait_srch	= cmd_wait[23:16];
+	wire	[7:0]	c_wait_pset	= cmd_wait[15:8];
+	wire	[7:0]	c_wait_point	= cmd_wait[7:0];
 
 	localparam	c_imp		= 4'b0000;
 	localparam	c_and		= 4'b0001;
@@ -292,8 +297,8 @@ module vdp_command (
 	reg			[5:0]	ff_state;
 	reg			[5:0]	ff_next_state;
 	reg					ff_count_valid;
-	reg			[7:0]	ff_wait_counter;
-	reg			[5:0]	ff_wait_count;
+	reg			[9:0]	ff_wait_counter;		//	MSX1 core: 8 -> 10 bits (waits up to 255 x 4)
+	reg			[7:0]	ff_wait_count;			//	MSX1 core: 6 -> 8 bits
 	reg					ff_command_end;
 
 	// --------------------------------------------------------------------
@@ -1176,7 +1181,7 @@ module vdp_command (
 			ff_cache_vram_wdata			<= 8'd0;
 			ff_count_valid				<= 1'b0;
 			ff_border_detect_request	<= 1'b0;
-			ff_wait_count				<= 6'd0;
+			ff_wait_count				<= 8'd0;
 			ff_xsel						<= 2'd0;
 			ff_finish_flag				<= 1'b0;
 		end
@@ -1186,7 +1191,7 @@ module vdp_command (
 			ff_border_detect_request	<= 1'b0;
 			ff_cache_flush_start		<= 1'b0;
 			ff_cache_vram_valid			<= 1'b0;
-			ff_wait_count				<= 6'd0;
+			ff_wait_count				<= 8'd0;
 			ff_xsel						<= 2'd0;
 			ff_finish_flag				<= 1'b0;
 			case( ff_command )
@@ -1353,7 +1358,7 @@ module vdp_command (
 				end
 				else if( reg_command_high_speed_mode ) begin
 					//	SX, DX のカウントアップが終わるまでの 1clk を待機する
-					ff_wait_counter			<= 8'd1;
+					ff_wait_counter			<= 10'd1;
 					ff_next_state			<= c_state_line;
 					ff_state				<= c_state_wait_counter;
 				end
@@ -1387,7 +1392,7 @@ module vdp_command (
 				end
 				else if( reg_command_high_speed_mode ) begin
 					//	SX, DX のカウントアップが終わるまでの 1clk を待機する
-					ff_wait_counter			<= 8'd1;
+					ff_wait_counter			<= 10'd1;
 					ff_next_state			<= c_state_lmmv;
 					ff_state				<= c_state_wait_counter;
 				end
@@ -1434,7 +1439,7 @@ module vdp_command (
 				end
 				else if( reg_command_high_speed_mode ) begin
 					//	SX, DX のカウントアップが終わるまでの 1clk を待機する
-					ff_wait_counter			<= 8'd1;
+					ff_wait_counter			<= 10'd1;
 					ff_next_state			<= c_state_lmmm;
 					ff_state				<= c_state_wait_counter;
 				end
@@ -1541,7 +1546,7 @@ module vdp_command (
 				end
 				else if( reg_command_high_speed_mode ) begin
 					//	SX, DX のカウントアップが終わるまでの 1clk を待機する
-					ff_wait_counter			<= 8'd1;
+					ff_wait_counter			<= 10'd1;
 					ff_next_state			<= c_state_hmmv;
 					ff_state				<= c_state_wait_counter;
 				end
@@ -1574,7 +1579,7 @@ module vdp_command (
 				end
 				else if( reg_command_high_speed_mode ) begin
 					//	SX, DX のカウントアップが終わるまでの 1clk を待機する
-					ff_wait_counter			<= 8'd1;
+					ff_wait_counter			<= 10'd1;
 					ff_next_state			<= c_state_hmmm;
 					ff_state				<= c_state_wait_counter;
 				end
@@ -1608,7 +1613,7 @@ module vdp_command (
 				end
 				else if( reg_command_high_speed_mode ) begin
 					//	SX, DX のカウントアップが終わるまでの 1clk を待機する
-					ff_wait_counter			<= 8'd1;
+					ff_wait_counter			<= 10'd1;
 					ff_next_state			<= c_state_ymmm;
 					ff_state				<= c_state_wait_counter;
 				end
@@ -1696,7 +1701,7 @@ module vdp_command (
 					ff_state				<= c_state_pre_finish;
 				end
 				else begin
-					ff_wait_counter			<= 8'd1;
+					ff_wait_counter			<= 10'd1;
 					ff_next_state			<= c_state_lrmm;
 					ff_state				<= c_state_wait_counter;
 				end
@@ -1784,12 +1789,12 @@ module vdp_command (
 					ff_state				<= c_state_pre_finish;
 				end
 				else if( ff_bit_count != 3'd0 ) begin
-					ff_wait_counter			<= 8'd1;
+					ff_wait_counter			<= 10'd1;
 					ff_next_state			<= c_state_lfmm_read;
 					ff_state				<= c_state_wait_counter;
 				end
 				else begin
-					ff_wait_counter			<= 8'd1;
+					ff_wait_counter			<= 10'd1;
 					ff_next_state			<= c_state_lfmm;
 					ff_state				<= c_state_wait_counter;
 				end
@@ -1799,7 +1804,7 @@ module vdp_command (
 			c_state_wait_rdata_en: begin
 				//	Wait until the results of the lead request arrive.
 				if( w_cache_vram_rdata_en ) begin
-					if( reg_command_high_speed_mode || ff_wait_count == 6'd0 ) begin
+					if( reg_command_high_speed_mode || ff_wait_count == 8'd0 ) begin
 						//	Activate cache flush and wait for it to complete.
 						ff_state				<= ff_next_state;
 						ff_cache_flush_start	<= (ff_next_state == c_state_finish);
@@ -1816,8 +1821,8 @@ module vdp_command (
 			c_state_wait_counter: begin
 				ff_cache_vram_valid		<= 1'b0;
 				ff_count_valid			<= 1'b0;
-				ff_wait_counter			<= ff_wait_counter - 8'd1;
-				if( ff_wait_counter == 8'd0 ) begin
+				ff_wait_counter			<= ff_wait_counter - 10'd1;
+				if( ff_wait_counter == 10'd0 ) begin
 					ff_state				<= ff_next_state;
 					ff_cache_flush_start	<= (ff_next_state == c_state_finish);
 				end

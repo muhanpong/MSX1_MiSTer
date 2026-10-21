@@ -13,7 +13,7 @@ build() {  # name ph defines...
         -Wno-CASEINCOMPLETE -Wno-PINCONNECTEMPTY -Wno-MULTIDRIVEN -Wno-BLKANDNBLK -Wno-UNOPTFLAT \
         "$@" ${XDEF:-} -GRELEASE_PH=$ph --top-module tb -Mdir "$O/$n" -o tb \
         $R/rtl/peripheral/sdram_tdm.sv $HERE/../sdram_tdm/sdram_chk.sv $R/rtl/video/v9968_link.sv \
-        $R/rtl/video/v9968/*.v $HERE/tb_v9968_vram.sv > "$O/$n.build.log" 2>&1
+        $R/rtl/video/v9968/*.v $R/rtl/video/v9968_cmdwait.sv $HERE/tb_v9968_vram.sv > "$O/$n.build.log" 2>&1
     [ -x "$O/$n/tb" ] || echo "BUILD FAIL $n: $(grep -m2 %Error "$O/$n.build.log")"
 }
 for ph in $(seq 0 11); do build p$ph $ph & done; wait

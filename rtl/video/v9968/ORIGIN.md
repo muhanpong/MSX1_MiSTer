@@ -17,3 +17,27 @@ Two files differ from upstream; ORIGIN.md5 keeps the upstream sums, so `md5sum -
   level 0 = no scanlines (upstream has_scanline = 0); interlace handling unchanged when level != 0.
 - `vdp.v`: new input port `scanline_level[1:0]`, passed to vdp_video_out.
 Driven from the OSD "Scandoubler Fx" (MSX1.sv: CRT 25/50/75% -> 1/2/3, others 0).
+
+## Local change (2026-10-22, bug): sprite request level held across a display-off
+
+- `vdp_sprite_select_visible_planes.v`: in the hold branch (display off / outside the active
+  area) `ff_vram_valid` is now cleared.  Upstream holds it: a request set on the clock before
+  R#1 turns the display off (2 of 128 clocks) stays asserted until the display is on again,
+  and `vdp_vram_interface` issues the sprite request before the command / CPU paths on every
+  slot, so a command that reads VRAM (LRMM, LMMM, ...) waits for data for ever and the VDP
+  freezes.  Found by the openMSX-V9968 trace replay (sim/v9968_replay) of SUPER CAT /
+  COASTAL FLIGHT (first LRMM after `R#1=00`); reproduced on its own in sim/v9968_vram
+  (`+cmd=3 +demo=1 +ct55=1 +offat=29` and `125`: STILL RUNNING; the other 126 offsets
+  finish in 12.66 ms).  On the board the same ROM runs 126 times out of 128.  Worth
+  reporting upstream (hra1129/V9968_Cartridge).
+
+## Local change (2026-10-22, user request): per-command waits from outside (V9938 option)
+
+- `vdp_command.v`: the twelve `c_wait_*` localparams (all 40) are now 8-bit slices of a new
+  input `cmd_wait[95:0]`; `ff_wait_count` 6 -> 8 bits and `ff_wait_counter` 8 -> 10 bits so
+  waits above 63 fit.  `vdp.v`: new input `cmd_wait`, passed through.
+- The values come from `rtl/video/v9968_cmdwait.sv`: 40 everywhere (bit-identical to
+  upstream; checked: the 256x128 HMMM takes 1014.61 lines before and after) or, with the
+  OSD "VDP command speed: V9938" (status[127]), a table calibrated per command to openMSX's
+  V9938 (sim/v9968_vram +wl=0..6: 0.970-1.007 x; Go Figure's boot HMMM 269.1 lines, pass
+  boundary 259.5).  HS=1 untouched.  Not for upstream: it changes the chip's defined speed.

@@ -323,6 +323,7 @@ wire      [64:0] rtc;
 //[72]    SLOT B sub-slots On/Off
 //[84:73] SLOT A sub-slot 0..3 device, 3 bits each (None,ROM,SCC,SCC+,FM-PAC,GameMaster2)
 //[96:85] SLOT B sub-slot 0..3 device, 3 bits each (GameMaster2 never on B)
+//[127]   V9968 build: VDP command speed at HS=0, 0 = V9968 (upstream), 1 = V9938 (v9968_cmdwait)
 //[117]   retired 2026-09-28 (was "Turbo R features", OSD-global).  The turbo R
 //        hardware now follows the loaded pack: bios_config.ver == 3.
 `include "build_id.v" 
@@ -418,6 +419,11 @@ localparam CONF_STR = {
    "P1O[40],Vertical Crop,No,Yes;",
    "P1O[41],Border,No,Yes;",
    "P1O[42],V9958,No,Yes;",
+`ifdef MSX_V9968
+   //  V9968 build: normal-speed (HS=0) VDP commands at the V9938's speed, for software that
+   //  times the VDP (Go Figure: "Abnormal fast VDP").  Never used before, so saved .CFG = 0.
+   "P1O[127],VDP command speed,V9968,V9938;",
+`endif
    //  How long the CPU is held between two VDP port accesses while NextZ80 owns
    //  the bus.  A real turbo R waits 8.66 us; this core used to wait 1.49 us,
    //  which compressed ASO's 24-write split-screen block from 3.4 raster lines
@@ -770,6 +776,7 @@ wire        v99_reset_n, v99_go, v99_tdm_run, v99_video;
 wire  [1:0] v99_scanline = (status[5:3] == 3'd3) ? 2'd1 :
                            (status[5:3] == 3'd4) ? 2'd2 :
                            (status[5:3] == 3'd5) ? 2'd3 : 2'd0;
+wire        v99_cmd_v9938 = status[127];   // OSD: HS=0 command waits of the V9938 (v9968_cmdwait)
 wire  [3:0] v99_tdm_ph;
 wire        v99_req, v99_we, v99_grant, v99_rvalid;
 wire [15:0] v99_addr; wire [31:0] v99_wdata, v99_rdata; wire [3:0] v99_be;
@@ -1231,7 +1238,7 @@ msx MSX
    .v99_vram_address(v99_vram_address), .v99_vram_write(v99_vram_write), .v99_vram_valid(v99_vram_valid),
    .v99_vram_wdata(v99_vram_wdata), .v99_vram_wdata_mask(v99_vram_wdata_mask),
    .v99_vram_rdata(v99_vram_rdata), .v99_vram_rdata_en(v99_vram_rdata_en),
-   .v99_late_cnt(v99_late_cnt), .v99_video(v99_video), .v99_scanline(v99_scanline),
+   .v99_late_cnt(v99_late_cnt), .v99_video(v99_video), .v99_scanline(v99_scanline), .v99_cmd_v9938(v99_cmd_v9938),
 `endif
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),

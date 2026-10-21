@@ -74,6 +74,11 @@ module v9968_link #(
         else if (tdm_ph == 4'(RELEASE_PH)) rel <= 1'b1;
     end
     always_ff @(posedge clk_vdp) vdp_reset_n <= rel;
+    //  clk_vdp phase within the 8-clock TDM frame, counted from the reset release:
+    //  the frame boundary that samples v_req follows one fixed value of it (GRID_PH,
+    //  measured in sim/v9968_replay).  Exposed for the benches.
+    logic [2:0] ph = 3'd0;
+    always_ff @(posedge clk_vdp) if (!vdp_reset_n) ph <= 3'd0; else ph <= ph + 3'd1;
 
     //  ── the port: wires both ways ─────────────────────────────────────────
     assign v_req   = vram_valid;

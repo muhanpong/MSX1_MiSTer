@@ -65,6 +65,7 @@ module tb;
    logic c21 = 1'b0;
    int   g194 = 0;
    initial v99_scanline = 2'd0;              // msx input (OSD scanlines); video is not checked here
+   initial v99_cmd_v9938 = 1'b0;             // msx input (OSD command speed): upstream waits
    initial begin
       clk_sdram = 1'b0; clk_vdp = 1'b0; c21 = 1'b0;
       forever begin

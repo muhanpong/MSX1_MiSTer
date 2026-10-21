@@ -38,6 +38,15 @@ module tb #(parameter int RELEASE_PH = 0);
         void'($value$plusargs("hs=%d", hs));      // V9968 high-speed command mode (force_highspeed)
         void'($value$plusargs("scr=%d", scr));    // SCREEN 5, 7 or 8
         void'($value$plusargs("scan=%d", scan));  // scanline_level 0..3 (MSX1 core change)
+        void'($value$plusargs("sp3=%d", sp3));    // R#20 SP3 (sprite mode 3) in the +cmd=3 test
+        void'($value$plusargs("demo=%d", demo));  // +cmd=3 with SUPER CAT's exact registers (oracle trace), overrides below
+        void'($value$plusargs("r1=%h", r1)); void'($value$plusargs("r20=%h", r20)); void'($value$plusargs("r21=%h", r21));
+        void'($value$plusargs("r25=%h", r25)); void'($value$plusargs("r8=%h", r8));
+        void'($value$plusargs("sat=%s", satf)); void'($value$plusargs("satms=%d", satms));   // SP3 sprite test: SAT bytes -> 10000h, display on
+        void'($value$plusargs("satpre=%d", satpre));
+        void'($value$plusargs("ct55=%d", ct55));
+        void'($value$plusargs("offat=%d", offat));
+        void'($value$plusargs("wl=%d", wl));          // 0..6: the seven V9938-referenced workloads of rtl/video/VDP/sim/tb_vdpcmd7.vhd    // >=0: display on 20 ms, then R#1=00 lands offat clk_vdp after the selector's (phase 2, sub 0) edge, then the LRMM      // 1: sprite colour table 0FE00h..0FFFFh = 55h and SAT 10000h..1007Fh = 0 (the oracle's VRAM at the hang)  // 1: write the SAT bytes before the command, no display change (replay's exact state)
     end
 
     //  ── SDRAM controller + model ──────────────────────────────────────────
@@ -87,7 +96,8 @@ module tb #(parameter int RELEASE_PH = 0);
 
     logic [2:0] bus_address = 0; logic bus_ioreq = 0, bus_write = 0, bus_valid = 0;
     logic [7:0] bus_wdata = 0; wire bus_ready, bus_rdata_en; wire [7:0] bus_rdata;
-    int scan = 0;
+    string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1;
+    int scan = 0, sp3 = 0, demo = 0, r1 = 0, r20 = 8'h1F, r21 = 8'h3A, r25 = 3, r8 = 8;
     wire d_hs, d_en; wire [7:0] d_r, d_g, d_b;
     //  scanlines: the sum of r+g+b over displayed pixels per line parity (lines counted
     //  at each hsync fall); the ratio dim/bright parity should be 1 - scan/4
@@ -101,6 +111,24 @@ module tb #(parameter int RELEASE_PH = 0);
         $display("SCANLINE level %0d: line sums %0d / %0d, ratio %.3f (want %.3f)", scan, sl_sum[0], sl_sum[1],
                  real'(sl_sum[0] < sl_sum[1] ? sl_sum[0] : sl_sum[1]) / real'(sl_sum[0] < sl_sum[1] ? sl_sum[1] : sl_sum[0]),
                  1.0 - scan / 4.0);
+    //  command waits (vdp_command.v): +w=a,b,...(12, order hmmc ymmm hmmm hmmv lmmc lmcm lmmm
+    //  lmmv line srch pset point) or +v9938=1 for rtl/video/v9968_cmdwait.sv's table; default 40s
+    logic [95:0] cmdw; int v9938 = 0; wire [95:0] cmdw_tab;
+    v9968_cmdwait u_cw (.v9938(1'b1), .cmd_wait(cmdw_tab));
+    initial begin
+        string ws; int vals [12]; int n = 0, v = 0; bit any = 0;
+        cmdw = {12{8'd40}};
+        void'($value$plusargs("v9938=%d", v9938));
+        if (v9938) cmdw = cmdw_tab;
+        if ($value$plusargs("w=%s", ws)) begin
+            foreach (ws[i]) begin
+                if (ws[i] >= "0" && ws[i] <= "9") begin v = v * 10 + (ws[i] - "0"); any = 1; end
+                else if (any) begin vals[n++] = v; v = 0; any = 0; end
+            end
+            if (any) vals[n++] = v;
+            for (int i = 0; i < 12; i++) cmdw[95 - 8*i -: 8] = 8'(vals[i]);
+        end
+    end
     vdp vdp9968 (
         .reset_n(vdp_reset_n), .clk(clk_vdp), .initial_busy(1'b0),
         .bus_address(bus_address), .bus_ioreq(bus_ioreq), .bus_write(bus_write), .bus_valid(bus_valid),
@@ -112,7 +140,7 @@ module tb #(parameter int RELEASE_PH = 0);
         .display_hs(d_hs), .display_vs(), .display_en(d_en), .display_r(d_r), .display_g(d_g), .display_b(d_b),
         .force_highspeed(hs != 0),
         .ext_cmd_wr(1'b0), .ext_cmd_num(6'd0), .ext_cmd_data(8'd0), .ext_cmd_ce(),
-        .scanline_level(2'(scan)),
+        .scanline_level(2'(scan)), .cmd_wait(cmdw),
         .button(2'b00),
         .pulse0(), .pulse1(), .pulse2(), .pulse3(), .pulse4(), .pulse5(), .pulse6(), .pulse7());
 
@@ -268,6 +296,126 @@ module tb #(parameter int RELEASE_PH = 0);
         //  (HMMV over the whole 256x212 page, re-issued every 2 ms) -- its VRAM writes take
         //  every slot the screen leaves
         mon_on = 1;
+        //  +wl=K: tb_vdpcmd7's workloads (SCREEN5, display + sprites on, 192 lines), timed in
+        //  scanlines (63.556 us) against openMSX 21.0-245: HMMV 722.18, HMMM 1466.82, LMMV 1476.01,
+        //  LMMM 1744.90, YMMM 1204.82, LINE x32 897.35, SRCH x32 670.97.  HMMV runs first (fills y=128).
+        if (wl >= 0) begin
+            int blk [7][15] = '{
+                '{0,0, 0,0, 0,0, 128,0, 0,1, 128,0, 238,0, 8'hC0},
+                '{0,0, 128,0, 0,0, 0,1, 0,1, 128,0, 0,0, 8'hD0},
+                '{0,0, 0,0, 0,0, 128,0, 0,1, 64,0, 14,0, 8'h80},
+                '{0,0, 128,0, 0,0, 0,1, 0,1, 64,0, 0,0, 8'h90},
+                '{0,0, 128,0, 0,0, 0,1, 0,0, 128,0, 0,0, 8'hE0},
+                '{0,0, 0,0, 0,0, 200,0, 255,0, 100,0, 15,0, 8'h70},
+                '{0,0, 128,0, 0,0, 0,0, 0,0, 0,0, 10,0, 8'h60}};
+            string nm [7] = '{"HMMV", "HMMM", "LMMV", "LMMM", "YMMM", "LINE", "SRCH"};
+            real refl [7] = '{722.18, 1466.82, 1476.01, 1744.90, 1204.82, 897.35, 670.97};
+            logic [7:0] st; longint tot;
+            wreg(9, 8'h00); wreg(8, 8'h08); wreg(1, 8'h60);
+            for (int k = 0; k < 7; k++) if (k == 0 || k == wl || wl == 7) begin
+                tot = 0;
+                for (int r = 0; r < (k >= 5 ? 32 : 1); r++) begin
+                    longint t0;
+                    for (int i = 0; i < 14; i++) wreg(32 + i, 8'(blk[k][i]));
+                    t0 = $time; wreg(46, 8'(blk[k][14]));
+                    wreg(15, 8'h02);
+                    do io(0, 3'd1, 8'h00, st); while (st[0]);
+                    tot += $time - t0;
+                    wreg(15, 8'h00);
+                end
+                $display("WL %s: %0.2f lines (openMSX V9938 %0.2f, ratio %0.3f)", nm[k], real'(tot) / 63556000.0, refl[k], real'(tot) / 63556000.0 / refl[k]);
+            end
+        end
+        //  +cmd=2: LMMM 256x212 copy (reads + writes through the port), +cmd=3: LRMM 256x212
+        //  with the identity vector (V9968 extended command: port-4 unlock, window regs).
+        //  Completion is polled on S#2 CE with a 100 ms limit; the port's unanswered-read
+        //  count during the command is the figure of merit (the link has no backpressure).
+        if (cmd >= 2) begin
+            longint t0; int w, noans0, nrd0, nwr0; logic [7:0] st;
+            if (cmd == 3 && demo) begin
+                //  SUPER CAT / COASTAL FLIGHT's state at its first LRMM (sim/v9968_replay hang)
+                io(1, 3'd4, 8'h00, q);
+                wreg(1, 8'(r1)); wreg(20, 8'(r20)); wreg(21, 8'(r21));
+                wreg(0, 8'h06); wreg(2, 8'h1F); wreg(5, 8'h03); wreg(6, 8'h70); wreg(7, 8'h00); wreg(8, 8'(r8)); wreg(9, 8'h80);
+                wreg(11, 8'h02); wreg(18, 8'h00); wreg(19, 8'h00); wreg(23, 8'h00); wreg(25, 8'(r25)); wreg(26, 8'h00); wreg(27, 8'h00);
+                wreg(51, 8'h00); wreg(52, 8'h00); wreg(53, 8'h00); wreg(54, 8'h04); wreg(55, 8'hFF); wreg(56, 8'h00); wreg(57, 8'hFF); wreg(58, 8'h06);
+                wreg(47, 8'h00); wreg(48, 8'h00); wreg(49, 8'h40); wreg(50, 8'h00);   // vx 0, vy 0.25: 90 deg, zoom 4
+                wreg(32, 8'h9A); wreg(33, 8'h00); wreg(34, 8'h64); wreg(35, 8'h06);   // SX 9Ah, SY 664h
+            end else if (cmd == 3) begin
+                io(1, 3'd4, 8'h00, q);                    // unlock the extended registers
+                wreg(20, 8'((hs ? 8'h01 : 8'h00) | (sp3 ? 8'h08 : 8'h00))); wreg(21, 8'h00);
+                wreg(47, 8'h00); wreg(48, 8'h01); wreg(49, 8'h00); wreg(50, 8'h00);   // vx = 1.0, vy = 0
+                wreg(51, 8'h00); wreg(52, 8'h00); wreg(53, 8'h00); wreg(54, 8'h01);   // window x 0.., y 256..
+                wreg(55, 8'hFF); wreg(56, 8'h00); wreg(57, 8'hFF); wreg(58, 8'h01);   // ..255, ..511
+            end
+            if (!demo) begin wreg(32, 8'h00); wreg(33, 8'h00); wreg(34, 8'h00); wreg(35, 8'h01); end   // SX 0, SY 256
+            if (cmd == 4) begin
+                //  Go Figure's boot calibration (rtl/video/VDP/sim/tb_vdpcmd.vhd): SCREEN5 192 lines,
+                //  display + sprites on, HMMM SX 20,SY 256 -> DX 30,DY 0, NX 28, NY 220 (3080 bytes).
+                //  V9938 reference 251.5 lines; the game needs CE still set at its line-188 check
+                //  (hardware boundary: a 255.8-line HMMM fails, 259.5 passes).
+                wreg(9, 8'h00);
+                wreg(32, 8'd20); wreg(33, 8'h00); wreg(34, 8'h00); wreg(35, 8'h01);
+                wreg(36, 8'd30); wreg(37, 8'h00); wreg(38, 8'h00); wreg(39, 8'h00);
+                wreg(40, 8'd28); wreg(41, 8'h00); wreg(42, 8'd220); wreg(43, 8'h00);
+                wreg(44, 8'h00); wreg(45, 8'h00);
+            end else begin
+            wreg(36, 8'h00); wreg(37, 8'h00); wreg(38, 8'h00); wreg(39, 8'h00);       // DX 0, DY 0
+            wreg(40, 8'h00); wreg(41, 8'h01); wreg(42, 8'hD4); wreg(43, 8'h00);       // NX 256, NY 212
+            wreg(44, 8'h00); wreg(45, 8'h00);
+            end
+            if (ct55) begin
+                wreg(14, 8'h03); io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h7E, q);          // 0FE00h
+                for (int i = 0; i < 512; i++) io(1, 3'd0, 8'h55, q);
+                wreg(14, 8'h04); io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h40, q);          // 10000h
+                for (int i = 0; i < 128; i++) io(1, 3'd0, 8'h00, q);
+            end
+            if (offat >= 0) begin
+                //  the display on with sprites running, then off at a chosen moment of the plane
+                //  selector's 128-clock cycle: the write's second byte (81h) is what lands
+                wreg(1, 8'h40);
+                repeat (20 * 85909) @(posedge clk_vdp);
+                io(1, 3'd1, 8'h00, q);                                     // R#1 value byte
+                @(negedge clk_vdp); wait (vdp9968.u_timing_control.u_sprite.u_select_visible_planes.w_phase == 3'd2 && vdp9968.u_timing_control.u_sprite.u_select_visible_planes.w_sub_phase == 4'd0); @(posedge clk_vdp);
+                repeat (offat) @(posedge clk_vdp);
+                bus_ioreq = 1; bus_address = 3'd1; bus_write = 1; bus_wdata = 8'h81; bus_valid = 1;   // the register byte, raw
+                @(posedge clk_vdp); while (!bus_ready) @(posedge clk_vdp);
+                @(negedge clk_vdp); bus_valid = 0; repeat (2) @(posedge clk_vdp); @(negedge clk_vdp); bus_ioreq = 0; repeat (40) @(posedge clk_vdp);
+                $display("OFFAT %0d: after display off the selector's ff_vram_valid = %0d (display_on %0d)", offat, vdp9968.u_timing_control.u_sprite.u_select_visible_planes.ff_vram_valid, vdp9968.reg_display_on);
+            end
+            if (satpre && satf != "") begin
+                int f, v;
+                f = $fopen(satf, "r");
+                wreg(14, 8'h04); io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h40, q);
+                while ($fscanf(f, "%h", v) == 1) io(1, 3'd0, 8'(v), q);
+                $fclose(f); satf = "";
+            end
+            noans0 = noans; nrd0 = nrd; nwr0 = nwr; t0 = $time;
+            wreg(46, cmd == 3 ? 8'h30 : cmd == 4 ? 8'hD0 : 8'h90);                    // LRMM / HMMM / LMMM, IMP
+            wreg(15, 8'h02);
+            w = 0;
+            do begin repeat (256) @(posedge clk_vdp); w += 256; io(0, 3'd1, 8'h00, st); end while (st[0] && w < 8600000);
+            $display("CMD %s hs=%0d demo=%0d offat=%0d r1=%02h r20=%02h r21=%02h r25=%02h r8=%02h: %s after %0.3f ms = %0.1f lines; port reads %0d (not answered %0d), writes %0d; link dropped %0d off-grid %0d",
+                     cmd == 3 ? "LRMM" : cmd == 4 ? "HMMM-GoFigure" : "LMMM", hs, demo, offat, r1, r20, r21, r25, r8, st[0] ? "STILL RUNNING" : "done", real'($time - t0) / 1e9, real'($time - t0) / 1e9 / 0.063556,
+                     nrd - nrd0, noans - noans0, nwr - nwr0, mon_drop, mon_mis);
+            $display(st[0] ? "CMD RESULT FAIL (did not finish)" : (noans - noans0 == 0 ? "CMD RESULT PASS" : "CMD RESULT FAIL (reads dropped)"));
+            wreg(15, 8'h00);
+            //  +sat=<hex bytes>: SUPER CAT's first sprite attribute upload, then the display on
+            //  (R#1=40h, sprites on) for satms ms: does the SP3 sprite fetch get served by the link?
+            if (satf != "") begin
+                int f, v, n = 0, nrd1, noans1, drop1;
+                f = $fopen(satf, "r");
+                wreg(14, 8'h04); io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h40, q);
+                while ($fscanf(f, "%h", v) == 1) begin io(1, 3'd0, 8'(v), q); n++; end
+                $fclose(f);
+                wreg(1, 8'h40);
+                nrd1 = nrd; noans1 = noans; drop1 = mon_drop;
+                repeat (satms * 85909) @(posedge clk_vdp);
+                $display("SAT test: %0d bytes at 10000h, display on %0d ms: port reads %0d, not answered %0d, link dropped %0d, off-grid %0d",
+                         n, satms, nrd - nrd1, noans - noans1, mon_drop - drop1, mon_mis);
+                $display(noans - noans1 == 0 ? "SAT RESULT PASS" : "SAT RESULT FAIL (sprite reads dropped)");
+            end
+        end
         for (int t = 0; t < ms; t += 2) begin
             if (cmd) begin
                 wreg(36, 8'h00); wreg(37, 8'h00); wreg(38, 8'h00); wreg(39, 8'h00);
