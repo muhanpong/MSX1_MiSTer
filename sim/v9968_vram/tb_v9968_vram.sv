@@ -48,7 +48,7 @@ module tb #(parameter int RELEASE_PH = 0);
     wire [7:0] cd [4];
     sdram_tdm #(.CACHE_LINES(1024)) dut (
         .init(init), .clk(clk_sdram), .mode128(m128[0]), .mode64(1'b0), .v_en(1'b1),
-        .v_go(v_go), .tdm_ph(tdm_ph), .cpu_paced(1'b1),
+        .v_go(v_go), .tdm_ph(tdm_ph), .tdm_run(), .cpu_paced(1'b1),
         .SDRAM_DQ(DQ), .SDRAM_A(A), .SDRAM_DQML(DQML), .SDRAM_DQMH(DQMH), .SDRAM_BA(BA),
         .SDRAM_nCS(nCS), .SDRAM_nWE(nWE), .SDRAM_nRAS(nRAS), .SDRAM_nCAS(nCAS), .SDRAM_CKE(CKE),
         .SDRAM_CLK(SCLK),
@@ -180,12 +180,17 @@ module tb #(parameter int RELEASE_PH = 0);
 
     //  ── CPU bus (clk_vdp) ─────────────────────────────────────────────────
     int cpu_bad = 0, cpu_n = 0;
+    //  CPU bus timing (plan S5, the adapter): clk_vdp from valid to the accepting edge
+    //  (bus_ready), and from acceptance to bus_rdata_en on reads, per port
+    int acc_max [8], rd_max [8], acc_n [8], rd_n [8];
+    int rd_hist [0:15];
     task automatic io(input logic wr, input logic [2:0] port, input logic [7:0] d, output logic [7:0] q);
         @(negedge clk_vdp);
         bus_ioreq = 1; bus_address = port; bus_write = wr; bus_wdata = d; bus_valid = 1;
         begin
             int w = 0;
             do begin @(posedge clk_vdp); w++; end while (!bus_ready && w < 20000);
+            if (w > acc_max[port]) acc_max[port] = w; acc_n[port]++;
             if (!bus_ready) begin
                 //  the V9968 waits for a VRAM answer without a time limit: a read the port
                 //  never answered (or answered off its time) hangs its bus for ever
@@ -201,6 +206,8 @@ module tb #(parameter int RELEASE_PH = 0);
             int w = 0;
             do begin @(posedge clk_vdp); w++; end while (!bus_rdata_en && w < 2000);
             q = bus_rdata;
+            if (w > rd_max[port]) rd_max[port] = w; rd_n[port]++;
+            rd_hist[w / 8 > 15 ? 15 : w / 8]++;
         end
         repeat (4) @(posedge clk_vdp);
         @(negedge clk_vdp); bus_ioreq = 0;
@@ -266,6 +273,12 @@ module tb #(parameter int RELEASE_PH = 0);
         $display("  bad latency %0d, bad data %0d, reads not answered %0d, spurious %0d", bad_lat, bad_data, noans, bad_order);
         $display("  link: dropped (refresh) %0d, off-grid %0d", mon_drop, mon_mis);
         $display("  cpu read-back: %0d of %0d wrong", cpu_bad, cpu_n);
+        for (int pp = 0; pp < 4; pp++)
+            if (acc_n[pp] != 0) $display("  cpu bus port %0d: %0d accesses, accept <= %0d clk_vdp, %0d reads, read data <= %0d clk_vdp after accept",
+                                          pp, acc_n[pp], acc_max[pp], rd_n[pp], rd_max[pp]);
+        $write("  cpu read data latency histogram (8-clock bins):");
+        for (int b = 0; b < 16; b++) if (rd_hist[b]) $write(" %0d-%0d:%0d", b*8, b*8+7, rd_hist[b]);
+        $display("");
         $display("  chip: errors=%0d REFRESH=%0d", chip2.errs, chip2.nref);
 `ifdef TDM_SIM_NO_VCHIP_REFRESH
         $display("  (TDM_SIM_NO_VCHIP_REFRESH: chip errors are the VRAM chip's missing refresh, not judged)");

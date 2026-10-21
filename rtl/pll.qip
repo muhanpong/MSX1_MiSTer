@@ -335,3 +335,7 @@ set_global_assignment -library "pll" -name QIP_FILE [file join $::quartus(qip_pa
 set_global_assignment -entity "pll_0002" -library "pll" -name IP_TOOL_NAME "altera_pll"
 set_global_assignment -entity "pll_0002" -library "pll" -name IP_TOOL_VERSION "17.0"
 set_global_assignment -entity "pll_0002" -library "pll" -name IP_TOOL_ENV "mwpim"
+#  the V9968 build's three-output variant (rtl/pll_v9968.v); unused, and so not built, otherwise
+set_global_assignment -library "pll" -name VERILOG_FILE [file join $::quartus(qip_path) "pll_v9968.v"]
+set_global_assignment -library "pll" -name VERILOG_FILE [file join $::quartus(qip_path) "pll/pll_v9968_0002.v"]
+set_global_assignment -library "pll" -name QIP_FILE [file join $::quartus(qip_path) "pll/pll_v9968_0002.qip"]

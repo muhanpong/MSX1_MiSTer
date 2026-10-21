@@ -5,7 +5,7 @@
 #
 #    sim/fullsys/run_preload.sh <old|tdm|tdm128> <pack.MSX> <ms> [roma.rom mapper] [fw.bin]
 #      tdm128: sdram_tdm in the 128 MB board map (two chips), sdram_size 3
-#      env: OUT=<dir>  MOONSOUND=1 (OSD MoonSound on)  EXTRA="+plusargs"  XDEFS="-D..."  VFLAGS="--threads 4"
+#      env: OUT=<dir>  V9968=1 (MSX_V9968 build)  MOONSOUND=1 (OSD MoonSound on)  EXTRA="+plusargs"  XDEFS="-D..."  VFLAGS="--threads 4"
 #  Validated against a normal upload run: see docs/handoff_20261013b_tdm_boot.md 7.
 set -eu
 cd "$(dirname "$0")/../.."
@@ -31,6 +31,13 @@ FILES=$(grep -v 'rtl/peripheral/sdram\(_tdm\)\?\.sv$' "$GEN/filelist.txt" | grep
 DEFS="-DPRELOAD -DPRELOAD_SVH=\"$OUT/pre.state.svh\""
 [ "$MODE" = tdm ] && DEFS="$DEFS -DTDM"
 [ "$MODE" = tdm128 ] && DEFS="$DEFS -DTDM128"
+#  V9968=1 (plan S5): the MSX_V9968 build -- the V9968 instead of the ESE VDP, its VRAM in
+#  sdram_tdm's V slot (needs tdm / tdm128)
+if [ -n "${V9968:-}" ]; then
+   FILES=$(echo "$FILES" | tr ' ' '\n' | grep -v '/gen/vdp\.v$' | tr '\n' ' ')
+   FILES="$FILES $(ls rtl/video/v9968/*.v | tr '\n' ' ') rtl/video/v9968_link.sv rtl/video/v9968_bus.sv"
+   DEFS="$DEFS -DMSX_V9968"
+fi
 DEFS="$DEFS ${XDEFS:-}"      # extra defines (negative controls: -DTDM128_MUT_MAP, -DIOLOG_MUT)
 verilator --binary --timing --public-flat-rw \
    -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL \

@@ -759,19 +759,47 @@ wire  [2:0] cpu_speed_osd = (msx_turbo_req & ~turbor_en & cpu_speed_sel == 3'd0)
 //  step.  Back on T80s the OSD speed returns the same way.
 wire        use_nz;                 // from msx.sv: NextZ80 owns the bus
 wire        cpu_paced;              // from msx.sv: 0 = stock T80s (sdram_tdm learns its T-state grid)
+`ifdef MSX_V9968
+//  The V9968 build (plan S5): msx.sv's V9968 VRAM port -> v9968_link -> sdram_tdm's V slot.
+wire [17:2] v99_vram_address; wire v99_vram_write, v99_vram_valid, v99_vram_rdata_en;
+wire [31:0] v99_vram_wdata, v99_vram_rdata; wire [3:0] v99_vram_wdata_mask;
+wire        v99_reset_n, v99_go, v99_tdm_run, v99_video;
+wire  [3:0] v99_tdm_ph;
+wire        v99_req, v99_we, v99_grant, v99_rvalid;
+wire [15:0] v99_addr; wire [31:0] v99_wdata, v99_rdata; wire [3:0] v99_be;
+wire [15:0] v99_late_cnt, v99_mon_drop, v99_mon_mis;
+`else
+wire        v99_video = 1'b0;
+`endif
 wire  [2:0] cpu_speed = use_nz ? 3'd4 : cpu_speed_osd;
 wire        cpu_turbo;              // driven by clock.sv from the latched speed
 wire  [2:0] cpu_speed_q;            // latched speed, back out of clock.sv
 wire        cpu_bus_idle;           // from msx.sv, gates the speed latch
 wire        ce_cpu;
+//  MSX_V9968 (build option): the V9968 VDP runs on clk_vdp = 85.909080 MHz, 2/3 of
+//  clk_sdram and 4 x clk21m, from the same VCO at phase 0 (rtl/pll_v9968.v).
+wire clk_vdp;
+`ifdef MSX_V9968
+pll_v9968 pll
+(
+   .refclk(CLK_50M),
+   .rst(0),
+   .outclk_0(clk_sdram), //128.863620
+   .outclk_1(clk21m),    //21.477270
+   .outclk_2(clk_vdp),   //85.909080
+   .locked(locked_sdram)
+);
+`else
+assign clk_vdp = 1'b0;
 pll pll
 (
    .refclk(CLK_50M),
    .rst(0),
-   .outclk_0(clk_sdram), //85.909090
+   .outclk_0(clk_sdram), //128.863620 (the comment used to say 85.909090)
    .outclk_1(clk21m),    //21.477270
    .locked(locked_sdram)
 );
+`endif
 
 clock clock
 (
@@ -1192,6 +1220,13 @@ msx MSX
    .r800_vdpw(status[38:36]),
    .use_nz   (use_nz),
    .cpu_paced_o(cpu_paced),
+`ifdef MSX_V9968
+   .clk_vdp(clk_vdp), .v99_reset_n(v99_reset_n),
+   .v99_vram_address(v99_vram_address), .v99_vram_write(v99_vram_write), .v99_vram_valid(v99_vram_valid),
+   .v99_vram_wdata(v99_vram_wdata), .v99_vram_wdata_mask(v99_vram_wdata_mask),
+   .v99_vram_rdata(v99_vram_rdata), .v99_vram_rdata_en(v99_vram_rdata_en),
+   .v99_late_cnt(v99_late_cnt), .v99_video(v99_video),
+`endif
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),
    .cpu_bus_idle(cpu_bus_idle),
@@ -1360,16 +1395,22 @@ logic wide;
 wire  vcrop_en, vga_de;
 wire  [1:0] ar;
 
+`ifdef MSX_V9968
+assign CLK_VIDEO   = clk_vdp;     // the TMS9918 is re-timed into it in msx.sv
+`else
 assign CLK_VIDEO   = clk21m;
+`endif
 assign VGA_SL      = status[5:3] > 2 ? status[4:3] - 2'd2 : 2'd0;
 assign vcrop_en    = status[40];
 assign ar          = status[2:1];
-wire scandoubler = status[5:3] || forced_scandoubler;
+//  the V9968's video is 31 kHz already: no scan doubler, no 240-line crop
+wire scandoubler = (status[5:3] || forced_scandoubler) && !v99_video;
 
 always @(posedge CLK_VIDEO) begin
 	vcrop <= 0;
 	wide <= 0;
-	if(HDMI_WIDTH >= (HDMI_HEIGHT + HDMI_HEIGHT[11:1]) && !scandoubler) begin
+	if (v99_video) ;
+	else if(HDMI_WIDTH >= (HDMI_HEIGHT + HDMI_HEIGHT[11:1]) && !scandoubler) begin
 		if(HDMI_HEIGHT == 480)  vcrop <= 240;
 		if(HDMI_HEIGHT == 600)  begin vcrop <= 200; wide <= vcrop_en; end
 		if(HDMI_HEIGHT == 720)  vcrop <= 240;
@@ -1614,6 +1655,17 @@ wire        upload_active = upload_ram_ce & upload_sdram_rq;
 //  The CPU's SDRAM ch2 request is the raw decode for both cores: T80s leads MREQ
 //  with its address, and nz_bus gives NextZ80 a full clk21m of address lead.
 wire ch2_req_cpu = sdram_ce;
+`ifdef MSX_V9968
+v9968_link #(.RELEASE_PH(5)) v99_link (       // RELEASE_PH 5: sim/v9968_vram (one of 12 works)
+   .clk_sdram(clk_sdram), .clk_vdp(clk_vdp), .rst(reset), .sdram_run(v99_tdm_run),
+   .tdm_ph(v99_tdm_ph), .v_go(v99_go), .vdp_reset_n(v99_reset_n),
+   .vram_address(v99_vram_address), .vram_write(v99_vram_write), .vram_valid(v99_vram_valid),
+   .vram_wdata(v99_vram_wdata), .vram_wdata_mask(v99_vram_wdata_mask),
+   .vram_rdata(v99_vram_rdata), .vram_rdata_en(v99_vram_rdata_en),
+   .v_req(v99_req), .v_we(v99_we), .v_addr(v99_addr), .v_wdata(v99_wdata), .v_be(v99_be),
+   .v_grant(v99_grant), .v_rdata(v99_rdata), .v_rvalid(v99_rvalid),
+   .mon_drop(v99_mon_drop), .mon_mis(v99_mon_mis));
+`endif
 // log_clear: pulse on new ROM staging start -> reset change-log journal per game
 reg         upload_active_q;
 always @(posedge clk21m) upload_active_q <= upload_active;
@@ -1640,8 +1692,14 @@ sdram_tdm sdram
    .init(~locked_sdram),
    .clk(clk_sdram),
    .mode128(sdram_size == 2'd3), .mode64(sdram_size == 2'd2),
-   .v_en(1'b0), .v_go(1'b1), .tdm_ph(), .cpu_paced(cpu_paced), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
+`ifdef MSX_V9968
+   .v_en(1'b1), .v_go(v99_go), .tdm_ph(v99_tdm_ph), .tdm_run(v99_tdm_run), .cpu_paced(cpu_paced),
+   .v_req(v99_req), .v_we(v99_we), .v_addr(v99_addr), .v_wdata(v99_wdata), .v_be(v99_be),
+   .v_grant(v99_grant), .v_rdata(v99_rdata), .v_rvalid(v99_rvalid),
+`else
+   .v_en(1'b0), .v_go(1'b1), .tdm_ph(), .tdm_run(), .cpu_paced(cpu_paced), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
    .v_grant(), .v_rdata(), .v_rvalid(),
+`endif
 
    .ch1_dout(nvbak_sdram_dout),
    .ch1_din (upload_active ? upload_ram_din  : dump_active ? dump_sdram_din  : nvbak_sdram_din),

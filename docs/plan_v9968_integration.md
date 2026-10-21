@@ -129,6 +129,15 @@ V9968 읽기 데이터는 핸드셰이크 뒤 펄스로 온다. 표준 속도 Z8
 | S7 | 빌드·타이밍(85.909 / 42.95 / 128.86 세 도메인 STA, relations), 실기 | TIMING PASS 후 실기 1회(결론을 가를 때만) |
 | S8 | Geo3D 시연 | Geo3D 데모 ROM 실기 |
 
+S5 진행(2026-10-21, 커밋 안의 증거 `docs/evidence_20261020/v9968_s5_vprobe.txt`): 별도 Quartus 리비전
+`MSX1_V9968`(`tools/sdram128/mk_v9968_qsf.sh`, `MSX_V9968=1`; V9968과 ESE VDP가 둘 다 모듈 `vdp`라 한 리비전에 못 넣음),
+`rtl/video/v9968_bus.sv`(CPU I/O 98h-9Fh → V9968 호스트 버스, 표준 CPU는 WAIT 없음, 핸드셰이크 CPU만 WAIT),
+`pll_v9968`(128.86 / 85.909 / 21.48). fullsys: BIOS 부팅은 600 ms 넘게 RAM 검사에 머물러(ESE도 같음) 판정에 못 쓰고,
+BIOS 자리에 VPROBE(`sim/fullsys/vprobe/`)를 넣어 검사: 포트 98h VRAM, HMMV + CE, 화면 켠 VBLANK 2회 — 오류 0,
+VRAM 읽기 37,988건 전부 +8 clk_vdp, 데이터 불일치 0, 늦은 CPU 읽기 0. 음성 대조 RELEASE_PH 6: 첫 읽기 무응답(FAIL).
+남은 것: BIOS 로고(긴 런), openMSX VRAM 대조(S6과 함께), 영상 경로(CLK_VIDEO, 스캔더블러 끔)는 sim이 보지 않음 — 빌드와 실기 몫.
+인터럽트: V9968 int_n → clk21m 한 번 등록 → INT(msx.sv). VPROBE는 인터럽트를 끄고 돌아 이 경로는 아직 sim에서 안 봄.
+
 memory_upload의 VRAM 영역 한도도 S5에서 같이 정한다(sdram_tdm_design.md 13절: v_en=1이면 뱅크 3 G 접근이
 영원히 거절되어 업로드가 멈춤. 32 MB에서 카트 둘 + MoonSound면 24.42 MB > 24 MB).
 

@@ -49,6 +49,7 @@ module sdram_tdm
     //  T-state grid is learnt and used (S4); a change clears what was learnt.
     input             cpu_paced,
     output     [3:0]  tdm_ph,      // the frame cycle 0..11 (v9968_link: VDP reset phase)
+    output            tdm_run,     // frames are running (v9968_link holds the VDP until then)
 
     inout      [15:0] SDRAM_DQ,
     output reg [12:0] SDRAM_A,
@@ -218,6 +219,7 @@ endfunction
 // ─── frame ─────────────────────────────────────────────────────────────────
 reg  [3:0] ph = 4'd0;            // the frame cycle (kept for benches)
 assign tdm_ph = ph;
+assign tdm_run = run;
 reg [11:0] ps = 12'd1;           // the same, one-hot: every decode below is one bit
 reg        run = 1'b0;           // init sequence done
 

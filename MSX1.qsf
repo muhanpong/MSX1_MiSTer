@@ -316,6 +316,9 @@ set_instance_assignment -name IO_STANDARD "3.3-V LVTTL" -to BTN_*
 set_instance_assignment -name WEAK_PULL_UP_RESISTOR ON -to BTN_*
 source files.qip
 set_global_assignment -name QIP_FILE rtl/files.qip
+#  the VDPs: V9958 (ESE VDP) + TMS9918.  The V9968 build (MSX1_V9968.qsf, made from this
+#  file by tools/sdram128/mk_v9968_qsf.sh) takes rtl/video/video_v9968.qip instead.
+set_global_assignment -name QIP_FILE rtl/video/video.qip
 set_global_assignment -name SDC_FILE MSX1.sdc
 set_global_assignment -name SDC_FILE tools/sdram128/sdram_io.sdc
 set_global_assignment -name SYSTEMVERILOG_FILE MSX1.sv

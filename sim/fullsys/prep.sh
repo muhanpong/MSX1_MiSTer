@@ -193,6 +193,9 @@ def scan(qip):
         if kind == "QIP_FILE": scan(p)
         elif kind != "VHDL_FILE": files.append(p)
 os.chdir(root); scan("files.qip")
+#  video.qip is listed by MSX1.qsf, not files.qip (MSX1_V9968.qsf lists video_v9968.qip
+#  instead: the V9968 and the ESE VDP both name a module `vdp`)
+scan("rtl/video/video.qip")
 sub = {"rtl/peripheral/wd1793.sv": out + "/sv/wd1793.sv"}
 files = [f for f in files if f != "MSX1.sv"]           # MiSTer top: not the machine
 print("rtl/package.sv")

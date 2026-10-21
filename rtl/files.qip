@@ -1,4 +1,3 @@
-set_global_assignment -name QIP_FILE           [file join $::quartus(qip_path) video/video.qip                       ]
 set_global_assignment -name QIP_FILE           [file join $::quartus(qip_path) sound/sound.qip                       ]
 #  T80s + NextZ80 with the run-time hand-over (cpu/cpuswap).  A-Z80 (cpu/az80) is
 #  no longer built; its sources stay in the tree.

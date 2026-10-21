@@ -19,7 +19,9 @@ module tb;
    //  needed.  Here they are edge-aligned, which is what sdram.sv's own bench
    //  uses and is enough for functional work.
    //  clk_sdram and clk21m are msx ports: declared in msx_ports.svh, driven here.
+`ifndef MSX_V9968
    initial clk_sdram = 1'b0;
+`endif
    //  -DTDMCLK (run_tdm.sh CLKONLY=1): the TDM clocks with sdram.sv and its CL2 chip
    //  model -- separates the 6:1 clock from the controller.
    //  -DTDM128 (run_preload.sh tdm128): sdram_tdm in its 128 MB board map (two chips,
@@ -34,6 +36,14 @@ module tb;
 `ifdef RPROBE
  `define PROBEPATCH
 `endif
+`ifdef VPROBE
+ `define PROBEPATCH
+`endif
+`ifdef MSX_V9968
+ `ifndef TDM
+  `define TDM
+ `endif
+`endif
 `ifdef TDM
  `define TDM_CLOCK
 `endif
@@ -45,15 +55,27 @@ module tb;
 `ifdef TDMCLK
  `define TDM_CLOCK
 `endif
-`ifndef TDM_CLOCK
-   localparam real TCK_NS = 11.64;
-   always #5.820 clk_sdram = ~clk_sdram;       // 85.909 MHz: 11.64 ns period
-                                              // (1ps resolution -- at 1ns the
-                                              //  half period rounds to 500x slow)
-   logic [1:0] cdiv = 2'd0;
-   always @(posedge clk_sdram) cdiv <= cdiv + 2'd1;
-   assign clk21m = cdiv[1];
-`else
+`ifdef MSX_V9968
+   //  The V9968 build: clk_sdram 128.86, clk_vdp 85.909 (= 2/3), clk21m (= 1/6) from one
+   //  1.94 ns grid in one process, so all three move in the same time step on the edges
+   //  they share, as from the PLL.  (clk21m used to be a register on clk_sdram: on a
+   //  shared edge its logic then saw the clk_vdp registers' new values -- clk_vdp ->
+   //  clk21m paths a step early.)
+   localparam real TCK_NS = 7.76;
+   logic c21 = 1'b0;
+   int   g194 = 0;
+   initial begin
+      clk_sdram = 1'b0; clk_vdp = 1'b0; c21 = 1'b0;
+      forever begin
+         #1.940;
+         g194 = (g194 == 23) ? 0 : g194 + 1;
+         clk_sdram = (g194 % 4) < 2;
+         clk_vdp   = (g194 % 6) < 3;
+         c21       = g194 < 12;
+      end
+   end
+   assign clk21m = c21;
+`elsif TDM_CLOCK
    //  sdram128 study: clk_sdram 128.86 MHz, clk21m = clk_sdram / 6 (run_tdm.sh)
    localparam real TCK_NS = 7.76;
    always #3.880 clk_sdram = ~clk_sdram;
@@ -63,6 +85,14 @@ module tb;
       if (cdiv6 == 2'd2) begin cdiv6 <= 2'd0; c21 <= ~c21; end
       else cdiv6 <= cdiv6 + 2'd1;
    assign clk21m = c21;
+`else
+   localparam real TCK_NS = 11.64;
+   always #5.820 clk_sdram = ~clk_sdram;       // 85.909 MHz: 11.64 ns period
+                                              // (1ps resolution -- at 1ns the
+                                              //  half period rounds to 500x slow)
+   logic [1:0] cdiv = 2'd0;
+   always @(posedge clk_sdram) cdiv <= cdiv + 2'd1;
+   assign clk21m = cdiv[1];
 `endif
 
 `include "msx_ports.svh"
@@ -421,6 +451,28 @@ module tb;
    wire  [15:0] dq_o, dq_i;
    wire         dq_oe, SDRAM_DQML, SDRAM_DQMH, SDRAM_nCS, SDRAM_nWE, SDRAM_nRAS, SDRAM_nCAS, SDRAM_CKE;
 
+`ifdef MSX_V9968
+   //  The V9968 build (plan S5): msx.sv's V9968 VRAM port -> v9968_link -> the V slot,
+   //  as MSX1.sv wires it.
+   wire        v99_go, v99_tdm_run;
+   wire  [3:0] v99_tdm_ph;
+   wire        v99_req, v99_we, v99_grant, v99_rvalid;
+   wire [15:0] v99_addr; wire [31:0] v99_wdata, v99_rdata; wire [3:0] v99_be;
+   wire [15:0] v99_mon_drop, v99_mon_mis;
+`ifndef V99_RELPH
+ `define V99_RELPH 5
+`endif
+   //  -DV99_RELPH=n: a negative control (sim/v9968_vram: only phase 5 works)
+   v9968_link #(.RELEASE_PH(`V99_RELPH)) v99_link (
+      .clk_sdram(clk_sdram), .clk_vdp(clk_vdp), .rst(reset), .sdram_run(v99_tdm_run),
+      .tdm_ph(v99_tdm_ph), .v_go(v99_go), .vdp_reset_n(v99_reset_n),
+      .vram_address(v99_vram_address), .vram_write(v99_vram_write), .vram_valid(v99_vram_valid),
+      .vram_wdata(v99_vram_wdata), .vram_wdata_mask(v99_vram_wdata_mask),
+      .vram_rdata(v99_vram_rdata), .vram_rdata_en(v99_vram_rdata_en),
+      .v_req(v99_req), .v_we(v99_we), .v_addr(v99_addr), .v_wdata(v99_wdata), .v_be(v99_be),
+      .v_grant(v99_grant), .v_rdata(v99_rdata), .v_rvalid(v99_rvalid),
+      .mon_drop(v99_mon_drop), .mon_mis(v99_mon_mis));
+`endif
 `ifndef TDM
    sdram u_sdram
    (
@@ -429,8 +481,14 @@ module tb;
    sdram_tdm u_sdram
    (
       .init(init_tb), .clk(clk_sdram), .mode128(`ifdef TDM128 1'b1 `else 1'b0 `endif), .mode64(1'b0),
-      .v_en(1'b0), .v_go(1'b1), .tdm_ph(), .cpu_paced(cpu_paced_o), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
+`ifdef MSX_V9968
+      .v_en(1'b1), .v_go(v99_go), .tdm_ph(v99_tdm_ph), .tdm_run(v99_tdm_run), .cpu_paced(cpu_paced_o),
+      .v_req(v99_req), .v_we(v99_we), .v_addr(v99_addr), .v_wdata(v99_wdata), .v_be(v99_be),
+      .v_grant(v99_grant), .v_rdata(v99_rdata), .v_rvalid(v99_rvalid),
+`else
+      .v_en(1'b0), .v_go(1'b1), .tdm_ph(), .tdm_run(), .cpu_paced(cpu_paced_o), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
       .v_grant(), .v_rdata(), .v_rvalid(),
+`endif
       .ch2_busy(sdram_busy),
 `endif
       .SDRAM_A(SDRAM_A), .SDRAM_DQML(SDRAM_DQML), .SDRAM_DQMH(SDRAM_DQMH),
@@ -978,7 +1036,6 @@ module tb;
       sram_save = 1'b0; sram_load = 1'b0;
    end
 
-   wire cpu_paced_o;
    msx MSX (.*);
 
    //  ── trace: the branch-target stream, same shape the JTAG ring prints ─────
@@ -1635,6 +1692,91 @@ module tb;
 `endif
    end
    final $display("ch1 request edges onto a queued request: %0d", ch1_over);
+`ifdef MSX_V9968
+   //  V9968 (plan S5): the VRAM port as the V9968 sees it (every read answered exactly
+   //  8 clk_vdp after its request, data = the last write to that word as a shadow keeps
+   //  it), the link's monitors, and the CPU's VDP I/O.
+   logic [31:0] v99_shadow [logic [15:0]];
+   int   v99_nwr = 0, v99_nrd = 0, v99_nans = 0, v99_badlat = 0, v99_baddata = 0, v99_unk = 0, v99_spur = 0;
+   int   v99_lat_hist [16];
+   int   v99_q_t [$]; logic [15:0] v99_q_a [$];
+   int   v99_tv = 0, v99_rel_t = -1;
+   int   v99_io_wr = 0, v99_io_rd = 0;
+   logic v99_bv_q = 1'b0;
+   always @(posedge clk_vdp) begin
+      v99_tv <= v99_tv + 1;
+      if (v99_reset_n && v99_rel_t < 0) v99_rel_t <= v99_tv;
+      if (v99_vram_rdata_en) begin
+         if (v99_q_t.size() == 0) v99_spur++;
+         else begin
+            automatic int t = v99_q_t.pop_front();
+            automatic logic [15:0] a = v99_q_a.pop_front();
+            v99_nans++;
+            if (v99_tv - t < 16) v99_lat_hist[v99_tv - t]++;
+            if (v99_tv - t != 8) v99_badlat++;
+            if (!v99_shadow.exists(a)) v99_unk++;
+            else if (v99_shadow[a] !== v99_vram_rdata) begin
+               if (v99_baddata < 5) $display("V9968 VRAM bad data: word %h read %h want %h", a, v99_vram_rdata, v99_shadow[a]);
+               v99_baddata++;
+            end
+         end
+      end
+      if (v99_vram_valid) begin
+         if (v99_vram_write) begin
+            automatic logic [31:0] o = v99_shadow.exists(v99_vram_address) ? v99_shadow[v99_vram_address] : 32'h0;
+            for (int i = 0; i < 4; i++) if (!v99_vram_wdata_mask[i]) o[i*8 +: 8] = v99_vram_wdata[i*8 +: 8];
+            v99_shadow[v99_vram_address] = o; v99_nwr++;
+         end else begin
+            v99_q_t.push_back(v99_tv); v99_q_a.push_back(v99_vram_address); v99_nrd++;
+         end
+      end
+      v99_bv_q <= MSX.v99_bus_valid;
+      if (MSX.v99_bus_valid && !v99_bv_q) begin
+         if (v99_io_wr + v99_io_rd == 0) $display("%.3f ms V9968 first CPU I/O: port %0d %s", $realtime/1e6, MSX.v99_bus_address, MSX.v99_bus_write ? "write" : "read");
+         if (MSX.v99_bus_write) v99_io_wr++; else v99_io_rd++;
+      end
+      if (v99_vram_valid && v99_nwr + v99_nrd == 0) $display("%.3f ms V9968 first VRAM access", $realtime/1e6);
+   end
+   final begin
+      $display("V9968 reset released at clk_vdp %0d (%.3f us)", v99_rel_t, v99_rel_t * 11.64 / 1000.0);
+      $display("V9968 VRAM: writes %0d reads %0d answered %0d | latency !=8: %0d, bad data %0d, unwritten words read %0d, spurious %0d",
+               v99_nwr, v99_nrd, v99_nans, v99_badlat, v99_baddata, v99_unk, v99_spur);
+      $write("V9968 VRAM latency hist:"); for (int i = 0; i < 16; i++) if (v99_lat_hist[i] != 0) $write(" %0d:%0d", i, v99_lat_hist[i]); $display("");
+      $display("V9968 link: dropped %0d, off-grid %0d | CPU I/O: writes %0d reads %0d, late reads %0d",
+               v99_mon_drop, v99_mon_mis, v99_io_wr, v99_io_rd, v99_late_cnt);
+   end
+ `ifdef VPROBE
+   //  -DVPROBE (sim/fullsys/vprobe/vprobe.asm through +kprobe=<hex>): the probe's
+   //  phase error counts (OUT 2Eh / 2Fh, the RPROBE protocol) and the VRAM port checks
+   //  above decide.  The display fetches of phase 3 must have happened (reads > 0).
+   int vp_phase = 0, vp_nb = 0, vp_lo = 0;
+   int vp_err [16];
+   logic vp_q2e = 1'b0, vp_q2f = 1'b0;
+   wire vp_w2e = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n & (MSX.a[7:0] == 8'h2E);
+   wire vp_w2f = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n & (MSX.a[7:0] == 8'h2F);
+   always @(posedge clk21m) begin
+      vp_q2e <= vp_w2e; vp_q2f <= vp_w2f;
+      if (vp_w2e & ~vp_q2e) begin
+         vp_phase = int'(MSX.d_from_cpu); vp_nb = 0;
+         $display("vprobe: phase %0d at %.3f ms (VRAM writes %0d reads %0d)", vp_phase, $realtime / 1e6, v99_nwr, v99_nrd);
+         if (vp_phase == 15) begin
+            automatic bit ok = (vp_err[1] | vp_err[2] | vp_err[3]) == 0 && v99_badlat == 0 && v99_baddata == 0
+                               && v99_spur == 0 && v99_nans == v99_nrd && v99_nrd > 0 && v99_mon_drop == 0 && v99_late_cnt == 0;
+            $display("VPROBE p1 port-98h VRAM errors %0d | p2 HMMV errors %0d | p3 VBLANK timeouts %0d",
+                     vp_err[1], vp_err[2], vp_err[3]);
+            $display("VPROBE RESULT %s", ok ? "PASS" : "FAIL");
+            $finish;
+         end
+      end
+      if (vp_w2f & ~vp_q2f) begin
+         if (vp_nb == 0) vp_lo = int'(MSX.d_from_cpu);
+         else vp_err[vp_phase & 15] = vp_lo | (int'(MSX.d_from_cpu) << 8);
+         vp_nb++;
+      end
+   end
+   final if (vp_phase != 15) $display("VPROBE RESULT FAIL (the probe did not finish: phase %0d)", vp_phase);
+ `endif
+`endif
 
    task automatic mupack_report();
       int b, bad = 0;

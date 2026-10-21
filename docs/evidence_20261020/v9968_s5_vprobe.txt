@@ -1,0 +1,45 @@
+S5 fullsys, MSX_V9968 build (2026-10-21).  FS-A1FX pack, tdm128 map, stock T80s 3.58 MHz.
+Bench: sim/fullsys/run_preload.sh tdm128 with V9968=1, -DVPROBE, +kprobe=sim/fullsys/vprobe/vprobe.hex
+(the probe replaces the BIOS; a plain BIOS boot stays in its RAM test past 600 ms, V9968 and ESE alike).
+
+== normal (RELEASE_PH 5)
+0.484 ms V9968 first CPU I/O: port 1 write
+vprobe: phase 1 at 0.506 ms (VRAM writes 0 reads 0)
+vprobe: phase 2 at 110.489 ms (VRAM writes 2048 reads 3072)
+vprobe: phase 3 at 120.697 ms (VRAM writes 2176 reads 11855)
+vprobe: phase 15 at 147.902 ms (VRAM writes 2176 reads 37988)
+VPROBE p1 port-98h VRAM errors 0 | p2 HMMV errors 0 | p3 VBLANK timeouts 0
+VPROBE RESULT PASS
+V9968 reset released at clk_vdp 40702 (473.771 us)
+V9968 VRAM: writes 2176 reads 37988 answered 37988 | latency !=8: 0, bad data 0, unwritten words read 14219, spurious 0
+V9968 VRAM latency hist: 8:37988
+V9968 link: dropped 0, off-grid 0 | CPU I/O: writes 2173 reads 5391, late reads 0
+
+== negative control RELEASE_PH 6 (binary built before the 'did not finish' FAIL line was added)
+0.484 ms V9968 first CPU I/O: port 1 write
+vprobe: phase 1 at 0.506 ms (VRAM writes 0 reads 0)
+vprobe: phase 2 at 112.199 ms (VRAM writes 2048 reads 1)
+V9968 reset released at clk_vdp 40703 (473.783 us)
+V9968 VRAM: writes 2048 reads 1 answered 0 | latency !=8: 0, bad data 0, unwritten words read 0, spurious 0
+V9968 VRAM latency hist:
+V9968 link: dropped 0, off-grid 2049 | CPU I/O: writes 2064 reads 1, late reads 18239
+
+== RELEASE_PH sweep, 45 ms each (phase 1 of the probe; reads begin after the 2 KB of writes)
+ph0: reset released at clk_vdp 40699 VRAM: writes 2048 reads 1 answered 0 | latency !=8: 0, bad data 0, unwritten words read 0, spurious 0 
+ph1: reset released at clk_vdp 40700 VRAM: writes 2048 reads 1 answered 0 | latency !=8: 0, bad data 0, unwritten words read 0, spurious 0 
+ph2: reset released at clk_vdp 40700 VRAM: writes 2048 reads 1 answered 0 | latency !=8: 0, bad data 0, unwritten words read 0, spurious 0 
+ph3: reset released at clk_vdp 40701 VRAM: writes 2048 reads 1 answered 0 | latency !=8: 0, bad data 0, unwritten words read 0, spurious 0 
+ph4: reset released at clk_vdp 40702 VRAM: writes 2048 reads 369 answered 369 | latency !=8: 0, bad data 0, unwritten words read 0, spurious 0 
+ph5: reset released at clk_vdp 40702 VRAM: writes 2048 reads 369 answered 369 | latency !=8: 0, bad data 0, unwritten words read 0, spurious 0 
+ph6: reset released at clk_vdp 40703 VRAM: writes 2048 reads 1 answered 0 | latency !=8: 0, bad data 0, unwritten words read 0, spurious 0 
+ph7: reset released at clk_vdp 40704 VRAM: writes 2048 reads 1 answered 0 | latency !=8: 0, bad data 0, unwritten words read 0, spurious 0 
+ph8: reset released at clk_vdp 40704 VRAM: writes 2048 reads 1 answered 0 | latency !=8: 0, bad data 0, unwritten words read 0, spurious 0 
+ph9: reset released at clk_vdp 40705 VRAM: writes 2048 reads 1 answered 0 | latency !=8: 0, bad data 0, unwritten words read 0, spurious 0 
+ph10: reset released at clk_vdp 40706 VRAM: writes 2048 reads 1 answered 0 | latency !=8: 0, bad data 0, unwritten words read 0, spurious 0 
+ph11: reset released at clk_vdp 40698 VRAM: writes 2048 reads 1 answered 0 | latency !=8: 0, bad data 0, unwritten words read 0, spurious 0 
+
+12 phases land on 8 release edges; only clk_vdp 40702 (phases 4, 5) answers reads.  sim/v9968_vram: only phase 5.
+Both benches pass at 5: MSX1.sv keeps RELEASE_PH 5.  A wrong edge hangs the V9968's first read (never answered).
+
+== first run, probe crossing 0180h (turbor.sv overlays CHGCPU there in this pack too): RET -> 18FFh -> RST 38h loop;
+   VRAM checks of that run: V9968 VRAM: writes 2176 reads 129913 answered 129913 | latency !=8: 0, bad data 0, unwritten words read 50662, spurious 0

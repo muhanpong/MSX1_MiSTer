@@ -41,6 +41,23 @@ module msx
    output            [15:0] probe_frame,
    input                    clk_sdram,
    input                    dma_active,
+`ifdef MSX_V9968
+   //  The V9968 build (plan S5): the VDP of MSX2 machines is the V9968 on clk_vdp
+   //  (85.909 MHz = 4 x clk21m, same PLL).  Its VRAM is sdram_tdm's V port through
+   //  v9968_link in MSX1.sv, whose aligned reset comes back here.  The video outputs
+   //  below are then in clk_vdp (CLK_VIDEO = clk_vdp), the TMS9918 re-timed into it.
+   input                    clk_vdp,
+   input                    v99_reset_n,
+   output            [17:2] v99_vram_address,
+   output                   v99_vram_write,
+   output                   v99_vram_valid,
+   output            [31:0] v99_vram_wdata,
+   output             [3:0] v99_vram_wdata_mask,
+   input             [31:0] v99_vram_rdata,
+   input                    v99_vram_rdata_en,
+   output            [15:0] v99_late_cnt,      // stock-CPU VDP reads not answered within the cycle
+   output                   v99_video,         // 1: the video below is the V9968's (31 kHz, 800x480)
+`endif
    //Video
    output             [7:0] R,
    output             [7:0] G,
@@ -855,7 +872,21 @@ wire vdp_hold  = cpu_paced & vdp_bus & ~vdp_grant;
 logic vdp_grant_d = 1'b0;
 always @(posedge clk21m) vdp_grant_d <= vdp_grant & vdp_bus;
 
+`ifndef MSX_V9968
 wire vdp_pace_n = ~(cpu_paced & vdp_bus & (~vdp_grant_d | (vdp18 & (vdp_hcnt < 3'd4))));
+`else
+//  V9968 build: a handshaked CPU waits on a V9968 access until the adapter says this
+//  cycle's transaction is done (done_tog moved since the cycle began); the TMS9918
+//  keeps its pacer.  The stock CPU never waits (v99_late_cnt counts if it should have).
+logic v99_tog0 = 1'b0, vdp_bus_q = 1'b0;
+always @(posedge clk21m) begin
+   vdp_bus_q <= vdp_bus;
+   if (vdp_bus & ~vdp_bus_q) v99_tog0 <= v99_done_tog;
+end
+wire v99_pending = vdp_bus & (vdp_bus_q ? (v99_done_tog == v99_tog0) : 1'b1);
+wire vdp_pace_n  = vdp18 ? ~(cpu_paced & vdp_bus & (~vdp_grant_d | (vdp_hcnt < 3'd4)))
+                         : ~(cpu_paced & v99_pending);
+`endif
 
 wire opll_pace_n;   // turbo OPLL write pacer, from msx_slots (spec inter-write gaps)
 
@@ -1213,6 +1244,7 @@ wire [7:0] d_to_cpu_vdp;
 assign vdp18          = bios_config.MSX_typ == MSX1;
 assign vdp            = bios_config.MSX_typ == MSX2;
 
+`ifndef MSX_V9968
 //CPU access
 assign d_to_cpu_vdp   = vdp18 ? d_from_vdp18                : d_from_vdp;
 assign vdp_int_n      = vdp18 ? int_n_vdp18                 : int_n_vdp;
@@ -1236,8 +1268,63 @@ always @(posedge clk21m) begin
       if (DHClk_vdp & DLClk_vdp)
          hblank_vdp_cor <= 1'b0;
 end
+`else
+//  V9968 build: MSX1 machines keep the TMS9918 (clk21m), MSX2 machines get the V9968
+//  (clk_vdp).  CPU data and interrupt are read in clk21m; video leaves in clk_vdp.
+assign d_to_cpu_vdp   = vdp18 ? d_from_vdp18                : v99_rdata;
+assign vdp_int_n      = vdp18 ? int_n_vdp18                 : v99_int_n_21;
+logic v99_int_n_21 = 1'b1;
+always @(posedge clk21m) v99_int_n_21 <= v99_int_n;
+
+//  The TMS9918's clk21m outputs re-timed into clk_vdp: t21 flips on every clk21m edge;
+//  a clk_vdp edge that sees it differ from its last sample is the one 11.64 ns after a
+//  clk21m edge (the shared edge still sees the old value), and takes the TMS9918's
+//  outputs there.  ce_pix keeps its clk21m meaning (ce_5m39_n) on that clk_vdp cycle.
+logic t21 = 1'b0;
+always @(posedge clk21m) t21 <= ~t21;
+logic t21_s = 1'b0;
+logic [7:0] R18_v, G18_v, B18_v;
+logic HS18_v, VS18_v, DE18_v, hb18_v, vb18_v, ce18_v;
+always @(posedge clk_vdp) begin
+   t21_s  <= t21;
+   ce18_v <= 1'b0;
+   if (t21 != t21_s) begin
+      R18_v <= R_vdp18; G18_v <= G_vdp18; B18_v <= B_vdp18;
+      HS18_v <= ~HS_n_vdp18; VS18_v <= ~VS_n_vdp18; DE18_v <= DE_vdp18;
+      hb18_v <= hblank_vdp18; vb18_v <= vblank_vdp18; ce18_v <= ce_5m39_n;
+   end
+end
+
+//  The V9968's video (clk_vdp, 31.4 kHz, 800x480 active, a pixel every 2 clocks).
+//  Its syncs are active low; hblank = no DE on the line so far / after, vblank = a
+//  line with no DE at all (registered at each hsync).
+wire        v99_hs, v99_vs, v99_de;
+wire  [7:0] v99_r, v99_g, v99_b;
+logic       v99_ce = 1'b0, v99_line_de = 1'b0, v99_vb = 1'b1, v99_hs_q = 1'b1;
+always @(posedge clk_vdp) begin
+   v99_ce   <= ~v99_ce;
+   v99_hs_q <= v99_hs;
+   if (v99_de) v99_line_de <= 1'b1;
+   if (v99_hs_q && !v99_hs) begin               // hsync falls: a line ended
+      v99_vb      <= ~v99_line_de;
+      v99_line_de <= 1'b0;
+   end
+end
+
+assign R      = vdp18 ? R18_v  : v99_r;
+assign G      = vdp18 ? G18_v  : v99_g;
+assign B      = vdp18 ? B18_v  : v99_b;
+assign HS     = vdp18 ? HS18_v : ~v99_hs;
+assign VS     = vdp18 ? VS18_v : ~v99_vs;
+assign DE     = vdp18 ? DE18_v : v99_de;
+assign hblank = vdp18 ? hb18_v : ~v99_de & ~v99_vb;
+assign vblank = vdp18 ? vb18_v : v99_vb;
+assign ce_pix = vdp18 ? ce18_v : v99_ce;
+assign v99_video = ~vdp18;
+`endif
 
 
+`ifndef MSX_V9968
 //VRAM access
 assign VRAM_address   = vdp18 ? {2'b00, VRAM_address_vdp18} : VRAM_address_vdp[15:0];
 assign VRAM_we_lo     = vdp18 ? VRAM_we_vdp18               : VRAM_we_lo_vdp;
@@ -1251,6 +1338,13 @@ assign VRAM_do        = vdp18 ? VRAM_do_vdp18               : VRAM_do_vdp;
 // still toggled: commands completed having written nothing.
 assign VRAM_we_lo_vdp = ~VRAM_we_n_vdp & ~VRAM_address_vdp[16];
 assign VRAM_we_hi_vdp = ~VRAM_we_n_vdp &  VRAM_address_vdp[16];
+`else
+//  V9968 build: the BRAM VRAM is the TMS9918's 16 KB only
+assign VRAM_address   = {2'b00, VRAM_address_vdp18};
+assign VRAM_we_lo     = VRAM_we_vdp18;
+assign VRAM_we_hi     = 1'b0;
+assign VRAM_do        = VRAM_do_vdp18;
+`endif
 
 logic iack;
 always @(posedge clk21m) begin
@@ -1301,6 +1395,7 @@ vdp18_core #(.compat_rgb_g(0)) vdp_vdp18
    .is_pal_i(msxConfig.video_mode == PAL)
 );
 
+`ifndef MSX_V9968
 wire        int_n_vdp;
 wire  [7:0] d_from_vdp;
 wire  [5:0] R_vdp, G_vdp, B_vdp;
@@ -1346,6 +1441,43 @@ vdp vdp_vdp
    .BORDER(msxConfig.border),
    .VDP_ID(5'b00000 | msxConfig.vdp_id << 1)
 );
+`else
+//  The V9968 (rtl/video/v9968, unmodified) and the CPU bus adapter.  Its reset comes
+//  from v9968_link (released on a fixed TDM cycle so its VRAM requests line up with
+//  the V slot); the core reset holds the link.  Geo3D is not in this build yet: the
+//  external command port is tied off.
+wire  [7:0] v99_rdata;
+wire        v99_int_n;
+wire        v99_busy, v99_done_tog;
+wire  [2:0] v99_bus_address;
+wire        v99_bus_ioreq, v99_bus_write, v99_bus_valid, v99_bus_ready, v99_bus_rdata_en;
+wire  [7:0] v99_bus_wdata, v99_bus_rdata;
+wire        v99_io_cyc = vdp_en & vdp & (~rd_n | ~wr_n);
+v9968_bus v99_bus (
+   .clk_vdp(clk_vdp), .reset_n(v99_reset_n),
+   .io_cyc(v99_io_cyc), .io_wr(~wr_n), .io_a(a[2:0]), .io_d(d_from_cpu),
+   .rdata(v99_rdata), .busy(v99_busy), .done_tog(v99_done_tog), .late_cnt(v99_late_cnt),
+   .bus_address(v99_bus_address), .bus_ioreq(v99_bus_ioreq), .bus_write(v99_bus_write),
+   .bus_valid(v99_bus_valid), .bus_ready(v99_bus_ready), .bus_wdata(v99_bus_wdata),
+   .bus_rdata(v99_bus_rdata), .bus_rdata_en(v99_bus_rdata_en)
+);
+vdp v9968 (
+   .reset_n(v99_reset_n), .clk(clk_vdp), .initial_busy(1'b0),
+   .bus_address(v99_bus_address), .bus_ioreq(v99_bus_ioreq), .bus_write(v99_bus_write),
+   .bus_valid(v99_bus_valid), .bus_ready(v99_bus_ready), .bus_wdata(v99_bus_wdata),
+   .bus_rdata(v99_bus_rdata), .bus_rdata_en(v99_bus_rdata_en),
+   .int_n(v99_int_n),
+   .vram_address(v99_vram_address), .vram_write(v99_vram_write), .vram_valid(v99_vram_valid),
+   .vram_wdata(v99_vram_wdata), .vram_wdata_mask(v99_vram_wdata_mask),
+   .vram_rdata(v99_vram_rdata), .vram_rdata_en(v99_vram_rdata_en), .vram_refresh(),
+   .display_hs(v99_hs), .display_vs(v99_vs), .display_en(v99_de),
+   .display_r(v99_r), .display_g(v99_g), .display_b(v99_b),
+   .force_highspeed(1'b0),
+   .ext_cmd_wr(1'b0), .ext_cmd_num(6'd0), .ext_cmd_data(8'd0), .ext_cmd_ce(),
+   .button(2'b00),
+   .pulse0(), .pulse1(), .pulse2(), .pulse3(), .pulse4(), .pulse5(), .pulse6(), .pulse7()
+);
+`endif
 
 //  Time-ordered event recorder for the nested-interrupt stack runaway (JTAG,
 //  tools/dump_evtrace.tcl).  See rtl/evt_trace.sv.
@@ -1370,6 +1502,7 @@ vdp_regprobe u_regprobe (
 wire [15:0] VRAM_address;
 wire  [7:0] VRAM_do, VRAM_di_lo, VRAM_di_hi;
 wire        VRAM_we_lo, VRAM_we_hi;
+`ifndef MSX_V9968
 spram #(.addr_width(16),.mem_name("VRA2")) vram_lo
 (
    .clock(clk21m),
@@ -1386,6 +1519,18 @@ spram #(.addr_width(16),.mem_name("VRA3")) vram_hi
    .data(VRAM_do),
    .q(VRAM_di_hi)
 );
+`else
+//  V9968 build: the TMS9918's 16 KB (the V9968's VRAM is in SDRAM)
+spram #(.addr_width(14),.mem_name("VRA2")) vram_lo
+(
+   .clock(clk21m),
+   .address(VRAM_address[13:0]),
+   .wren(VRAM_we_lo),
+   .data(VRAM_do),
+   .q(VRAM_di_lo)
+);
+assign VRAM_di_hi = 8'h00;
+`endif
 
 wire         [7:0] d_from_slots;
 wire signed [15:0] cart_sound;
