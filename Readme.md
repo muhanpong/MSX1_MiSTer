@@ -7,6 +7,36 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
 
 ---
 
+## 이 브랜치: V9968_Geo3D / This branch: V9968_Geo3D
+
+**실험 브랜치 / Experimental.** 기존 V9958 코어는 `nextz80` 브랜치에 있다.
+*The regular V9958 core lives on the `nextz80` branch.*
+
+- **V9968 VDP** — HRA!의 [V9968_Cartridge](https://github.com/hra1129/V9968_Cartridge) RTL을 내부 VDP로 쓰는 별도 빌드(Quartus 리비전 `MSX1_V9968`). 모든 기계 종류에서 V9968, VRAM 256KB는 SDRAM, 출력 31kHz
+  *A separate build (Quartus revision `MSX1_V9968`) with HRA!'s V9968 RTL as the internal VDP, on every machine type; 256KB VRAM in SDRAM; 31 kHz output.*
+- **Geo3D v2.0.0** — Alex Moncks의 3D 엔진, 포트 9Dh/9Fh, 42.95MHz
+  *Alex Moncks' 3D engine on ports 9Dh/9Fh at 42.95 MHz.*
+- **SDRAM 128.86MHz** — 고정 12클럭 TDM 컨트롤러(`rtl/peripheral/sdram_tdm.sv`), V9968 VRAM은 bank 3 전용 슬롯. OPL4 PCM 엔진도 이 클럭에 맞춰 파이프라인화
+  *A fixed 12-clock TDM SDRAM controller; the V9968's VRAM has its own slot in bank 3. The OPL4 PCM engine is pipelined for this clock.*
+- **OSD** — `VDP command speed V9968/V9938`(V9938 속도에 맞춘 명령 대기), `Scandoubler Fx`의 CRT 25/50/75%가 V9968 자체 스캔라인으로 동작
+  *`VDP command speed V9968/V9938` (V9938-paced command waits); the CRT 25/50/75% choices of `Scandoubler Fx` drive the V9968's own scanlines.*
+- **upstream V9968 수정 / fixes to upstream V9968** — 모두 `rtl/video/v9968/ORIGIN.md`에 재현 방법과 함께 기록. upstream 보고 초안은 `docs/upstream_issues_v9968_20261022.md`
+  *All recorded with repro commands in `rtl/video/v9968/ORIGIN.md`; upstream report drafts in `docs/upstream_issues_v9968_20261022.md`.*
+  - 화면을 끌 때 붙잡힌 스프라이트 VRAM 요청이 VDP 명령을 멈춤 *(a sprite VRAM request held across display-off froze VDP commands)*
+  - R#9 LN을 프레임 중간에 바꾸면 화면 시작이 10줄 움직임(224라인 오버스캔) *(a mid-frame R#9 LN change moved the display start by 10 lines)*
+  - status 읽기와 같은 클럭의 인터럽트 이벤트 유실, 그리고 한 클럭 늦은 status 래치로 인한 FH/F 유실 *(interrupt events lost on the clock of a status read, and FH/F lost through the one-clock-late status latch)*
+- **빌드 / Build** — `REV=MSX1_V9968 ASM=1 tools/sdram128/compile.sh` (Quartus 17.0, `SEED=N`으로 시드 지정). 일반 V9958 빌드는 `tools/sdram128/compile.sh`
+  *Quartus 17.0; `SEED=N` picks the fitter seed. The plain V9958 build is `tools/sdram128/compile.sh`.*
+- **Geo3D 데모 / demos** — 내장 98h 판을 쓴다. ASCII16 롬은 자동 판별이 틀리므로 OSD 매퍼를 `ASCII16X`로 고르거나 파일 오프셋 10h에 `ASCII16X` 헤더를 넣는다
+  *Use the internal 98h builds. Auto-detect gets these ASCII16 ROMs wrong: pick `ASCII16X` in the OSD mapper menu, or put an `ASCII16X` header at file offset 10h.*
+- **라이선스 / Licence** — V9968 RTL 파일 헤더는 HRA!의 3조항 조건(**허가 없는 상업적 이용 금지** 포함), Geo3D는 MIT
+  *The V9968 RTL file headers carry HRA!'s 3-clause terms (including **no commercial use without written permission**); Geo3D is MIT.*
+
+**알려진 문제 / Known issues** — ASO 224(R800)가 SPACE 후 검은 화면으로 멈춤(조사 중). 업로드 한도 32MB(V9968 VRAM bank와 겹침). MSX1 기계의 색은 MSX2 표준 팔레트
+*ASO 224 (R800) stops on a black screen after SPACE (under investigation). The upload limit is 32MB (it would overlap the V9968's VRAM bank). MSX1 machines show the MSX2 standard palette.*
+
+---
+
 ## 이 포크가 더한 것 / What this fork adds (summary)
 
 **새로 생긴 것 / New**
