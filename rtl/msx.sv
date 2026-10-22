@@ -190,7 +190,7 @@ module msx
    output logic       [15:0] dbg_pc_snap,       // PC at the last IFF1-fall before green latched
    output logic       [15:0] dbg_pc_vec,        // PC of handler entry after the last INTA
    output logic       [15:0] dbg_pc_now,        // live PC (dark-freeze spin locator)
-   // ── PC-trap forensics (MOONSOUND_DIAG): where execution died ─────────────
+   // ── PC-trap forensics (DEBUG): where execution died ─────────────
    output logic       [15:0] dbg_trap_from,     // last opcode fetch before landing at 0000
    output logic       [15:0] dbg_trap_prev,     // the one before that
    output logic       [15:0] dbg_trap_sp,       // SP at the moment of the trap
@@ -1494,6 +1494,10 @@ vdp v9968 (
 );
 `endif
 
+//  DEBUG (MSX1.qsf VERILOG_MACRO, on by default): the JTAG diagnostic rings.  Off, they
+//  are not built (evt_trace: ~330 ALM + 80 M10K, vdp_regprobe: ~170 ALM + 10 M10K in the
+//  V9968 build) and the overlay's VDP-register rows read 0.
+`ifdef DEBUG
 //  Time-ordered event recorder for the nested-interrupt stack runaway (JTAG,
 //  tools/dump_evtrace.tcl).  See rtl/evt_trace.sv.
 evt_trace u_evtrace
@@ -1513,6 +1517,10 @@ vdp_regprobe u_regprobe (
    .msx_pause(probe_freeze),
    .p_r2(probe_r2), .p_r23(probe_r23), .p_r0(probe_r0), .p_r1(probe_r1), .p_r9(probe_r9), .p_r19(probe_r19), .p_frame(probe_frame)
 );
+`else
+assign probe_r2 = '0; assign probe_r23 = '0; assign probe_r0 = '0; assign probe_r1 = '0;
+assign probe_r9 = '0; assign probe_r19 = '0; assign probe_frame = '0;
+`endif
 
 `ifndef MSX_V9968
 wire [15:0] VRAM_address;
@@ -2068,7 +2076,7 @@ wire ms_int_n = ~ms_int_hold;
 
 // ═══ MoonSound freeze-diagnosis infrastructure ═══════════════════════════════
 // Battle-tested during the 2026-06 vgmplay-OPL4 freeze hunt (detectors, T80
-`ifdef MOONSOUND_DIAG
+`ifdef DEBUG
 // ── SignalTap embedded logic analyzer (JTAG) ────────────────────────────────
 // Manual sld_signaltap instantiation so the whole thing is scriptable -- no
 // .stp authoring.  The SignalTap GUI / quartus_stp discovers it over JTAG as
@@ -2097,8 +2105,8 @@ always_ff @(posedge clk21m) stp_data <= {
 `endif
 
 // IFF/IM/I/PC forensics, IM2-table write watchpoint).  Compiled out by default;
-// re-enable by defining MOONSOUND_DIAG (see MSX1.qsf).
-`ifdef MOONSOUND_DIAG
+// re-enable by defining DEBUG (see MSX1.qsf).
+`ifdef DEBUG
 logic        m1_dly;
 logic        booted = 1'b0;   // see PC TRAP: the Z80 reset vector IS PC=0000
 logic        iow_a8_d;       // OUT (A8) edge detect -- the slot-select snoop

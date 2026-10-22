@@ -118,7 +118,7 @@ always_ff @(posedge CLK_VIDEO) begin
     active_s1  <= dbg_slot_active;   active_s2  <= active_s1;
     envlive_s1 <= dbg_slot_envlive;  envlive_s2 <= envlive_s1;
     env_s1     <= dbg_env_min;       env_s2     <= env_s1;
-`ifdef MOONSOUND_DIAG
+`ifdef DEBUG
     wstk_s     <= {wstk_s[0], dbg_wait_stuck};
     istk_s     <= {istk_s[0], dbg_irq_stuck};
     nom1_s     <= {nom1_s[0], dbg_cpu_nom1};
@@ -331,7 +331,7 @@ logic        pb;      // reg-probe current bit (comb temp)
 
 // ─── Render ──────────────────────────────────────────────────────────────────
 localparam PW = 11'd66;
-`ifdef MOONSOUND_DIAG
+`ifdef DEBUG
 // 37 bands (13 base + 17 diag + 7 reg-probe) x 6 lines + top/bottom border.
 // Band height went 8 -> 7 when the reg-probe rows arrived and 7 -> 6 when R#1
 // joined them; the whole stack has to stay within the ~245-line visible area.
@@ -400,7 +400,7 @@ always_comb begin
             end else if (row < 6'd6) begin // DEAD-VOICE COUNT — red bar (length = #dead)
                 if (px < dead_w) begin R_out=8'hFF; G_out=8'h00; B_out=8'h00; end
                 else             begin R_out=8'h20; G_out=8'h20; B_out=8'h20; end
-`ifdef MOONSOUND_DIAG
+`ifdef DEBUG
             end else if (row < 6'd7) begin // FREEZE DETECTORS — 7 segments (9px each):
                 // [WAIT red][IRQ magenta][noM1 white][ACK-STOP yellow][INTACK-STOP cyan]
                 // [IFF-OFF green][REFUSED orange]

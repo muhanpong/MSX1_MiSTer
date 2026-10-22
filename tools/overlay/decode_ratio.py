@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read the P5 WAIT-ratio and ch2 cache HIT-ratio bars out of a MiSTer screenshot.
 
-The two bottom rows of the MOONSOUND_DIAG overlay are bars, not bit patterns:
+The two bottom rows of the DEBUG overlay are bars, not bit patterns:
 64 panel pixels = 100%, value[15:10] of a per-65536 counter.  Reading them by
 eye off a 2.4x-scaled screenshot is guesswork, so read them off the PNG.
 
