@@ -27,3 +27,9 @@ bench a lost FH costs one frame, never a hang.
    shortcut first), first stop PC vs the openMSX msx2pp trace (skill openmsx-oracle).
 3. Check what differs in the R800 path only: V9968 bus wait/ack with use_nz, port 9Ah/9Bh
    writes ASO makes, R#25+ registers the V9958 path ignores.
+
+## Board debug capture (user, 2026-10-23)
+`docs/evidence_20261023/aso224_ff50884_hang_overlay.png`: rbf ff50884, ASO 224 hung after
+SPACE, OSD open (paused), DEBUG OVERLAY ON. The left panel shows the overlay rows at the hang;
+not decoded yet. Start the resumed analysis by decoding it (rtl/debug_overlay.sv row map,
+tools/decode_probe_shot.py). Note: this rbf was built with DEBUG=1 (qsf regenerated in 5128f0f).
