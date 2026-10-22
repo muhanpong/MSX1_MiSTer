@@ -864,6 +864,13 @@ module vdp_cpu_interface (
 
 	// --------------------------------------------------------------------
 	//	Interrupt
+	//	MSX1 core: the clears (status read, Port#4 write) are applied first and the events
+	//	after them, so an event that lands on the clock of a status read or a Port#4 write
+	//	still sets its flag.  Upstream had them in one if / else-if chain: a line match (a
+	//	one-clock pulse) on the clock of any read of port 1 never set FH, and the same for
+	//	F and the command-end flag.  A program that polls a status register while it waits
+	//	for FH (ASO 224's status bar: R#19 = C6h, poll S#1) then waits for ever -- one miss
+	//	in a few frames in sim/v9968_vram +aso.
 	// --------------------------------------------------------------------
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
@@ -872,34 +879,37 @@ module vdp_cpu_interface (
 			ff_command_end_interrupt	<= 1'b0;
 			ff_lock_extregs				<= 1'b1;
 		end
-		else if( w_read && ff_port1 ) begin
-			if( ff_status_register_pointer == 4'd0 ) begin
-				//	Clear frame interrupt flag
-				ff_frame_interrupt <= 1'b0;
-			end
-			else if( ff_status_register_pointer == 4'd1 ) begin
-				//	Clear line interrupt flag
-				ff_line_interrupt <= 1'b0;
-			end
-		end
-		else if( w_write && ff_port4 ) begin
-			if( ff_bus_wdata[0] == 1'b1 ) begin
-				//	Clear frame interrupt flag
-				ff_frame_interrupt <= 1'b0;
-			end
-			if( ff_bus_wdata[1] == 1'b1 ) begin
-				//	Clear line interrupt flag
-				ff_line_interrupt <= 1'b0;
-			end
-			if( ff_bus_wdata[2] == 1'b1 ) begin
-				//	Clear command end interrupt flag
-				ff_command_end_interrupt <= 1'b0;
-			end
-			ff_lock_extregs <= ff_bus_wdata[7];
-		end
 		else begin
+			//	clears by the CPU
+			if( w_read && ff_port1 ) begin
+				if( ff_status_register_pointer == 4'd0 ) begin
+					//	Clear frame interrupt flag
+					ff_frame_interrupt <= 1'b0;
+				end
+				else if( ff_status_register_pointer == 4'd1 ) begin
+					//	Clear line interrupt flag
+					ff_line_interrupt <= 1'b0;
+				end
+			end
+			if( w_write && ff_port4 ) begin
+				if( ff_bus_wdata[0] == 1'b1 ) begin
+					//	Clear frame interrupt flag
+					ff_frame_interrupt <= 1'b0;
+				end
+				if( ff_bus_wdata[1] == 1'b1 ) begin
+					//	Clear line interrupt flag
+					ff_line_interrupt <= 1'b0;
+				end
+				if( ff_bus_wdata[2] == 1'b1 ) begin
+					//	Clear command end interrupt flag
+					ff_command_end_interrupt <= 1'b0;
+				end
+				ff_lock_extregs <= ff_bus_wdata[7];
+			end
+
+			//	events (assigned last: they win over a clear on the same clock)
 			if( intr_frame ) begin
-				//	Happend line interrupt
+				//	Happend frame interrupt
 				ff_frame_interrupt <= 1'b1;
 			end
 
@@ -915,7 +925,7 @@ module vdp_cpu_interface (
 			end
 
 			if( intr_command_end ) begin
-				//	Happend line interrupt
+				//	Happend command end interrupt
 				ff_command_end_interrupt <= 1'b1;
 			end
 		end

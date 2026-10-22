@@ -753,9 +753,14 @@ always @(posedge clk) begin
             took = v_en && v_req;
             vs_v <= took; vs_we <= v_we; vs_l <= vl; vs_wdata <= v_wdata; vs_be <= v_be;
             v_grant <= took;
-            if (took) begin
-                command <= CMD_ACT; chip <= vl.c; ba_i <= vl.b; a_i <= vl.r;
-            end
+            //  chip / bank / row are loaded whether or not V asks this frame: nothing else
+            //  uses them on this edge, the row's A12:A11 are 0 for every V address (VBASE +
+            //  18-bit word address), so the cycle-0 DQM stays 00, and a NOP ignores them.
+            //  Only the command depends on v_req: the V9968's request (clk_vdp, 7.76 ns
+            //  away) no longer enables 20-odd address flops (MSX1_V9968 f8fb45d: a_i <-
+            //  ff_vram_address -0.162 ns at SEED 10, a_i <- ff_vram_valid -0.135 at SEED 11).
+            chip <= vl.c; ba_i <= vl.b; a_i <= vl.r;
+            if (took) command <= CMD_ACT;
         end
         ps[2]: begin         // V READ (cycle 3) / G1 decision
             if (vs_v && !vs_we) begin

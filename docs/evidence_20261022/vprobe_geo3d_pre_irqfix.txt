@@ -1,0 +1,7 @@
+== stock: PASS (want PASS)
+== turbo: PASS (want PASS)
+== mut_relph: FAIL (want FAIL)
+== mut_nowait: FAIL (want FAIL)
+== mut_noint: FAIL (want FAIL)
+== mut_nogeo: FAIL (want FAIL)
+RESULT PASS

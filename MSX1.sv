@@ -792,6 +792,7 @@ wire        ce_cpu;
 //  MSX_V9968 (build option): the V9968 VDP runs on clk_vdp = 85.909080 MHz, 2/3 of
 //  clk_sdram and 4 x clk21m, from the same VCO at phase 0 (rtl/pll_v9968.v).
 wire clk_vdp;
+wire clk_geo;
 `ifdef MSX_V9968
 pll_v9968 pll
 (
@@ -800,10 +801,12 @@ pll_v9968 pll
    .outclk_0(clk_sdram), //128.863620
    .outclk_1(clk21m),    //21.477270
    .outclk_2(clk_vdp),   //85.909080
+   .outclk_3(clk_geo),   //42.954540 = clk_vdp / 2, phase 0 (Geo3D engine; unused until it is wired)
    .locked(locked_sdram)
 );
 `else
 assign clk_vdp = 1'b0;
+assign clk_geo = 1'b0;
 pll pll
 (
    .refclk(CLK_50M),
@@ -1238,7 +1241,7 @@ msx MSX
    .v99_vram_address(v99_vram_address), .v99_vram_write(v99_vram_write), .v99_vram_valid(v99_vram_valid),
    .v99_vram_wdata(v99_vram_wdata), .v99_vram_wdata_mask(v99_vram_wdata_mask),
    .v99_vram_rdata(v99_vram_rdata), .v99_vram_rdata_en(v99_vram_rdata_en),
-   .v99_late_cnt(v99_late_cnt), .v99_video(v99_video), .v99_scanline(v99_scanline), .v99_cmd_v9938(v99_cmd_v9938),
+   .v99_late_cnt(v99_late_cnt), .v99_video(v99_video), .v99_scanline(v99_scanline), .v99_cmd_v9938(v99_cmd_v9938), .clk_geo(clk_geo),
 `endif
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),

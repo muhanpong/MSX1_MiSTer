@@ -25,3 +25,6 @@ set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) v9968/v
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) v9968/vdp_video_out.v ]
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) v9968/vdp_video_ram_line_buffer.v ]
 set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) v9968/vdp_vram_interface.v ]
+set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) geo3d/geo3d_core.v ]
+set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) geo3d/geo3d_engine.v ]
+set_global_assignment -name VERILOG_FILE [file join $::quartus(qip_path) geo3d/geo3d_bus.v ]

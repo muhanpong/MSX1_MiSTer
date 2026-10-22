@@ -35,7 +35,7 @@ DEFS="-DPRELOAD -DPRELOAD_SVH=\"$OUT/pre.state.svh\""
 #  sdram_tdm's V slot (needs tdm / tdm128)
 if [ -n "${V9968:-}" ]; then
    FILES=$(echo "$FILES" | tr ' ' '\n' | grep -v '/gen/vdp\(18_core\)\?\.v$' | tr '\n' ' ')
-   FILES="$FILES $(ls rtl/video/v9968/*.v | tr '\n' ' ') rtl/video/v9968_link.sv rtl/video/v9968_bus.sv rtl/video/v9968_cmdwait.sv"
+   FILES="$FILES $(ls rtl/video/v9968/*.v | tr '\n' ' ') rtl/video/v9968_link.sv rtl/video/v9968_bus.sv rtl/video/v9968_cmdwait.sv rtl/video/geo3d/geo3d_core.v rtl/video/geo3d/geo3d_engine.v rtl/video/geo3d/geo3d_bus.v"
    DEFS="$DEFS -DMSX_V9968"
 fi
 DEFS="$DEFS ${XDEFS:-}"      # extra defines (negative controls: -DTDM128_MUT_MAP, -DIOLOG_MUT)

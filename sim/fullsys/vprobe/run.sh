@@ -25,9 +25,10 @@ run turbo      ""                  "+zspeed=4" &
 run mut_relph  "-DV99_RELPH=6"     ""          &
 run mut_nowait "-DV99_MUT_NOWAIT"  "+zspeed=4" &
 run mut_noint  "-DV99_MUT_NOINT"   ""          &
+run mut_nogeo  "-DV99_MUT_NOGEO_CMD" ""        &
 wait
 ok=1
-for r in stock:PASS turbo:PASS mut_relph:FAIL mut_nowait:FAIL mut_noint:FAIL; do
+for r in stock:PASS turbo:PASS mut_relph:FAIL mut_nowait:FAIL mut_noint:FAIL mut_nogeo:FAIL; do
    n=${r%%:*}; want=${r##*:}
    got=$(grep -ho 'VPROBE RESULT [A-Z]*' "$OUT/$n.log" | tail -1 | awk '{print $3}')
    echo "== $n: ${got:-no result} (want $want)"

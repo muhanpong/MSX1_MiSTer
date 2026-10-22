@@ -59,6 +59,7 @@ module msx
    output                   v99_video,         // 1: the video below is the V9968's (31 kHz, 800x480)
    input              [1:0] v99_scanline,      // V9968 scanlines: 0 off, 1/2/3 = 25/50/75% (OSD, quasi-static)
    input                    v99_cmd_v9938,     // V9968 HS=0 command waits: 0 upstream, 1 V9938 (OSD, quasi-static)
+   input                    clk_geo,           // 42.954 MHz = clk_vdp / 2, same PLL, phase 0 (Geo3D engine)
 `endif
    //Video
    output             [7:0] R,
@@ -1429,10 +1430,9 @@ vdp vdp_vdp
    .VDP_ID(5'b00000 | msxConfig.vdp_id << 1)
 );
 `else
-//  The V9968 (rtl/video/v9968, unmodified) and the CPU bus adapter.  Its reset comes
-//  from v9968_link (released on a fixed TDM cycle so its VRAM requests line up with
-//  the V slot); the core reset holds the link.  Geo3D is not in this build yet: the
-//  external command port is tied off.
+//  The V9968 (rtl/video/v9968) and the CPU bus adapter.  Its reset comes from
+//  v9968_link (released on a fixed TDM cycle so its VRAM requests line up with the
+//  V slot); the core reset holds the link.  Geo3D shares the host bus (below).
 wire        v99_busy;
 wire  [2:0] v99_bus_address;
 wire        v99_bus_ioreq, v99_bus_write, v99_bus_valid, v99_bus_ready, v99_bus_rdata_en;
@@ -1452,11 +1452,30 @@ logic       v99_cmd_v9938_v = 1'b0;          // OSD setting, re-registered on cl
 always @(posedge clk_vdp) v99_cmd_v9938_v <= v99_cmd_v9938;
 wire [95:0] v99_cmd_wait;
 v9968_cmdwait v99_cmdwait (.v9938(v99_cmd_v9938_v), .cmd_wait(v99_cmd_wait));
+//  Geo3D (rtl/video/geo3d, MIT, Alex Moncks): ports 9Dh / 9Fh of the same host bus.  Its
+//  accesses never reach the V9968 (bus_valid gated); ready / read data come from whichever
+//  side owns the port.  The engine writes the V9968 command registers through ext_cmd_*.
+wire        geo_hit, geo_ready, geo_rdata_en, geo_cmd_wr, geo_busy;
+wire  [7:0] geo_rdata, geo_cmd_data;
+wire  [5:0] geo_cmd_num;
+wire        vdp_bus_ready, vdp_bus_rdata_en, vdp_ext_ce;
+wire  [7:0] vdp_bus_rdata;
+geo3d_bus #(.PORT_INDEX(3'd5), .PORT_DATA(3'd7)) u_geo3d (
+   .clk(clk_vdp), .clk_eng(clk_geo), .reset_n(v99_reset_n),
+   .bus_address(v99_bus_address), .bus_ioreq(v99_bus_ioreq), .bus_write(v99_bus_write),
+   .bus_valid(v99_bus_valid), .bus_wdata(v99_bus_wdata),
+   .hit(geo_hit), .bus_ready(geo_ready), .bus_rdata(geo_rdata), .bus_rdata_en(geo_rdata_en),
+   .cmd_wr(geo_cmd_wr), .cmd_num(geo_cmd_num), .cmd_data(geo_cmd_data), .cmd_ce(vdp_ext_ce),
+   .run_busy(geo_busy)
+);
+assign v99_bus_ready    = geo_hit ? geo_ready : vdp_bus_ready;
+assign v99_bus_rdata_en = geo_rdata_en | vdp_bus_rdata_en;
+assign v99_bus_rdata    = geo_rdata_en ? geo_rdata : vdp_bus_rdata;
 vdp v9968 (
    .reset_n(v99_reset_n), .clk(clk_vdp), .initial_busy(1'b0),
    .bus_address(v99_bus_address), .bus_ioreq(v99_bus_ioreq), .bus_write(v99_bus_write),
-   .bus_valid(v99_bus_valid), .bus_ready(v99_bus_ready), .bus_wdata(v99_bus_wdata),
-   .bus_rdata(v99_bus_rdata), .bus_rdata_en(v99_bus_rdata_en),
+   .bus_valid(v99_bus_valid & ~geo_hit), .bus_ready(vdp_bus_ready), .bus_wdata(v99_bus_wdata),
+   .bus_rdata(vdp_bus_rdata), .bus_rdata_en(vdp_bus_rdata_en),
    .int_n(v99_int_n),
    .vram_address(v99_vram_address), .vram_write(v99_vram_write), .vram_valid(v99_vram_valid),
    .vram_wdata(v99_vram_wdata), .vram_wdata_mask(v99_vram_wdata_mask),
@@ -1464,7 +1483,11 @@ vdp v9968 (
    .display_hs(v99_hs), .display_vs(v99_vs), .display_en(v99_de),
    .display_r(v99_r), .display_g(v99_g), .display_b(v99_b),
    .force_highspeed(1'b0),
-   .ext_cmd_wr(1'b0), .ext_cmd_num(6'd0), .ext_cmd_data(8'd0), .ext_cmd_ce(),
+`ifndef V99_MUT_NOGEO_CMD
+   .ext_cmd_wr(geo_cmd_wr), .ext_cmd_num(geo_cmd_num), .ext_cmd_data(geo_cmd_data), .ext_cmd_ce(vdp_ext_ce),
+`else   // negative control (sim/fullsys/vprobe phase 6): the engine's command writes never arrive
+   .ext_cmd_wr(1'b0), .ext_cmd_num(6'd0), .ext_cmd_data(8'd0), .ext_cmd_ce(vdp_ext_ce),
+`endif
    .scanline_level(v99_scanline_v), .cmd_wait(v99_cmd_wait),
    .button(2'b00),
    .pulse0(), .pulse1(), .pulse2(), .pulse3(), .pulse4(), .pulse5(), .pulse6(), .pulse7()

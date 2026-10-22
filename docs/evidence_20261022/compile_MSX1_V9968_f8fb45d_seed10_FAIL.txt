@@ -1,0 +1,45 @@
+MSX1_V9968.qsf written (386 lines)
+build_id.v: `define BUILD_DATE "261022"
+compile MSX1_V9968 f8fb45d compile.sh writes build_id.v; VPROBE OTIR phase; replay poll model generalised; LRMM bench at 2026-10-22 19:51:06
+stage map rc=0 373s errors=0
+build: map 2026-10-22 19:57:19, HEAD f8fb45d (map only)
+PCM pipeline states synthesised: 10 / 10
+PCM memories in MLAB: 31 distinct, 31 required
+PCM arrays Quartus could not infer as memory (10999): 0
+════════════════════════════════
+RESULT PASS: map stage is the 128.86 MHz PIPE study (fit may go on)
+stage fit rc=0 1129s errors=0
+stage sta rc=0 26s errors=0
+build: map 2026-10-22 19:57:19, sta 2026-10-22 20:16:34, HEAD f8fb45d
+clk_sdram period: 7.760 ns
+PCM pipeline states synthesised: 10 / 10
+PCM memories in MLAB: 31 distinct, 31 required
+PCM arrays Quartus could not infer as memory (10999): 0
+SDC constraints ignored by TimeQuest: none
+setup, clk_sdram: slack -0.162 TNS -0.353 
+Setup slack -0.162  emu|pll|pll_inst general[0]
+Setup slack 0.079  sdram_clk_pin
+Setup slack 0.089  emu|pll|pll_inst general[2]
+Setup slack 0.425  pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk
+Setup slack 0.706  emu|pll|pll_inst general[1]
+Setup slack 5.258  spi_sck
+Setup slack 8.296  FPGA_CLK1_50
+Setup slack 10.050  altera_reserved_tck
+Setup slack 11.058  FPGA_CLK2_50
+Setup slack 14.688  pll_audio|pll_audio_inst general[0]
+Hold slack 0.246  emu|pll|pll_inst general[0]
+Hold slack 0.250  emu|pll|pll_inst general[1]
+Hold slack 0.251  emu|pll|pll_inst general[2]
+Hold slack 0.258  pll_hdmi|pll_hdmi_inst|altera_pll_i|cyclonev_pll|counter[0].output_counter|divclk
+Hold slack 0.275  pll_audio|pll_audio_inst general[0]
+Hold slack 0.361  FPGA_CLK2_50
+Hold slack 0.413  FPGA_CLK1_50
+Hold slack 0.448  altera_reserved_tck
+Hold slack 0.458  spi_sck
+Hold slack 2.512  sdram_clk_pin
+failing endpoints: 3
+    2   -0.16  VS sdram: a_i <- ff_vram_address
+    1   -0.03  SS sdram: g2.l.b <- m128
+════════════════════════════════
+RESULT PASS: the build is the 128.86 MHz PIPE study it claims to be
+TIMING FAIL: worst Setup slack -0.162 ns (any clock)

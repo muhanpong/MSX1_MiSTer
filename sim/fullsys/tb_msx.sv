@@ -67,12 +67,13 @@ module tb;
    initial v99_scanline = 2'd0;              // msx input (OSD scanlines); video is not checked here
    initial v99_cmd_v9938 = 1'b0;             // msx input (OSD command speed): upstream waits
    initial begin
-      clk_sdram = 1'b0; clk_vdp = 1'b0; c21 = 1'b0;
+      clk_sdram = 1'b0; clk_vdp = 1'b0; clk_geo = 1'b0; c21 = 1'b0;
       forever begin
          #1.940;
          g194 = (g194 == 23) ? 0 : g194 + 1;
          clk_sdram = (g194 % 4) < 2;
          clk_vdp   = (g194 % 6) < 3;
+         clk_geo   = (g194 % 12) < 6;           // clk_vdp / 2, rising with it (PLL outclk_3)
          c21       = g194 < 12;
       end
    end
@@ -1776,10 +1777,10 @@ module tb;
          $display("vprobe: phase %0d at %.3f ms (VRAM writes %0d reads %0d) | V9968 bus: 98h writes started %0d accepted %0d | CPU cycles on 98h-9Bh %0d, clk21m with WAIT from the V9968 pacer %0d",
                   vp_phase, $realtime / 1e6, v99_nwr, v99_nrd, v99_w98_st, v99_w98_acc, vp_cyc, vp_waitclk);
          if (vp_phase == 15) begin
-            automatic bit ok = (vp_err[1] | vp_err[2] | vp_err[3] | vp_err[4] | vp_err[5]) == 0 && v99_badlat == 0 && v99_baddata == 0
+            automatic bit ok = (vp_err[1] | vp_err[2] | vp_err[3] | vp_err[4] | vp_err[5] | vp_err[6]) == 0 && v99_badlat == 0 && v99_baddata == 0
                                && v99_spur == 0 && v99_nans == v99_nrd && v99_nrd > 0 && v99_mon_drop == 0 && v99_late_cnt == 0;
-            $display("VPROBE p1 port-98h VRAM errors %0d | p2 HMMV errors %0d | p3 VBLANK timeouts %0d | p4 interrupt timeouts %0d | p5 OTIR errors %0d",
-                     vp_err[1], vp_err[2], vp_err[3], vp_err[4], vp_err[5]);
+            $display("VPROBE p1 port-98h VRAM errors %0d | p2 HMMV errors %0d | p3 VBLANK timeouts %0d | p4 interrupt timeouts %0d | p5 OTIR errors %0d | p6 Geo3D errors %0d",
+                     vp_err[1], vp_err[2], vp_err[3], vp_err[4], vp_err[5], vp_err[6]);
             $display("VPROBE RESULT %s", ok ? "PASS" : "FAIL");
             $finish;
          end

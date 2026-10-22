@@ -50,3 +50,15 @@ Driven from the OSD "Scandoubler Fx" (MSX1.sv: CRT 25/50/75% -> 1/2/3, others 0)
   moved `screen_pos_y` back 10 lines at once (sim/v9968_vram `+lnsw=207`: 206 -> 197, and
   229 -> 240 when LN=1 comes back), so Knightmare 224's HUD showed 10 lines low.  The end
   of the active area still follows LN live (the trick needs that).  Worth reporting upstream.
+
+## Local change (2026-10-22, bug): an interrupt event on the clock of a status read is lost
+
+- `vdp_cpu_interface.v`, the interrupt-flag block: upstream used one `if (port-1 read) /
+  else if (port-4 write) / else { events }` chain, so a line match (a one-clock pulse), the
+  frame interrupt or the command end that fell on the clock of a status read (any S#n) or
+  a Port#4 write never set its flag.  The clears are now applied first and the events after
+  them in the same clock (the events win).  ASO 224 waits for FH (R#19 = C6h) by polling
+  S#1: a lost FH left it waiting for ever -- the black screen after SPACE on the board,
+  V9968 build only (the V9958 build and openMSX V9958/V9968 run it).
+  sim/v9968_vram `+aso=30`: unfixed 11 waits never answered (every stage, ~1 in 11 FH),
+  fixed 0.  Worth reporting upstream.

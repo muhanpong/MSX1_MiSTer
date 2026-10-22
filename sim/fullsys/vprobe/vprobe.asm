@@ -141,8 +141,70 @@ otr:    in a,(98h) : cp (hl) : jr z,otok
 otok:   inc hl : djnz otr
         REPORT
 
+        ; 6  Geo3D on 9Dh (index / status) and 9Fh (data):
+        ;    (a) ID (0x49) = 20h
+        ;    (b) immediate vertex: identity matrix, F=256, CX=128, CY=106: (100,50,256) ->
+        ;        SX=228, SY=56
+        ;    (c) RUN, wireframe: vertices (0,0,256), (100,0,256), edge 0-1, colour 0Fh ->
+        ;        a LINE from (128,106) to (228,106) drawn by the engine through ext_cmd;
+        ;        VRAM byte at y=106 x=150 (SCREEN5: 106*128+75 = 354Bh) = FFh, DRAWN = 1
+        ld a,6 : out (2Eh),a
+        ld de,0
+        ld a,49h : out (9Dh),a
+        in a,(9Fh) : cp 20h : jr z,g_id
+        inc de
+g_id:   xor a : out (9Dh),a
+        ld hl,gcfg : ld bc,36 * 256 + 9Fh : otir            ; 0x00-0x23
+        ld hl,gvtx : ld bc,6 * 256 + 9Fh : otir             ; 0x24-0x29: computes
+        ld b,0
+g_w1:   in a,(9Dh) : and 08h : jr z,g_d1                    ; core busy
+        djnz g_w1
+        inc de
+g_d1:   ld a,30h : out (9Dh),a
+        in a,(9Fh) : cp 228 & 0FFh : jr z,g_s1
+        inc de
+g_s1:   in a,(9Fh) : cp 0 : jr z,g_s2
+        inc de
+g_s2:   in a,(9Fh) : cp 56 : jr z,g_s3
+        inc de
+g_s3:   in a,(9Fh) : or a : jr z,g_s4
+        inc de
+g_s4:   ld a,40h : out (9Dh),a : xor a : out (9Fh),a       ; VADDR 0
+        ld a,41h : out (9Dh),a : xor a : out (9Fh),a       ; EADDR 0
+        ld a,42h : out (9Dh),a : ld a,2 : out (9Fh),a      ; NVERT 2
+        ld a,43h : out (9Dh),a : ld a,1 : out (9Fh),a      ; NEDGE 1
+        ld a,44h : out (9Dh),a : ld a,0Fh : out (9Fh),a    ; COLOR
+        ld a,45h : out (9Dh),a : xor a : out (9Fh),a       ; LOP IMP
+        ld a,46h : out (9Dh),a : xor a : out (9Fh),a : out (9Fh),a   ; YPAGE 0
+        ld a,50h : out (9Dh),a
+        ld hl,gvtx2 : ld bc,12 * 256 + 9Fh : otir           ; VDATA x2
+        ld a,51h : out (9Dh),a
+        xor a : out (9Fh),a : inc a : out (9Fh),a           ; EDATA 0,1
+        ld a,48h : out (9Dh),a : ld a,1 : out (9Fh),a      ; CTRL: RUN, wireframe
+        ld hl,0
+g_w2:   in a,(9Dh) : and 01h : jr z,g_d2                    ; RUN busy
+        dec hl : ld a,h : or l : jr nz,g_w2
+        inc de
+g_d2:   VREG 15, 2
+g_w3:   in a,(99h) : and 1 : jr nz,g_w3                     ; the last LINE done
+        VREG 15, 0
+        VADDR 0, 35h, 0
+        ld a,4Bh : out (99h),a : ld a,35h : out (99h),a      ; read address 354Bh
+        in a,(98h) : cp 0FFh : jr z,g_px
+        inc de
+g_px:   ld a,4Ch : out (9Dh),a
+        in a,(9Fh) : cp 1 : jr z,g_dr
+        inc de
+g_dr:   REPORT
+
         ld a,0Fh : out (2Eh),a
 park:   jr park
+
+gcfg:   dw 4000h, 0, 0,  0, 4000h, 0,  0, 0, 4000h          ; M00..M22 identity (Q2.14)
+        dw 0, 0, 0                                         ; TX TY TZ
+        dw 256, 128, 106, 1, 256, 212                      ; F CX CY ZNEAR W H
+gvtx:   dw 100, 50, 256                                    ; VX VY VZ
+gvtx2:  dw 0, 0, 256,  100, 0, 256
 
 otab:   db 00h, 8Eh, 00h, 70h                  ; R#14 = 0; address 3000h, write
 otdat:  db 11h,22h,33h,44h,55h,66h,77h,88h, 99h,0AAh,0BBh,0CCh,0DDh,0EEh,0FFh,01h

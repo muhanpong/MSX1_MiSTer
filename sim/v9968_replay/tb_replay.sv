@@ -290,7 +290,7 @@ module tb #(parameter int RELEASE_PH = 5);
     end
     task automatic vram_dump(input int k);
         int f; f = $fopen($sformatf("%s/vram_%0d.bin", out, k), "wb");
-        for (int i = 0; i < 131072; i++) $fwrite(f, "%c", vsh[i]);
+        for (int i = 0; i < 262144; i++) $fwrite(f, "%c", vsh[i]);   // 256 KB: the LRMM source atlas is at 20000h-3FFFFh
         $fclose(f);
         $display("REPLAY vram dump at flip %0d (t=%0t)", k, $time);
     endtask
