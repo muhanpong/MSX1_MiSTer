@@ -13,7 +13,7 @@
 #  had been built as flops; Quartus had said so in the map report 20 minutes earlier.
 #  The fit settings are the project's own (MSX1.qsf), so slacks stay comparable with
 #  the earlier `quartus_sh --flow compile` builds.  The PRE_FLOW build_id script only
-#  runs under --flow; these bitstreams are timing studies and never go on a board.
+#  runs under --flow, so build_id.v is written below (these bitstreams now go on the board).
 #  MSX1.qsf is restored at the end (Quartus rewrites its version line).
 set -u
 cd "$(dirname "$0")/../.."
@@ -22,6 +22,12 @@ pgrep -x "quartus_(map|fit|sta|asm|sh)" > /dev/null && { echo "RESULT FAIL: anot
 rc=0
 REV=${REV:-MSX1}; export REV
 [ "$REV" = MSX1_V9968 ] && { tools/sdram128/mk_v9968_qsf.sh || exit 1; }
+#  build_id.v (BUILD_DATE, shown as "MSX1 vYYMMDD" in the MiSTer OSD About/info): the
+#  PRE_FLOW script sys/build_id.tcl only runs under --flow, so these stage-by-stage
+#  builds kept the date of the last --flow build (the 2026-10-22 board rbf said v261019).
+#  Write it here the same way, every time.
+printf '`define BUILD_DATE "%s"\n' "$(date +%y%m%d)" > build_id.v
+echo "build_id.v: $(cat build_id.v)"
 stage() {
     local st=$1 t0=$(date +%s)
     "$Q/quartus_$st" MSX1 -c $REV > "output_files/stage_$st.log" 2>&1; local r=$?

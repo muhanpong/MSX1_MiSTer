@@ -29,15 +29,15 @@ module tb #(parameter int RELEASE_PH = 5);
     always #5820 clk_vdp   = ~clk_vdp;
 
     string trace = "", out = "/tmp/v9968_replay", dumps = "";
-    int m128 = 1, sync_to = 3000000;             // ~2 frames of clk_vdp (1.43 M per frame)
-    int pace = 1;                                // 1: replay each event no earlier than its trace time (gaps > 1 ms
+    int m128 = 1, sync_to = 1500000;             // ~2 frames of clk_vdp (1.43 M per frame)
+    int pace = 1, gen_poll = 1;   // gen_poll: wait for the bits the oracle saw change at a poll loop's exit                                // 1: replay each event no earlier than its trace time (gaps > 1 ms
                                                  //    before the port-4 unlock are cut to 1 ms: the BIOS boot is idle)
     initial begin
         void'($value$plusargs("trace=%s", trace));
         void'($value$plusargs("out=%s", out));
         void'($value$plusargs("dump=%s", dumps));
         void'($value$plusargs("m128=%d", m128));
-        void'($value$plusargs("sync_to=%d", sync_to)); void'($value$plusargs("pace=%d", pace));
+        void'($value$plusargs("sync_to=%d", sync_to)); void'($value$plusargs("pace=%d", pace)); void'($value$plusargs("genpoll=%d", gen_poll));
     end
 
     //  ── SDRAM controller + model (as sim/v9968_vram) ──────────────────────
@@ -299,6 +299,7 @@ module tb #(parameter int RELEASE_PH = 5);
     int n_ev = 0, n_w = 0, n_r98 = 0, n_r99 = 0, rd_bad = 0, sync_miss = 0, sync_wait = 0, vr_fresh = 0;
     logic [7:0] last_99_w = 8'h00; bit second_byte = 0;     // R#2 detection: value then 82h
     int   run_len = 0; logic [7:0] run_first = 8'h00; bit run_ce = 0; logic [3:0] sreg = 4'd0;   // poll runs
+    logic [7:0] run_ov_prev = 8'h00, run_ov_last = 8'h00; bit run_ov_ok = 0;                   // oracle peeks of the run
     longint t_prev = -1, t_skip = 0, t_sim0 = 0; bit unlocked = 0;                                // pacing
     initial begin
         int f, rc; longint t; string rw; int port, val; logic [7:0] q;
@@ -349,7 +350,12 @@ module tb #(parameter int RELEASE_PH = 5);
                         vr_fresh++;
                     end
                     while (!ok && w < sync_to) begin
-                        if (sreg == 4'd0)              ok = q[7];                 // F
+                        //  a run of >= 2 whose oracle peeks changed at the end: wait for the
+                        //  changed bits (any status register: FH, HR, VR, CE, TR, F ...)
+                        if (gen_poll && run_len >= 2 && run_ov_ok && (run_ov_last ^ run_ov_prev) != 8'h00)
+                            ok = ((q ^ run_ov_last) & (run_ov_last ^ run_ov_prev)) == 8'h00;
+                        else if (sreg == 4'd0)         ok = q[7];                 // F
+                        else if (sreg == 4'd1)         ok = 1'b1;                 // S#1 single read: no wait
                         else if (run_ce || run_first[0]) ok = !q[0];             // CE
                         else                           ok = q[6];                 // VR
                         if (!ok) begin repeat (32) @(posedge clk_vdp); w += 32; io(0, 3'd1, 8'h00, q); end
@@ -390,7 +396,8 @@ module tb #(parameter int RELEASE_PH = 5);
                     //  replayed as a run (see end_run below).
                     n_r99++;
                     io(0, 3'd1, 8'h00, q);
-                    if (run_len == 0) run_first = q;
+                    if (run_len == 0) begin run_first = q; run_ov_ok = 0; end
+                    if (rc >= 4) begin run_ov_prev = (run_len == 0) ? 8'(val) : run_ov_last; run_ov_last = 8'(val); run_ov_ok = 1; end
                     run_len++;
                     if (rc >= 4 && val[0]) run_ce = 1;
                     second_byte = 0;      // a status read ends a register pair (as the VDP does)

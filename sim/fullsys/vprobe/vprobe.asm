@@ -125,8 +125,30 @@ vint:   di
 idone:  VREG 1, 40h
         REPORT
 
+        ; 5  block I/O (OTIR) to the VDP, as ASO 224's register/table blocks do: on a
+        ;    handshaked CPU (NextZ80 / R800, -DR800) the V9968 adapter must take back-to-back
+        ;    OUT cycles of one OTIR.  (a) OTIR to 99h: R#14 = 0, write address 3000h;
+        ;    (b) OTIR 64 bytes to 98h; read back with IN.  A hang never reaches phase 0Fh.
+        ld a,5 : out (2Eh),a
+        ld de,0
+        VREG 1, 00h
+        ld hl,otab : ld bc,4 * 256 + 99h : otir
+        ld hl,otdat : ld bc,64 * 256 + 98h : otir
+        VADDR 0, 30h, 0
+        ld hl,otdat : ld b,64
+otr:    in a,(98h) : cp (hl) : jr z,otok
+        inc de
+otok:   inc hl : djnz otr
+        REPORT
+
         ld a,0Fh : out (2Eh),a
 park:   jr park
+
+otab:   db 00h, 8Eh, 00h, 70h                  ; R#14 = 0; address 3000h, write
+otdat:  db 11h,22h,33h,44h,55h,66h,77h,88h, 99h,0AAh,0BBh,0CCh,0DDh,0EEh,0FFh,01h
+        db 12h,23h,34h,45h,56h,67h,78h,89h, 9Ah,0ABh,0BCh,0CDh,0DEh,0EFh,0F0h,02h
+        db 13h,24h,35h,46h,57h,68h,79h,8Ah, 9Bh,0ACh,0BDh,0CEh,0DFh,0E0h,0F1h,03h
+        db 14h,25h,36h,47h,58h,69h,7Ah,8Bh, 9Ch,0ADh,0BEh,0CFh,0D0h,0E1h,0F2h,04h
 
 hmmv:   db 0,0, 0,0, 0,1, 4,0, 5Ah, 0, 0C0h   ; DX DY NX=256 NY=4 CLR ARG HMMV
         assert $ < 4000h

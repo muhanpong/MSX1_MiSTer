@@ -47,7 +47,9 @@ module tb #(parameter int RELEASE_PH = 0);
         void'($value$plusargs("ct55=%d", ct55));
         void'($value$plusargs("offat=%d", offat));
         void'($value$plusargs("wl=%d", wl));
-        void'($value$plusargs("lnsw=%d", lnsw));      // >=0: km224's overscan trick: 212 lines, R#9 LN=0 written at screen line lnsw (0 = never: control)          // 0..6: the seven V9938-referenced workloads of rtl/video/VDP/sim/tb_vdpcmd7.vhd    // >=0: display on 20 ms, then R#1=00 lands offat clk_vdp after the selector's (phase 2, sub 0) edge, then the LRMM      // 1: sprite colour table 0FE00h..0FFFFh = 55h and SAT 10000h..1007Fh = 0 (the oracle's VRAM at the hang)  // 1: write the SAT bytes before the command, no display change (replay's exact state)
+        void'($value$plusargs("lnsw=%d", lnsw));
+        void'($value$plusargs("lr_sx=%d", lr_sx)); void'($value$plusargs("lr_sy=%d", lr_sy));      // +lr_*: one LRMM with these
+        void'($value$plusargs("lr_vx=%d", lr_vx)); void'($value$plusargs("lr_vy=%d", lr_vy));      //  start/vectors (SUPER CAT frames)      // >=0: km224's overscan trick: 212 lines, R#9 LN=0 written at screen line lnsw (0 = never: control)          // 0..6: the seven V9938-referenced workloads of rtl/video/VDP/sim/tb_vdpcmd7.vhd    // >=0: display on 20 ms, then R#1=00 lands offat clk_vdp after the selector's (phase 2, sub 0) edge, then the LRMM      // 1: sprite colour table 0FE00h..0FFFFh = 55h and SAT 10000h..1007Fh = 0 (the oracle's VRAM at the hang)  // 1: write the SAT bytes before the command, no display change (replay's exact state)
     end
 
     //  ── SDRAM controller + model ──────────────────────────────────────────
@@ -97,7 +99,7 @@ module tb #(parameter int RELEASE_PH = 0);
 
     logic [2:0] bus_address = 0; logic bus_ioreq = 0, bus_write = 0, bus_valid = 0;
     logic [7:0] bus_wdata = 0; wire bus_ready, bus_rdata_en; wire [7:0] bus_rdata;
-    string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1;
+    string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1, lr_sx = -1, lr_sy = 0, lr_vx = 0, lr_vy = 0;
     int scan = 0, sp3 = 0, demo = 0, r1 = 0, r20 = 8'h1F, r21 = 8'h3A, r25 = 3, r8 = 8;
     wire d_hs, d_en; wire [7:0] d_r, d_g, d_b;
     //  scanlines: the sum of r+g+b over displayed pixels per line parity (lines counted
@@ -341,6 +343,36 @@ module tb #(parameter int RELEASE_PH = 0);
                     end
                 end
             join
+        end
+        //  +lr_sx=..: SUPER CAT's LRMM (SCREEN5, window x 0..255 y 1024..1791, 256x212 to page 0)
+        //  with a given start and vectors.  The window is filled with 33h by HMMV first and the
+        //  outside colour is 0Fh, so each destination byte tells inside (33h) / outside (FFh).
+        if (lr_sx >= 0) begin
+            logic [7:0] st; int n33 = 0, nff = 0, noth = 0;
+            io(1, 3'd4, 8'h00, q);
+            wreg(0, 8'h06); wreg(1, 8'h00); wreg(9, 8'h80); wreg(20, 8'h1F); wreg(21, 8'h3A); wreg(25, 8'h03);
+            //  HMMV y 1024..1791 (768 lines) with 33h, in 3 strips of 256
+            for (int k = 0; k < 3; k++) begin
+                wreg(36, 8'h00); wreg(37, 8'h00); wreg(38, 8'h00); wreg(39, 8'(4 + k));
+                wreg(40, 8'h00); wreg(41, 8'h01); wreg(42, 8'h00); wreg(43, 8'h01);
+                wreg(44, 8'h33); wreg(45, 8'h00); wreg(46, 8'hC0); wreg(15, 8'h02);
+                do io(0, 3'd1, 8'h00, st); while (st[0]);
+            end
+            wreg(51, 8'h00); wreg(52, 8'h00); wreg(53, 8'h00); wreg(54, 8'h04); wreg(55, 8'hFF); wreg(56, 8'h00); wreg(57, 8'hFF); wreg(58, 8'h06);
+            wreg(47, 8'(lr_vx)); wreg(48, 8'(lr_vx >> 8)); wreg(49, 8'(lr_vy)); wreg(50, 8'(lr_vy >> 8));
+            wreg(32, 8'(lr_sx)); wreg(33, 8'(lr_sx >> 8)); wreg(34, 8'(lr_sy)); wreg(35, 8'(lr_sy >> 8));
+            wreg(36, 8'h00); wreg(37, 8'h00); wreg(38, 8'h00); wreg(39, 8'h00);
+            wreg(40, 8'h00); wreg(41, 8'h01); wreg(42, 8'd212); wreg(43, 8'h00);
+            wreg(44, 8'hFF); wreg(45, 8'h00); wreg(46, 8'h30); wreg(15, 8'h02);
+            do io(0, 3'd1, 8'h00, st); while (st[0]);
+            wreg(15, 8'h00);
+            repeat (20000) @(posedge clk_vdp);
+            for (int a = 0; a < 212 * 128; a++) begin
+                if (!known[a]) noth++;
+                else if (shadow[a] == 8'h33) n33++; else if (shadow[a] == 8'hFF) nff++; else noth++;
+            end
+            $display("LRMM sx=%0d sy=%0d vx=%0d vy=%0d: dest bytes inside(33h) %0d, outside(FFh) %0d, other/unwritten %0d of %0d",
+                     lr_sx, lr_sy, lr_vx, lr_vy, n33, nff, noth, 212 * 128);
         end
         //  +wl=K: tb_vdpcmd7's workloads (SCREEN5, display + sprites on, 192 lines), timed in
         //  scanlines (63.556 us) against openMSX 21.0-245: HMMV 722.18, HMMM 1466.82, LMMV 1476.01,
