@@ -96,6 +96,31 @@ in 30 frames, at all four steps. In every one of those, the `intr_line` pulse fi
 `ff_line_interrupt` never rose (signal log). Fixed (clears first, events last, as above):
 0 in 30 frames.
 
+
+### Addendum (2026-10-22, later): a second window, one clock after the event
+
+`ff_status_register` is latched one clock behind the flags (the "Read data latch" block).
+A port-1 read on the clock *after* `ff_line_interrupt` rose returns FH = 0 from the stale
+latch and still clears the flag, so the CPU never sees that FH. The same applies to F on
+S#0. The same-clock fix above does not cover this.
+
+Repro: the `+aso` bench with `+pollpad=0..11` (extra clocks per S#1 poll, which moves the
+read phase), 30 frames each, 1440 FH events in total.
+- With the same-clock fix only: 17 FH lost, at 5 of the 12 phases. Each costs one frame.
+- With the fix below: 0 lost. Reads on the critical clock still happen (12), but they no
+  longer clear.
+
+Fix: a status read clears F / FH only when the byte it returns shows the flag.
+
+```verilog
+if( ff_status_register_pointer == 4'd0 ) begin
+    if( ff_status_register[7] ) ff_frame_interrupt <= 1'b0;
+end
+else if( ff_status_register_pointer == 4'd1 ) begin
+    if( ff_status_register[0] ) ff_line_interrupt <= 1'b0;
+end
+```
+
 ---
 
 ## Issue B — Sprite VRAM request held across display-off freezes VDP commands
@@ -233,4 +258,6 @@ Repro: 212 lines with the display on; write R#9 = 00h at screen line 207.
   of the MiSTer MSX1 core (not pushed).
 - Not reported: HS=0 command speed vs the V9938 (by design; openMSX offers `timing=1`
   for that); our local additions (scanline levels, per-command wait port, Geo3D wiring).
-- Licence: upstream files are MIT; the diffs above are ours to offer under the same.
+- Licence: the repository `LICENSE` is MIT, but the `vdp_*.v` headers carry Takayuki Hara's
+  3-clause terms (incl. no commercial use without written permission). The diffs above are
+  offered under whatever terms the file they patch carries.

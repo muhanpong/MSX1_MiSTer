@@ -48,7 +48,8 @@ module tb #(parameter int RELEASE_PH = 0);
         void'($value$plusargs("offat=%d", offat));
         void'($value$plusargs("wl=%d", wl));
         void'($value$plusargs("lnsw=%d", lnsw));
-        void'($value$plusargs("aso=%d", aso));        // >0: ASO 224's per-frame line-IRQ loop for that many frames
+        void'($value$plusargs("aso=%d", aso));
+        void'($value$plusargs("pollpad=%d", pollpad));   // +aso: extra clk_vdp per S#1 poll (moves the read phase against the line match)        // >0: ASO 224's per-frame line-IRQ loop for that many frames
         void'($value$plusargs("lr_sx=%d", lr_sx)); void'($value$plusargs("lr_sy=%d", lr_sy));      // +lr_*: one LRMM with these
         void'($value$plusargs("lr_vx=%d", lr_vx)); void'($value$plusargs("lr_vy=%d", lr_vy));      //  start/vectors (SUPER CAT frames)      // >=0: km224's overscan trick: 212 lines, R#9 LN=0 written at screen line lnsw (0 = never: control)          // 0..6: the seven V9938-referenced workloads of rtl/video/VDP/sim/tb_vdpcmd7.vhd    // >=0: display on 20 ms, then R#1=00 lands offat clk_vdp after the selector's (phase 2, sub 0) edge, then the LRMM      // 1: sprite colour table 0FE00h..0FFFFh = 55h and SAT 10000h..1007Fh = 0 (the oracle's VRAM at the hang)  // 1: write the SAT bytes before the command, no display change (replay's exact state)
     end
@@ -100,7 +101,7 @@ module tb #(parameter int RELEASE_PH = 0);
 
     logic [2:0] bus_address = 0; logic bus_ioreq = 0, bus_write = 0, bus_valid = 0;
     logic [7:0] bus_wdata = 0; wire bus_ready, bus_rdata_en; wire [7:0] bus_rdata;
-    string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1, lr_sx = -1, lr_sy = 0, lr_vx = 0, lr_vy = 0, aso = 0;
+    string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1, lr_sx = -1, lr_sy = 0, lr_vx = 0, lr_vy = 0, aso = 0, pollpad = 0;
     int scan = 0, sp3 = 0, demo = 0, r1 = 0, r20 = 8'h1F, r21 = 8'h3A, r25 = 3, r8 = 8;
     wire d_hs, d_en; wire [7:0] d_r, d_g, d_b;
     //  scanlines: the sum of r+g+b over displayed pixels per line parity (lines counted
@@ -157,6 +158,15 @@ module tb #(parameter int RELEASE_PH = 0);
                                          vdp9968.u_cpu_interface.reg_interrupt_line, vdp9968.reg_vertical_offset, `SSG.ff_v_count, $time);
         lh_q <= vdp9968.u_cpu_interface.ff_line_interrupt;
         if (lh_q && !vdp9968.u_cpu_interface.ff_line_interrupt) $display("ASO   FH cleared at screen %0d t=%0t", $signed(`SSG.w_screen_pos_y), $time);
+    end
+    //  stale status read: an S#1 read that clears FH while the latched status byte (one
+    //  clock old) still shows FH=0 -- the CPU sees 0 and the flag is gone.
+    int stale_fh = 0;
+    always @(posedge clk_vdp) if (vdp9968.u_cpu_interface.w_read && vdp9968.u_cpu_interface.ff_port1
+                                  && vdp9968.u_cpu_interface.ff_status_register_pointer == 4'd1
+                                  && vdp9968.u_cpu_interface.ff_line_interrupt
+                                  && !vdp9968.u_cpu_interface.ff_status_register[0]) begin
+        stale_fh++; $display("ASO   STALE S#1 read cleared FH unseen t=%0t", $time);
     end
     always @(posedge clk_vdp) begin
         f_q <= vdp9968.u_cpu_interface.ff_frame_interrupt;
@@ -377,7 +387,7 @@ module tb #(parameter int RELEASE_PH = 0);
                     int w = 0;
                     wreg(15, 8'h01);
                     begin longint t0; t0 = $time;   // timeout: 1.5 frames of real time
-                    do begin io(0, 3'd1, 8'h00, st); w++; end while (!st[0] && ($time - t0) < 64'd25_000_000_000); end
+                    do begin io(0, 3'd1, 8'h00, st); w++; repeat (pollpad) @(posedge clk_vdp); end while (!st[0] && ($time - t0) < 64'd25_000_000_000); end
                     wreg(15, 8'h00);
                     if (!st[0]) begin stuck++; $display("ASO frame %0d stage %0d: FH never came (stuck)", fr, k); end
                     else $display("ASO frame %0d stage %0d: FH at screen line %0d (v_count %0d) t=%0t", fr, k, $signed(`SSG.w_screen_pos_y), `SSG.ff_v_count, $time);
@@ -390,7 +400,7 @@ module tb #(parameter int RELEASE_PH = 0);
                     endcase
                 end
             end
-            $display("ASO RESULT: %0d stuck waits, %0d frame interrupts (F) raised (see ASO F lines)", stuck, aso_f);
+            $display("ASO RESULT: %0d stuck waits, %0d frame interrupts (F) raised (see ASO F lines), %0d stale S#1 reads (pollpad %0d)", stuck, aso_f, stale_fh, pollpad);
         end
         //  +lr_sx=..: SUPER CAT's LRMM (SCREEN5, window x 0..255 y 1024..1791, 256x212 to page 0)
         //  with a given start and vectors.  The window is filled with 33h by HMMV first and the

@@ -880,15 +880,19 @@ module vdp_cpu_interface (
 			ff_lock_extregs				<= 1'b1;
 		end
 		else begin
-			//	clears by the CPU
+			//	clears by the CPU.  MSX1 core: a status read clears F / FH only when the byte it
+			//	returns shows the flag.  ff_status_register is latched one clock behind the flags,
+			//	so a read on the clock after a line match returned FH = 0 and still cleared FH:
+			//	the CPU never saw it (sim/v9968_vram +aso +pollpad=0..11: 9 of 1440 FH lost
+			//	with the same-clock fix alone).
 			if( w_read && ff_port1 ) begin
 				if( ff_status_register_pointer == 4'd0 ) begin
 					//	Clear frame interrupt flag
-					ff_frame_interrupt <= 1'b0;
+					if( ff_status_register[7] ) ff_frame_interrupt <= 1'b0;
 				end
 				else if( ff_status_register_pointer == 4'd1 ) begin
 					//	Clear line interrupt flag
-					ff_line_interrupt <= 1'b0;
+					if( ff_status_register[0] ) ff_line_interrupt <= 1'b0;
 				end
 			end
 			if( w_write && ff_port4 ) begin
