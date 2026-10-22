@@ -15,10 +15,13 @@ set_global_assignment -name PARTITION_COLOR 16764057 -section_id Top
 
 set_global_assignment -name LAST_QUARTUS_VERSION "17.1.0 Lite Edition"
 
-# MoonSound freeze-diagnosis infrastructure (detectors + T80 forensics + overlay
-# rows + IM2-table watchpoint).  Uncomment to re-enable; see rtl/msx.sv and
-# rtl/debug_overlay.sv `ifdef MOONSOUND_DIAG sections.
-set_global_assignment -name VERILOG_MACRO "MOONSOUND_DIAG=1"
+# DEBUG: the diagnostics -- MoonSound freeze detectors, T80 PC-trap forensics, the
+# debug overlay's diagnostic rows, the IM2-table watchpoint, the SignalTap tap word,
+# and the JTAG rings evt_trace / vdp_regprobe (rtl/msx.sv, rtl/debug_overlay.sv
+# `ifdef DEBUG).  On by default; comment the line out to build without them
+# (2026-10-22: renamed from MOONSOUND_DIAG, which did not cover the two rings).
+# The overlay's pause / save icons and SCC_DIAG (per-channel mutes) are not DEBUG.
+set_global_assignment -name VERILOG_MACRO "DEBUG=1"
 # ---- SCC diagnostics -------------------------------------------------------
 # Two switches, cheap and expensive.
 #
