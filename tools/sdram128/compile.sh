@@ -26,6 +26,11 @@ REV=${REV:-MSX1}; export REV
 #  PRE_FLOW script sys/build_id.tcl only runs under --flow, so these stage-by-stage
 #  builds kept the date of the last --flow build (the 2026-10-22 board rbf said v261019).
 #  Write it here the same way, every time.
+#  SEED=N: fitter seed for this revision's qsf only (placement; MSX1.qsf keeps its own)
+if [ -n "${SEED:-}" ]; then
+    sed -i "s/^set_global_assignment -name SEED .*/set_global_assignment -name SEED $SEED/" "$REV.qsf"
+    echo "seed: $(grep '^set_global_assignment -name SEED' "$REV.qsf")"
+fi
 printf '`define BUILD_DATE "%s"\n' "$(date +%y%m%d)" > build_id.v
 echo "build_id.v: $(cat build_id.v)"
 stage() {
