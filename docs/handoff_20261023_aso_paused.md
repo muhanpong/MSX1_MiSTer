@@ -33,3 +33,32 @@ bench a lost FH costs one frame, never a hang.
 SPACE, OSD open (paused), DEBUG OVERLAY ON. The left panel shows the overlay rows at the hang;
 not decoded yet. Start the resumed analysis by decoding it (rtl/debug_overlay.sv row map,
 tools/decode_probe_shot.py). Note: this rbf was built with DEBUG=1 (qsf regenerated in 5128f0f).
+
+### Decoded (2026-10-23)
+Rows 7-29 are T80-only forensics (`dbg_pc_now` = t80_reg): in R800 mode they show the idle
+Z80 (PC 0661), not the R800 -- ignore them here. Sanity: row 28 AB mode-set PC = 042A (BIOS
+init) and row 26 = MS=1 ctrl=02, as on a healthy boot, so the decode is aligned.
+Reg-probe rows (rtl/vdp_regprobe.sv; NOTE rows labelled r9/r19 are really R#5/R#8):
+
+| reg | value | frame | oracle state at 555.09 ms after R#1=02 |
+|---|---|---|---|
+| R#23 | 00 | 0B54 | 00 |
+| R#2 | 3F | 0B5C | 3F |
+| R#5 | BF | 0B5C | BF |
+| R#1 | 02 (display off, IE0 off) | 0B5E | 02 |
+| R#8 | 28 | 0B5E | 28 |
+| R#0 | 16 (SCREEN 5, IE1 on) | 0B7F | 16 |
+| frame now | 1382 | | |
+
+R#0=16 came 0x21 = 33 frames after R#1=02; the oracle's first in-game R#0=16 is at 555.09 ms
+= 33.3 frames after R#1=02. Nothing of these six registers was written for 2051 frames after.
+So the board stops exactly where the oracle (tr_aso.io) does: R#9=00, R#19=68h, R#0=16, then
+the game does NOT poll -- it waits for the line interrupt as a CPU interrupt (oracle: next
+access is the handler at 563.86 ms: R#15=1, S#1 read = 05, FH set). In-game R#1 is 02/42:
+IE0 is off, so the line IRQ is the ONLY interrupt; music runs from it too -> silence.
+
+Gap: nothing tested that path. sim/v9968_vram +aso polls S#1; VPROBE phase 4 tests IE0
+(VBLANK) only. Next decisive sim: the register state above (oracle, full list via the
+snippet in this session: R#0 16, R#1 02, R#9 00, R#19 68, R#23 00, R#25 02, ...), display
+off, no CPU polling; watch int_n for the line-104 FH, then the same through fullsys with the
+R800 (IM 1 -> 0038h) as a VPROBE phase "IE1 line interrupt, display off".
