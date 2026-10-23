@@ -50,7 +50,8 @@ module tb #(parameter int RELEASE_PH = 0);
         void'($value$plusargs("lnsw=%d", lnsw));
         void'($value$plusargs("aso=%d", aso));
         void'($value$plusargs("pollpad=%d", pollpad));
-        void'($value$plusargs("ie1=%d", ie1)); void'($value$plusargs("disp=%d", disp)); void'($value$plusargs("ie1off=%d", ie1off));   // +ie1=N: ASO 224's first in-game wait, line IRQ taken as int_n (no polling); +disp=1 control: display on   // +aso: extra clk_vdp per S#1 poll (moves the read phase against the line match)        // >0: ASO 224's per-frame line-IRQ loop for that many frames
+        void'($value$plusargs("ie1=%d", ie1)); void'($value$plusargs("disp=%d", disp)); void'($value$plusargs("ie1off=%d", ie1off));
+        void'($value$plusargs("rpl=%s", rplf)); void'($value$plusargs("rplscale=%d", rplscale));   // +rplscale=P: event times x P/100 (R800 runs ~1.8x openMSX between I/O)   // +rpl=<file>: replay an oracle window (tools: aso_win.txt), paced, reads not forced   // +ie1=N: ASO 224's first in-game wait, line IRQ taken as int_n (no polling); +disp=1 control: display on   // +aso: extra clk_vdp per S#1 poll (moves the read phase against the line match)        // >0: ASO 224's per-frame line-IRQ loop for that many frames
         void'($value$plusargs("lr_sx=%d", lr_sx)); void'($value$plusargs("lr_sy=%d", lr_sy));      // +lr_*: one LRMM with these
         void'($value$plusargs("lr_vx=%d", lr_vx)); void'($value$plusargs("lr_vy=%d", lr_vy));      //  start/vectors (SUPER CAT frames)      // >=0: km224's overscan trick: 212 lines, R#9 LN=0 written at screen line lnsw (0 = never: control)          // 0..6: the seven V9938-referenced workloads of rtl/video/VDP/sim/tb_vdpcmd7.vhd    // >=0: display on 20 ms, then R#1=00 lands offat clk_vdp after the selector's (phase 2, sub 0) edge, then the LRMM      // 1: sprite colour table 0FE00h..0FFFFh = 55h and SAT 10000h..1007Fh = 0 (the oracle's VRAM at the hang)  // 1: write the SAT bytes before the command, no display change (replay's exact state)
     end
@@ -103,6 +104,7 @@ module tb #(parameter int RELEASE_PH = 0);
     logic [2:0] bus_address = 0; logic bus_ioreq = 0, bus_write = 0, bus_valid = 0;
     logic [7:0] bus_wdata = 0; wire bus_ready, bus_rdata_en; wire [7:0] bus_rdata;
     string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1, lr_sx = -1, lr_sy = 0, lr_vx = 0, lr_vy = 0, aso = 0, pollpad = 0, ie1 = 0, disp = 0, ie1off = 0;
+    string rplf = ""; int rplscale = 100;
     int scan = 0, sp3 = 0, demo = 0, r1 = 0, r20 = 8'h1F, r21 = 8'h3A, r25 = 3, r8 = 8;
     wire d_hs, d_en; wire [7:0] d_r, d_g, d_b;
     //  scanlines: the sum of r+g+b over displayed pixels per line parity (lines counted
@@ -379,6 +381,45 @@ module tb #(parameter int RELEASE_PH = 0);
         //  then R#19=DBh, LN=0 (the overscan trick).  FH is polled on S#1 like the game (timeout
         //  one frame = "stuck").  A monitor logs every frame-interrupt (F) rise with its screen
         //  line: on the V9958 a frame whose LN goes 1 -> 0 between 192 and 212 has no F at all.
+        //  +rpl=<file>: replay ASO 224's display-off window from the oracle trace, paced to its
+        //  times.  Lines "t_ns W|R port(0-3) val 0", plus "0 W 9 reg val" for the register state
+        //  at the start.  Reads are NOT forced: status bytes are compared with the oracle's
+        //  (mismatches printed); a VDP bus that never answers ends the run (io task, "hung").
+        //  After the last event: wait for int_n as +ie1 does (the game waits there for the
+        //  line interrupt).
+        if (rplf != "") begin
+            int fd, n = 0, mis = 0, misce = 0, pt, a, b; longint tt, base; string d; logic [7:0] q;
+            fd = $fopen(rplf, "r");
+            if (fd == 0) begin $display("RPL cannot open %s", rplf); $finish; end
+            base = $time;
+            while ($fscanf(fd, "%d %s %d %h %h", tt, d, pt, a, b) == 5) begin
+                if (pt == 9) begin wreg(a, 8'(b)); continue; end
+                while (($time - base) < tt * 10 * rplscale) @(posedge clk_vdp);
+                if (d == "W") io(1, 3'(pt), 8'(a), q);
+                else begin
+                    int ptr; ptr = vdp9968.u_cpu_interface.ff_status_register_pointer;
+                    io(0, 3'(pt), 8'h00, q);
+                    if (pt == 1 && q !== 8'(a)) begin
+                        mis++;
+                        if (ptr == 2 && q[0] != a[0]) misce++;
+                        if (mis <= 40) $display("RPL t=%0.3f ms S#%0d core %02h oracle %02h", real'(tt) / 1e6, ptr, q, 8'(a));
+                    end
+                end
+                n++;
+                if (n % 5000 == 0) $display("RPL %0d events, t=%0.1f ms, CE=%0d", n, real'(tt) / 1e6, vdp9968.u_command.ff_command_execute);
+            end
+            $display("RPL done: %0d events, %0d status mismatches (%0d on S#2 CE)", n, mis, misce);
+            begin longint t0; t0 = $time;
+                while (v_int_n && ($time - t0) < 64'd25_000_000_000) @(posedge clk_vdp);
+                $display("RPL RESULT: line interrupt %s (screen %0d, FH=%0d, CE=%0d)", v_int_n ? "NEVER came (stuck)" : "came",
+                         $signed(`SSG.w_screen_pos_y), vdp9968.u_cpu_interface.ff_line_interrupt, vdp9968.u_command.ff_command_execute);
+                $display("RPL int sources: F %0d&IE0 %0d | FH %0d&IE1 %0d | CE-end %0d&IE2 %0d | extregs locked %0d | t=%0.3f ms after the last event",
+                         vdp9968.u_cpu_interface.ff_frame_interrupt, vdp9968.u_cpu_interface.ff_frame_interrupt_enable,
+                         vdp9968.u_cpu_interface.ff_line_interrupt, vdp9968.u_cpu_interface.ff_line_interrupt_enable,
+                         vdp9968.u_cpu_interface.ff_command_end_interrupt, vdp9968.u_cpu_interface.ff_command_end_interrupt_enable,
+                         vdp9968.u_cpu_interface.ff_lock_extregs, real'($time - t0) / 1e9);
+            end
+        end
         //  +ie1=N: ASO 224's first in-game frame (oracle tr_aso.io, 555 ms after R#1=02): the game
         //  sets R#9=00, R#19=68h, R#0=16h with the display OFF (R#1=02, IE0 off) and does NOT poll:
         //  it waits for the line interrupt as a CPU interrupt.  Here int_n is watched (1.5-frame
