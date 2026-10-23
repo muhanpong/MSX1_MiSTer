@@ -1781,6 +1781,10 @@ module tb;
                                && v99_spur == 0 && v99_nans == v99_nrd && v99_nrd > 0 && v99_mon_drop == 0 && v99_late_cnt == 0;
             $display("VPROBE p1 port-98h VRAM errors %0d | p2 HMMV errors %0d | p3 VBLANK timeouts %0d | p4 interrupt timeouts %0d | p5 OTIR errors %0d | p6 Geo3D errors %0d | p7 IE1 line-interrupt errors %0d",
                      vp_err[1], vp_err[2], vp_err[3], vp_err[4], vp_err[5], vp_err[6], vp_err[7]);
+`ifdef DEBUG
+            $display("VPROBE overlay R800 rows: fetch min %04h max %04h (last window), last %04h, ISR entry %04h, INTAs/window %0d",
+                     dbg_pc_snap, dbg_im_i, dbg_pc_now, dbg_pc_vec, dbg_watch_dc);
+`endif
             $display("VPROBE RESULT %s", ok ? "PASS" : "FAIL");
             $finish;
          end

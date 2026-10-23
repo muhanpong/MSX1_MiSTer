@@ -2157,6 +2157,9 @@ logic        iff_at_ack   = 1'b0, ack_on_clear = 1'b0, m38_c3_seen = 1'b0;
 logic        intack_d     = 1'b0;   // ~3ms threshold (> the ~880us Timer-1 period, so a
                                // CPU taking the IRQ once per overflow doesn't false-latch)
 logic [15:0] iffoff_cnt = 0, refuse_cnt = 0;
+logic        nzf_q = 1'b0, nzf_ack = 1'b0;                      // R800 fetch capture (rows 7-10, 12)
+logic [15:0] nzf_last = 0, nzf_isr = 0, nzf_min = 16'hFFFF, nzf_max = 0, nzf_acks = 0, nzf_min_q = 0, nzf_max_q = 0, nzf_acks_q = 0;
+logic [19:0] nzf_win = 0;
 logic        iff1_d = 1'b0, ghost_arm = 1'b0, intack_seen = 1'b0;
 logic        mreq_n_d = 1'b1, wr_n_d = 1'b1;
 logic [15:0] addr_d;
@@ -2248,12 +2251,32 @@ always_ff @(posedge clk21m) begin
             if (dbg_m38 == 8'h00) ack_on_clear <= 1'b1;
         end
 
-        dbg_pc_now <= t80_reg[79:64];
+        //  R800 (NextZ80) opcode fetches, taken from the shared bus (t80_reg is the idle
+        //  T80's in R800 mode): every M1 memory read is a fetch at PC.  Over a window of
+        //  2^20 clk21m (48.8 ms) keep the lowest / highest fetch address and count INTAs;
+        //  also the first fetch after an INTA (handler entry).  Shown on rows 7-10 and 12
+        //  when use_nz (ASO 224 hang on V9968, 2026-10-23: where does the R800 loop?).
+        nzf_q <= ~m1_n & ~mreq_n;
+        if (~m1_n & ~mreq_n & ~nzf_q) begin
+            nzf_last <= a;
+            if (a < nzf_min) nzf_min <= a;
+            if (a > nzf_max) nzf_max <= a;
+            if (nzf_ack) begin nzf_isr <= a; nzf_ack <= 1'b0; end
+        end
+        if ((~m1_n & ~iorq_n) & ~intack_d) begin nzf_ack <= 1'b1; if (~&nzf_acks) nzf_acks <= nzf_acks + 16'd1; end
+        nzf_win <= nzf_win + 20'd1;
+        if (&nzf_win) begin
+            nzf_min_q <= nzf_min; nzf_max_q <= nzf_max; nzf_acks_q <= nzf_acks;
+            nzf_min <= 16'hFFFF; nzf_max <= 16'h0000; nzf_acks <= 16'd0;
+        end
+
+        dbg_pc_now <= use_nz ? nzf_last : t80_reg[79:64];             // row 9
+        if (use_nz) dbg_pc_vec <= nzf_isr;                            // row 8
         //  {use_nz, r800, dram, 5'b0, byte@0038} and {byte@0039, byte@003A}
-        dbg_pc_snap  <= dbg_m38_pc;                                   // row 7
-        dbg_im_i     <= {iff_at_ack, ack_on_clear, m38_c3_seen, 5'd0, ackiff0_cnt};  // row 10
+        dbg_pc_snap  <= use_nz ? nzf_min_q : dbg_m38_pc;              // row 7
+        dbg_im_i     <= use_nz ? nzf_max_q : {iff_at_ack, ack_on_clear, m38_c3_seen, 5'd0, ackiff0_cnt};  // row 10
         dbg_watch_pc <= {use_nz, tr_r800, tr_dram, 5'd0, dbg_m38};
-        dbg_watch_dc <= {dbg_m39, dbg_m3a};
+        dbg_watch_dc <= use_nz ? nzf_acks_q : {dbg_m39, dbg_m3a};     // row 12
 
         // ── PC TRAP ──────────────────────────────────────────────────────────
         // A Konami-mapper game executes in 4000-BFFF and calls BIOS in page 0
