@@ -10,573 +10,646 @@
   9   0000              ;   3  two VBLANKs (S#0 F set) with the display on -- the V9968 fetching VRAM
  10   0000              ;      through the V slot while the bench checks every read (error = timeout)
  11   0000              ;   4  IM 1 interrupt: R#1 IE0 on, EI, wait for the jump to 0038h (error = timeout)
- 12   0000              ;   0Fh done
- 13   0000              ; No stack and no RAM.  The code starts at 0040h and skips 0180h-018Bh (turbor.sv).
- 14   0000                      org 0
- 15   0000 18 3E                jr start
- 16   0002 00 00 00...          ds 38h - $, 0
- 17   0038 C3 E8 01             jp vint                         ; IM 1 (phase 4).  No RAM: the pushed PC is lost
- 18   003B 00 00 00...          ds 40h - $, 0
- 19   0040
- 20   0040                      macro VREG reg, val
- 21   0040 ~                    ld a,val
- 21   0040 ~              out (99h),a
- 21   0040 ~              ld a,80h | reg
- 21   0040 ~              out (99h),a
- 22   0040                      endm
- 23   0040                      ; VRAM address: R#14 = bank, then A7..0, A13..8 (| 40h for write)
- 24   0040                      macro VADDR bank, a13, wr
- 25   0040 ~                    VREG 14, bank
- 26   0040 ~                    xor a
- 26   0040 ~              out (99h),a
- 26   0040 ~              ld a,a13 | (wr * 40h)
- 26   0040 ~              out (99h),a
- 27   0040                      endm
- 28   0040                      macro REPORT
- 29   0040 ~                    ld a,e
- 29   0040 ~              out (2Fh),a
- 29   0040 ~              ld a,d
- 29   0040 ~              out (2Fh),a
- 30   0040                      endm
- 31   0040
- 32   0040                      ; write 1 KB: byte = L xor H xor salt
- 33   0040                      macro VWRITE4K salt
- 34   0040 ~                    ld hl,0
- 35   0040 ~            .w:     ld a,l
- 35   0040 ~              xor h
- 35   0040 ~              xor salt
- 35   0040 ~              out (98h),a
- 36   0040 ~                    inc hl
- 36   0040 ~              ld a,h
- 36   0040 ~              cp 04h
- 36   0040 ~              jr nz,.w
- 37   0040                      endm
- 38   0040                      macro VCHECK4K salt
- 39   0040 ~                    ld hl,0
- 40   0040 ~            .r:     in a,(98h)
- 40   0040 ~              ld b,a
- 41   0040 ~                    ld a,l
- 41   0040 ~              xor h
- 41   0040 ~              xor salt
- 41   0040 ~              cp b
- 41   0040 ~              jr z,.ok
- 42   0040 ~                    inc de
- 43   0040 ~            .ok:    inc hl
- 43   0040 ~              ld a,h
- 43   0040 ~              cp 04h
- 43   0040 ~              jr nz,.r
- 44   0040                      endm
- 45   0040
- 46   0040 F3           start:  di
- 47   0041                  IFDEF R800
- 48   0041 C3 90 01             jp r800sw                       ; (the switch code sits past 0190h: no room here)
- 49   0044              r800ret:
- 50   0044                  ENDIF
- 51   0044                      VREG 8, 08h                     ; VR = 1 (64K x 4 addressing), sprites on
- 51   0044 3E 08       >        ld a,08h
- 51   0046 D3 99       >  out (99h),a
- 51   0048 3E 88       >  ld a,80h | 8
- 51   004A D3 99       >  out (99h),a
- 52   004C                      VREG 1, 00h                     ; display off: the CPU owns the VRAM port
- 52   004C 3E 00       >        ld a,00h
- 52   004E D3 99       >  out (99h),a
- 52   0050 3E 81       >  ld a,80h | 1
- 52   0052 D3 99       >  out (99h),a
- 53   0054 3E 01                ld a,1
- 53   0056 D3 2E          out (2Eh),a
- 54   0058 11 00 00             ld de,0
- 55   005B                      VADDR 0, 0, 1
- 55   005B             >        VREG 14, 0
- 55   005B 3E 00       >        ld a,0
- 55   005D D3 99       >  out (99h),a
- 55   005F 3E 8E       >  ld a,80h | 14
- 55   0061 D3 99       >  out (99h),a
- 55   0063 AF          >        xor a
- 55   0064 D3 99       >  out (99h),a
- 55   0066 3E 40       >  ld a,0 | (1 * 40h)
- 55   0068 D3 99       >  out (99h),a
- 56   006A                      VWRITE4K 0A5h
- 56   006A 21 00 00    >        ld hl,0
- 56   006D 7D          >.w:     ld a,l
- 56   006E AC          >  xor h
- 56   006F EE A5       >  xor 0A5h
- 56   0071 D3 98       >  out (98h),a
- 56   0073 23          >        inc hl
- 56   0074 7C          >  ld a,h
- 56   0075 FE 04       >  cp 04h
- 56   0077 20 F4       >  jr nz,.w
- 57   0079                      VADDR 7, 0, 1
- 57   0079             >        VREG 14, 7
- 57   0079 3E 07       >        ld a,7
- 57   007B D3 99       >  out (99h),a
- 57   007D 3E 8E       >  ld a,80h | 14
- 57   007F D3 99       >  out (99h),a
- 57   0081 AF          >        xor a
- 57   0082 D3 99       >  out (99h),a
- 57   0084 3E 40       >  ld a,0 | (1 * 40h)
- 57   0086 D3 99       >  out (99h),a
- 58   0088                      VWRITE4K 3Ch
- 58   0088 21 00 00    >        ld hl,0
- 58   008B 7D          >.w:     ld a,l
- 58   008C AC          >  xor h
- 58   008D EE 3C       >  xor 3Ch
- 58   008F D3 98       >  out (98h),a
- 58   0091 23          >        inc hl
- 58   0092 7C          >  ld a,h
- 58   0093 FE 04       >  cp 04h
- 58   0095 20 F4       >  jr nz,.w
- 59   0097                      VADDR 0, 0, 0
- 59   0097             >        VREG 14, 0
- 59   0097 3E 00       >        ld a,0
- 59   0099 D3 99       >  out (99h),a
- 59   009B 3E 8E       >  ld a,80h | 14
- 59   009D D3 99       >  out (99h),a
- 59   009F AF          >        xor a
- 59   00A0 D3 99       >  out (99h),a
- 59   00A2 3E 00       >  ld a,0 | (0 * 40h)
- 59   00A4 D3 99       >  out (99h),a
- 60   00A6                      VCHECK4K 0A5h
- 60   00A6 21 00 00    >        ld hl,0
- 60   00A9 DB 98       >.r:     in a,(98h)
- 60   00AB 47          >  ld b,a
- 60   00AC 7D          >        ld a,l
- 60   00AD AC          >  xor h
- 60   00AE EE A5       >  xor 0A5h
- 60   00B0 B8          >  cp b
- 60   00B1 28 01       >  jr z,.ok
- 60   00B3 13          >        inc de
- 60   00B4 23          >.ok:    inc hl
- 60   00B5 7C          >  ld a,h
- 60   00B6 FE 04       >  cp 04h
- 60   00B8 20 EF       >  jr nz,.r
- 61   00BA                      VADDR 7, 0, 0
- 61   00BA             >        VREG 14, 7
- 61   00BA 3E 07       >        ld a,7
- 61   00BC D3 99       >  out (99h),a
- 61   00BE 3E 8E       >  ld a,80h | 14
- 61   00C0 D3 99       >  out (99h),a
- 61   00C2 AF          >        xor a
- 61   00C3 D3 99       >  out (99h),a
- 61   00C5 3E 00       >  ld a,0 | (0 * 40h)
- 61   00C7 D3 99       >  out (99h),a
- 62   00C9                      VCHECK4K 3Ch
- 62   00C9 21 00 00    >        ld hl,0
- 62   00CC DB 98       >.r:     in a,(98h)
- 62   00CE 47          >  ld b,a
- 62   00CF 7D          >        ld a,l
- 62   00D0 AC          >  xor h
- 62   00D1 EE 3C       >  xor 3Ch
- 62   00D3 B8          >  cp b
- 62   00D4 28 01       >  jr z,.ok
- 62   00D6 13          >        inc de
- 62   00D7 23          >.ok:    inc hl
- 62   00D8 7C          >  ld a,h
- 62   00D9 FE 04       >  cp 04h
- 62   00DB 20 EF       >  jr nz,.r
- 63   00DD                      VADDR 0, 0, 0
- 63   00DD             >        VREG 14, 0
- 63   00DD 3E 00       >        ld a,0
- 63   00DF D3 99       >  out (99h),a
- 63   00E1 3E 8E       >  ld a,80h | 14
- 63   00E3 D3 99       >  out (99h),a
- 63   00E5 AF          >        xor a
- 63   00E6 D3 99       >  out (99h),a
- 63   00E8 3E 00       >  ld a,0 | (0 * 40h)
- 63   00EA D3 99       >  out (99h),a
- 64   00EC                      VCHECK4K 0A5h
- 64   00EC 21 00 00    >        ld hl,0
- 64   00EF DB 98       >.r:     in a,(98h)
- 64   00F1 47          >  ld b,a
- 64   00F2 7D          >        ld a,l
- 64   00F3 AC          >  xor h
- 64   00F4 EE A5       >  xor 0A5h
- 64   00F6 B8          >  cp b
- 64   00F7 28 01       >  jr z,.ok
- 64   00F9 13          >        inc de
- 64   00FA 23          >.ok:    inc hl
- 64   00FB 7C          >  ld a,h
- 64   00FC FE 04       >  cp 04h
- 64   00FE 20 EF       >  jr nz,.r
- 65   0100                      REPORT
- 65   0100 7B          >        ld a,e
- 65   0101 D3 2F       >  out (2Fh),a
- 65   0103 7A          >  ld a,d
- 65   0104 D3 2F       >  out (2Fh),a
- 66   0106
- 67   0106 3E 02                ld a,2
- 67   0108 D3 2E          out (2Eh),a
- 68   010A 11 00 00             ld de,0
- 69   010D                      VREG 0, 06h                     ; SCREEN 5
- 69   010D 3E 06       >        ld a,06h
- 69   010F D3 99       >  out (99h),a
- 69   0111 3E 80       >  ld a,80h | 0
- 69   0113 D3 99       >  out (99h),a
- 70   0115                      VREG 1, 40h                     ; display on, no interrupts
- 70   0115 3E 40       >        ld a,40h
- 70   0117 D3 99       >  out (99h),a
- 70   0119 3E 81       >  ld a,80h | 1
- 70   011B D3 99       >  out (99h),a
- 71   011D                      VREG 2, 1Fh                     ; pattern name table at 00000h
- 71   011D 3E 1F       >        ld a,1Fh
- 71   011F D3 99       >  out (99h),a
- 71   0121 3E 82       >  ld a,80h | 2
- 71   0123 D3 99       >  out (99h),a
- 72   0125                      VREG 9, 00h
- 72   0125 3E 00       >        ld a,00h
- 72   0127 D3 99       >  out (99h),a
- 72   0129 3E 89       >  ld a,80h | 9
- 72   012B D3 99       >  out (99h),a
- 73   012D                      VREG 17, 36                     ; R#36.. auto-increment through port 9Bh
- 73   012D 3E 24       >        ld a,36
- 73   012F D3 99       >  out (99h),a
- 73   0131 3E 91       >  ld a,80h | 17
- 73   0133 D3 99       >  out (99h),a
- 74   0135 21 B2 03             ld hl,hmmv
- 74   0138 06 0B          ld b,11
- 74   013A 0E 9B          ld c,9Bh
- 75   013C ED B3                otir
- 76   013E 01 00 00             ld bc,0
- 77   0141              ce:     VREG 15, 2
- 77   0141 3E 02       >        ld a,2
- 77   0143 D3 99       >  out (99h),a
- 77   0145 3E 8F       >  ld a,80h | 15
- 77   0147 D3 99       >  out (99h),a
- 78   0149 DB 99                in a,(99h)
- 78   014B E6 01          and 1
- 78   014D 28 06          jr z,cedone
- 79   014F 0B                   dec bc
- 79   0150 78             ld a,b
- 79   0151 B1             or c
- 79   0152 20 ED          jr nz,ce
- 80   0154 13                   inc de                          ; CE never cleared
- 81   0155              cedone: VREG 15, 0
- 81   0155 3E 00       >        ld a,0
- 81   0157 D3 99       >  out (99h),a
- 81   0159 3E 8F       >  ld a,80h | 15
- 81   015B D3 99       >  out (99h),a
- 82   015D                      VADDR 0, 0, 0
- 82   015D             >        VREG 14, 0
- 82   015D 3E 00       >        ld a,0
- 82   015F D3 99       >  out (99h),a
- 82   0161 3E 8E       >  ld a,80h | 14
- 82   0163 D3 99       >  out (99h),a
- 82   0165 AF          >        xor a
- 82   0166 D3 99       >  out (99h),a
- 82   0168 3E 00       >  ld a,0 | (0 * 40h)
- 82   016A D3 99       >  out (99h),a
- 83   016C 21 00 02             ld hl,200h
- 84   016F DB 98        fr:     in a,(98h)
- 84   0171 FE 5A          cp 5Ah
- 84   0173 28 01          jr z,frok
- 85   0175 13                   inc de
- 86   0176 2B           frok:   dec hl
- 86   0177 7C             ld a,h
- 86   0178 B5             or l
- 86   0179 20 F4          jr nz,fr
- 87   017B C3 9E 01             jp part2
- 88   017E                      assert $ <= 0180h
- 89   017E                      ; turbor.sv overlays 0180h-018Bh (CHGCPU) in every pack this bench runs
- 90   017E                      ; (seen: the FS-A1FX run fetched OUT (E5h),A / RET there and went off to 18FFh)
- 91   017E 00 00 00...          ds 0190h - $, 0
- 92   0190                  IFDEF R800
- 93   0190                      ; R800 variant (-DR800, turbo R pack): S1990 reg 6 bit 5 = 0 selects the R800, so
- 94   0190                      ; the rest runs on NextZ80 with the handshaked V9968 WAIT path (vdp_gap_r800)
- 95   0190 3E 06        r800sw: ld a,6
- 95   0192 D3 E4          out (0E4h),a
- 95   0194 AF             xor a
- 95   0195 D3 E5          out (0E5h),a
- 96   0197 06 00                ld b,0
- 97   0199 10 FE        .sw:    djnz .sw                        ; let cpuswap_ctl hand the bus over
- 98   019B C3 44 00             jp r800ret
- 99   019E                  ENDIF
-100   019E              part2:  REPORT
-100   019E 7B          >        ld a,e
-100   019F D3 2F       >  out (2Fh),a
-100   01A1 7A          >  ld a,d
-100   01A2 D3 2F       >  out (2Fh),a
-101   01A4
-102   01A4 3E 03                ld a,3
-102   01A6 D3 2E          out (2Eh),a
-103   01A8 11 00 00             ld de,0
-104   01AB DB 99                in a,(99h)                      ; S#0: clear F
-105   01AD 0E 02                ld c,2
-106   01AF 21 00 00     vbl:    ld hl,0
-107   01B2 DB 99        vw:     in a,(99h)
-107   01B4 07             rlca
-107   01B5 38 08          jr c,vgot
-108   01B7 2B                   dec hl
-108   01B8 7C             ld a,h
-108   01B9 B5             or l
-108   01BA 20 F6          jr nz,vw
-109   01BC 13                   inc de
-109   01BD 18 03          jr vto                 ; no VBLANK in ~65536 polls
-110   01BF 0D           vgot:   dec c
-110   01C0 20 ED          jr nz,vbl
-111   01C2              vto:    REPORT
-111   01C2 7B          >        ld a,e
-111   01C3 D3 2F       >  out (2Fh),a
-111   01C5 7A          >  ld a,d
-111   01C6 D3 2F       >  out (2Fh),a
-112   01C8
-113   01C8 3E 04                ld a,4
-113   01CA D3 2E          out (2Eh),a
-114   01CC 11 00 00             ld de,0
-115   01CF DB 99                in a,(99h)                      ; S#0: clear F
-116   01D1                      VREG 1, 60h                     ; display on, IE0 on
-116   01D1 3E 60       >        ld a,60h
-116   01D3 D3 99       >  out (99h),a
-116   01D5 3E 81       >  ld a,80h | 1
-116   01D7 D3 99       >  out (99h),a
-117   01D9 ED 56                im 1
-117   01DB FB             ei
-118   01DC 21 00 00             ld hl,0
-119   01DF 2B           iw:     dec hl
-119   01E0 7C             ld a,h
-119   01E1 B5             or l
-119   01E2 20 FB          jr nz,iw
-120   01E4 F3                   di
-121   01E5 13                   inc de                          ; no interrupt in ~65536 loops
-122   01E6 18 03                jr idone
-123   01E8 F3           vint:   di
-124   01E9 DB 99                in a,(99h)                      ; S#0: acknowledge
-125   01EB              idone:  VREG 1, 40h
-125   01EB 3E 40       >        ld a,40h
-125   01ED D3 99       >  out (99h),a
-125   01EF 3E 81       >  ld a,80h | 1
-125   01F1 D3 99       >  out (99h),a
-126   01F3                      REPORT
-126   01F3 7B          >        ld a,e
-126   01F4 D3 2F       >  out (2Fh),a
-126   01F6 7A          >  ld a,d
-126   01F7 D3 2F       >  out (2Fh),a
-127   01F9
-128   01F9                      ; 5  block I/O (OTIR) to the VDP, as ASO 224's register/table blocks do: on a
-129   01F9                      ;    handshaked CPU (NextZ80 / R800, -DR800) the V9968 adapter must take back-to-back
-130   01F9                      ;    OUT cycles of one OTIR.  (a) OTIR to 99h: R#14 = 0, write address 3000h;
-131   01F9                      ;    (b) OTIR 64 bytes to 98h; read back with IN.  A hang never reaches phase 0Fh.
-132   01F9 3E 05                ld a,5
-132   01FB D3 2E          out (2Eh),a
-133   01FD 11 00 00             ld de,0
-134   0200                      VREG 1, 00h
-134   0200 3E 00       >        ld a,00h
-134   0202 D3 99       >  out (99h),a
-134   0204 3E 81       >  ld a,80h | 1
-134   0206 D3 99       >  out (99h),a
-135   0208 21 6E 03             ld hl,otab
-135   020B 01 99 04       ld bc,4 * 256 + 99h
-135   020E ED B3          otir
-136   0210 21 72 03             ld hl,otdat
-136   0213 01 98 40       ld bc,64 * 256 + 98h
-136   0216 ED B3          otir
-137   0218                      VADDR 0, 30h, 0
-137   0218             >        VREG 14, 0
-137   0218 3E 00       >        ld a,0
-137   021A D3 99       >  out (99h),a
-137   021C 3E 8E       >  ld a,80h | 14
-137   021E D3 99       >  out (99h),a
-137   0220 AF          >        xor a
-137   0221 D3 99       >  out (99h),a
-137   0223 3E 30       >  ld a,30h | (0 * 40h)
-137   0225 D3 99       >  out (99h),a
-138   0227 21 72 03             ld hl,otdat
-138   022A 06 40          ld b,64
-139   022C DB 98        otr:    in a,(98h)
-139   022E BE             cp (hl)
-139   022F 28 01          jr z,otok
-140   0231 13                   inc de
-141   0232 23           otok:   inc hl
-141   0233 10 F7          djnz otr
-142   0235                      REPORT
-142   0235 7B          >        ld a,e
-142   0236 D3 2F       >  out (2Fh),a
-142   0238 7A          >  ld a,d
-142   0239 D3 2F       >  out (2Fh),a
-143   023B
-144   023B                      ; 6  Geo3D on 9Dh (index / status) and 9Fh (data):
-145   023B                      ;    (a) ID (0x49) = 20h
-146   023B                      ;    (b) immediate vertex: identity matrix, F=256, CX=128, CY=106: (100,50,256) ->
-147   023B                      ;        SX=228, SY=56
-148   023B                      ;    (c) RUN, wireframe: vertices (0,0,256), (100,0,256), edge 0-1, colour 0Fh ->
-149   023B                      ;        a LINE from (128,106) to (228,106) drawn by the engine through ext_cmd;
-150   023B                      ;        VRAM byte at y=106 x=150 (SCREEN5: 106*128+75 = 354Bh) = FFh, DRAWN = 1
-151   023B 3E 06                ld a,6
-151   023D D3 2E          out (2Eh),a
-152   023F 11 00 00             ld de,0
-153   0242 3E 49                ld a,49h
-153   0244 D3 9D          out (9Dh),a
-154   0246 DB 9F                in a,(9Fh)
-154   0248 FE 20          cp 20h
-154   024A 28 01          jr z,g_id
-155   024C 13                   inc de
-156   024D AF           g_id:   xor a
-156   024E D3 9D          out (9Dh),a
-157   0250 21 38 03             ld hl,gcfg
-157   0253 01 9F 24       ld bc,36 * 256 + 9Fh
-157   0256 ED B3          otir            ; 0x00-0x23
-158   0258 21 5C 03             ld hl,gvtx
-158   025B 01 9F 06       ld bc,6 * 256 + 9Fh
-158   025E ED B3          otir             ; 0x24-0x29: computes
-159   0260 06 00                ld b,0
-160   0262 DB 9D        g_w1:   in a,(9Dh)
-160   0264 E6 08          and 08h
-160   0266 28 03          jr z,g_d1                    ; core busy
-161   0268 10 F8                djnz g_w1
-162   026A 13                   inc de
-163   026B 3E 30        g_d1:   ld a,30h
-163   026D D3 9D          out (9Dh),a
-164   026F DB 9F                in a,(9Fh)
-164   0271 FE E4          cp 228 & 0FFh
-164   0273 28 01          jr z,g_s1
-165   0275 13                   inc de
-166   0276 DB 9F        g_s1:   in a,(9Fh)
-166   0278 FE 00          cp 0
-166   027A 28 01          jr z,g_s2
-167   027C 13                   inc de
-168   027D DB 9F        g_s2:   in a,(9Fh)
-168   027F FE 38          cp 56
-168   0281 28 01          jr z,g_s3
-169   0283 13                   inc de
-170   0284 DB 9F        g_s3:   in a,(9Fh)
-170   0286 B7             or a
-170   0287 28 01          jr z,g_s4
+ 12   0000              ;   5  OTIR to the VDP   6  Geo3D   7  line interrupt (IE1) with the display off, no polling
+ 13   0000              ;   0Fh done
+ 14   0000              ; No stack and no RAM.  The code starts at 0040h and skips 0180h-018Bh (turbor.sv).
+ 15   0000                      org 0
+ 16   0000 18 3E                jr start
+ 17   0002 00 00 00...          ds 38h - $, 0
+ 18   0038 C3 E8 01             jp vint                         ; IM 1 (phase 4).  No RAM: the pushed PC is lost
+ 19   003B 00 00 00...          ds 40h - $, 0
+ 20   0040
+ 21   0040                      macro VREG reg, val
+ 22   0040 ~                    ld a,val
+ 22   0040 ~              out (99h),a
+ 22   0040 ~              ld a,80h | reg
+ 22   0040 ~              out (99h),a
+ 23   0040                      endm
+ 24   0040                      ; VRAM address: R#14 = bank, then A7..0, A13..8 (| 40h for write)
+ 25   0040                      macro VADDR bank, a13, wr
+ 26   0040 ~                    VREG 14, bank
+ 27   0040 ~                    xor a
+ 27   0040 ~              out (99h),a
+ 27   0040 ~              ld a,a13 | (wr * 40h)
+ 27   0040 ~              out (99h),a
+ 28   0040                      endm
+ 29   0040                      macro REPORT
+ 30   0040 ~                    ld a,e
+ 30   0040 ~              out (2Fh),a
+ 30   0040 ~              ld a,d
+ 30   0040 ~              out (2Fh),a
+ 31   0040                      endm
+ 32   0040
+ 33   0040                      ; write 1 KB: byte = L xor H xor salt
+ 34   0040                      macro VWRITE4K salt
+ 35   0040 ~                    ld hl,0
+ 36   0040 ~            .w:     ld a,l
+ 36   0040 ~              xor h
+ 36   0040 ~              xor salt
+ 36   0040 ~              out (98h),a
+ 37   0040 ~                    inc hl
+ 37   0040 ~              ld a,h
+ 37   0040 ~              cp 04h
+ 37   0040 ~              jr nz,.w
+ 38   0040                      endm
+ 39   0040                      macro VCHECK4K salt
+ 40   0040 ~                    ld hl,0
+ 41   0040 ~            .r:     in a,(98h)
+ 41   0040 ~              ld b,a
+ 42   0040 ~                    ld a,l
+ 42   0040 ~              xor h
+ 42   0040 ~              xor salt
+ 42   0040 ~              cp b
+ 42   0040 ~              jr z,.ok
+ 43   0040 ~                    inc de
+ 44   0040 ~            .ok:    inc hl
+ 44   0040 ~              ld a,h
+ 44   0040 ~              cp 04h
+ 44   0040 ~              jr nz,.r
+ 45   0040                      endm
+ 46   0040
+ 47   0040 F3           start:  di
+ 48   0041                  IFDEF R800
+ 49   0041 C3 90 01             jp r800sw                       ; (the switch code sits past 0190h: no room here)
+ 50   0044              r800ret:
+ 51   0044                  ENDIF
+ 52   0044                      VREG 8, 08h                     ; VR = 1 (64K x 4 addressing), sprites on
+ 52   0044 3E 08       >        ld a,08h
+ 52   0046 D3 99       >  out (99h),a
+ 52   0048 3E 88       >  ld a,80h | 8
+ 52   004A D3 99       >  out (99h),a
+ 53   004C                      VREG 1, 00h                     ; display off: the CPU owns the VRAM port
+ 53   004C 3E 00       >        ld a,00h
+ 53   004E D3 99       >  out (99h),a
+ 53   0050 3E 81       >  ld a,80h | 1
+ 53   0052 D3 99       >  out (99h),a
+ 54   0054 3E 01                ld a,1
+ 54   0056 D3 2E          out (2Eh),a
+ 55   0058 11 00 00             ld de,0
+ 56   005B                      VADDR 0, 0, 1
+ 56   005B             >        VREG 14, 0
+ 56   005B 3E 00       >        ld a,0
+ 56   005D D3 99       >  out (99h),a
+ 56   005F 3E 8E       >  ld a,80h | 14
+ 56   0061 D3 99       >  out (99h),a
+ 56   0063 AF          >        xor a
+ 56   0064 D3 99       >  out (99h),a
+ 56   0066 3E 40       >  ld a,0 | (1 * 40h)
+ 56   0068 D3 99       >  out (99h),a
+ 57   006A                      VWRITE4K 0A5h
+ 57   006A 21 00 00    >        ld hl,0
+ 57   006D 7D          >.w:     ld a,l
+ 57   006E AC          >  xor h
+ 57   006F EE A5       >  xor 0A5h
+ 57   0071 D3 98       >  out (98h),a
+ 57   0073 23          >        inc hl
+ 57   0074 7C          >  ld a,h
+ 57   0075 FE 04       >  cp 04h
+ 57   0077 20 F4       >  jr nz,.w
+ 58   0079                      VADDR 7, 0, 1
+ 58   0079             >        VREG 14, 7
+ 58   0079 3E 07       >        ld a,7
+ 58   007B D3 99       >  out (99h),a
+ 58   007D 3E 8E       >  ld a,80h | 14
+ 58   007F D3 99       >  out (99h),a
+ 58   0081 AF          >        xor a
+ 58   0082 D3 99       >  out (99h),a
+ 58   0084 3E 40       >  ld a,0 | (1 * 40h)
+ 58   0086 D3 99       >  out (99h),a
+ 59   0088                      VWRITE4K 3Ch
+ 59   0088 21 00 00    >        ld hl,0
+ 59   008B 7D          >.w:     ld a,l
+ 59   008C AC          >  xor h
+ 59   008D EE 3C       >  xor 3Ch
+ 59   008F D3 98       >  out (98h),a
+ 59   0091 23          >        inc hl
+ 59   0092 7C          >  ld a,h
+ 59   0093 FE 04       >  cp 04h
+ 59   0095 20 F4       >  jr nz,.w
+ 60   0097                      VADDR 0, 0, 0
+ 60   0097             >        VREG 14, 0
+ 60   0097 3E 00       >        ld a,0
+ 60   0099 D3 99       >  out (99h),a
+ 60   009B 3E 8E       >  ld a,80h | 14
+ 60   009D D3 99       >  out (99h),a
+ 60   009F AF          >        xor a
+ 60   00A0 D3 99       >  out (99h),a
+ 60   00A2 3E 00       >  ld a,0 | (0 * 40h)
+ 60   00A4 D3 99       >  out (99h),a
+ 61   00A6                      VCHECK4K 0A5h
+ 61   00A6 21 00 00    >        ld hl,0
+ 61   00A9 DB 98       >.r:     in a,(98h)
+ 61   00AB 47          >  ld b,a
+ 61   00AC 7D          >        ld a,l
+ 61   00AD AC          >  xor h
+ 61   00AE EE A5       >  xor 0A5h
+ 61   00B0 B8          >  cp b
+ 61   00B1 28 01       >  jr z,.ok
+ 61   00B3 13          >        inc de
+ 61   00B4 23          >.ok:    inc hl
+ 61   00B5 7C          >  ld a,h
+ 61   00B6 FE 04       >  cp 04h
+ 61   00B8 20 EF       >  jr nz,.r
+ 62   00BA                      VADDR 7, 0, 0
+ 62   00BA             >        VREG 14, 7
+ 62   00BA 3E 07       >        ld a,7
+ 62   00BC D3 99       >  out (99h),a
+ 62   00BE 3E 8E       >  ld a,80h | 14
+ 62   00C0 D3 99       >  out (99h),a
+ 62   00C2 AF          >        xor a
+ 62   00C3 D3 99       >  out (99h),a
+ 62   00C5 3E 00       >  ld a,0 | (0 * 40h)
+ 62   00C7 D3 99       >  out (99h),a
+ 63   00C9                      VCHECK4K 3Ch
+ 63   00C9 21 00 00    >        ld hl,0
+ 63   00CC DB 98       >.r:     in a,(98h)
+ 63   00CE 47          >  ld b,a
+ 63   00CF 7D          >        ld a,l
+ 63   00D0 AC          >  xor h
+ 63   00D1 EE 3C       >  xor 3Ch
+ 63   00D3 B8          >  cp b
+ 63   00D4 28 01       >  jr z,.ok
+ 63   00D6 13          >        inc de
+ 63   00D7 23          >.ok:    inc hl
+ 63   00D8 7C          >  ld a,h
+ 63   00D9 FE 04       >  cp 04h
+ 63   00DB 20 EF       >  jr nz,.r
+ 64   00DD                      VADDR 0, 0, 0
+ 64   00DD             >        VREG 14, 0
+ 64   00DD 3E 00       >        ld a,0
+ 64   00DF D3 99       >  out (99h),a
+ 64   00E1 3E 8E       >  ld a,80h | 14
+ 64   00E3 D3 99       >  out (99h),a
+ 64   00E5 AF          >        xor a
+ 64   00E6 D3 99       >  out (99h),a
+ 64   00E8 3E 00       >  ld a,0 | (0 * 40h)
+ 64   00EA D3 99       >  out (99h),a
+ 65   00EC                      VCHECK4K 0A5h
+ 65   00EC 21 00 00    >        ld hl,0
+ 65   00EF DB 98       >.r:     in a,(98h)
+ 65   00F1 47          >  ld b,a
+ 65   00F2 7D          >        ld a,l
+ 65   00F3 AC          >  xor h
+ 65   00F4 EE A5       >  xor 0A5h
+ 65   00F6 B8          >  cp b
+ 65   00F7 28 01       >  jr z,.ok
+ 65   00F9 13          >        inc de
+ 65   00FA 23          >.ok:    inc hl
+ 65   00FB 7C          >  ld a,h
+ 65   00FC FE 04       >  cp 04h
+ 65   00FE 20 EF       >  jr nz,.r
+ 66   0100                      REPORT
+ 66   0100 7B          >        ld a,e
+ 66   0101 D3 2F       >  out (2Fh),a
+ 66   0103 7A          >  ld a,d
+ 66   0104 D3 2F       >  out (2Fh),a
+ 67   0106
+ 68   0106 3E 02                ld a,2
+ 68   0108 D3 2E          out (2Eh),a
+ 69   010A 11 00 00             ld de,0
+ 70   010D                      VREG 0, 06h                     ; SCREEN 5
+ 70   010D 3E 06       >        ld a,06h
+ 70   010F D3 99       >  out (99h),a
+ 70   0111 3E 80       >  ld a,80h | 0
+ 70   0113 D3 99       >  out (99h),a
+ 71   0115                      VREG 1, 40h                     ; display on, no interrupts
+ 71   0115 3E 40       >        ld a,40h
+ 71   0117 D3 99       >  out (99h),a
+ 71   0119 3E 81       >  ld a,80h | 1
+ 71   011B D3 99       >  out (99h),a
+ 72   011D                      VREG 2, 1Fh                     ; pattern name table at 00000h
+ 72   011D 3E 1F       >        ld a,1Fh
+ 72   011F D3 99       >  out (99h),a
+ 72   0121 3E 82       >  ld a,80h | 2
+ 72   0123 D3 99       >  out (99h),a
+ 73   0125                      VREG 9, 00h
+ 73   0125 3E 00       >        ld a,00h
+ 73   0127 D3 99       >  out (99h),a
+ 73   0129 3E 89       >  ld a,80h | 9
+ 73   012B D3 99       >  out (99h),a
+ 74   012D                      VREG 17, 36                     ; R#36.. auto-increment through port 9Bh
+ 74   012D 3E 24       >        ld a,36
+ 74   012F D3 99       >  out (99h),a
+ 74   0131 3E 91       >  ld a,80h | 17
+ 74   0133 D3 99       >  out (99h),a
+ 75   0135 21 17 04             ld hl,hmmv
+ 75   0138 06 0B          ld b,11
+ 75   013A 0E 9B          ld c,9Bh
+ 76   013C ED B3                otir
+ 77   013E 01 00 00             ld bc,0
+ 78   0141              ce:     VREG 15, 2
+ 78   0141 3E 02       >        ld a,2
+ 78   0143 D3 99       >  out (99h),a
+ 78   0145 3E 8F       >  ld a,80h | 15
+ 78   0147 D3 99       >  out (99h),a
+ 79   0149 DB 99                in a,(99h)
+ 79   014B E6 01          and 1
+ 79   014D 28 06          jr z,cedone
+ 80   014F 0B                   dec bc
+ 80   0150 78             ld a,b
+ 80   0151 B1             or c
+ 80   0152 20 ED          jr nz,ce
+ 81   0154 13                   inc de                          ; CE never cleared
+ 82   0155              cedone: VREG 15, 0
+ 82   0155 3E 00       >        ld a,0
+ 82   0157 D3 99       >  out (99h),a
+ 82   0159 3E 8F       >  ld a,80h | 15
+ 82   015B D3 99       >  out (99h),a
+ 83   015D                      VADDR 0, 0, 0
+ 83   015D             >        VREG 14, 0
+ 83   015D 3E 00       >        ld a,0
+ 83   015F D3 99       >  out (99h),a
+ 83   0161 3E 8E       >  ld a,80h | 14
+ 83   0163 D3 99       >  out (99h),a
+ 83   0165 AF          >        xor a
+ 83   0166 D3 99       >  out (99h),a
+ 83   0168 3E 00       >  ld a,0 | (0 * 40h)
+ 83   016A D3 99       >  out (99h),a
+ 84   016C 21 00 02             ld hl,200h
+ 85   016F DB 98        fr:     in a,(98h)
+ 85   0171 FE 5A          cp 5Ah
+ 85   0173 28 01          jr z,frok
+ 86   0175 13                   inc de
+ 87   0176 2B           frok:   dec hl
+ 87   0177 7C             ld a,h
+ 87   0178 B5             or l
+ 87   0179 20 F4          jr nz,fr
+ 88   017B C3 9E 01             jp part2
+ 89   017E                      assert $ <= 0180h
+ 90   017E                      ; turbor.sv overlays 0180h-018Bh (CHGCPU) in every pack this bench runs
+ 91   017E                      ; (seen: the FS-A1FX run fetched OUT (E5h),A / RET there and went off to 18FFh)
+ 92   017E 00 00 00...          ds 0190h - $, 0
+ 93   0190                  IFDEF R800
+ 94   0190                      ; R800 variant (-DR800, turbo R pack): S1990 reg 6 bit 5 = 0 selects the R800, so
+ 95   0190                      ; the rest runs on NextZ80 with the handshaked V9968 WAIT path (vdp_gap_r800)
+ 96   0190 3E 06        r800sw: ld a,6
+ 96   0192 D3 E4          out (0E4h),a
+ 96   0194 AF             xor a
+ 96   0195 D3 E5          out (0E5h),a
+ 97   0197 06 00                ld b,0
+ 98   0199 10 FE        .sw:    djnz .sw                        ; let cpuswap_ctl hand the bus over
+ 99   019B C3 44 00             jp r800ret
+100   019E                  ENDIF
+101   019E              part2:  REPORT
+101   019E 7B          >        ld a,e
+101   019F D3 2F       >  out (2Fh),a
+101   01A1 7A          >  ld a,d
+101   01A2 D3 2F       >  out (2Fh),a
+102   01A4
+103   01A4 3E 03                ld a,3
+103   01A6 D3 2E          out (2Eh),a
+104   01A8 11 00 00             ld de,0
+105   01AB DB 99                in a,(99h)                      ; S#0: clear F
+106   01AD 0E 02                ld c,2
+107   01AF 21 00 00     vbl:    ld hl,0
+108   01B2 DB 99        vw:     in a,(99h)
+108   01B4 07             rlca
+108   01B5 38 08          jr c,vgot
+109   01B7 2B                   dec hl
+109   01B8 7C             ld a,h
+109   01B9 B5             or l
+109   01BA 20 F6          jr nz,vw
+110   01BC 13                   inc de
+110   01BD 18 03          jr vto                 ; no VBLANK in ~65536 polls
+111   01BF 0D           vgot:   dec c
+111   01C0 20 ED          jr nz,vbl
+112   01C2              vto:    REPORT
+112   01C2 7B          >        ld a,e
+112   01C3 D3 2F       >  out (2Fh),a
+112   01C5 7A          >  ld a,d
+112   01C6 D3 2F       >  out (2Fh),a
+113   01C8
+114   01C8 3E 04                ld a,4
+114   01CA D3 2E          out (2Eh),a
+115   01CC 11 00 00             ld de,0
+116   01CF DB 99                in a,(99h)                      ; S#0: clear F
+117   01D1                      VREG 1, 60h                     ; display on, IE0 on
+117   01D1 3E 60       >        ld a,60h
+117   01D3 D3 99       >  out (99h),a
+117   01D5 3E 81       >  ld a,80h | 1
+117   01D7 D3 99       >  out (99h),a
+118   01D9 ED 56                im 1
+118   01DB FB             ei
+119   01DC 21 00 00             ld hl,0
+120   01DF 2B           iw:     dec hl
+120   01E0 7C             ld a,h
+120   01E1 B5             or l
+120   01E2 20 FB          jr nz,iw
+121   01E4 F3                   di
+122   01E5 13                   inc de                          ; no interrupt in ~65536 loops
+123   01E6 18 09                jr idone
+124   01E8 F3           vint:   di
+125   01E9 79                   ld a,c
+125   01EA FE 07          cp 7
+125   01EC CA 70 03       jp z,v7         ; phase 7 (C = 7): the line-interrupt handler
+126   01EF DB 99                in a,(99h)                      ; S#0: acknowledge
+127   01F1              idone:  VREG 1, 40h
+127   01F1 3E 40       >        ld a,40h
+127   01F3 D3 99       >  out (99h),a
+127   01F5 3E 81       >  ld a,80h | 1
+127   01F7 D3 99       >  out (99h),a
+128   01F9                      REPORT
+128   01F9 7B          >        ld a,e
+128   01FA D3 2F       >  out (2Fh),a
+128   01FC 7A          >  ld a,d
+128   01FD D3 2F       >  out (2Fh),a
+129   01FF
+130   01FF                      ; 5  block I/O (OTIR) to the VDP, as ASO 224's register/table blocks do: on a
+131   01FF                      ;    handshaked CPU (NextZ80 / R800, -DR800) the V9968 adapter must take back-to-back
+132   01FF                      ;    OUT cycles of one OTIR.  (a) OTIR to 99h: R#14 = 0, write address 3000h;
+133   01FF                      ;    (b) OTIR 64 bytes to 98h; read back with IN.  A hang never reaches phase 0Fh.
+134   01FF 3E 05                ld a,5
+134   0201 D3 2E          out (2Eh),a
+135   0203 11 00 00             ld de,0
+136   0206                      VREG 1, 00h
+136   0206 3E 00       >        ld a,00h
+136   0208 D3 99       >  out (99h),a
+136   020A 3E 81       >  ld a,80h | 1
+136   020C D3 99       >  out (99h),a
+137   020E 21 D3 03             ld hl,otab
+137   0211 01 99 04       ld bc,4 * 256 + 99h
+137   0214 ED B3          otir
+138   0216 21 D7 03             ld hl,otdat
+138   0219 01 98 40       ld bc,64 * 256 + 98h
+138   021C ED B3          otir
+139   021E                      VADDR 0, 30h, 0
+139   021E             >        VREG 14, 0
+139   021E 3E 00       >        ld a,0
+139   0220 D3 99       >  out (99h),a
+139   0222 3E 8E       >  ld a,80h | 14
+139   0224 D3 99       >  out (99h),a
+139   0226 AF          >        xor a
+139   0227 D3 99       >  out (99h),a
+139   0229 3E 30       >  ld a,30h | (0 * 40h)
+139   022B D3 99       >  out (99h),a
+140   022D 21 D7 03             ld hl,otdat
+140   0230 06 40          ld b,64
+141   0232 DB 98        otr:    in a,(98h)
+141   0234 BE             cp (hl)
+141   0235 28 01          jr z,otok
+142   0237 13                   inc de
+143   0238 23           otok:   inc hl
+143   0239 10 F7          djnz otr
+144   023B                      REPORT
+144   023B 7B          >        ld a,e
+144   023C D3 2F       >  out (2Fh),a
+144   023E 7A          >  ld a,d
+144   023F D3 2F       >  out (2Fh),a
+145   0241
+146   0241                      ; 6  Geo3D on 9Dh (index / status) and 9Fh (data):
+147   0241                      ;    (a) ID (0x49) = 20h
+148   0241                      ;    (b) immediate vertex: identity matrix, F=256, CX=128, CY=106: (100,50,256) ->
+149   0241                      ;        SX=228, SY=56
+150   0241                      ;    (c) RUN, wireframe: vertices (0,0,256), (100,0,256), edge 0-1, colour 0Fh ->
+151   0241                      ;        a LINE from (128,106) to (228,106) drawn by the engine through ext_cmd;
+152   0241                      ;        VRAM byte at y=106 x=150 (SCREEN5: 106*128+75 = 354Bh) = FFh, DRAWN = 1
+153   0241 3E 06                ld a,6
+153   0243 D3 2E          out (2Eh),a
+154   0245 11 00 00             ld de,0
+155   0248 3E 49                ld a,49h
+155   024A D3 9D          out (9Dh),a
+156   024C DB 9F                in a,(9Fh)
+156   024E FE 20          cp 20h
+156   0250 28 01          jr z,g_id
+157   0252 13                   inc de
+158   0253 AF           g_id:   xor a
+158   0254 D3 9D          out (9Dh),a
+159   0256 21 9D 03             ld hl,gcfg
+159   0259 01 9F 24       ld bc,36 * 256 + 9Fh
+159   025C ED B3          otir            ; 0x00-0x23
+160   025E 21 C1 03             ld hl,gvtx
+160   0261 01 9F 06       ld bc,6 * 256 + 9Fh
+160   0264 ED B3          otir             ; 0x24-0x29: computes
+161   0266 06 00                ld b,0
+162   0268 DB 9D        g_w1:   in a,(9Dh)
+162   026A E6 08          and 08h
+162   026C 28 03          jr z,g_d1                    ; core busy
+163   026E 10 F8                djnz g_w1
+164   0270 13                   inc de
+165   0271 3E 30        g_d1:   ld a,30h
+165   0273 D3 9D          out (9Dh),a
+166   0275 DB 9F                in a,(9Fh)
+166   0277 FE E4          cp 228 & 0FFh
+166   0279 28 01          jr z,g_s1
+167   027B 13                   inc de
+168   027C DB 9F        g_s1:   in a,(9Fh)
+168   027E FE 00          cp 0
+168   0280 28 01          jr z,g_s2
+169   0282 13                   inc de
+170   0283 DB 9F        g_s2:   in a,(9Fh)
+170   0285 FE 38          cp 56
+170   0287 28 01          jr z,g_s3
 171   0289 13                   inc de
-172   028A 3E 40        g_s4:   ld a,40h
-172   028C D3 9D          out (9Dh),a
-172   028E AF             xor a
-172   028F D3 9F          out (9Fh),a       ; VADDR 0
-173   0291 3E 41                ld a,41h
-173   0293 D3 9D          out (9Dh),a
-173   0295 AF             xor a
-173   0296 D3 9F          out (9Fh),a       ; EADDR 0
-174   0298 3E 42                ld a,42h
-174   029A D3 9D          out (9Dh),a
-174   029C 3E 02          ld a,2
-174   029E D3 9F          out (9Fh),a      ; NVERT 2
-175   02A0 3E 43                ld a,43h
-175   02A2 D3 9D          out (9Dh),a
-175   02A4 3E 01          ld a,1
-175   02A6 D3 9F          out (9Fh),a      ; NEDGE 1
-176   02A8 3E 44                ld a,44h
-176   02AA D3 9D          out (9Dh),a
-176   02AC 3E 0F          ld a,0Fh
-176   02AE D3 9F          out (9Fh),a    ; COLOR
-177   02B0 3E 45                ld a,45h
-177   02B2 D3 9D          out (9Dh),a
-177   02B4 AF             xor a
-177   02B5 D3 9F          out (9Fh),a       ; LOP IMP
-178   02B7 3E 46                ld a,46h
-178   02B9 D3 9D          out (9Dh),a
-178   02BB AF             xor a
-178   02BC D3 9F          out (9Fh),a
-178   02BE D3 9F          out (9Fh),a   ; YPAGE 0
-179   02C0 3E 50                ld a,50h
-179   02C2 D3 9D          out (9Dh),a
-180   02C4 21 62 03             ld hl,gvtx2
-180   02C7 01 9F 0C       ld bc,12 * 256 + 9Fh
-180   02CA ED B3          otir           ; VDATA x2
-181   02CC 3E 51                ld a,51h
-181   02CE D3 9D          out (9Dh),a
-182   02D0 AF                   xor a
-182   02D1 D3 9F          out (9Fh),a
-182   02D3 3C             inc a
-182   02D4 D3 9F          out (9Fh),a           ; EDATA 0,1
-183   02D6 3E 48                ld a,48h
-183   02D8 D3 9D          out (9Dh),a
-183   02DA 3E 01          ld a,1
-183   02DC D3 9F          out (9Fh),a      ; CTRL: RUN, wireframe
-184   02DE 21 00 00             ld hl,0
-185   02E1 DB 9D        g_w2:   in a,(9Dh)
-185   02E3 E6 01          and 01h
-185   02E5 28 06          jr z,g_d2                    ; RUN busy
-186   02E7 2B                   dec hl
-186   02E8 7C             ld a,h
-186   02E9 B5             or l
-186   02EA 20 F5          jr nz,g_w2
-187   02EC 13                   inc de
-188   02ED              g_d2:   VREG 15, 2
-188   02ED 3E 02       >        ld a,2
-188   02EF D3 99       >  out (99h),a
-188   02F1 3E 8F       >  ld a,80h | 15
-188   02F3 D3 99       >  out (99h),a
-189   02F5 DB 99        g_w3:   in a,(99h)
-189   02F7 E6 01          and 1
-189   02F9 20 FA          jr nz,g_w3                     ; the last LINE done
-190   02FB                      VREG 15, 0
-190   02FB 3E 00       >        ld a,0
-190   02FD D3 99       >  out (99h),a
-190   02FF 3E 8F       >  ld a,80h | 15
-190   0301 D3 99       >  out (99h),a
-191   0303                      VADDR 0, 35h, 0
-191   0303             >        VREG 14, 0
-191   0303 3E 00       >        ld a,0
-191   0305 D3 99       >  out (99h),a
-191   0307 3E 8E       >  ld a,80h | 14
-191   0309 D3 99       >  out (99h),a
-191   030B AF          >        xor a
-191   030C D3 99       >  out (99h),a
-191   030E 3E 35       >  ld a,35h | (0 * 40h)
-191   0310 D3 99       >  out (99h),a
-192   0312 3E 4B                ld a,4Bh
-192   0314 D3 99          out (99h),a
-192   0316 3E 35          ld a,35h
-192   0318 D3 99          out (99h),a      ; read address 354Bh
-193   031A DB 98                in a,(98h)
-193   031C FE FF          cp 0FFh
-193   031E 28 01          jr z,g_px
-194   0320 13                   inc de
-195   0321 3E 4C        g_px:   ld a,4Ch
-195   0323 D3 9D          out (9Dh),a
-196   0325 DB 9F                in a,(9Fh)
-196   0327 FE 01          cp 1
-196   0329 28 01          jr z,g_dr
-197   032B 13                   inc de
-198   032C              g_dr:   REPORT
-198   032C 7B          >        ld a,e
-198   032D D3 2F       >  out (2Fh),a
-198   032F 7A          >  ld a,d
-198   0330 D3 2F       >  out (2Fh),a
-199   0332
-200   0332 3E 0F                ld a,0Fh
-200   0334 D3 2E          out (2Eh),a
-201   0336 18 FE        park:   jr park
-202   0338
-203   0338 00 40 00 00  gcfg:   dw 4000h, 0, 0,  0, 4000h, 0,  0, 0, 4000h          ; M00..M22 identity (Q2.14)
-203   033C 00 00 00 00
-203   0340 00 40 00 00
-203   0344 00 00 00 00
-203   0348 00 40
-204   034A 00 00 00 00          dw 0, 0, 0                                         ; TX TY TZ
-204   034E 00 00
-205   0350 00 01 80 00          dw 256, 128, 106, 1, 256, 212                      ; F CX CY ZNEAR W H
-205   0354 6A 00 01 00
-205   0358 00 01 D4 00
-206   035C 64 00 32 00  gvtx:   dw 100, 50, 256                                    ; VX VY VZ
-206   0360 00 01
-207   0362 00 00 00 00  gvtx2:  dw 0, 0, 256,  100, 0, 256
-207   0366 00 01 64 00
-207   036A 00 00 00 01
-208   036E
-209   036E 00 8E 00 70  otab:   db 00h, 8Eh, 00h, 70h                  ; R#14 = 0; address 3000h, write
-210   0372 11 22 33 44  otdat:  db 11h,22h,33h,44h,55h,66h,77h,88h, 99h,0AAh,0BBh,0CCh,0DDh,0EEh,0FFh,01h
-210   0376 55 66 77 88
-210   037A 99 AA BB CC
-210   037E DD EE FF 01
-211   0382 12 23 34 45          db 12h,23h,34h,45h,56h,67h,78h,89h, 9Ah,0ABh,0BCh,0CDh,0DEh,0EFh,0F0h,02h
-211   0386 56 67 78 89
-211   038A 9A AB BC CD
-211   038E DE EF F0 02
-212   0392 13 24 35 46          db 13h,24h,35h,46h,57h,68h,79h,8Ah, 9Bh,0ACh,0BDh,0CEh,0DFh,0E0h,0F1h,03h
-212   0396 57 68 79 8A
-212   039A 9B AC BD CE
-212   039E DF E0 F1 03
-213   03A2 14 25 36 47          db 14h,25h,36h,47h,58h,69h,7Ah,8Bh, 9Ch,0ADh,0BEh,0CFh,0D0h,0E1h,0F2h,04h
-213   03A6 58 69 7A 8B
-213   03AA 9C AD BE CF
-213   03AE D0 E1 F2 04
-214   03B2
-215   03B2 00 00 00 00  hmmv:   db 0,0, 0,0, 0,1, 4,0, 5Ah, 0, 0C0h   ; DX DY NX=256 NY=4 CLR ARG HMMV
-215   03B6 00 01 04 00
-215   03BA 5A 00 C0
-216   03BD                      assert $ < 4000h
-217   03BD
+172   028A DB 9F        g_s3:   in a,(9Fh)
+172   028C B7             or a
+172   028D 28 01          jr z,g_s4
+173   028F 13                   inc de
+174   0290 3E 40        g_s4:   ld a,40h
+174   0292 D3 9D          out (9Dh),a
+174   0294 AF             xor a
+174   0295 D3 9F          out (9Fh),a       ; VADDR 0
+175   0297 3E 41                ld a,41h
+175   0299 D3 9D          out (9Dh),a
+175   029B AF             xor a
+175   029C D3 9F          out (9Fh),a       ; EADDR 0
+176   029E 3E 42                ld a,42h
+176   02A0 D3 9D          out (9Dh),a
+176   02A2 3E 02          ld a,2
+176   02A4 D3 9F          out (9Fh),a      ; NVERT 2
+177   02A6 3E 43                ld a,43h
+177   02A8 D3 9D          out (9Dh),a
+177   02AA 3E 01          ld a,1
+177   02AC D3 9F          out (9Fh),a      ; NEDGE 1
+178   02AE 3E 44                ld a,44h
+178   02B0 D3 9D          out (9Dh),a
+178   02B2 3E 0F          ld a,0Fh
+178   02B4 D3 9F          out (9Fh),a    ; COLOR
+179   02B6 3E 45                ld a,45h
+179   02B8 D3 9D          out (9Dh),a
+179   02BA AF             xor a
+179   02BB D3 9F          out (9Fh),a       ; LOP IMP
+180   02BD 3E 46                ld a,46h
+180   02BF D3 9D          out (9Dh),a
+180   02C1 AF             xor a
+180   02C2 D3 9F          out (9Fh),a
+180   02C4 D3 9F          out (9Fh),a   ; YPAGE 0
+181   02C6 3E 50                ld a,50h
+181   02C8 D3 9D          out (9Dh),a
+182   02CA 21 C7 03             ld hl,gvtx2
+182   02CD 01 9F 0C       ld bc,12 * 256 + 9Fh
+182   02D0 ED B3          otir           ; VDATA x2
+183   02D2 3E 51                ld a,51h
+183   02D4 D3 9D          out (9Dh),a
+184   02D6 AF                   xor a
+184   02D7 D3 9F          out (9Fh),a
+184   02D9 3C             inc a
+184   02DA D3 9F          out (9Fh),a           ; EDATA 0,1
+185   02DC 3E 48                ld a,48h
+185   02DE D3 9D          out (9Dh),a
+185   02E0 3E 01          ld a,1
+185   02E2 D3 9F          out (9Fh),a      ; CTRL: RUN, wireframe
+186   02E4 21 00 00             ld hl,0
+187   02E7 DB 9D        g_w2:   in a,(9Dh)
+187   02E9 E6 01          and 01h
+187   02EB 28 06          jr z,g_d2                    ; RUN busy
+188   02ED 2B                   dec hl
+188   02EE 7C             ld a,h
+188   02EF B5             or l
+188   02F0 20 F5          jr nz,g_w2
+189   02F2 13                   inc de
+190   02F3              g_d2:   VREG 15, 2
+190   02F3 3E 02       >        ld a,2
+190   02F5 D3 99       >  out (99h),a
+190   02F7 3E 8F       >  ld a,80h | 15
+190   02F9 D3 99       >  out (99h),a
+191   02FB DB 99        g_w3:   in a,(99h)
+191   02FD E6 01          and 1
+191   02FF 20 FA          jr nz,g_w3                     ; the last LINE done
+192   0301                      VREG 15, 0
+192   0301 3E 00       >        ld a,0
+192   0303 D3 99       >  out (99h),a
+192   0305 3E 8F       >  ld a,80h | 15
+192   0307 D3 99       >  out (99h),a
+193   0309                      VADDR 0, 35h, 0
+193   0309             >        VREG 14, 0
+193   0309 3E 00       >        ld a,0
+193   030B D3 99       >  out (99h),a
+193   030D 3E 8E       >  ld a,80h | 14
+193   030F D3 99       >  out (99h),a
+193   0311 AF          >        xor a
+193   0312 D3 99       >  out (99h),a
+193   0314 3E 35       >  ld a,35h | (0 * 40h)
+193   0316 D3 99       >  out (99h),a
+194   0318 3E 4B                ld a,4Bh
+194   031A D3 99          out (99h),a
+194   031C 3E 35          ld a,35h
+194   031E D3 99          out (99h),a      ; read address 354Bh
+195   0320 DB 98                in a,(98h)
+195   0322 FE FF          cp 0FFh
+195   0324 28 01          jr z,g_px
+196   0326 13                   inc de
+197   0327 3E 4C        g_px:   ld a,4Ch
+197   0329 D3 9D          out (9Dh),a
+198   032B DB 9F                in a,(9Fh)
+198   032D FE 01          cp 1
+198   032F 28 01          jr z,g_dr
+199   0331 13                   inc de
+200   0332              g_dr:   REPORT
+200   0332 7B          >        ld a,e
+200   0333 D3 2F       >  out (2Fh),a
+200   0335 7A          >  ld a,d
+200   0336 D3 2F       >  out (2Fh),a
+201   0338
+202   0338                      ; 7  ASO 224's first in-game wait: display OFF and IE0 off (R#1 = 02h), R#9 = 00h,
+203   0338                      ;    R#19 = 68h, R#0 = 16h (SCREEN 5, IE1 on), then EI and NO polling -- the line
+204   0338                      ;    interrupt must arrive as an IM 1 interrupt (0038h).  The handler does what the
+205   0338                      ;    game's does: R#15 = 1, read S#1 (FH must be 1), R#15 = 0.
+206   0338                      ;    Errors: no interrupt (timeout), or FH = 0 in the handler.
+207   0338 3E 07                ld a,7
+207   033A D3 2E          out (2Eh),a
+208   033C 11 00 00             ld de,0
+209   033F                      VREG 1, 02h
+209   033F 3E 02       >        ld a,02h
+209   0341 D3 99       >  out (99h),a
+209   0343 3E 81       >  ld a,80h | 1
+209   0345 D3 99       >  out (99h),a
+210   0347                      VREG 9, 00h
+210   0347 3E 00       >        ld a,00h
+210   0349 D3 99       >  out (99h),a
+210   034B 3E 89       >  ld a,80h | 9
+210   034D D3 99       >  out (99h),a
+211   034F                      VREG 19, 68h
+211   034F 3E 68       >        ld a,68h
+211   0351 D3 99       >  out (99h),a
+211   0353 3E 93       >  ld a,80h | 19
+211   0355 D3 99       >  out (99h),a
+212   0357                  IFDEF P7NEG
+213   0357 ~                    VREG 0, 06h                     ; negative control: IE1 off -> phase 7 must time out
+214   0357                  ELSE
+215   0357                      VREG 0, 16h
+215   0357 3E 16       >        ld a,16h
+215   0359 D3 99       >  out (99h),a
+215   035B 3E 80       >  ld a,80h | 0
+215   035D D3 99       >  out (99h),a
+216   035F                  ENDIF
+217   035F 0E 07                ld c,7
+218   0361 ED 56                im 1
+218   0363 FB             ei
+219   0364 21 00 00             ld hl,0
+220   0367 2B           i7w:    dec hl
+220   0368 7C             ld a,h
+220   0369 B5             or l
+220   036A 20 FB          jr nz,i7w
+221   036C F3                   di
+222   036D 13                   inc de                          ; no line interrupt in ~65536 loops
+223   036E 18 17                jr i7done
+224   0370              v7:     VREG 15, 1
+224   0370 3E 01       >        ld a,1
+224   0372 D3 99       >  out (99h),a
+224   0374 3E 8F       >  ld a,80h | 15
+224   0376 D3 99       >  out (99h),a
+225   0378 DB 99                in a,(99h)
+225   037A E6 01          and 1
+225   037C 20 01          jr nz,v7ok
+226   037E 13                   inc de                          ; the handler saw FH = 0
+227   037F              v7ok:   VREG 15, 0
+227   037F 3E 00       >        ld a,0
+227   0381 D3 99       >  out (99h),a
+227   0383 3E 8F       >  ld a,80h | 15
+227   0385 D3 99       >  out (99h),a
+228   0387              i7done: VREG 0, 06h
+228   0387 3E 06       >        ld a,06h
+228   0389 D3 99       >  out (99h),a
+228   038B 3E 80       >  ld a,80h | 0
+228   038D D3 99       >  out (99h),a
+229   038F 0E 00                ld c,0
+230   0391                      REPORT
+230   0391 7B          >        ld a,e
+230   0392 D3 2F       >  out (2Fh),a
+230   0394 7A          >  ld a,d
+230   0395 D3 2F       >  out (2Fh),a
+231   0397
+232   0397 3E 0F                ld a,0Fh
+232   0399 D3 2E          out (2Eh),a
+233   039B 18 FE        park:   jr park
+234   039D
+235   039D 00 40 00 00  gcfg:   dw 4000h, 0, 0,  0, 4000h, 0,  0, 0, 4000h          ; M00..M22 identity (Q2.14)
+235   03A1 00 00 00 00
+235   03A5 00 40 00 00
+235   03A9 00 00 00 00
+235   03AD 00 40
+236   03AF 00 00 00 00          dw 0, 0, 0                                         ; TX TY TZ
+236   03B3 00 00
+237   03B5 00 01 80 00          dw 256, 128, 106, 1, 256, 212                      ; F CX CY ZNEAR W H
+237   03B9 6A 00 01 00
+237   03BD 00 01 D4 00
+238   03C1 64 00 32 00  gvtx:   dw 100, 50, 256                                    ; VX VY VZ
+238   03C5 00 01
+239   03C7 00 00 00 00  gvtx2:  dw 0, 0, 256,  100, 0, 256
+239   03CB 00 01 64 00
+239   03CF 00 00 00 01
+240   03D3
+241   03D3 00 8E 00 70  otab:   db 00h, 8Eh, 00h, 70h                  ; R#14 = 0; address 3000h, write
+242   03D7 11 22 33 44  otdat:  db 11h,22h,33h,44h,55h,66h,77h,88h, 99h,0AAh,0BBh,0CCh,0DDh,0EEh,0FFh,01h
+242   03DB 55 66 77 88
+242   03DF 99 AA BB CC
+242   03E3 DD EE FF 01
+243   03E7 12 23 34 45          db 12h,23h,34h,45h,56h,67h,78h,89h, 9Ah,0ABh,0BCh,0CDh,0DEh,0EFh,0F0h,02h
+243   03EB 56 67 78 89
+243   03EF 9A AB BC CD
+243   03F3 DE EF F0 02
+244   03F7 13 24 35 46          db 13h,24h,35h,46h,57h,68h,79h,8Ah, 9Bh,0ACh,0BDh,0CEh,0DFh,0E0h,0F1h,03h
+244   03FB 57 68 79 8A
+244   03FF 9B AC BD CE
+244   0403 DF E0 F1 03
+245   0407 14 25 36 47          db 14h,25h,36h,47h,58h,69h,7Ah,8Bh, 9Ch,0ADh,0BEh,0CFh,0D0h,0E1h,0F2h,04h
+245   040B 58 69 7A 8B
+245   040F 9C AD BE CF
+245   0413 D0 E1 F2 04
+246   0417
+247   0417 00 00 00 00  hmmv:   db 0,0, 0,0, 0,1, 4,0, 5Ah, 0, 0C0h   ; DX DY NX=256 NY=4 CLR ARG HMMV
+247   041B 00 01 04 00
+247   041F 5A 00 C0
+248   0422                      assert $ < 4000h
+249   0422
 # file closed: vprobe.asm

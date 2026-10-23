@@ -9,6 +9,7 @@
 ;   3  two VBLANKs (S#0 F set) with the display on -- the V9968 fetching VRAM
 ;      through the V slot while the bench checks every read (error = timeout)
 ;   4  IM 1 interrupt: R#1 IE0 on, EI, wait for the jump to 0038h (error = timeout)
+;   5  OTIR to the VDP   6  Geo3D   7  line interrupt (IE1) with the display off, no polling
 ;   0Fh done
 ; No stack and no RAM.  The code starts at 0040h and skips 0180h-018Bh (turbor.sv).
         org 0
@@ -121,6 +122,7 @@ iw:     dec hl : ld a,h : or l : jr nz,iw
         inc de                          ; no interrupt in ~65536 loops
         jr idone
 vint:   di
+        ld a,c : cp 7 : jp z,v7         ; phase 7 (C = 7): the line-interrupt handler
         in a,(99h)                      ; S#0: acknowledge
 idone:  VREG 1, 40h
         REPORT
@@ -196,6 +198,36 @@ g_px:   ld a,4Ch : out (9Dh),a
         in a,(9Fh) : cp 1 : jr z,g_dr
         inc de
 g_dr:   REPORT
+
+        ; 7  ASO 224's first in-game wait: display OFF and IE0 off (R#1 = 02h), R#9 = 00h,
+        ;    R#19 = 68h, R#0 = 16h (SCREEN 5, IE1 on), then EI and NO polling -- the line
+        ;    interrupt must arrive as an IM 1 interrupt (0038h).  The handler does what the
+        ;    game's does: R#15 = 1, read S#1 (FH must be 1), R#15 = 0.
+        ;    Errors: no interrupt (timeout), or FH = 0 in the handler.
+        ld a,7 : out (2Eh),a
+        ld de,0
+        VREG 1, 02h
+        VREG 9, 00h
+        VREG 19, 68h
+    IFDEF P7NEG
+        VREG 0, 06h                     ; negative control: IE1 off -> phase 7 must time out
+    ELSE
+        VREG 0, 16h
+    ENDIF
+        ld c,7
+        im 1 : ei
+        ld hl,0
+i7w:    dec hl : ld a,h : or l : jr nz,i7w
+        di
+        inc de                          ; no line interrupt in ~65536 loops
+        jr i7done
+v7:     VREG 15, 1
+        in a,(99h) : and 1 : jr nz,v7ok
+        inc de                          ; the handler saw FH = 0
+v7ok:   VREG 15, 0
+i7done: VREG 0, 06h
+        ld c,0
+        REPORT
 
         ld a,0Fh : out (2Eh),a
 park:   jr park
