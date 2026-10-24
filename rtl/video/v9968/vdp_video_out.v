@@ -85,10 +85,10 @@ module vdp_video_out (
 	localparam		c_v_count_max_60	= 10'd523;
 	localparam		c_v_count_max_50	= 10'd625;
 	localparam		active_area_start	= 12'd747;
-	localparam		active_area_end		= active_area_start + 12'd1600;
+	localparam		active_area_end		= active_area_start + 12'd1440;
 	localparam		clocks_per_line		= 12'd2736;
 	localparam		h_en_start			= 12'd748;
-	localparam		h_en_end			= h_en_start + 12'd1600;
+	localparam		h_en_end			= h_en_start + 12'd1440;
 	localparam		hs_start			= clocks_per_line - 1;
 	localparam		hs_end				= 12'd567;
 	localparam		v_en_start			= 10'd14;

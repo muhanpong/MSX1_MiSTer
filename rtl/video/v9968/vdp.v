@@ -611,8 +611,8 @@ module vdp (
 		.display_b									( display_b									),
 		.reg_interlace_mode							( reg_interlace_mode						),
 		.reg_flat_interlace_mode					( reg_flat_interlace_mode					),
-		.reg_denominator							( 8'd200									),
-		.reg_normalize								( 8'd41										),
+		.reg_denominator							( 8'd180									),
+		.reg_normalize								( 8'd46										),
 		.reg_50hz_mode								( reg_50hz_mode								)
 	);
 	assign ext_cmd_ce = w_status_command_execute;

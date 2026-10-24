@@ -80,3 +80,11 @@ Driven from the OSD "Scandoubler Fx" (MSX1.sv: CRT 25/50/75% -> 1/2/3, others 0)
 - Bench: sim/v9968_vram `+ie1=6 +ie1line=D2 +ie1r9=80 +ie1dly=<clk>`: upstream reads FH = 0 in 6 of 6
   frames at 20 / 48 / 90 us and 0 of 6 at 5 / 10 us; fixed: 0 of 6 at every delay.  Control line 68h
   at 48 us: 0 of 6 on both.  Worth reporting upstream (hra1129/V9968_Cartridge).
+
+## Upstream sync (2026-10-24): 8a37b33 "Modified" -- horizontal display width
+
+- upstream changed two lines in files that also carry local changes, so they were applied by hand
+  (ORIGIN.md5 now holds 8a37b33's sums for these two files; every other file is still 7820668):
+  `vdp_video_out.v` active area / h_en 1600 -> 1440 clocks; `vdp.v` bilinear scaler
+  `reg_denominator` 200 -> 180, `reg_normalize` 41 -> 46.  The other upstream commits since 7820668
+  (31d82b8 detect tool, a678a53 system controller + updater) touch no file copied here.
