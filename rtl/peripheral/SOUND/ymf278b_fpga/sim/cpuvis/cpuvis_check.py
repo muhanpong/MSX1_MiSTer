@@ -340,9 +340,17 @@ def run(hdr, ops, st, mem, dev):
         elif lo - TOL > tnext:
             ok = fall is None
         else:
-            ok = None           # the next access starts inside the window: not judged
+            ok = None           # the next access starts inside the window
         if ok is None:
-            obs.append((key + " busy", f"[{lo - t},{hi - t}] (unjudged)", "-", True))
+            # The fall itself cannot be seen, but BUSY must not drop before the window opens
+            # (back-to-back accesses, e.g. R800 OTIR: a BUSY that never rises lives here)
+            early = min(lo - TOL, tnext)
+            if early > t + 2:
+                f2 = fall_after(st, t + 2, early, 0)
+                obs.append((key + " busy-held", f"no fall before {early - t}",
+                            f"{None if f2 is None else f2 - t}", f2 is None))
+            else:
+                obs.append((key + " busy", f"[{lo - t},{hi - t}] (unjudged)", "-", True))
         else:
             obs.append((key + " busy", f"[{lo - t},{hi - t}]", f"{None if fall is None else fall - t}", ok))
         if not m.status2:
@@ -353,6 +361,10 @@ def run(hdr, ops, st, mem, dev):
                 obs.append((key + " ld", f"{ld - t}", f"{None if fall is None else fall - t}", ok))
             elif fall is not None:
                 obs.append((key + " ld", f"{ld - t}", f"{fall - t}", abs(fall - ld) <= TOL))
+            elif ld - TOL > t + 2:
+                f2 = fall_after(st, t + 2, min(ld - TOL, tnext), 1)
+                obs.append((key + " ld-held", f"no fall before {min(ld - TOL, tnext) - t}",
+                            f"{None if f2 is None else f2 - t}", f2 is None))
             else:
                 obs.append((key + " ld", f"{ld - t} (unjudged)", "-", True))
     return obs

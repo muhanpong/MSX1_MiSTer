@@ -16,6 +16,10 @@ verilator --binary --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-TIMESCALEM
 fi
 FILES=$(grep -v 'rtl/peripheral/sdram\(_tdm\)\?\.sv$' "$GEN/filelist.txt" | grep -v 'memory_upload\.sv$' | grep -v 'ymf278b_regs\.sv$' | tr '\n' ' ')
 FILES="$FILES $V/ymf278b_regs.sv"
+# PCM_ENGINE="<files>": the PCM engine under test replaces the filelist's rtl/pcm/ymf278_pcm_*.sv
+if [ -n "${PCM_ENGINE:-}" ]; then
+    FILES="$(echo "$FILES" | tr ' ' '\n' | grep -v 'rtl/pcm/ymf278_pcm_[a-z0-9_]*\.sv$' | tr '\n' ' ') $PCM_ENGINE"
+fi
 FILES=$(echo "$FILES" | tr ' ' '\n' | grep -vx "$GEN/vdp\(18_core\)\?\.v" | grep -v '/gen/vdp\(18_core\)\?\.v$' | tr '\n' ' ')
 FILES="$FILES $(ls rtl/video/v9968/*.v | tr '\n' ' ') rtl/video/v9968_link.sv rtl/video/v9968_bus.sv rtl/video/v9968_cmdwait.sv rtl/video/geo3d/geo3d_core.v rtl/video/geo3d/geo3d_engine.v rtl/video/geo3d/geo3d_bus.v"
 DEFS="-DPRELOAD -DPRELOAD_SVH=\"$OUT/pre.state.svh\" -DTDM128 -DMSX_V9968 -DVPROBE"

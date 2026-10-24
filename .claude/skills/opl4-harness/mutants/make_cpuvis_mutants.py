@@ -44,6 +44,9 @@ MUTANTS = [
      "assign status_live = opl3_status | {6'd0, 1'b0, busy}"),
     ("latch_rd", "regs", "7Eh read returns the latch instead of FFh",
      "io_data_out <= 8'hFF;  // latch not readable", "io_data_out <= opl4latch;  // latch not readable"),
+    ("memrd_nobusy", "regs", "a wave-memory read (latch 3..6) raises no BUSY counter (the engine op alone)",
+     "                    busy_cnt    <= DELAY_W'(MEM_READ_DELAY);",
+     "                    busy_cnt    <= '0;"),
     ("new2_keep", "top", "a warm reset keeps NEW2 (as openMSX does; the RTL clears it on purpose)",
      "        opl3_reg_shadow[0] <= 8'h00;", "        opl3_reg_shadow[0] <= opl3_reg_shadow[0];"),
 ]

@@ -58,7 +58,7 @@ SCEN=${SCEN:-"sc_single8:900:o sc_square16:900:o sc_tri12_loop:1000:o sc_multi:1
 #  latencies on the current engine (one header fetch per frame, SPEC H4)
 LOAD_SCEN=${LOAD_SCEN:-"sc_songchange24:800:o"}
 LOAD_LATS=${LOAD_LATS:-"6 10 20"}
-ORACLE_DEV=${ORACLE_DEV:-"I1,I2,I4,I5,I7,I11"}
+ORACLE_DEV=${ORACLE_DEV:-"I1,I2,I4,I5,I7,I9,I11"}
 #  The production clock is 128.86 MHz, where the engine runs its PIPE datapath; 85.909 MHz runs
 #  a different circuit.  LATS = SDRAM read latencies (tb +lat) every scenario runs at.
 CLK_HZ=${CLK_HZ:-128863620}
@@ -145,6 +145,8 @@ do_oracle() {
     #  every deviation the model carries is named).
     local d="$OUT/oracle"; rm -rf "$d"; mkdir -p "$d"
     g++ -O2 -w -o "$d/ref278" "$G/ref278.cpp" 2> "$d/build.log" || { gate oracle FAIL "ref278 does not build"; return; }
+    #  ORACLE_REF=<program> stands in for ref278 (to check the judge, e.g. one that crashes)
+    [ -n "${ORACLE_REF:-}" ] && cp "$ORACLE_REF" "$d/ref278"
     gold_make > "$d/gold.log" || { gate oracle FAIL "no reference streams"; return; }
     local sets="all" x e n f m
     for x in ${ORACLE_DEV//,/ }; do sets="$sets no_$x"; done
@@ -153,12 +155,19 @@ do_oracle() {
         [ "$x" != all ] && dev=$(echo "${ORACLE_DEV//,/ }" | tr ' ' '\n' | grep -vx "${x#no_}" | paste -sd,)
         for e in $SCEN; do
             IFS=: read -r n f m _ <<< "$e"
-            ( cd "$G" && REF_OMSX=1 REF_DEV="$dev" "$d/ref278" mem.bin "$n.txt" "$f" "$d/${n}.$x" 2> /dev/null
-              cmp -s "$d/${n}.$x" "$GOLD/$n.txt" && echo same > "$d/${n}.$x.r" || echo diff > "$d/${n}.$x.r" ) &
+            #  a ref278 that dies or writes a short stream is an error, never a "diff"
+            #  (a crash in a no_<flag> run would otherwise count as "flag needed")
+            ( cd "$G" && REF_OMSX=1 REF_DEV="$dev" "$d/ref278" mem.bin "$n.txt" "$f" "$d/${n}.$x" 2> "$d/${n}.$x.err"
+              rc=$?
+              if [ $rc != 0 ] || [ "$(wc -l < "$d/${n}.$x" 2>/dev/null)" != "$f" ] \
+                 || [ "$(wc -l < "$GOLD/$n.txt" 2>/dev/null)" != "$f" ]; then echo "err rc=$rc"
+              elif cmp -s "$d/${n}.$x" "$GOLD/$n.txt"; then echo same; else echo diff; fi > "$d/${n}.$x.r" ) &
         done
     done
     wait
-    local bad="" dead="" hit
+    local bad="" dead="" hit errs
+    errs=$(grep -l '^err' "$d"/*.r 2>/dev/null | wc -l)
+    [ "$errs" = 0 ] || { gate oracle FAIL "$errs ref278 run(s) failed or wrote a short stream (see $d/*.err)"; return; }
     for e in $SCEN; do n=${e%%:*}; [ "$(cat "$d/$n.all.r" 2>/dev/null)" = same ] || bad="$bad $n"; done
     for x in ${ORACLE_DEV//,/ }; do
         hit=$(for e in $SCEN; do n=${e%%:*}; [ "$(cat "$d/$n.no_$x.r" 2>/dev/null)" = diff ] && echo "$n"; done | wc -l)
@@ -231,7 +240,7 @@ do_memwr() {
     cp "${REGS:-$Y/rtl/ymf278b_regs.sv}" "$d/ymf278b_regs.sv"
     #  MEMWR_LOG=<r800.log> judges an existing log instead of running (checks the judge itself)
     if [ -n "${MEMWR_LOG:-}" ]; then cp "$MEMWR_LOG" "$d/r800.log"
-    else HEX="$HERE/../assets/mprobe_r.hex" LOG=r800.log bash "$HERE/../assets/run1.sh" "$d" > "$d/run1.out" 2>&1; fi
+    else PCM_ENGINE="$ENGINE" HEX="$HERE/../assets/mprobe_r.hex" LOG=r800.log bash "$HERE/../assets/run1.sh" "$d" > "$d/run1.out" 2>&1; fi
     #  only the per-phase lines count (the closing VPROBE summary repeats phase 7's count),
     #  and the probe must have reached its last phase with every checking phase reported
     local log="$d/r800.log" p miss=""
@@ -239,7 +248,11 @@ do_memwr() {
     for p in 1 6 7 8 9; do grep -qE "phase $p errors [0-9]+" "$log" || miss="$miss $p"; done
     [ -z "$miss" ] || { gate memwr FAIL "no error count for phase(s)$miss (see $d)"; return; }
     local e; e=$(grep -hoE "phase [0-9]+ errors [0-9]+" "$log" | awk '{s+=$4} END {print s+0}')
-    [ "$e" = 0 ] && gate memwr PASS "R800 OTIR 1024 B upload + readback, phases 1-15, 0 errors" \
+    #  run1.sh swaps the filelist's PCM engine for ENGINE (PCM_ENGINE); say which engine,
+    #  and say when the verdict is on a saved log
+    local how="engine $(basename "$(echo $ENGINE | awk '{print $NF}')")"
+    [ -n "${MEMWR_LOG:-}" ] && how="SAVED LOG $MEMWR_LOG, engine unknown"
+    [ "$e" = 0 ] && gate memwr PASS "R800 OTIR 1024 B upload + readback, phases 1-15, 0 errors ($how)" \
                  || gate memwr FAIL "$e readback errors ($(grep -hoE "phase [0-9]+ errors [1-9][0-9]*" "$log" | tr '\n' ';'))"
 }
 
@@ -278,6 +291,12 @@ do_cpuvis() {
         else echo "  cpuvis mutant $base: NOT CAUGHT"; fi
     done
     local tl; tl=$(grep -m1 "^cpuvis:" "$d/tree.txt")
+    #  a floor on what was judged: a model change that widens windows must not turn
+    #  checks into "unjudged" passes (2026-10-24: 717 judged, 0 unjudged)
+    local nj nu; nj=$(echo "$tl" | grep -oE '[0-9]+ checks' | grep -oE '[0-9]+'); nu=$(echo "$tl" | grep -oE '[0-9]+ unjudged' | grep -oE '[0-9]+')
+    if [ "${nj:-0}" -lt "${CPUVIS_MIN_CHECKS:-717}" ] || [ "${nu:-999}" -gt "${CPUVIS_MAX_UNJUDGED:-0}" ]; then
+        gate cpuvis FAIL "judged ${nj:-?} (min ${CPUVIS_MIN_CHECKS:-717}), unjudged ${nu:-?} (max ${CPUVIS_MAX_UNJUDGED:-0}): $tl"; return
+    fi
     if grep -q "^CPUVIS PASS" "$d/tree.txt" && [ $n -gt 0 ] && [ $caught -eq $n ]; then
         gate cpuvis PASS "$tl; mutants $caught/$n caught"
     else
@@ -312,7 +331,9 @@ do_resource() {
     awk -v a="$pcm" -v b="$PCM_ALM_MAX" 'BEGIN{exit !(a<=b)}' || ok=0
     awk -v a="$ms"  -v b="$MS_ALM_MAX"  'BEGIN{exit !(a<=b)}' || ok=0
     [ "$w10999" = 0 ] || ok=0
-    [ $ok = 1 ] && gate resource PASS "PCM $pcm <= $PCM_ALM_MAX, MoonSound $ms <= $MS_ALM_MAX, 10999 x0 ($(basename "$rpt"))" \
+    local ovr=""; [ "$PCM_ALM_MAX/$MS_ALM_MAX" = 1200/2500 ] || ovr=" BUDGET OVERRIDE (default 1200/2500)"
+    [ "$rd" = "$W/output_files" ] || ovr="$ovr, report from $rd"
+    [ $ok = 1 ] && gate resource PASS "PCM $pcm <= $PCM_ALM_MAX, MoonSound $ms <= $MS_ALM_MAX, 10999 x0 ($(basename "$rpt"))$ovr" \
                 || gate resource FAIL "PCM $pcm (max $PCM_ALM_MAX), MoonSound $ms (max $MS_ALM_MAX), 10999 x$w10999 ($(basename "$rpt"))"
     echo "  RAM check: read the map report's RAM summary for every intended MLAB/M10K -- warnings alone are not proof"
 }

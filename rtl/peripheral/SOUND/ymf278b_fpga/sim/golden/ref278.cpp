@@ -27,6 +27,15 @@
 //   I11 key-on/key-off/retrigger take effect at the slot's turn with the registers
 //       current then (openMSX acts at the write: AR/DL written after the key-on
 //       in the same frame do not shape that key-on)
+//   I9  reg 6 writes below 0x200000 land: the RTL has no ROM write protect (the
+//       yrw801 image sits in SDRAM; msx.sv's ch4 bridge passes every write).  openMSX
+//       ignores writes outside RAM (YMF278.cc writeMem).  An RTL defect, not a choice.
+// None of the flags has a hardware recording behind it; they name how the RTL differs
+// from openMSX, not that the RTL is right.  I7 in particular: openMSX's early return
+// carries "TODO update internal state, even if muted", so there the RTL is the likelier
+// match for the chip.
+// The sum is clamped to 16 bits after the F9h level, like the RTL; openMSX keeps floats
+// per slot and clips in its mixer after the level (and the master volume, 1 here).
 #include <string>
 #include <cstdint>
 #include <cstdio>
@@ -220,7 +229,12 @@ static void writeRegDirect(uint8_t reg, uint8_t data){
   else if (OMSX && reg==4){ regs4 = data; }
   else if (OMSX && reg==5){ memAdr = (regs3<<16)|(regs4<<8)|data; }
   else if (OMSX && reg==6){
-    if (regs2 & 1){ unsigned a = memAdr & 0x3FFFFF; if (a < MEM.size()) MEM[a]=data; ++memAdr; }
+    if (regs2 & 1){
+      unsigned a = memAdr & 0x3FFFFF;
+      bool ram = a >= 0x200000 && !(RAM_BYTES && (a - 0x200000) >= RAM_BYTES);
+      if ((ram || dev("I9")) && a < MEM.size()) MEM[a]=data;
+      ++memAdr;
+    }
   }
   else if (OMSX && reg==0xF9){ mixF9 = data; }
   // without REF_OMSX reg 0xF9 (PCM mix) is ignored: the TB forces 0dB
@@ -359,15 +373,18 @@ int main(int argc, char** argv){
   if (argc < 5){ fprintf(stderr,"usage: ref278 mem.bin script.txt frames out.txt\n"); return 1; }
   for (int i=0;i<8;i++) lfo_period[i] = Lp((const double[]){0.168,2.019,3.196,4.206,5.215,5.888,6.224,7.066}[i]);
   FILE* mf=fopen(argv[1],"rb");
+  if (!mf){ fprintf(stderr,"ref278: cannot open %s\n",argv[1]); return 1; }
   fseek(mf,0,SEEK_END); long ms=ftell(mf); fseek(mf,0,SEEK_SET);
   MEM.resize(ms); fread(MEM.data(),1,ms,mf); fclose(mf);
   int frames = atoi(argv[3]);
   if (const char* rk = getenv("RAM_KB")) RAM_BYTES = unsigned(atoi(rk)) * 1024;
   if (const char* o = getenv("REF_OMSX")) OMSX = atoi(o) != 0;
+  if (frames <= 0){ fprintf(stderr,"ref278: bad frame count\n"); return 1; }
   if (const char* d = getenv("REF_DEV")) DEV = d;
   // read script into per-frame write lists
   std::vector<std::vector<std::pair<int,int>>> wr(frames+2);
   FILE* sf=fopen(argv[2],"r"); char line[128];
+  if (!sf){ fprintf(stderr,"ref278: cannot open %s\n",argv[2]); return 1; }
   while (fgets(line,sizeof line,sf)){
     int fr,ad,da;
     if (sscanf(line,"%d %x %x",&fr,&ad,&da)>=3 && fr>=0 && fr<frames+2)
@@ -375,6 +392,7 @@ int main(int argc, char** argv){
   }
   fclose(sf);
   FILE* of=fopen(argv[4],"w");
+  if (!of){ fprintf(stderr,"ref278: cannot write %s\n",argv[4]); return 1; }
   for (int f=0; f<frames; f++){
     for (auto& w : wr[f]) writeRegDirect(uint8_t(w.first), uint8_t(w.second));
     // I5: the TB writes frame f+1's registers during frame f; F9h shapes frame f already
