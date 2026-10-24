@@ -917,10 +917,8 @@ module vdp_cpu_interface (
 				ff_frame_interrupt <= 1'b1;
 			end
 
-			if( clear_line_interrupt || intr_frame ) begin
-				ff_line_interrupt <= 1'b0;
-			end
-			else if( ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19) ) begin
+			//	FH is not cleared at the frame interrupt (MSX1 core, 2026-10-24): see ORIGIN.md
+			if( ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19) ) begin
 				ff_line_interrupt <= 1'b0;
 			end
 			else if( intr_line ) begin

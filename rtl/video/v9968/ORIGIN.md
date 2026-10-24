@@ -62,3 +62,21 @@ Driven from the OSD "Scandoubler Fx" (MSX1.sv: CRT 25/50/75% -> 1/2/3, others 0)
   V9968 build only (the V9958 build and openMSX V9958/V9968 run it).
   sim/v9968_vram `+aso=30`: unfixed 11 waits never answered (every stage, ~1 in 11 FH),
   fixed 0.  Worth reporting upstream.
+
+## Local change (2026-10-24, bug): FH survives the frame interrupt (ASO 224 black screen)
+
+- `vdp_cpu_interface.v` (~920): upstream cleared FH (`ff_line_interrupt`) on `clear_line_interrupt`
+  (= the frame-interrupt timing, vdp_timing_control_ssg.v:250/431) and on `intr_frame`.  That clear
+  is gone; FH is still cleared by the S#1 read (unchanged), port #4 bit1, and an R#0/R#19 write.
+  openMSX resets irqHorizontal only at reset, on the S#1 read with IE1 on and on an R#0 write that
+  turns IE1 off; this core's ESE VDP removed the same clear for the same game
+  (rtl/video/VDP/vdp_interrupt.vhd:120-140).
+- Why it matters: ASO's line-104 handler sets R#19 = D2h and R#9 = 212 lines.  FH is set at line
+  210 and the frame-interrupt timing comes 1248 clk_vdp (14.5 us) later; the game's IRQ path
+  (0038h -> H.KEYI FD9Ah -> 80BBh, S#1 read at 80F2h, callback 058Bh only if bit0) needs ~48 us on
+  this core's R800 (~87 us in openMSX), so it always read FH = 0, never ran phase BAh, never set
+  (9402) and the main loop spun at 065Dh for ever (board overlay of b90a9d4: R800 last fetch 0660h,
+  1 INTA per frame, R#0/R#2 unwritten for 576 frames).
+- Bench: sim/v9968_vram `+ie1=6 +ie1line=D2 +ie1r9=80 +ie1dly=<clk>`: upstream reads FH = 0 in 6 of 6
+  frames at 20 / 48 / 90 us and 0 of 6 at 5 / 10 us; fixed: 0 of 6 at every delay.  Control line 68h
+  at 48 us: 0 of 6 on both.  Worth reporting upstream (hra1129/V9968_Cartridge).

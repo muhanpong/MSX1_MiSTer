@@ -51,6 +51,7 @@ module tb #(parameter int RELEASE_PH = 0);
         void'($value$plusargs("aso=%d", aso));
         void'($value$plusargs("pollpad=%d", pollpad));
         void'($value$plusargs("ie1=%d", ie1)); void'($value$plusargs("disp=%d", disp)); void'($value$plusargs("ie1off=%d", ie1off));
+        void'($value$plusargs("ie1line=%h", ie1line)); void'($value$plusargs("ie1r9=%h", ie1r9)); void'($value$plusargs("ie1dly=%d", ie1dly));   // +ie1line=D2 +ie1r9=80: ASO's second split (line 210, 212 lines); +ie1dly=clk_vdp from int_n to the S#1 read
         void'($value$plusargs("rpl=%s", rplf)); void'($value$plusargs("rplscale=%d", rplscale));   // +rplscale=P: event times x P/100 (R800 runs ~1.8x openMSX between I/O)   // +rpl=<file>: replay an oracle window (tools: aso_win.txt), paced, reads not forced   // +ie1=N: ASO 224's first in-game wait, line IRQ taken as int_n (no polling); +disp=1 control: display on   // +aso: extra clk_vdp per S#1 poll (moves the read phase against the line match)        // >0: ASO 224's per-frame line-IRQ loop for that many frames
         void'($value$plusargs("lr_sx=%d", lr_sx)); void'($value$plusargs("lr_sy=%d", lr_sy));      // +lr_*: one LRMM with these
         void'($value$plusargs("lr_vx=%d", lr_vx)); void'($value$plusargs("lr_vy=%d", lr_vy));      //  start/vectors (SUPER CAT frames)      // >=0: km224's overscan trick: 212 lines, R#9 LN=0 written at screen line lnsw (0 = never: control)          // 0..6: the seven V9938-referenced workloads of rtl/video/VDP/sim/tb_vdpcmd7.vhd    // >=0: display on 20 ms, then R#1=00 lands offat clk_vdp after the selector's (phase 2, sub 0) edge, then the LRMM      // 1: sprite colour table 0FE00h..0FFFFh = 55h and SAT 10000h..1007Fh = 0 (the oracle's VRAM at the hang)  // 1: write the SAT bytes before the command, no display change (replay's exact state)
@@ -103,7 +104,7 @@ module tb #(parameter int RELEASE_PH = 0);
 
     logic [2:0] bus_address = 0; logic bus_ioreq = 0, bus_write = 0, bus_valid = 0;
     logic [7:0] bus_wdata = 0; wire bus_ready, bus_rdata_en; wire [7:0] bus_rdata;
-    string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1, lr_sx = -1, lr_sy = 0, lr_vx = 0, lr_vy = 0, aso = 0, pollpad = 0, ie1 = 0, disp = 0, ie1off = 0;
+    string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1, lr_sx = -1, lr_sy = 0, lr_vx = 0, lr_vy = 0, aso = 0, pollpad = 0, ie1 = 0, disp = 0, ie1off = 0, ie1line = 'h68, ie1r9 = 'h00, ie1dly = 400;
     string rplf = ""; int rplscale = 100;
     int scan = 0, sp3 = 0, demo = 0, r1 = 0, r20 = 8'h1F, r21 = 8'h3A, r25 = 3, r8 = 8;
     wire d_hs, d_en; wire [7:0] d_r, d_g, d_b;
@@ -426,11 +427,11 @@ module tb #(parameter int RELEASE_PH = 0);
         //  timeout = "stuck"); the handler then does what the game's does (R#15=1, read S#1,
         //  R#15=0) and re-arms the same line.  +disp=1 is the control with the display on.
         if (ie1 > 0) begin
-            logic [7:0] st; int got = 0, stuck = 0;
+            logic [7:0] st; int got = 0, stuck = 0, fh0 = 0;
             wreg(3, 8'hDA); wreg(4, 8'h00); wreg(6, 8'h0F); wreg(7, 8'h01); wreg(10, 8'h01); wreg(11, 8'h00);
             wreg(2, 8'h3F); wreg(5, 8'hBF); wreg(8, 8'h28); wreg(23, 8'h00); wreg(25, 8'h02); wreg(26, 8'h00); wreg(27, 8'h00);
             wreg(1, disp ? 8'h42 : 8'h02);
-            wreg(9, 8'h00); wreg(19, 8'h68); wreg(0, ie1off ? 8'h06 : 8'h16);   // +ie1off: negative control, IE1 off
+            wreg(9, 8'(ie1r9)); wreg(19, 8'(ie1line)); wreg(0, ie1off ? 8'h06 : 8'h16);   // +ie1off: negative control, IE1 off
             for (int fr = 0; fr < ie1; fr++) begin
                 longint t0; t0 = $time;
                 while (v_int_n && ($time - t0) < 64'd25_000_000_000) @(posedge clk_vdp);
@@ -439,14 +440,15 @@ module tb #(parameter int RELEASE_PH = 0);
                 else begin
                     got++;
                     $display("IE1 frame %0d: int_n low at screen line %0d t=%0t", fr, $signed(`SSG.w_screen_pos_y), $time);
-                    repeat (400) @(posedge clk_vdp);      // ~IM1 entry latency
+                    repeat (ie1dly) @(posedge clk_vdp);   // IM1 entry -> S#1 read latency (ASO: ~48 us R800, ~87 us openMSX)
                     wreg(15, 8'h01); io(0, 3'd1, 8'h00, st); wreg(15, 8'h00);
-                    if (!st[0]) $display("IE1 frame %0d: handler read S#1=%02h (FH=0)", fr, st);
+                    if (!st[0]) begin fh0++; $display("IE1 frame %0d: handler read S#1=%02h (FH=0)", fr, st); end
                     if (!v_int_n) $display("IE1 frame %0d: int_n still low after the S#1 read", fr);
-                    wreg(19, 8'h68); wreg(0, 8'h16);
+                    wreg(19, 8'(ie1line)); wreg(0, 8'h16);
                 end
             end
-            $display("IE1 RESULT: %0d of %0d line interrupts reached int_n, %0d stuck (display %s)", got, ie1, stuck, disp ? "on" : "off");
+            $display("IE1 RESULT: %0d of %0d line interrupts reached int_n, %0d stuck, %0d read FH=0 (line %02h, R#9 %02h, delay %0d clk, display %s)",
+                     got, ie1, stuck, fh0, ie1line, ie1r9, ie1dly, disp ? "on" : "off");
         end
         if (aso > 0) begin
             logic [7:0] st; int stuck = 0, fmid = 0;
