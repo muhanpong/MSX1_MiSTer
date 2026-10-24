@@ -25,7 +25,9 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   - 화면을 끌 때 붙잡힌 스프라이트 VRAM 요청이 VDP 명령을 멈춤 *(a sprite VRAM request held across display-off froze VDP commands)*
   - R#9 LN을 프레임 중간에 바꾸면 화면 시작이 10줄 움직임(224라인 오버스캔) *(a mid-frame R#9 LN change moved the display start by 10 lines)*
   - status 읽기와 같은 클럭의 인터럽트 이벤트 유실, 그리고 한 클럭 늦은 status 래치로 인한 FH/F 유실 *(interrupt events lost on the clock of a status read, and FH/F lost through the one-clock-late status latch)*
-- **빌드 / Build** — `REV=MSX1_V9968 ASM=1 tools/sdram128/compile.sh` (Quartus 17.0, `SEED=N`으로 시드 지정). 일반 V9958 빌드는 `tools/sdram128/compile.sh`
+- **R800/터보 VDP 대기 / R800 and turbo VDP waits** — R800의 VDP 대기(8.66µs)는 실기 터보R처럼 98h–9Bh에만 걸린다. Geo3D 포트 9Dh/9Fh는 대기 없이 동작(R800에서 Geo3D가 빨라짐). V9968 빌드의 터보 Z80에는 VDP 간격 대기가 없다(V9968 버스가 요청을 잃지 않음)
+  *The R800 VDP wait (8.66 µs) covers 98h–9Bh only, as on a turbo R; Geo3D's 9Dh/9Fh run unpaced (Geo3D is faster on the R800). A turbo Z80 gets no VDP spacing in the V9968 build (the V9968 bus cannot drop a request).*
+- **빌드 / Build** — `REV=MSX1_V9968 ASM=1 tools/sdram128/compile.sh` (Quartus 17.0, `SEED=N`으로 시드 지정, 시드 비교는 `tools/sdram128/seed_table.sh`). 일반 V9958 빌드는 `tools/sdram128/compile.sh`
   *Quartus 17.0; `SEED=N` picks the fitter seed. The plain V9958 build is `tools/sdram128/compile.sh`.*
 - **Geo3D 데모 / demos** — 내장 98h 판을 쓴다. ASCII16 롬은 자동 판별이 틀리므로 OSD 매퍼를 `ASCII16X`로 고르거나 파일 오프셋 10h에 `ASCII16X` 헤더를 넣는다
   *Use the internal 98h builds. Auto-detect gets these ASCII16 ROMs wrong: pick `ASCII16X` in the OSD mapper menu, or put an `ASCII16X` header at file offset 10h.*
