@@ -84,7 +84,10 @@ class OpenMsxEngine(_mod.Engine):
 
 def main():
     script_f, mem_f, frames, out_f = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
-    eng = OpenMsxEngine(list(open(mem_f, 'rb').read()))
+    #  the full 4MB space, zero past the image like the TB's array (tb_golden_pcm.sv mem),
+    #  so reg 6 writes and reads in the RAM half (0x200000+) land somewhere
+    mem = list(open(mem_f, 'rb').read())
+    eng = OpenMsxEngine(mem + [0] * (0x400000 - len(mem)))
     writes = {}
     for ln in open(script_f):
         ln = ln.split('#')[0].strip()

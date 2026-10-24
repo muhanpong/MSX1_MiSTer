@@ -30,6 +30,9 @@
 //   I9  reg 6 writes below 0x200000 land: the RTL has no ROM write protect (the
 //       yrw801 image sits in SDRAM; msx.sv's ch4 bridge passes every write).  openMSX
 //       ignores writes outside RAM (YMF278.cc writeMem).  An RTL defect, not a choice.
+//   I8  R#2 bit 1 (memory type) is stored for readback only: the RTL keeps the flat
+//       mode-0 map (RAM at 0x200000) where openMSX's MoonSound wiring has RAM only at
+//       0x380000 and nothing at 0x200000-0x37FFFF (read 0xFF, write ignored)
 // None of the flags has a hardware recording behind it; they name how the RTL differs
 // from openMSX, not that the RTL is right.  I7 in particular: openMSX's early return
 // carries "TODO update internal state, even if muted", so there the RTL is the likelier
@@ -95,12 +98,7 @@ static std::vector<uint8_t> MEM;
 // RAM region (>=0x200000) mapped only up to the configured RAM size, beyond
 // which readMem returns 0xFF (unmapped block).  RAM_BYTES=0 => no limit (flat).
 static unsigned RAM_BYTES = 0;
-static inline uint8_t readMem(unsigned a){
-    a &= 0x3FFFFF;                                  // 4MB wrap (openMSX masks)
-    if (RAM_BYTES && a >= 0x200000 && (a - 0x200000) >= RAM_BYTES)
-        return 0xFF;                                // unmapped RAM block
-    return a < MEM.size() ? MEM[a] : 0xFF;
-}
+static uint8_t readMem(unsigned a);                 // after regs2 / REF_DEV below
 
 struct Slot {
   uint16_t wave=0, FN=0;
@@ -149,6 +147,25 @@ static unsigned eg_cnt = 0;
 static bool OMSX = false;
 static std::string DEV;
 static bool dev(const char* f){ return OMSX && (","+DEV+",").find(std::string(",")+f+",") != std::string::npos; }
+// Where address a lands in MEM (ROM at 0, RAM image at 0x200000), or -1 if unmapped.
+// R#2 bit 1 = 1 (REF_OMSX, MSXMoonSound.cc setupMemPtrs mode1): 0x200000-0x37FFFF has
+// nothing on it and the first 512kB of RAM appears at 0x380000 (/MCS6../MCS9).
+static int memIndex(unsigned a, bool& ram){
+    a &= 0x3FFFFF;                                  // 4MB wrap (openMSX masks)
+    ram = a >= 0x200000;
+    if (!ram) return int(a);
+    unsigned off = a - 0x200000;
+    if (OMSX && (regs2 & 2) && !dev("I8")){
+        if (a < 0x380000) return -1;
+        off = a - 0x380000;
+    }
+    if (RAM_BYTES && off >= RAM_BYTES) return -1;   // unmapped RAM block
+    return int(0x200000 + off);
+}
+static uint8_t readMem(unsigned a){
+    bool ram; int i = memIndex(a, ram);
+    return (i >= 0 && unsigned(i) < MEM.size()) ? MEM[i] : 0xFF;
+}
 static uint8_t regs3 = 0, regs4 = 0, mixF9 = 0, mixF9next = 0;
 static unsigned memAdr = 0;
 static bool posClr[24], pendOn[24], pendOff[24], pendRetrig[24], ran[24], noStep[24];
@@ -231,8 +248,8 @@ static void writeRegDirect(uint8_t reg, uint8_t data){
   else if (OMSX && reg==6){
     if (regs2 & 1){
       unsigned a = memAdr & 0x3FFFFF;
-      bool ram = a >= 0x200000 && !(RAM_BYTES && (a - 0x200000) >= RAM_BYTES);
-      if ((ram || dev("I9")) && a < MEM.size()) MEM[a]=data;
+      bool ram; int i = memIndex(a, ram);
+      if ((ram || dev("I9")) && i >= 0 && unsigned(i) < MEM.size()) MEM[i]=data;
       ++memAdr;
     }
   }
@@ -379,6 +396,8 @@ int main(int argc, char** argv){
   int frames = atoi(argv[3]);
   if (const char* rk = getenv("RAM_KB")) RAM_BYTES = unsigned(atoi(rk)) * 1024;
   if (const char* o = getenv("REF_OMSX")) OMSX = atoi(o) != 0;
+  // REF_OMSX: the full 4MB space, zero past the image like the golden TB's array
+  if (OMSX && MEM.size() < 0x400000) MEM.resize(0x400000, 0);
   if (frames <= 0){ fprintf(stderr,"ref278: bad frame count\n"); return 1; }
   if (const char* d = getenv("REF_DEV")) DEV = d;
   // read script into per-frame write lists

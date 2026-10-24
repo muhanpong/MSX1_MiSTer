@@ -25,7 +25,7 @@ Checks per access:
 Exit 0 = every check passed AND every deviation flag in use changes at least
 one observation of this op script (otherwise the script no longer tests it).
 """
-import sys, math
+import os, sys, math
 
 MASTER_HZ = 33868800
 # YMF278B.cc:14-39 (master clocks)
@@ -387,6 +387,10 @@ def main():
     obs = run(hdr, ops, st, mem, dev)
     bad = [o for o in obs if not o[3]]
     unj = sum(1 for o in obs if '(unjudged)' in o[1])
+    # the judged check keys, next to the log: the harness compares them with a committed
+    # baseline, so a change cannot keep the count while dropping or relabelling checks
+    with open(os.path.join(os.path.dirname(os.path.abspath(log)), 'checks.txt'), 'w') as f:
+        f.writelines(o[0] + '\n' for o in obs if '(unjudged)' not in o[1])
     acc = sorted(dev - set(DEFECTS)); dfx = sorted(dev & set(DEFECTS))
     print(f"cpuvis: {len(ops)} accesses, {len(obs) - unj} checks, {len(bad)} failed, "
           f"{unj} unjudged (model: openMSX + deviations {','.join(acc) or 'none'}"

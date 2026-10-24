@@ -88,6 +88,11 @@ for i in range(64): MEM[0x7000+i] = (128 - i*4) & 0xFF
 # loads an all-zero header (AR=0: silent)
 header(386, 2, 0x2000, 0, 32, ar=13, d1r=5, dl=2, d2r=2, base=0x80000 + 2*12)
 
+# waves 5 and 6 play from the RAM half (sc_memtype1): 8-bit, 64 samples, full loop.
+# Their data is not in mem.bin -- the scenario uploads it through reg 6.
+header(5, 0, 0x200000, 0, 64)
+header(6, 0, 0x380000, 0, 64)
+
 out = os.path.dirname(os.path.abspath(__file__))
 open(f"{out}/mem.bin", "wb").write(MEM)
 with open(f"{out}/mem.hex", "w") as f:
@@ -361,6 +366,28 @@ slotw(L, 260, 4, 5, (4 << 3) | 3)
 slotw(L, 260, 4, 9, 2)
 slotw(L, 340, 4, 3, (0x30 << 1) | 0)            # TL ramp
 scripts['sc_silence.txt'] = (L, 900)
+
+# MEMORY TYPE 1 (R#2 bit 1).  openMSX's MoonSound (MSXMoonSound.cc setupMemPtrs) maps
+# RAM only at 0x380000 in mode 1 and leaves 0x200000-0x37FFFF unmapped (0xFF, writes
+# ignored); the RTL keeps the flat mode-0 map (SPEC I8).  Upload two different ramps
+# in mode 0, to 0x200000 (wave 5) and 0x380000 (wave 6), switch to mode 1, play both,
+# write into 0x380000 in mode 1, then go back to mode 0.
+L = []
+W(L, 1, 0x02, 0x01)                             # mode 0, memory access on
+def upload(L, fr0, a, data):
+    W(L, fr0, 0x03, (a >> 16) & 0x3F, 1000)
+    W(L, fr0, 0x04, (a >> 8) & 0xFF, 1020)
+    W(L, fr0, 0x05, a & 0xFF, 1040)
+    for k, d in enumerate(data):
+        W(L, fr0 + 1 + k, 0x06, d, 1000)
+upload(L, 2, 0x200000, [(i * 4 - 128) & 0xFF for i in range(64)])
+upload(L, 70, 0x380000, [(96 - i * 3) & 0xFF for i in range(64)])
+W(L, 140, 0x02, 0x03)                           # mode 1
+keyon(L, 150, 0, wave=5, fn=0x200, oct_=0)
+keyon(L, 150, 1, wave=6, fn=0x180, oct_=0)
+upload(L, 250, 0x380000, [(i * 7) & 0xFF for i in range(32)])
+W(L, 400, 0x02, 0x01)                           # back to mode 0
+scripts['sc_memtype1.txt'] = (L, 600)
 
 for name, (lines, frames) in scripts.items():
     lines = [t[2] for t in sorted(lines, key=lambda t: (t[0], t[1]))]

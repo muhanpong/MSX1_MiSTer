@@ -30,7 +30,9 @@
 #    PCM_ALM_MAX / MS_ALM_MAX   budgets (default 1200 / 2500)
 #    REGS      ymf278b_regs.sv to use in memwr (default the worktree's)
 #    TOP       ymf278b_top.sv for cpuvis (default the worktree's); CPU_MUT_DIR its mutants
-#    GEN       fullsys generated sources (sim/fullsys/prep.sh output; default $W/sim/fullsys/gen)
+#    GEN       fullsys generated sources (sim/fullsys/prep.sh output).  Default: memwr runs
+#              $W/sim/fullsys/prep.sh into its own output dir on every run.  A GEN outside $W is a
+#              FAIL (gen/ is gitignored, so another tree's gen mixes that tree's ports and stubs in)
 #    MEMWR_TAG output subdirectory name for memwr (default memwr), so a control can run beside it
 set -u
 export PATH=/home/linuxbrew/.linuxbrew/bin:$PATH
@@ -53,12 +55,13 @@ SCEN=${SCEN:-"sc_single8:900:o sc_square16:900:o sc_tri12_loop:1000:o sc_multi:1
   sc_pitchbend:1000:o sc_wavehi:800:o sc_odd16:900:o sc_relwave:300:o sc_dirdep_good:700:o
   sc_dirdep_bad:700:o sc_memhit:400:o sc_eg_dl:900:o sc_eg_damp:1000:o sc_tlramp:1000:o
   sc_lfo_reset:1500:o sc_pan_mix:1100:o sc_tblhdr:600:o sc_lfo_off:900:o sc_silence:900:o
+  sc_memtype1:600:o
   sc_songchange24:800:o:1"}
 #  24 voices, mass key-off / wave-number rewrite: bit-exact at lat 1, not at longer
 #  latencies on the current engine (one header fetch per frame, SPEC H4)
 LOAD_SCEN=${LOAD_SCEN:-"sc_songchange24:800:o"}
 LOAD_LATS=${LOAD_LATS:-"6 10 20"}
-ORACLE_DEV=${ORACLE_DEV:-"I1,I2,I4,I5,I7,I9,I11"}
+ORACLE_DEV=${ORACLE_DEV:-"I1,I2,I4,I5,I7,I8,I9,I11"}
 #  The production clock is 128.86 MHz, where the engine runs its PIPE datapath; 85.909 MHz runs
 #  a different circuit.  LATS = SDRAM read latencies (tb +lat) every scenario runs at.
 CLK_HZ=${CLK_HZ:-128863620}
@@ -235,12 +238,28 @@ do_stress() {
 }
 
 do_memwr() {
-    local d="$OUT/${MEMWR_TAG:-memwr}"; rm -rf "$d"; mkdir -p "$d"
+    local d="$OUT/${MEMWR_TAG:-memwr}" tree_id=""; rm -rf "$d"; mkdir -p "$d"
     echo "  memwr: regs $(md5sum < "${REGS:-$Y/rtl/ymf278b_regs.sv}" | cut -c1-8) MEM_WRITE_DELAY=$(grep -oE 'MEM_WRITE_DELAY +=[ 0-9]+' "${REGS:-$Y/rtl/ymf278b_regs.sv}" | grep -oE '[0-9]+$')"
     cp "${REGS:-$Y/rtl/ymf278b_regs.sv}" "$d/ymf278b_regs.sv"
     #  MEMWR_LOG=<r800.log> judges an existing log instead of running (checks the judge itself)
     if [ -n "${MEMWR_LOG:-}" ]; then cp "$MEMWR_LOG" "$d/r800.log"
-    else PCM_ENGINE="$ENGINE" HEX="$HERE/../assets/mprobe_r.hex" LOG=r800.log bash "$HERE/../assets/run1.sh" "$d" > "$d/run1.out" 2>&1; fi
+    else
+        #  the generated sources must come from the tree under test: regenerate them here (4 s)
+        #  unless GEN is given, and then it must live inside $W
+        local gen="${GEN:-$d/gen}" rw rg
+        if [ -n "${GEN:-}" ]; then
+            rw=$(realpath "$W"); rg=$(realpath "$GEN")
+            case "$rg/" in "$rw"/*) ;; *) gate memwr FAIL "GEN $rg is outside W $rw (another tree's generated sources)"; return;; esac
+        else bash "$W/sim/fullsys/prep.sh" "$gen" > "$d/prep.log" 2>&1 || { gate memwr FAIL "prep.sh failed (see $d/prep.log)"; return; }
+        fi
+        #  every absolute path the build reads must be inside W or the gen dir
+        local stray; stray=$(grep '^/' "$gen/filelist.txt" | while read -r f; do
+            f=$(realpath "$f"); case "$f" in "$(realpath "$W")"/*|"$(realpath "$gen")"/*) ;; *) echo "$f";; esac; done)
+        [ -z "$stray" ] || { gate memwr FAIL "filelist reads outside the tree: $(echo $stray)"; return; }
+        GEN="$gen" PCM_ENGINE="$ENGINE" HEX="$HERE/../assets/mprobe_r.hex" LOG=r800.log bash "$HERE/../assets/run1.sh" "$d" > "$d/run1.out" 2>&1
+        local cm; cm=$(git -C "$W" rev-parse --short HEAD); git -C "$W" diff --quiet HEAD || cm="$cm+dirty"
+        tree_id="tree $cm, gen $(cd "$gen" && cat filelist.txt msx_ports.svh *.v *.sv sv/*.sv | md5sum | cut -c1-8)"
+    fi
     #  only the per-phase lines count (the closing VPROBE summary repeats phase 7's count),
     #  and the probe must have reached its last phase with every checking phase reported
     local log="$d/r800.log" p miss=""
@@ -250,7 +269,7 @@ do_memwr() {
     local e; e=$(grep -hoE "phase [0-9]+ errors [0-9]+" "$log" | awk '{s+=$4} END {print s+0}')
     #  run1.sh swaps the filelist's PCM engine for ENGINE (PCM_ENGINE); say which engine,
     #  and say when the verdict is on a saved log
-    local how="engine $(basename "$(echo $ENGINE | awk '{print $NF}')")"
+    local how="engine $(basename "$(echo $ENGINE | awk '{print $NF}')"), $tree_id"
     [ -n "${MEMWR_LOG:-}" ] && how="SAVED LOG $MEMWR_LOG, engine unknown"
     [ "$e" = 0 ] && gate memwr PASS "R800 OTIR 1024 B upload + readback, phases 1-15, 0 errors ($how)" \
                  || gate memwr FAIL "$e readback errors ($(grep -hoE "phase [0-9]+ errors [1-9][0-9]*" "$log" | tr '\n' ';'))"
@@ -297,8 +316,20 @@ do_cpuvis() {
     if [ "${nj:-0}" -lt "${CPUVIS_MIN_CHECKS:-717}" ] || [ "${nu:-999}" -gt "${CPUVIS_MAX_UNJUDGED:-0}" ]; then
         gate cpuvis FAIL "judged ${nj:-?} (min ${CPUVIS_MIN_CHECKS:-717}), unjudged ${nu:-?} (max ${CPUVIS_MAX_UNJUDGED:-0}): $tl"; return
     fi
+    #  the count alone can be kept while checks are dropped or relabelled: the judged check
+    #  keys ("op<n> <kind> <port> <check>") must equal the committed baseline.  A new engine
+    #  whose ack timing moves windows changes them legitimately; then review the diff and
+    #  commit a new baseline (CPUVIS_BASELINE points at another one).
+    local bl=${CPUVIS_BASELINE:-$Y/sim/cpuvis/checks_baseline.txt} miss new
+    [ -f "$d/tree/checks.txt" ] || { gate cpuvis FAIL "no checks.txt from the tree run: $tl"; return; }
+    miss=$(comm -23 <(sort "$bl") <(sort "$d/tree/checks.txt") | wc -l)
+    new=$(comm -13 <(sort "$bl") <(sort "$d/tree/checks.txt") | wc -l)
+    if [ "$miss" != 0 ] || [ "$new" != 0 ]; then
+        comm -3 <(sort "$bl") <(sort "$d/tree/checks.txt") > "$d/checks.diff"
+        gate cpuvis FAIL "check set differs from $(basename "$bl"): $miss missing, $new new (see $d/checks.diff): $tl"; return
+    fi
     if grep -q "^CPUVIS PASS" "$d/tree.txt" && [ $n -gt 0 ] && [ $caught -eq $n ]; then
-        gate cpuvis PASS "$tl; mutants $caught/$n caught"
+        gate cpuvis PASS "$tl; check set == $(basename "$bl") ($(wc -l < "$bl")); mutants $caught/$n caught"
     else
         gate cpuvis FAIL "tree: $(grep -m1 '^CPUVIS' "$d/tree.txt") ${tl}; mutants $caught/$n caught"
     fi
@@ -332,8 +363,11 @@ do_resource() {
     awk -v a="$ms"  -v b="$MS_ALM_MAX"  'BEGIN{exit !(a<=b)}' || ok=0
     [ "$w10999" = 0 ] || ok=0
     local ovr=""; [ "$PCM_ALM_MAX/$MS_ALM_MAX" = 1200/2500 ] || ovr=" BUDGET OVERRIDE (default 1200/2500)"
-    [ "$rd" = "$W/output_files" ] || ovr="$ovr, report from $rd"
-    [ $ok = 1 ] && gate resource PASS "PCM $pcm <= $PCM_ALM_MAX, MoonSound $ms <= $MS_ALM_MAX, 10999 x0 ($(basename "$rpt"))$ovr" \
+    #  resolved, so an output_files symlink into another tree is named too
+    local rr; rr=$(realpath "$rpt")
+    case "$rr" in "$(realpath "$W")"/*) ;; *) ovr="$ovr, report from $(dirname "$rr")";; esac
+    #  ALMs only: whether that fit met timing is the Quartus gate's question, not this one
+    [ $ok = 1 ] && gate resource PASS "PCM $pcm <= $PCM_ALM_MAX, MoonSound $ms <= $MS_ALM_MAX, 10999 x0 ($(basename "$rpt"); timing not judged)$ovr" \
                 || gate resource FAIL "PCM $pcm (max $PCM_ALM_MAX), MoonSound $ms (max $MS_ALM_MAX), 10999 x$w10999 ($(basename "$rpt"))"
     echo "  RAM check: read the map report's RAM summary for every intended MLAB/M10K -- warnings alone are not proof"
 }

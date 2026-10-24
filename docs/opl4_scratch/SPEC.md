@@ -10,13 +10,13 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 | 게이트 | 무엇 | 시나리오/뮤턴트 위치 |
 |---|---|---|
 | `oracle` | golden 모델 자체가 "openMSX + C절의 차이"인지: ref278(openMSX 포트)에 C절 플래그를 다 켜면 모든 시나리오에서 모델과 바이트 일치, 플래그 하나라도 빼면 시나리오가 달라짐 | `sim/golden/ref278.cpp` (`REF_OMSX=1 REF_DEV=...`) |
-| `golden` | 슬롯 출력 샘플, 128.86 MHz(PIPE 경로), SDRAM 지연 1·20, 비트 일치(지연 0, ±1도 불허) | `sim/golden/gen_pcm_testdata.py`의 `sc_*` 20개 + `sc_songchange24`(24보이스, 지연 1만), 모델 `golden_pcm_omsx.py` |
+| `golden` | 슬롯 출력 샘플, 128.86 MHz(PIPE 경로), SDRAM 지연 1·20, 비트 일치(지연 0, ±1도 불허) | `sim/golden/gen_pcm_testdata.py`의 `sc_*` 21개 + `sc_songchange24`(24보이스, 지연 1만), 모델 `golden_pcm_omsx.py` |
 | `load` | 무거운 부하(24보이스 + 한 프레임 96회 쓰기)를 지연 6·10·20에서 비트 일치. **현행 엔진은 FAIL**(H4) | `sc_songchange24` |
 | `mutants` | golden이 실패할 수 있음 | `mutants/make_engine2_mutants.py` 20개 |
-| `cpuvis` | CPU 가시 동작, 접근 하나하나를 openMSX 모델과 같은 클럭에서 비교 | `sim/cpuvis/` (op 스크립트 `cpuvis_ops.py`, 모델 `cpuvis_check.py`), 뮤턴트 `mutants/make_cpuvis_mutants.py` 15개 |
+| `cpuvis` | CPU 가시 동작, 접근 하나하나를 openMSX 모델과 같은 클럭에서 비교 | `sim/cpuvis/` (op 스크립트 `cpuvis_ops.py`, 모델 `cpuvis_check.py`), 뮤턴트 `mutants/make_cpuvis_mutants.py` 16개. 판정한 검사 키 목록이 `sim/cpuvis/checks_baseline.txt`(717개)와 같아야 함 |
 | `stress` | MLAB 레지스터 파일: 슬롯 읽기 순간의 쓰기, warm reset, reset 길이 | `sim/lockstep/run_stress.sh` (자체 뮤턴트 4개 + reset_len=8) |
-| `memwr` | fullsys R800 OTIR 1024바이트 업로드 + 읽어 비교 | `assets/mprobe_r.hex`, 대조 `MEM_WRITE_DELAY 0` |
-| `resource` | fit 보고서 ALM. 보고서가 MoonSound RTL보다 오래됐거나, map 보고서가 없거나, `u_pcm`의 모듈이 시험 중인 엔진이 아니면 FAIL | — |
+| `memwr` | fullsys R800 OTIR 1024바이트 업로드 + 읽어 비교. fullsys 생성 소스(`prep.sh` 출력)를 매 실행 시험 트리에서 새로 만들고, `GEN`이 트리 밖이거나 파일 목록이 트리 밖을 읽으면 FAIL. PASS 줄에 트리 커밋과 생성 소스 해시 | `assets/mprobe_r.hex`, 대조 `MEM_WRITE_DELAY 0`, 엔진 뮤턴트(reg 6 주소 증가 없음), 다른 트리의 `GEN` |
+| `resource` | fit 보고서 ALM. 보고서가 MoonSound RTL보다 오래됐거나, map 보고서가 없거나, `u_pcm`의 모듈이 시험 중인 엔진이 아니면 FAIL. 타이밍은 보지 않는다(PASS 줄에 "timing not judged"); 보고서 경로는 실제 경로로 풀어 트리 밖이면 표시 | — |
 
 아래 표의 "검증" 열은 그 항목을 덮는 시나리오(`sc_*`, cpuvis op 블록 이름 `C-*`/`D*`)와 그 항목이 깨지면 잡히는 뮤턴트(`mut_*`)다.
 
@@ -75,9 +75,9 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 
 골든 모델(`golden_pcm.py`, `golden_pcm_omsx.py`)이 이 차이를 그대로 흉내 낸다. 새 엔진이 하나를 없애면 모델과 해당 시나리오를 같은 커밋에서 바꾼다.
 
-**플래그** 열이 있는 항목은 `ref278.cpp`의 `REF_DEV` 플래그로 실행 가능하다. `oracle` 게이트가 "ref278 + 플래그 전부 = golden 모델"(21개 시나리오 바이트 일치)과 "플래그 하나를 빼면 시나리오가 달라짐"을 요구하고, ref278이 죽거나 짧은 출력을 내면 FAIL이다(2026-10-24: 빼면 달라지는 시나리오 수 I1 2, I2 1, I4 8, I5 1, I7 9, I9 1, I11 11). 2026-10-24 적대적 검토(msx1-handoff) 전에는 이 대조가 게이트에 없었고, ref278과 모델은 19개 중 11개 시나리오에서 달랐다.
+**플래그** 열이 있는 항목은 `ref278.cpp`의 `REF_DEV` 플래그로 실행 가능하다. `oracle` 게이트가 "ref278 + 플래그 전부 = golden 모델"(22개 시나리오 바이트 일치)과 "플래그 하나를 빼면 시나리오가 달라짐"을 요구하고, ref278이 죽거나 짧은 출력을 내면 FAIL이다(2026-10-24: 빼면 달라지는 시나리오 수 I1 2, I2 1, I4 8, I5 1, I7 9, I8 1, I9 1, I11 11). 2026-10-24 적대적 검토(msx1-handoff) 전에는 이 대조가 게이트에 없었고, ref278과 모델은 19개 중 11개 시나리오에서 달랐다.
 
-**이 게이트가 증명하는 것은 "모델 = openMSX + 이름 붙은 차이"까지다.** 차이가 옳다는 증명은 아니다. 플래그는 21개 시나리오가 맞을 때까지 맞춘 것이고, I1·I4·I11 어느 것도 하드웨어 녹음 근거가 없다(근거는 엔진 줄과 openMSX 처리 순서뿐). 특히 I11은 11개 시나리오를 바꾼다. 성격 열: **미검증** = RTL과 openMSX 중 어느 쪽이 칩과 같은지 모름, **RTL 결함** = openMSX 쪽이 실칩에 맞다는 근거가 있음, **openMSX 지름길** = openMSX 쪽이 실칩과 다를 근거가 있음.
+**이 게이트가 증명하는 것은 "모델 = openMSX + 이름 붙은 차이"까지다.** 차이가 옳다는 증명은 아니다. 플래그는 시나리오가 맞을 때까지 맞춘 것이고, I1·I4·I11 어느 것도 하드웨어 녹음 근거가 없다(근거는 엔진 줄과 openMSX 처리 순서뿐). 특히 I11은 11개 시나리오를 바꾼다. 성격 열: **미검증** = RTL과 openMSX 중 어느 쪽이 칩과 같은지 모름, **RTL 결함** = openMSX 쪽이 실칩에 맞다는 근거가 있음, **openMSX 지름길** = openMSX 쪽이 실칩과 다를 근거가 있음.
 
 | ID | 플래그 | 차이 (성격) | 근거 | 보이는 시나리오 (ref278 플래그를 뺐을 때 달라지는 것) |
 |---|---|---|---|---|
@@ -89,13 +89,13 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 | I6 | — | 헤더 로드 지연(서비스 창/스톨) — 소리 결과는 dirty mask와 스톨로 openMSX와 같게 맞춤. CPU가 LD가 풀리기 전에 필드 5-9를 읽으면 옛 값이 보일 수 있음(H4) | E:1233-1281 | `sc_dirdep_*`; cpuvis는 LD 해제 후에만 읽음 |
 | I7 | `I7` | **openMSX 지름길.** openMSX는 활성 슬롯이 하나도 없으면 `generateChannels`가 `advance()`까지 건너뜀(eg_cnt, TL 보간, LFO 정지). 바로 그 줄에 `// TODO update internal state, even if muted`(YMF278.cc:509)가 있다: 에뮬레이터의 생략이지 칩 동작이 아니다. RTL은 항상 진행하고, 칩에 더 가까운 쪽은 RTL일 가능성이 크다. 모든 시나리오가 무음 프레임 0으로 시작하므로 EG 위상이 거의 모든 곳에 영향 | YMF278.cc:508-513; E:132-150 | `sc_silence` 외 8개 |
 | I11 | `I11` | **미검증.** 키온·키오프·키온 중 웨이브 쓰기(재트리거)는 그 슬롯 차례에, **그때의** 레지스터로 처리. openMSX는 쓰는 순간 처리하므로 같은 프레임에 키온 **뒤에** 쓴 AR/DL 등은 그 키온에 안 먹는다 | E:1595-1617; YMF278.cc:616-621, 669-673 | `sc_multi`, `sc_eg_dl`, `sc_dirdep_*` 등 11개 |
-| I8 | — | reg 2 bit1(메모리 타입, mode1 칩셀렉트 배치)은 저장·읽기만, 주소 배치는 바꾸지 않음 | E:1670-1678; YMF278.cc:850-870 | 없음(MoonSound는 mode0) |
+| I8 | `I8` | **RTL 결함(보드 배선), 드묾.** reg 2 bit1(메모리 타입)은 저장·읽기만 하고 주소 배치는 mode 0 그대로(RAM이 0x200000부터). openMSX의 MoonSound 배선(MSXMoonSound.cc:30-90 `setupMemPtrs`)은 mode 1에서 RAM이 /MCS6..9 = 0x380000부터 512kB이고 0x200000-0x37FFFF는 비어 있다(읽기 0xFF, 쓰기 무시). openMSX도 "MoonSound에서는 보통 쓰지 않는다"고 적는다. 빈 영역을 읽은 값(0xFF)은 하드웨어 미검증. 3차 검토(msx1-handoff) 전에는 ref278도 이 비트를 무시해서 시나리오가 없었다 | E:1670-1678; YMF278.cc:850-870; MSXMoonSound.cc:30-90 | `sc_memtype1` (I8을 빼면 600프레임 중 418프레임이 다름) |
 | I9 | `I9` | **RTL 결함.** 소리 메모리: openMSX는 0-2MB가 ROM이라 reg 6 쓰기를 무시하고(`writeMem`, YMF278.cc:882-894), 2MB 이상 RAM에만 쓴다. RTL은 ROM 영역도 쓴다: yrw801 이미지가 SDRAM에 있고 `msx.sv` ch4 브리지(M:1857-1897)는 주소를 보지 않고 모든 쓰기를 넘긴다 → 2MB 아래에 쓰는 소프트웨어는 ROM 샘플을 (다음 로드까지) 망가뜨린다. `sc_memhit`은 0x1000·0x2000에 쓰므로 이 결함 위에서만 재생이 바뀐다(I9를 빼면 400프레임 중 380프레임이 다름) | YMF278.cc:872-894; M:1857-1897 | `sc_memhit` |
 | I10 | — | EG_DEC에서 env를 0x3FF로 클램프(openMSX는 클램프 없음, DL ≤ 0x3E0이라 결과 동일) | E:1073-1081; YMF278.cc:380-389 | — |
 
 ## D. openMSX와의 CPU 가시 차이 (cpuvis 모델 플래그)
 
-`sim/cpuvis/cpuvis_check.py`의 `DEVIATIONS`가 이 표의 실행 가능한 형태다. 게이트는 모든 플래그를 켠 모델과 RTL이 접근마다 일치하고, **각 플래그가 op 스크립트의 관측 1개 이상을 바꾸는지**(= 스크립트가 그 차이를 실제로 건드리는지)를 요구한다. 2026-10-24 측정: 판정한 검사 717개 0 실패, 판정 못 한 검사 0개. 다음 접근이 기대 BUSY/LD 창 안에서 시작하는 33개(전부 연속 메모리 접근)는 하강 시점 대신 "창이 열리기 전에 BUSY/LD가 내려가지 않음"만 본다(`busy-held`/`ld-held`; P1 첫 보고 때는 이 33개를 판정 없이 통과로 셌다, `mut_memrd_nobusy`가 이 검사에 걸린다). 게이트는 판정 수 717 이상, 미판정 0을 요구한다(`CPUVIS_MIN_CHECKS`, `CPUVIS_MAX_UNJUDGED`). 플래그별 의존 검사 수 D1 268, D2 88, D3 1, D4 2, D5 63, D6 2, D7 1, D8 59, D9 21. 플래그 없는 순수 openMSX 모델과는 판정 717개 중 358개가 다르다.
+`sim/cpuvis/cpuvis_check.py`의 `DEVIATIONS`가 이 표의 실행 가능한 형태다. 게이트는 모든 플래그를 켠 모델과 RTL이 접근마다 일치하고, **각 플래그가 op 스크립트의 관측 1개 이상을 바꾸는지**(= 스크립트가 그 차이를 실제로 건드리는지)를 요구한다. 2026-10-24 측정: 판정한 검사 717개 0 실패, 판정 못 한 검사 0개. 다음 접근이 기대 BUSY/LD 창 안에서 시작하는 33개(전부 연속 메모리 접근)는 하강 시점 대신 "창이 열리기 전에 BUSY/LD가 내려가지 않음"만 본다(`busy-held`/`ld-held`; P1 첫 보고 때는 이 33개를 판정 없이 통과로 셌다, `mut_memrd_nobusy`가 이 검사에 걸린다). 게이트는 판정 수 717 이상, 미판정 0을 요구하고(`CPUVIS_MIN_CHECKS`, `CPUVIS_MAX_UNJUDGED`), 판정한 검사의 키(`op<n> <종류> <포트> <검사>`) 목록이 `sim/cpuvis/checks_baseline.txt`와 같아야 한다. 개수만 맞춘 채 검사를 빼거나 종류를 바꾸면 FAIL(대조: 기준의 `busy` 하나를 `busy-held`로 바꾸면 "1 missing, 1 new"). 새 엔진이 ack 시점을 바꿔 창이 움직이면 목록이 정당하게 바뀌므로, 그때는 차이를 검토해 기준을 새로 커밋한다. 키 목록은 검사 **내용**(판정 식)을 고정하지 않는다: 그것은 cpuvis 뮤턴트가 지킨다. 플래그별 의존 검사 수 D1 268, D2 88, D3 1, D4 2, D5 63, D6 2, D7 1, D8 59, D9 21. 플래그 없는 순수 openMSX 모델과는 판정 717개 중 358개가 다르다.
 
 D3·D4·D5·D7은 **RTL 결함**이다: openMSX의 해당 동작에 "Verified on real YMF278" 주석이 있다(D7은 읽는 순간의 메모리를 주는 openMSX 동작, 하드웨어 주석은 없음). 게이트는 고칠 때까지 이 결함을 허용할 뿐 정답으로 삼지 않으며, 출력 줄에 "tolerated RTL defects"로 따로 적는다. D1·D2·D6은 RTL의 선택이고 하드웨어 근거는 어느 쪽에도 없다.
 
