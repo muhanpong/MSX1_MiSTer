@@ -417,9 +417,11 @@ localparam CONF_STR = {
    "P1O[5:3],Scandoubler Fx,None,HQ2x-320,HQ2x-160,CRT 25%,CRT 50%,CRT 75%;",
    "P1O[7:6],Scale,Normal,V-Integer,Narrower HV-Integer,Wider HV-Integer;",
    "P1O[40],Vertical Crop,No,Yes;",
+`ifndef MSX_V9968
+   //  ESE VDP only: the V9968 build ignores both bits (msx.sv ifndef MSX_V9968)
    "P1O[41],Border,No,Yes;",
    "P1O[42],V9958,No,Yes;",
-`ifdef MSX_V9968
+`else
    //  V9968 build: normal-speed (HS=0) VDP commands at the V9938's speed, for software that
    //  times the VDP (Go Figure: "Abnormal fast VDP").  Never used before, so saved .CFG = 0.
    "P1O[127],VDP command speed,V9968,V9938;",

@@ -806,13 +806,10 @@ localparam [7:0] VDP_GAP38 = 8'd32;   // MSX2: >= worst-case VRAM slot period (2
 //      T80s or on a real turbo R.  A request arriving before the previous VRAM
 //      slot finished is dropped silently (see the .ACK() note above).
 //  Both point at the same missing wait, so this is one change and two tests.
-//  Why 217 (10.1 us) and not the real machine's 186 (8.66 us): the spacing a
-//  given frame needs goes UP as the code around the block gets faster -- swept
-//  off-core, a Z80 base of 10.74 MHz needs >= 6 us while 21.48 MHz still fails at
-//  8 us and only passes at 10.1.  This core's R800 runs the surrounding code
-//  ~1.8x faster than a real R800 does, so it sits at or past that fast end.  10.1
-//  us passed at every base tested; drop it to 186 for fidelity once the effect is
-//  confirmed here.
+//  The default is the real machine's 186 (8.66 us, openMSX VDPIODelay: 98h-9Bh,
+//  R800 only); 217 (10.1 us) was the value ASO's split screen needed before the
+//  FH-synced ASO 224 patch -- this core's R800 runs the code around a register
+//  block ~1.8x faster than a real R800, which moved the needed spacing up.
 //  T80s keeps the old spacing: it loses nothing today, and slowing a Z80's VDP
 //  writes is not what any real MSX2+ does.
 //  OSD-selectable, because the value that works moves with how fast the code
@@ -832,9 +829,10 @@ endcase
 `ifndef MSX_V9968
 wire  [7:0] vdp_gap_rld = use_nz ? vdp_gap_r800 : (vdp18 ? VDP_GAP18 : VDP_GAP38);
 `else
-//  V9968 build: the spacing is kept -- it is what ASO's split screen needs from a fast
-//  CPU, whatever VDP takes the writes (no TMS9918 here, so no VDP_GAP18)
-wire  [7:0] vdp_gap_rld = use_nz ? vdp_gap_r800 : VDP_GAP38;
+//  V9968 build: the R800 keeps the turbo R's spacing; a turbo Z80 gets none -- VDP_GAP38
+//  exists because the V9938 drops a request inside its slot period, and the V9968 path
+//  cannot drop one (the CPU waits on v99_pending until v9968_bus has it)
+wire  [7:0] vdp_gap_rld = use_nz ? vdp_gap_r800 : 8'd0;
 `endif
 wire        vdp_bus_all = ~iorq_n & m1_n & vdp_en & (~rd_n | ~wr_n);
 `ifndef MSX_V9968
