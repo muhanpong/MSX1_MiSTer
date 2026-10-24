@@ -250,3 +250,18 @@ set_false_path -to [get_registers {*u_overlay|*_s1[*]}]
 #  (pcm_sync <- pcm_valid failed by 0.01 ns in MSX1_V9968 75c48e2).  They are
 #  synchronisers by design: not timed.
 set_false_path -to [get_registers {*debug_overlay:u_overlay|*_sync[0] *debug_overlay:u_overlay|lvl_sync1[*]}]
+
+# V9968 build: the V9968's VRAM request (clk_vdp) into sdram_tdm (clk_sdram).  v9968_link
+# locks the TDM so that every frame boundary (ps[11], the only state that reads v_req /
+# v_addr / v_we / v_wdata / v_be) is the clk_sdram edge 7.76 ns after a shared rising
+# edge, and the V9968 launches its request on shared edges.  TimeQuest takes the closer
+# edge pair of the 2:3 ratio (3.88 ns), which these paths never use.  Measured
+# (sim/v9968_vram/edge_probe.sv, RELEASE_PH 5, CPU / display / LRMM runs, 100k
+# requests): every source change is 7.76 ns (bench 5.82 + its 1.94 ns clock offset)
+# before the boundary that reads it, never 3.88.  Not a multicycle: -end 2 would allow
+# 11.64 ns; the real budget is one clk_sdram period.  The reverse path (v_rvalid ->
+# V9968) is a true 3.88 ns pair and stays default.
+set v99_req [get_registers -nowarn {*u_vram_interface|ff_vram_valid* *u_vram_interface|ff_vram_address[*]* *u_vram_interface|ff_vram_write* *u_vram_interface|ff_vram_wdata[*]* *u_vram_interface|ff_vram_wdata_mask[*]*}]
+if {[get_collection_size $v99_req] > 0} {
+    set_max_delay -from $v99_req -to [get_registers {*sdram_tdm:sdram|*}] 7.760
+}
