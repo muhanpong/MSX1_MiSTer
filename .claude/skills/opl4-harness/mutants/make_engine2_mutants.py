@@ -69,6 +69,9 @@ MUTANTS = [
     ("mix_f9", "mix", "reg F9h PCM mix level ignored",
      "osl = pcm_mix_gain(pcm_mix_l, accum_l >>> sh);",
      "osl = pcm_mix_gain(3'd0, accum_l >>> sh);", 1),
+    ("slots_hi_mute", "dispatch", "slots 12-23 never run (msx1-handoff review 2026-10-24: every\n"
+     "     scenario then had at most 10 slots, so this passed golden)",
+     "                    if (ld_run) begin", "                    if (ld_run && cur_slot < 5'd12) begin", 1),
     ("out_lsb1", "output", "left output +1 LSB (invisible to a +-1 tolerant comparator)",
      "pcm_left  <= sat16(out_gl);",
      "pcm_left  <= sat16(out_gl + 24'sd1);", 1),

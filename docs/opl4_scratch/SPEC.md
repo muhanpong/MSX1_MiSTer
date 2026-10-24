@@ -9,12 +9,14 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 
 | 게이트 | 무엇 | 시나리오/뮤턴트 위치 |
 |---|---|---|
-| `golden` | 슬롯 출력 샘플, 128.86 MHz(PIPE 경로), SDRAM 지연 1·20, 비트 일치(지연 0, ±1도 불허) | `sim/golden/gen_pcm_testdata.py`의 `sc_*` 18개, 모델 `golden_pcm_omsx.py` |
-| `mutants` | golden이 실패할 수 있음 | `mutants/make_engine2_mutants.py` 19개 |
+| `oracle` | golden 모델 자체가 "openMSX + C절의 차이"인지: ref278(openMSX 포트)에 C절 플래그를 다 켜면 모든 시나리오에서 모델과 바이트 일치, 플래그 하나라도 빼면 시나리오가 달라짐 | `sim/golden/ref278.cpp` (`REF_OMSX=1 REF_DEV=...`) |
+| `golden` | 슬롯 출력 샘플, 128.86 MHz(PIPE 경로), SDRAM 지연 1·20, 비트 일치(지연 0, ±1도 불허) | `sim/golden/gen_pcm_testdata.py`의 `sc_*` 20개 + `sc_songchange24`(24보이스, 지연 1만), 모델 `golden_pcm_omsx.py` |
+| `load` | 무거운 부하(24보이스 + 한 프레임 96회 쓰기)를 지연 6·10·20에서 비트 일치. **현행 엔진은 FAIL**(H4) | `sc_songchange24` |
+| `mutants` | golden이 실패할 수 있음 | `mutants/make_engine2_mutants.py` 20개 |
 | `cpuvis` | CPU 가시 동작, 접근 하나하나를 openMSX 모델과 같은 클럭에서 비교 | `sim/cpuvis/` (op 스크립트 `cpuvis_ops.py`, 모델 `cpuvis_check.py`), 뮤턴트 `mutants/make_cpuvis_mutants.py` 15개 |
 | `stress` | MLAB 레지스터 파일: 슬롯 읽기 순간의 쓰기, warm reset, reset 길이 | `sim/lockstep/run_stress.sh` (자체 뮤턴트 4개 + reset_len=8) |
 | `memwr` | fullsys R800 OTIR 1024바이트 업로드 + 읽어 비교 | `assets/mprobe_r.hex`, 대조 `MEM_WRITE_DELAY 0` |
-| `resource` | fit 보고서 ALM | — |
+| `resource` | fit 보고서 ALM. 보고서가 MoonSound RTL보다 오래됐거나, map 보고서가 없거나, `u_pcm`의 모듈이 시험 중인 엔진이 아니면 FAIL | — |
 
 아래 표의 "검증" 열은 그 항목을 덮는 시나리오(`sc_*`, cpuvis op 블록 이름 `C-*`/`D*`)와 그 항목이 깨지면 잡히는 뮤턴트(`mut_*`)다.
 
@@ -73,32 +75,37 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 
 골든 모델(`golden_pcm.py`, `golden_pcm_omsx.py`)이 이 차이를 그대로 흉내 낸다. 새 엔진이 하나를 없애면 모델과 해당 시나리오를 같은 커밋에서 바꾼다.
 
-| ID | 차이 | 근거 | 보이는 시나리오 |
-|---|---|---|---|
-| I1 | eg_cnt 오프바이원: RTL은 프레임 **끝**에 증가, openMSX는 샘플마다 `advance()` 첫 줄에서 증가 | E:139-146; YMF278.cc:333; `sim/golden/RESULTS.md` | EG가 움직이는 모든 시나리오 |
-| I2 | EG_OFF 슬롯은 LFO도 진행 안 함(openMSX는 모든 슬롯 진행) | E:613-618, 552; YMF278.cc:339-353 | `sc_lfo_reset`(재키 시 위상) |
-| I3 | 비브라토 ÷12를 0 방향으로 절단(openMSX `/`도 0 방향이지만 RTL은 크기 표 `vib_q_tab`) | E:439-469, 822-829; YMF278.cc:300-315 | `sc_lfo`, `sc_lfo_reset` |
-| I4 | 새 스텝/키온이 쓰기 다음 프레임에 바로 적용(openMSX는 샘플 출력 **뒤** 진행, 한 샘플 늦음) → ref278과 위상 차, `sim/golden_srg/README.md`의 "floor" | tb_golden_pcm.sv 머리말; YMF278.cc:549-559 | `sc_square16`, `sc_pitchbend`, `sc_odd16` (ref278 대비) |
-| I5 | F9h 믹스는 정수 곱/시프트(내림), openMSX는 float 볼륨. 그리고 F9h 쓰기는 **그 프레임의 출력**부터 적용(슬롯 쓰기보다 한 프레임 빠름) | E:720-735; A:113-126; YMF278.cc:491-504 | `sc_pan_mix` |
-| I6 | 헤더 로드 지연(서비스 창/스톨) — 소리 결과는 dirty mask와 스톨로 openMSX와 같게 맞춤. CPU가 LD가 풀리기 전에 필드 5-9를 읽으면 옛 값이 보일 수 있음(H4) | E:1233-1281 | `sc_dirdep_*`; cpuvis는 LD 해제 후에만 읽음 |
-| I7 | openMSX는 활성 슬롯이 하나도 없으면 `generateChannels`가 `advance()`까지 건너뜀(eg_cnt, TL 보간, LFO 정지). RTL은 항상 진행 | YMF278.cc:508-513; E:132-150 | 전부 무음 구간 뒤의 EG 위상. **시나리오 없음** |
-| I8 | reg 2 bit1(메모리 타입, mode1 칩셀렉트 배치)은 저장·읽기만, 주소 배치는 바꾸지 않음 | E:1670-1678; YMF278.cc:850-870 | 없음(MoonSound는 mode0) |
-| I9 | 소리 메모리: openMSX는 0-2MB ROM(쓰기 무시), 2MB+ RAM. RTL은 SDRAM ch4 하나(ROM 영역 쓰기 처리 여부는 msx.sv ch4 브리지 쪽, **미확인**) | YMF278.cc:872-894; MSXMoonSound.cc:64-87 | cpuvis는 0x200000+에만 씀 |
-| I10 | EG_DEC에서 env를 0x3FF로 클램프(openMSX는 클램프 없음, DL ≤ 0x3E0이라 결과 동일) | E:1073-1081; YMF278.cc:380-389 | — |
+**플래그** 열이 있는 항목은 `ref278.cpp`의 `REF_DEV` 플래그로 실행 가능하다. `oracle` 게이트가 "ref278 + 플래그 전부 = golden 모델"(21개 시나리오 바이트 일치)과 "플래그 하나를 빼면 시나리오가 달라짐"을 요구한다(2026-10-24: I1 2개, I2 1개, I4 8개, I5 1개, I7 9개, I11 11개 시나리오). 즉 golden 모델과 openMSX의 차이는 이 표의 플래그가 **전부**다. 2026-10-24 적대적 검토(msx1-handoff) 전에는 이 대조가 게이트에 없었고, ref278과 모델은 21개 중 11개 시나리오에서 달랐다.
+
+| ID | 플래그 | 차이 | 근거 | 보이는 시나리오 (ref278 플래그를 뺐을 때 달라지는 것) |
+|---|---|---|---|---|
+| I1 | `I1` | EG 단계 순서: 프레임 f의 레지스터 쓰기·키 이벤트가 EG 단계 f(eg_cnt = f)에 이미 반영되고, 단계가 그 프레임 샘플 **앞**에 온다. 키온·키오프 프레임은 EG가 안 움직인다. openMSX는 샘플 **뒤**, 쓰기 **전**에 단계를 밟는다(그래서 "eg_cnt 오프바이원"으로 보였다) | E:139-146; YMF278.cc:331-333, 506-562 | `sc_songchange24`, `sc_lfo_off` |
+| I2 | `I2` | EG_OFF 슬롯은 LFO도 진행 안 함(openMSX는 모든 슬롯 진행) | E:613-618, 552; YMF278.cc:349-351 | `sc_lfo_off` (P1의 "`sc_lfo_reset`에서 보임"은 틀렸다: 그 시나리오는 이 차이를 건드리지 않음) |
+| I3 | — | 비브라토 ÷12를 0 방향으로 절단. openMSX `/`도 0 방향이라 **결과 차이 없음**(ref278 플래그 불필요) | E:439-469, 822-829; YMF278.cc:300-315 | — |
+| I4 | `I4` | 슬롯이 샘플 **전**에 위치를 진행(새 스텝/비브라토가 한 샘플 빨리 반영). 위치 리셋(키온·키오프 중 웨이브 쓰기)이 있는 프레임은 진행 없이 pos 0. openMSX는 샘플 출력 **뒤** 진행 → `sim/golden_srg/README.md`의 "floor" | tb_golden_pcm.sv 머리말; YMF278.cc:549-559 | `sc_square16`, `sc_pitchbend`, `sc_odd16`, `sc_lfo*`, `sc_wavehi`, `sc_silence` |
+| I5 | `I5` | F9h 믹스는 정수 곱/시프트(내림), openMSX는 float 볼륨(이 시나리오들에서는 결과 같음). 그리고 F9h 쓰기는 **그 프레임의 출력**부터 적용(슬롯 쓰기보다 한 프레임 빠름). 이것은 TB가 프레임 f+1 레지스터를 프레임 f 동안 쓰는 일정과 엔진의 프레임 끝 믹스가 합쳐진 결과다. F9h를 다른 레지스터처럼 다음 프레임에 반영하는 엔진은 `sc_pan_mix` 7프레임에서 golden FAIL → 그 엔진은 이 플래그를 끄고 모델을 같이 바꾼다 | E:720-735; A:113-126; YMF278.cc:491-504 | `sc_pan_mix` |
+| I6 | — | 헤더 로드 지연(서비스 창/스톨) — 소리 결과는 dirty mask와 스톨로 openMSX와 같게 맞춤. CPU가 LD가 풀리기 전에 필드 5-9를 읽으면 옛 값이 보일 수 있음(H4) | E:1233-1281 | `sc_dirdep_*`; cpuvis는 LD 해제 후에만 읽음 |
+| I7 | `I7` | openMSX는 활성 슬롯이 하나도 없으면 `generateChannels`가 `advance()`까지 건너뜀(eg_cnt, TL 보간, LFO 정지). RTL은 항상 진행. 모든 시나리오가 무음 프레임 0으로 시작하므로 EG 위상이 거의 모든 곳에 영향 | YMF278.cc:508-513; E:132-150 | `sc_silence` 외 8개 |
+| I11 | `I11` | 키온·키오프·키온 중 웨이브 쓰기(재트리거)는 그 슬롯 차례에, **그때의** 레지스터로 처리. openMSX는 쓰는 순간 처리하므로 같은 프레임에 키온 **뒤에** 쓴 AR/DL 등은 그 키온에 안 먹는다 | E:1595-1617; YMF278.cc:616-621, 669-673 | `sc_multi`, `sc_eg_dl`, `sc_dirdep_*` 등 11개 |
+| I8 | — | reg 2 bit1(메모리 타입, mode1 칩셀렉트 배치)은 저장·읽기만, 주소 배치는 바꾸지 않음 | E:1670-1678; YMF278.cc:850-870 | 없음(MoonSound는 mode0) |
+| I9 | — | 소리 메모리: openMSX는 0-2MB ROM(쓰기 무시), 2MB+ RAM. RTL은 SDRAM ch4 하나(ROM 영역 쓰기 처리 여부는 msx.sv ch4 브리지 쪽, **미확인**) | YMF278.cc:872-894; MSXMoonSound.cc:64-87 | cpuvis는 0x200000+에만 씀 |
+| I10 | — | EG_DEC에서 env를 0x3FF로 클램프(openMSX는 클램프 없음, DL ≤ 0x3E0이라 결과 동일) | E:1073-1081; YMF278.cc:380-389 | — |
 
 ## D. openMSX와의 CPU 가시 차이 (cpuvis 모델 플래그)
 
-`sim/cpuvis/cpuvis_check.py`의 `DEVIATIONS`가 이 표의 실행 가능한 형태다. 게이트는 모든 플래그를 켠 모델과 RTL이 접근마다 일치하고, **각 플래그가 op 스크립트의 관측 1개 이상을 바꾸는지**(= 스크립트가 그 차이를 실제로 건드리는지)를 요구한다. 2026-10-24 측정: 717개 검사 0 실패, 플래그별 의존 검사 수 D1 268, D2 88, D3 1, D4 2, D5 63, D6 2, D7 1, D8 59, D9 21. 플래그 없는 순수 openMSX 모델과는 718개 중 358개가 다르다.
+`sim/cpuvis/cpuvis_check.py`의 `DEVIATIONS`가 이 표의 실행 가능한 형태다. 게이트는 모든 플래그를 켠 모델과 RTL이 접근마다 일치하고, **각 플래그가 op 스크립트의 관측 1개 이상을 바꾸는지**(= 스크립트가 그 차이를 실제로 건드리는지)를 요구한다. 2026-10-24 측정: 판정한 검사 684개 0 실패, **판정하지 않은 검사 33개**(다음 접근이 기대 BUSY/LD 창 안에서 시작해 하강을 볼 수 없는 경우, 예전에는 통과로 셌다), 플래그별 의존 검사 수 D1 268, D2 88, D3 1, D4 2, D5 63, D6 2, D7 1, D8 59, D9 21. 플래그 없는 순수 openMSX 모델과는 판정 717개 중 358개가 다르다.
+
+D3·D4·D5·D7은 **RTL 결함**이다: openMSX의 해당 동작에 "Verified on real YMF278" 주석이 있다(D7은 읽는 순간의 메모리를 주는 openMSX 동작, 하드웨어 주석은 없음). 게이트는 고칠 때까지 이 결함을 허용할 뿐 정답으로 삼지 않으며, 출력 줄에 "tolerated RTL defects"로 따로 적는다. D1·D2·D6은 RTL의 선택이고 하드웨어 근거는 어느 쪽에도 없다.
 
 | ID | 차이 | 현행 근거 | openMSX | 성격 | P2에서 |
 |---|---|---|---|---|---|
 | D1 | BUSY/LD 지연을 clk_sdram 클럭으로 셈(마스터 클럭이 아님): 128.86 MHz에서 openMSX보다 3.8배 짧음 (LD 10000 clk = 77.6 µs, openMSX 295 µs) | R:52-83 | YMF278B.cc:10-39 | 2026-10-04 의도적으로 유지(R:56-62 주석) | 그대로 또는 스케일. 상태 비트일 뿐 |
 | D2 | 래치 3..6 쓰기의 BUSY = 1024 clk(7.95 µs), 그동안 CPU WAIT | R:82, 236-241, 192-197 | 28 마스터 클럭(0.83 µs), WAIT 없음 | R800 OTIR 업로드 손실 회피용(PLAN §0, memwr) | **바꿀 대상**: 쓰기가 SDRAM에 반영되는 시점에 BUSY 해제, WAIT ≈ 107 clk (PLAN 목표 5) |
-| D3 | reg 6 읽기/쓰기가 reg 2 bit0(메모리 접근 모드)를 무시 | E:1666-1722 | 모드 0이면 쓰기 무시·주소 유지, 읽기 FFh (YMF278.cc:739-748, 780-786) | 미확인(의도 기록 없음) | 결정 필요 |
-| D4 | reg 3/4 쓰기가 메모리 주소를 즉시 바꿈 | E:1683-1684 | reg 5 쓰기 때만 주소 갱신 (YMF278.cc:716-737, 실칩 확인 주석) | 결함 쪽 | openMSX대로 고치는 것을 권장 |
-| D5 | NEW2 0→1마다 ID 1회 신호 재무장 | R:166-169 | reset 후 한 번만 (YMF262.cc:1103-1110) | 미확인 | 영향 작음 |
+| D3 | reg 6 읽기/쓰기가 reg 2 bit0(메모리 접근 모드)를 무시 | E:1666-1722 | 모드 0이면 쓰기 무시·주소 유지, 읽기 FFh (YMF278.cc:739-748, 780-786, **실칩 확인 주석**) | **RTL 결함** | 고침(소프트웨어는 bit0을 세우고 접근하므로 영향은 비정상 코드뿐) |
+| D4 | reg 3/4 쓰기가 메모리 주소를 즉시 바꿈 | E:1683-1684 | reg 5 쓰기 때만 주소 갱신 (YMF278.cc:716-737, 실칩 확인 주석) | **RTL 결함** | openMSX대로 고침 |
+| D5 | NEW2 0→1마다 ID 1회 신호 재무장 | R:166-169 | reset 후 한 번만 (YMF262.cc:1101-1110, **실칩 확인 주석**) | **RTL 결함** | 고침(D9와 함께: warm reset은 재무장) |
 | D6 | reset 후 F8h 읽기 00h, FM 믹스 x1 | E:1542-1547, 1398-1403 | 1Bh (YMF278.cc:842), FM 믹스 레벨도 그 값 | 미확인 | 읽기값만이면 맞추기 쉬움 |
-| D7 | reg 6 읽기는 직전 reg 5 쓰기/reg 6 읽기 때 프리페치한 바이트를 줌. reg 6 쓰기 뒤에 reg 5 없이 읽으면 옛 값 | E:1702, 1716-1721; T:268-271 | 읽는 순간의 메모리 (YMF278.cc:780-782) | 결함 | 읽기 시점 기준으로 |
+| D7 | reg 6 읽기는 직전 reg 5 쓰기/reg 6 읽기 때 프리페치한 바이트를 줌. reg 6 쓰기 뒤에 reg 5 없이 읽으면 옛 값 | E:1702, 1716-1721; T:268-271 | 읽는 순간의 메모리 (YMF278.cc:780-782) | **RTL 결함** | 읽기 시점 기준으로 |
 | D8 | reg 5/6 쓰기, reg 6 읽기 뒤 BUSY가 엔진의 메모리 연산 완료까지 늘어남(최대 1프레임) | R:141; E:1722 | 고정 지연 | 구조적(S-BOUND) | 새 엔진에서도 상한 보장 |
 | D9 | warm reset이 NEW2를 지움 | T:90-102 | reg 105h 유지, ID 신호만 재무장 (YMF262.cc:1398-1404) | **의도적**: GoFigure 감지 실패 수정(T:93-99 주석) | 유지 |
 
@@ -109,7 +116,10 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 | H1 | reg 6 읽기는 프리페치 완료를 기다리지 않는다(`pcm_reg_rd_done = 1`). 재생 중(서비스가 늦을 때) R800 INIR처럼 연속으로 읽으면 이전 바이트를 다시 받을 수 있다. cpuvis는 재생 없는 상태에서만 읽는다 | T:271; E:1702, 1716-1722 | P2: 읽기 ack를 데이터 도착에 묶고, cpuvis에 "재생 24보이스 + 연속 읽기" 블록 추가 |
 | H2 | BUSY가 쓰기 **발행** 시점에 내려간다(반영 시점이 아님). MEM_WRITE_DELAY가 그 틈을 덮는다 | E:1298-1306, 1703, 1722 | PLAN 목표 5. memwr 게이트(지연 0 대조) 유지 |
 | H3 | C-DROP(WAIT 타임아웃 뒤 접근 버림) 경로는 어떤 벤치도 안 지난다 | R:205-216 | cpuvis에 ack 타임아웃 op 추가 검토 |
-| H4 | 헤더 로드는 프레임당 1슬롯(서비스 창) + 재생 중 슬롯의 즉시 스톨. 한꺼번에 24슬롯의 웨이브 번호를 쓰면 무음 슬롯의 헤더는 최대 24프레임(544 µs)이 걸려 LD(77.6 µs)보다 늦다. 그동안 필드 5-9 읽기는 옛 값 | E:1242, 1271-1281 | P2 설계: 헤더 로드를 슬롯 마이크로시퀀스나 서비스 창 여러 개로 |
+| H4 | 헤더 로드는 프레임당 1슬롯(서비스 창) + 재생 중 슬롯의 즉시 스톨. 한꺼번에 24슬롯의 웨이브 번호를 쓰면 무음 슬롯의 헤더는 최대 24프레임(544 µs)이 걸려 LD(77.6 µs)보다 늦다. 그동안 필드 5-9 읽기는 옛 값. **소리도 틀린다**: `sc_songchange24`는 지연 1에서만 비트 일치, 지연 6에서 1600 중 620, 10에서 623, 20에서 44 일치(첫 불일치 frame 310 = 96회 쓰기 프레임) — `load` 게이트, 현행 엔진 FAIL | E:1242, 1271-1281 | P2 설계: 헤더 로드를 슬롯 마이크로시퀀스나 서비스 창 여러 개로. 새 엔진은 `load` PASS |
 | H5 | FM 쪽(F8h 믹스, OPL3 상태/타이머 실제 속도)은 이 하네스 밖. cpuvis의 OPL3는 타이머 스텁(clk_sdram 구동) | tb/opl3_stub.sv | P6 |
-| H6 | I7(전부 무음일 때 openMSX의 진행 정지)를 보는 시나리오가 없다 | — | 필요하면 ref278 대비 시나리오 |
+| H6 | (해결) I7은 `sc_silence`, I2는 `sc_lfo_off`가 본다(`oracle` 게이트) | — | — |
+| H8 | golden 뮤턴트는 모두 기능 끄기·비교 경계 수정이다. 스케줄링(디스패치 순서, 헤더 스톨, PIPE 캐시 태그, 프레임 끝 예약, `cache_rr` 32프레임 재페치, 노트 중 warm reset)을 건드리는 뮤턴트가 없다. 같은 프레임 key-off→key-on, 슬롯 23→0 경계, 12비트 루프 이음새 홀수 걸침도 전용 시나리오가 없다. cpuvis 뮤턴트 15개도 전부 정적 디코드다 | E:754-757 외 | P2: 스케줄링 뮤턴트 추가 |
+| H9 | golden TB의 메모리 모델은 고정 지연 + 미결 1개뿐: 지터, 리프레시, 다른 채널 경합, CPU 쓰기 busy가 없다 | tb/tb_golden_pcm.sv:44-70 | ch4 지연 실측 뒤 분포를 TB에 |
+| H10 | `dbg_slot_keyon/active/envlive`는 `debug_overlay.sv:28-30`이 쓴다. 드롭인 교체면 새 엔진도 내야 한다 | debug_overlay.sv:28-30 | DESIGN ALM 표에 포함 |
 | H7 | 실제 소프트웨어 레지스터 트레이스(MoonBlaster, vgmplay, OPL4 데모)는 이번에 수집하지 않았다(PLAN P0의 일부) | — | P2 전에 openMSX에서 수집 |

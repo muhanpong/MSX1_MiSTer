@@ -234,6 +234,7 @@ scripts['sc_relwave.txt'] = (L, 300)
 # the 8-bit ramp (wave 0, 0x1000) and the 16-bit square (wave 1, 0x2000) and change
 # the data, so a stale cached word is a sample difference, not just a flag.
 L = []
+W(L, 1, 0x02, 0x01)                             # memory access mode: openMSX ignores reg 6 without it
 keyon(L, 1, 0, wave=0, fn=0x010, oct_=0x9)     # oct -7: < 1 sample per frame
 keyon(L, 1, 5, wave=1, fn=0x010, oct_=0x9)
 for k, fr in enumerate(range(20, 380, 3)):
@@ -328,6 +329,38 @@ slotw(L, 1, 9, 2, (0 << 4) | ((0x100 >> 7) & 7))
 slotw(L, 1, 9, 3, 1)
 slotw(L, 1, 9, 4, 0x80 | 0x20 | 13)
 scripts['sc_tblhdr.txt'] = (L, 600)
+
+# LFO of a silent slot (SPEC I2): slot 6 plays with vibrato + tremolo, releases fast
+# to EG_OFF, stays off ~300 frames and is keyed again.  openMSX keeps its LFO running
+# while off; the RTL does not, so the re-keyed note starts at another LFO phase.
+# Slot 7 plays quietly throughout, so some slot is always active (keeps I7 out).
+L = []
+keyon(L, 1, 7, wave=1, fn=0x100, oct_=-1, tl=0x30, pan=3)
+keyon(L, 1, 6, wave=0, fn=0x100, oct_=-2, lfo_off=False)
+slotw(L, 1, 6, 5, (7 << 3) | 7)
+slotw(L, 1, 6, 9, 7)
+slotw(L, 1, 6, 8, 0xFF)                          # RC=15, RR=15: off within a few frames
+W(L, 150, 0x08 + 4*24 + 6, 0x00)                 # key-off, LFO stays active
+keyon(L, 460, 6, wave=0, fn=0x100, oct_=-2, lfo_off=False)
+slotw(L, 460, 6, 5, (7 << 3) | 7)                # the wave write reloaded fields 5-9
+slotw(L, 460, 6, 9, 7)
+scripts['sc_lfo_off.txt'] = (L, 900)
+
+# Every slot silent (SPEC I7): openMSX generateChannels returns before advance() when
+# no slot is active, so eg_cnt, the TL ramp and the LFOs stop; the RTL keeps counting.
+# A note, release (RR=15: 4 steps a frame, off by frame ~180), ~80 silent frames, then a slow attack + decay + TL ramp + LFO
+# whose step pattern depends on the eg_cnt phase.
+L = []
+keyon(L, 1, 3, wave=1, fn=0x155, oct_=0)
+slotw(L, 1, 3, 8, 0xFF)
+W(L, 20, 0x08 + 4*24 + 3, 0x20)
+keyon(L, 260, 4, wave=0, fn=0x180, oct_=0, lfo_off=False)
+slotw(L, 260, 4, 6, (9 << 4) | 9)               # AR=9, D1R=9 (RC=15 from the header)
+slotw(L, 260, 4, 7, (3 << 4) | 5)               # DL=3, D2R=5
+slotw(L, 260, 4, 5, (4 << 3) | 3)
+slotw(L, 260, 4, 9, 2)
+slotw(L, 340, 4, 3, (0x30 << 1) | 0)            # TL ramp
+scripts['sc_silence.txt'] = (L, 900)
 
 for name, (lines, frames) in scripts.items():
     lines = [t[2] for t in sorted(lines, key=lambda t: (t[0], t[1]))]

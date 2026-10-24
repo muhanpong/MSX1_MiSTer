@@ -56,6 +56,17 @@ DEVIATIONS = {
     'D9': "a warm reset clears NEW2 (openMSX keeps reg 105h) (ymf278b_top.sv:90-102)",
 }
 
+# Of those, the ones where openMSX follows a "Verified on real YMF278" comment (or, for
+# D7, plain read-time semantics) are RTL defects the gate tolerates until they are fixed,
+# not accepted behaviour.  The rest are RTL choices: D1/D2/D6 have no hardware basis either
+# way, D8 is structural (S-BOUND), D9 is a software fix (GoFigure).
+DEFECTS = {
+    'D3': "YMF278.cc:744-747 (write) and 784-786 (read), 'Verified on real YMF278'",
+    'D4': "YMF278.cc:717-736, 'Verified on real YMF278'",
+    'D5': "YMF262.cc:1101-1110, 'Verified on real YMF278'",
+    'D7': "YMF278.cc:780-782 (read-time memory; no hardware note either way)",
+}
+
 TOL = 4
 
 
@@ -329,16 +340,21 @@ def run(hdr, ops, st, mem, dev):
         elif lo - TOL > tnext:
             ok = fall is None
         else:
-            ok = True
-        obs.append((key + " busy", f"[{lo - t},{hi - t}]", f"{None if fall is None else fall - t}", ok))
+            ok = None           # the next access starts inside the window: not judged
+        if ok is None:
+            obs.append((key + " busy", f"[{lo - t},{hi - t}] (unjudged)", "-", True))
+        else:
+            obs.append((key + " busy", f"[{lo - t},{hi - t}]", f"{None if fall is None else fall - t}", ok))
         if not m.status2:
             ld = max(m.load, t)
             fall = fall_after(st, t + 2, tnext, 1)
             if ld + TOL < tnext:
                 ok = fall is not None and abs(fall - ld) <= TOL
+                obs.append((key + " ld", f"{ld - t}", f"{None if fall is None else fall - t}", ok))
+            elif fall is not None:
+                obs.append((key + " ld", f"{ld - t}", f"{fall - t}", abs(fall - ld) <= TOL))
             else:
-                ok = fall is None or abs(fall - ld) <= TOL
-            obs.append((key + " ld", f"{ld - t}", f"{None if fall is None else fall - t}", ok))
+                obs.append((key + " ld", f"{ld - t} (unjudged)", "-", True))
     return obs
 
 
@@ -358,8 +374,11 @@ def main():
         print("CPUVIS FAIL: no ops in log"); sys.exit(1)
     obs = run(hdr, ops, st, mem, dev)
     bad = [o for o in obs if not o[3]]
-    print(f"cpuvis: {len(ops)} accesses, {len(obs)} checks, {len(bad)} failed "
-          f"(model: openMSX + {','.join(sorted(dev)) or 'no deviations'})")
+    unj = sum(1 for o in obs if '(unjudged)' in o[1])
+    acc = sorted(dev - set(DEFECTS)); dfx = sorted(dev & set(DEFECTS))
+    print(f"cpuvis: {len(ops)} accesses, {len(obs) - unj} checks, {len(bad)} failed, "
+          f"{unj} unjudged (model: openMSX + deviations {','.join(acc) or 'none'}"
+          f" + tolerated RTL defects {','.join(dfx) or 'none'})")
     for key, e, a, ok in bad[:25]:
         print(f"  BAD {key}: expected {e} got {a}")
     # coverage of each deviation: does dropping it change what this script observes?
@@ -368,15 +387,17 @@ def main():
         alt = run(hdr, ops, st, mem, dev - {d})
         n = sum(1 for x, y in zip(obs, alt) if x[1] != y[1] or x[3] != y[3])
         if not quiet:
-            print(f"  {d}: {n} checks depend on it -- {DEVIATIONS[d]}")
+            tag = f" [RTL DEFECT vs {DEFECTS[d]}]" if d in DEFECTS else ""
+            print(f"  {d}: {n} checks depend on it -- {DEVIATIONS[d]}{tag}")
         if n == 0:
             uncovered.append(d)
     if uncovered:
         print(f"  deviations not exercised by the op script: {' '.join(uncovered)}")
     if not quiet:
         pure = run(hdr, ops, st, mem, set())
-        n = sum(1 for o in pure if not o[3])
-        print(f"  vs pure openMSX (no deviations): {n} of {len(pure)} checks differ")
+        pj = [o for o in pure if '(unjudged)' not in o[1]]
+        n = sum(1 for o in pj if not o[3])
+        print(f"  vs pure openMSX (no deviations): {n} of {len(pj)} judged checks differ")
     ok = not bad and not uncovered
     print("CPUVIS " + ("PASS" if ok else "FAIL"))
     sys.exit(0 if ok else 1)

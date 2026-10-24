@@ -18,14 +18,16 @@ What each scenario and each cpuvis block covers, and every intended difference f
 
 | Gate | What it proves | Negative control |
 |---|---|---|
-| `golden` | PCM engine output bit-exact (comparator lag 0, no +-1) to `sim/golden/golden_pcm_omsx.py` (golden_pcm.py, checked against `ref278.cpp`, the openMSX YMF278.cc port, plus the wave-write position reset and reg 06h writes) on 18 scenarios, at 128.86 MHz (the PIPE datapath the board runs) and SDRAM read latency 1 and 20 | `mutants` |
-| `mutants` | every engine mutant FAILS golden. For `ymf278_pcm_engine2.sv` they are generated from the file under test by `mutants/make_engine2_mutants.py` (19: interpolation, EG, DAMP/PRVB, TL ramp, LFO, pan/DO1, header backfill/dirty mask/table bank, loop end/loop address, wave-write position reset, F9h mix, +1 LSB); a new engine brings its own `MUT_DIR` | a mutant that passes means the gate is blind there: add a scenario |
+| `oracle` | the golden model is exactly "openMSX + SPEC section C": `sim/golden/ref278.cpp` (openMSX YMF278.cc port) with `REF_OMSX=1 REF_DEV=I1,I2,I4,I5,I7,I11` equals `golden_pcm_omsx.py` byte for byte on every golden scenario | built in: dropping any one flag must change at least one scenario (a flag nothing needs is a FAIL) |
+| `golden` | PCM engine output bit-exact (comparator lag 0, no +-1) to `sim/golden/golden_pcm_omsx.py` on 21 scenarios (`SCEN` entries `name:frames:model[:lats]`), at 128.86 MHz (the PIPE datapath), SDRAM read latency 1 and 20 (`sc_songchange24`: 1 only) | `mutants` |
+| `load` | heavy load bit-exact at longer latencies: `sc_songchange24` (24 voices, 96 writes in one frame) at lat 6/10/20. **The current engine FAILS** (SPEC H4); a new engine must pass | the current engine |
+| `mutants` | every engine mutant FAILS golden. For `ymf278_pcm_engine2.sv` they are generated from the file under test by `mutants/make_engine2_mutants.py` (20: interpolation, EG, DAMP/PRVB, TL ramp, LFO, pan/DO1, header backfill/dirty mask/table bank, loop end/loop address, wave-write position reset, F9h mix, +1 LSB, slots 12-23 never dispatched); another engine brings its own `MUT_DIR` | the mutants are the control; none of them touches scheduling yet (SPEC H8) |
 | `cpuvis` | CPU-visible behaviour of `ymf278b_top` access by access against an openMSX YMF278B model (`sim/cpuvis`): read data, status/BUSY/LD timing, io_ack hold, NEW2/ID, reg 2/3-6, slot read-back, F8h/F9h, OPL2 remap, warm reset. Known differences are model flags D1..D9 (`docs/opl4_scratch/SPEC.md` D); every flag must change at least one observation | its 15 mutants (`mutants/make_cpuvis_mutants.py`) must all fail (built in) |
 | `stress` | the current engine's per-byte MLAB register file under writes aimed at slot reads, warm resets (`sim/lockstep/run_stress.sh`) | its own 4 mutants + `reset_len=8` must fail (built in) |
-| `memwr` | fullsys (FS-A1GT, tdm128, +moonsound): R800 OTIR 1024-byte wave-memory upload + readback, 0 errors | `REGS=` a ymf278b_regs.sv with `MEM_WRITE_DELAY` 0 must FAIL (`MEMWR_TAG=` keeps the two runs apart) |
-| `resource` | fit report (`FIT_DIR`, default `$W/output_files`): PCM <= `PCM_ALM_MAX` (1200), MoonSound <= `MS_ALM_MAX` (2500), no warning 10999 | the current engine fails the 1200 budget (2,826 ALM, 2026-10-24) and passes 3000/4200 |
+| `memwr` | fullsys (FS-A1GT, tdm128, +moonsound): R800 OTIR 1024-byte wave-memory upload + readback; PASS needs the probe to reach phase 15 and an error count line for phases 1, 6, 7, 8, 9, all 0 (only per-phase lines are summed: the closing VPROBE line repeats phase 7) | `REGS=` a ymf278b_regs.sv with `MEM_WRITE_DELAY` 0 must FAIL (1269 = phase 7 249 + phase 9 1020, 2026-10-24); `MEMWR_LOG=<r800.log>` judges a saved log (truncated / missing-phase logs FAIL) |
+| `resource` | fit report (`FIT_DIR`, default `$W/output_files`): PCM (`u_pcm`, whatever the module) <= `PCM_ALM_MAX` (1200), MoonSound <= `MS_ALM_MAX` (2500), no warning 10999. FAIL when the map report is missing, the fit report is older than any MoonSound RTL file, the ALM count is not found, or `u_pcm`'s module is not the engine under test | the current engine fails the 1200 budget (2,826 ALM, 2026-10-24) and passes 3000/4200; each FAIL path was run once |
 
-`harness.sh all` = golden mutants cpuvis resource; `HEAVY=1` adds stress and memwr (fullsys builds take
+`harness.sh all` = oracle golden mutants cpuvis load resource (the current engine FAILS `load`); `HEAVY=1` adds stress and memwr (fullsys builds take
 tens of minutes; `GEN=` points at `sim/fullsys/prep.sh` output when it lives outside the tree).
 `W` defaults to the worktree the skill is installed in and is printed first; check it.
 `ENGINE="<files>"` selects the engine under test; the last file is the one mutants replace.
@@ -59,16 +61,18 @@ rerun every gate on the OLD engine first.
 | Oracle | Where | Use |
 |---|---|---|
 | ref278 (openMSX YMF278.cc, verbatim math) | `sim/golden/ref278.cpp` | the chip reference for PCM samples |
-| golden_pcm.py | `sim/golden/` | per-scenario comparison (checked against ref278) |
+| golden_pcm.py | `sim/golden/` | per-scenario comparison (checked against ref278 by the `oracle` gate) |
 | current engine | `rtl/pcm/ymf278_pcm_engine2.sv` | lockstep / regression reference; keep it in the repo |
 | Nuked-OPL3 | `sim/golden/fm/run_fm_golden.sh` | FM |
 | openMSX | `~/data/openmsx_v9968` | BUSY, timers, software register traces |
 | cpuvis model | `sim/cpuvis/cpuvis_check.py` | openMSX YMF278B/YMF278/YMF262 CPU-visible behaviour, cited by line, with the RTL's deviations as flags |
 
-Known intended differences between the RTL and openMSX (the python model mirrors them):
-eg_cnt off-by-one, no LFO advance on EG_OFF slots, vibrato ÷12 truncation toward zero
-(`sim/golden/RESULTS.md`). A new engine either keeps them or removes them on purpose, with a
-scenario that shows which.
+Known intended differences between the RTL and openMSX are SPEC section C; the ones that change
+samples are ref278 flags (I1 EG step order, I2 no LFO on EG_OFF, I4 position before sample, I5 F9h
+timing/integer, I7 no pause while silent, I11 key events at the slot's turn). A new engine either
+keeps one or drops it on purpose: drop the flag from `ORACLE_DEV`, change the model, same commit.
+CPU-visible ones are cpuvis flags; D3/D4/D5/D7 there are RTL defects the gate only tolerates.
+cpuvis prints how many BUSY/LD checks it could not judge (the next access started inside the window).
 
 ## Reporting
 

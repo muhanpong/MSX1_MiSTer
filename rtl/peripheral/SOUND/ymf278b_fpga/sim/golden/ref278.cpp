@@ -9,6 +9,25 @@
 //   Writes for frame N are applied before frame N is generated; one stereo
 //   sample is emitted per frame.  Output: "<L> <R>" per line (raw mix sum,
 //   reg-0xF9 PCM mix level forced to 0dB to match the RTL TB which sets it 0dB).
+//
+// REF_OMSX=1 adds the rest of openMSX that the frame loop above leaves out:
+// reg F9h mix level (float, setMixLevel YMF278.cc:491-504), the wave-memory port
+// (regs 3-6, YMF278.cc:705-737: only reg 5 moves memAdr, reg 6 needs reg 2 bit 0),
+// and the generateChannels early return when no slot is active (YMF278.cc:508-513).
+// REF_DEV=<comma list> then switches on the RTL's documented deviations one by one
+// (docs/opl4_scratch/SPEC.md section C), so the golden model can be checked as
+// "openMSX + exactly these deviations" (opl4-harness gate `oracle`):
+//   I1  frame f's register writes and key events are in force for envelope step f, which
+//       runs before the frame's sample (openMSX: step after the sample, before the writes);
+//       a key-on/key-off frame does not step the envelope
+//   I2  EG_OFF slots do not advance their LFO
+//   I4  a slot advances pos BEFORE it samples (new step/vibrato one sample earlier)
+//   I5  F9h is integer x3/shift, and an F9h write already shapes the previous frame
+//   I7  no early return: eg_cnt, TL ramp and LFO run while every slot is silent
+//   I11 key-on/key-off/retrigger take effect at the slot's turn with the registers
+//       current then (openMSX acts at the write: AR/DL written after the key-on
+//       in the same frame do not shape that key-on)
+#include <string>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -118,6 +137,12 @@ struct Slot {
 static Slot slots[24];
 static uint8_t regs2 = 0;
 static unsigned eg_cnt = 0;
+static bool OMSX = false;
+static std::string DEV;
+static bool dev(const char* f){ return OMSX && (","+DEV+",").find(std::string(",")+f+",") != std::string::npos; }
+static uint8_t regs3 = 0, regs4 = 0, mixF9 = 0, mixF9next = 0;
+static unsigned memAdr = 0;
+static bool posClr[24], pendOn[24], pendOff[24], pendRetrig[24], ran[24], noStep[24];
 
 static int16_t getSample(const Slot& s, uint16_t pos){
   switch (s.bits){
@@ -170,7 +195,8 @@ static void writeRegDirect(uint8_t reg, uint8_t data){
         s.loopAddr = uint16_t(buf[4] | (buf[3]<<8));
         s.endAddr  = uint16_t(buf[6] | (buf[5]<<8));
         for (int i=7;i<12;i++) writeRegDirect(uint8_t(8 + sNum + (i-2)*24), buf[i]);
-        if (s.keyon) keyOnHelper(s); else { s.stepPtr=0; s.pos=0; }
+        if (s.keyon) { if (dev("I11")) pendRetrig[sNum]=true; else keyOnHelper(s); }
+        else { s.stepPtr=0; s.pos=0; posClr[sNum]=true; }
         break;
       }
       case 1: s.wave=uint16_t((s.wave&0xFF)|((data&1)<<8)); s.FN=(s.FN&0x380)|(data>>1); s.step=calcStep(s.OCT,s.FN); break;
@@ -180,8 +206,8 @@ static void writeRegDirect(uint8_t reg, uint8_t data){
         s.pan = (data&0x10) ? 8 : (data&0x0F);
         if (data&0x20){ s.lfo_active=false; s.lfo_cnt=0; } else s.lfo_active=true;
         s.DAMP=(data&0x40)!=0;
-        if (data&0x80){ if (!s.keyon){ s.keyon=true; keyOnHelper(s);} }
-        else { if (s.keyon){ s.keyon=false; s.state=EG_REL; } }
+        if (data&0x80){ if (!s.keyon){ s.keyon=true; if (dev("I11")) pendOn[sNum]=true; else keyOnHelper(s);} }
+        else { if (s.keyon){ s.keyon=false; if (dev("I11")) pendOff[sNum]=true; else s.state=EG_REL; } }
         break;
       case 5: s.lfo=(data>>3)&7; s.vib=data&7; break;
       case 6: s.AR=data>>4; s.D1R=data&0xF; break;
@@ -190,19 +216,34 @@ static void writeRegDirect(uint8_t reg, uint8_t data){
       case 9: s.AM=data&7; break;
     }
   } else if (reg==2){ regs2 = data; }
-  // reg 0xF9 (PCM mix) intentionally ignored: TB forces 0dB
+  else if (OMSX && reg==3){ regs3 = data & 0x3F; }
+  else if (OMSX && reg==4){ regs4 = data; }
+  else if (OMSX && reg==5){ memAdr = (regs3<<16)|(regs4<<8)|data; }
+  else if (OMSX && reg==6){
+    if (regs2 & 1){ unsigned a = memAdr & 0x3FFFFF; if (a < MEM.size()) MEM[a]=data; ++memAdr; }
+  }
+  else if (OMSX && reg==0xF9){ mixF9 = data; }
+  // without REF_OMSX reg 0xF9 (PCM mix) is ignored: the TB forces 0dB
 }
 
-static void advance(){
-  eg_cnt++;
+static void advanceLFO(){
+  for (int i=0;i<24;i++){
+    Slot& op = slots[i];
+    if (op.lfo_active && !(dev("I2") && !ran[i])) op.lfo_cnt = (op.lfo_cnt + lfo_period[op.lfo]) & (LFO_PERIOD-1);
+  }
+}
+// lfo: advance the LFOs here too (openMSX order); I1 runs them after the frame instead
+static void advanceEG(bool lfo){
   unsigned tl_int_cnt = eg_cnt % 9;
   unsigned tl_int_step = (eg_cnt/9)%3;
+  if (lfo) advanceLFO();
   for (auto& op : slots){
     if (tl_int_cnt==0){
       if (tl_int_step==0){ if (op.TL < op.TLdest) ++op.TL; }
       else { if (op.TL > op.TLdest) --op.TL; }
     }
-    if (op.lfo_active) op.lfo_cnt = (op.lfo_cnt + lfo_period[op.lfo]) & (LFO_PERIOD-1);
+    int idx = int(&op - slots);
+    if (noStep[idx]) continue;
     switch (op.state){
       case EG_ATT: {
         uint8_t rate=op.compute_rate(op.AR);
@@ -246,9 +287,37 @@ static void advance(){
   }
 }
 
+static void advance(){ eg_cnt++; advanceEG(true); }
+
+// I11: deferred key events, at the slot's turn.  Marks the slots that render this frame
+// at pos 0 (edge) and the ones whose envelope does not step this frame (noStep).
+static bool edgeF[24];
+static void keyEvents(){
+  for (int i=0;i<24;i++){
+    Slot& sl = slots[i];
+    noStep[i] = false; bool edge = false;
+    if (pendOn[i] || pendRetrig[i]){ if (sl.keyon){ keyOnHelper(sl); edge = true; noStep[i] = true; } }
+    else if (pendOff[i] && sl.state!=EG_OFF && sl.state!=EG_REL){ sl.state=EG_REL; noStep[i] = true; }
+    edge |= posClr[i];      // I4: a position reset renders this frame at pos 0, like a key-on
+    pendOn[i]=pendOff[i]=pendRetrig[i]=posClr[i]=false;
+    ran[i] = sl.state!=EG_OFF;
+    edgeF[i] = edge;
+  }
+  if (!dev("I1")) for (int i=0;i<24;i++) noStep[i] = false;
+}
+
 // one stereo sample, raw mix sum (no reg-F9, no software volume)
 static void genSample(int32_t& outL, int32_t& outR){
   int32_t l=0, r=0;
+  if (!dev("I1")) keyEvents();
+  for (int i=0;i<24;i++){
+    Slot& sl = slots[i];
+    if (dev("I4") && ran[i] && !edgeF[i]){
+      unsigned st = (sl.lfo_active && sl.vib) ? calcStep(sl.OCT, sl.FN, sl.compute_vib()) : sl.step;
+      sl.stepPtr += st;
+      if (sl.stepPtr >= 0x10000){ sl.pos = nextPos(sl, sl.pos, uint16_t(sl.stepPtr>>16)); sl.stepPtr &= 0xffff; }
+    }
+  }
   for (auto& sl : slots){
     if (sl.state==EG_OFF) {
       // still advance pos? No: real chip skips EG_OFF entirely in the loop.
@@ -264,9 +333,21 @@ static void genSample(int32_t& outL, int32_t& outR){
     vR = (0x20 - (vR & 0x0f)) >> (vR >> 4);
     l += (smplOut * vL) >> 5;
     r += (smplOut * vR) >> 5;
+    if (dev("I4")) continue;
     unsigned step = (sl.lfo_active && sl.vib) ? calcStep(sl.OCT, sl.FN, sl.compute_vib()) : sl.step;
     sl.stepPtr += step;
     if (sl.stepPtr >= 0x10000){ sl.pos = nextPos(sl, sl.pos, uint16_t(sl.stepPtr>>16)); sl.stepPtr &= 0xffff; }
+  }
+  if (OMSX){
+    // F9h: openMSX setSoftwareVolume (float level); I5 = the RTL's integer x3/shift
+    uint8_t m = dev("I5") ? mixF9next : mixF9;
+    static const float lv[8] = {1.0f, 0.75f, 0.5f, 0.375f, 0.25f, 0.1875f, 0.125f, 0.0f};
+    auto mix = [&](int32_t x, int i) -> int32_t {
+      if (!dev("I5")) return int32_t(float(x) * lv[i]);
+      const int32_t t[8] = {x, (x*3)>>2, x>>1, (x*3)>>3, x>>2, (x*3)>>4, x>>3, 0};
+      return t[i];
+    };
+    l = mix(l, m & 7); r = mix(r, (m >> 3) & 7);
   }
   // clip to int16 like the RTL accumulator output
   l = std::clamp(l, -32768, 32767);
@@ -282,6 +363,8 @@ int main(int argc, char** argv){
   MEM.resize(ms); fread(MEM.data(),1,ms,mf); fclose(mf);
   int frames = atoi(argv[3]);
   if (const char* rk = getenv("RAM_KB")) RAM_BYTES = unsigned(atoi(rk)) * 1024;
+  if (const char* o = getenv("REF_OMSX")) OMSX = atoi(o) != 0;
+  if (const char* d = getenv("REF_DEV")) DEV = d;
   // read script into per-frame write lists
   std::vector<std::vector<std::pair<int,int>>> wr(frames+2);
   FILE* sf=fopen(argv[2],"r"); char line[128];
@@ -294,9 +377,30 @@ int main(int argc, char** argv){
   FILE* of=fopen(argv[4],"w");
   for (int f=0; f<frames; f++){
     for (auto& w : wr[f]) writeRegDirect(uint8_t(w.first), uint8_t(w.second));
-    int32_t L,R; genSample(L,R);
+    // I5: the TB writes frame f+1's registers during frame f; F9h shapes frame f already
+    mixF9next = mixF9;
+    for (auto& w : wr[f+1]) if (w.first == 0xF9) mixF9next = uint8_t(w.second);
+    bool any = false;
+    for (int i=0;i<24;i++) any |= slots[i].state != EG_OFF || pendOn[i] || pendRetrig[i];
+    if (OMSX && !dev("I7") && !any){
+      // YMF278.cc:508-513: no slot active -> silence, and advance() is not called
+      fprintf(of,"0 0\n");
+      continue;
+    }
+    int32_t L,R;
+    if (dev("I1")){
+      // I1: frame f's writes are in force for envelope step f (eg_cnt == f), which runs
+      // before the sample; openMSX steps the envelope after the sample, before the writes
+      keyEvents();
+      advanceEG(false);           // with eg_cnt == the number of frames run so far
+      genSample(L,R);
+      advanceLFO();
+      eg_cnt++;
+    } else {
+      genSample(L,R);
+      advance();
+    }
     fprintf(of,"%d %d\n",L,R);
-    advance();
   }
   fclose(of);
   fprintf(stderr,"ref278: %d frames -> %s\n", frames, argv[4]);
