@@ -251,11 +251,73 @@ Repro: 212 lines with the display on; write R#9 = 00h at screen line 207.
 
 ---
 
+## Issue D — FH is cleared at the frame-interrupt timing (a late line-interrupt handler reads FH = 0)
+
+Added 2026-10-24.  Hardware-confirmed fix on the MiSTer core (ASO 224 runs).
+
+### 日本語
+
+`vdp_cpu_interface.v` の割り込みフラグ処理で、走査線割り込みフラグ FH (`ff_line_interrupt`) が
+フレーム割り込みのタイミングで消されています。
+
+```verilog
+if( clear_line_interrupt || intr_frame ) begin
+    ff_line_interrupt <= 1'b0;
+end
+```
+
+`clear_line_interrupt` は `vdp_timing_control_ssg.v` の `w_intr_frame_timing` (250行, 431行) を
+1クロック遅らせたものです。このため、R#19 が画面下端付近の走査線を指している場合、FH が立ってから
+CPU が S#1 を読む前にフラグが消えます。実機 (V9938/V9958) と openMSX は FH をリセット、IE1=1 での
+S#1 読み出し、IE1 を 0 にする R#0 書き込みでのみクリアします (openMSX VDP.cc の irqHorizontal.reset())。
+
+ASO (turbo R) で発生します: 104ライン目の割り込み処理で R#19 = D2h (210)、R#9 = 212ライン に設定。
+210ライン目で FH が立ち、1248 clk (14.5 µs) 後のフレーム割り込みタイミングで消えます。ゲームの割り込み
+経路 (0038h → H.KEYI FD9Ah → 80BBh、S#1 読み出しは 80F2h、bit0 が 1 のときだけコールバック 058Bh) は
+S#1 を読むまで R800 で約 48 µs (openMSX では約 87 µs) かかるため、常に FH = 0 を読みます。コールバックが
+呼ばれず、メインループ (065Dh) が (9402h) を待ち続け、SPACE 後に黒画面のまま止まります。
+
+修正案 (この1行のクリアを削除するだけ):
+
+```verilog
+if( ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19) ) begin
+    ff_line_interrupt <= 1'b0;
+end
+else if( intr_line ) begin
+    ff_line_interrupt <= 1'b1;
+end
+```
+
+### English
+
+In `vdp_cpu_interface.v` the line-interrupt flag FH is cleared at the frame-interrupt timing
+(`clear_line_interrupt || intr_frame`; `clear_line_interrupt` is `w_intr_frame_timing` delayed
+one clock, vdp_timing_control_ssg.v:250/431). With R#19 near the bottom of the screen, FH is
+gone before the CPU reads S#1. The V9938/V9958 and openMSX clear FH only on reset, on the S#1
+read with IE1 on, and on an R#0 write that turns IE1 off.
+
+ASO (turbo R): its line-104 handler sets R#19 = D2h (210) and 212 lines. FH rises at line 210
+and is cleared 1248 clk_vdp (14.5 µs) later. The game's IRQ path (0038h → H.KEYI FD9Ah →
+80BBh, S#1 read at 80F2h, callback 058Bh only if bit0) needs ~48 µs on an R800 (~87 µs in
+openMSX), so it always reads FH = 0, the callback never runs, the main loop waits on (9402h)
+at 065Dh for ever: a black screen after SPACE.
+
+Fix: drop that clear (diff above). Repro (our bench): display off, R#0 = 16h, R#9 = 80h,
+R#19 = D2h; on int_n falling wait D µs, then R#15 = 1 and read S#1. Unfixed: FH = 0 in 6 of 6
+frames at D = 20, 48, 90 µs (FH = 1 at 5 and 10 µs). Fixed: FH = 1 at every D. Control
+R#19 = 68h: FH = 1 on both. On hardware (MiSTer, V9968 build) ASO 224 plays after the fix.
+
+Related, not changed on our side yet: the same block also clears FH on ANY write to R#0 or
+R#19 (openMSX: only an R#0 write that turns IE1 off), and that clear takes priority over an
+`intr_line` on the same clock, so a line match coinciding with such a write is lost.
+
+---
+
 ## Notes for posting (not part of the issues)
 
 - Bench names on our side, if asked: `sim/v9968_vram/tb_v9968_vram.sv` with `+aso=30` (A),
-  `+cmd=3 +demo=1 +ct55=1 +offat=N` (B), `+lnsw=207` / `+lnsw=0` (C), branch v9968_v9990
-  of the MiSTer MSX1 core (not pushed).
+  `+cmd=3 +demo=1 +ct55=1 +offat=N` (B), `+lnsw=207` / `+lnsw=0` (C), `sim/v9968_vram/run_irq.sh`
+  (D, with its own mutant), branch V9968_Geo3D of github.com/muhanpong/MSX1_MiSTer.
 - Not reported: HS=0 command speed vs the V9938 (by design; openMSX offers `timing=1`
   for that); our local additions (scanline levels, per-command wait port, Geo3D wiring).
 - Licence: the repository `LICENSE` is MIT, but the `vdp_*.v` headers carry Takayuki Hara's
