@@ -238,7 +238,7 @@ do_stress() {
 }
 
 do_memwr() {
-    local d="$OUT/${MEMWR_TAG:-memwr}" tree_id=""; rm -rf "$d"; mkdir -p "$d"
+    local d="$OUT/${MEMWR_TAG:-memwr}" tree_id="" outside="" regs_src=${REGS:-$Y/rtl/ymf278b_regs.sv}; rm -rf "$d"; mkdir -p "$d"
     echo "  memwr: regs $(md5sum < "${REGS:-$Y/rtl/ymf278b_regs.sv}" | cut -c1-8) MEM_WRITE_DELAY=$(grep -oE 'MEM_WRITE_DELAY +=[ 0-9]+' "${REGS:-$Y/rtl/ymf278b_regs.sv}" | grep -oE '[0-9]+$')"
     cp "${REGS:-$Y/rtl/ymf278b_regs.sv}" "$d/ymf278b_regs.sv"
     #  MEMWR_LOG=<r800.log> judges an existing log instead of running (checks the judge itself)
@@ -257,8 +257,15 @@ do_memwr() {
             f=$(realpath "$f"); case "$f" in "$(realpath "$W")"/*|"$(realpath "$gen")"/*) ;; *) echo "$f";; esac; done)
         [ -z "$stray" ] || { gate memwr FAIL "filelist reads outside the tree: $(echo $stray)"; return; }
         GEN="$gen" PCM_ENGINE="$ENGINE" HEX="$HERE/../assets/mprobe_r.hex" LOG=r800.log bash "$HERE/../assets/run1.sh" "$d" > "$d/run1.out" 2>&1
-        local cm; cm=$(git -C "$W" rev-parse --short HEAD); git -C "$W" diff --quiet HEAD || cm="$cm+dirty"
+        #  status, not diff: an untracked (uncommitted new) engine file is dirty too
+        local cm; cm=$(git -C "$W" rev-parse --short HEAD); [ -z "$(git -C "$W" status --porcelain)" ] || cm="$cm+dirty"
         tree_id="tree $cm, gen $(cd "$gen" && cat filelist.txt msx_ports.svh *.v *.sv sv/*.sv | md5sum | cut -c1-8)"
+        tree_id="$tree_id, engine+regs $(cat $ENGINE "$regs_src" | md5sum | cut -c1-8)"
+        #  ENGINE and REGS join the build after the filelist check: a file outside W is named,
+        #  and a PASS on it is not a PASS of this tree (controls still report their errors)
+        local f; for f in $ENGINE "$regs_src"; do
+            case "$(realpath "$f")" in "$(realpath "$W")"/*) ;; *) outside="$outside $(realpath "$f")";; esac
+        done
     fi
     #  only the per-phase lines count (the closing VPROBE summary repeats phase 7's count),
     #  and the probe must have reached its last phase with every checking phase reported
@@ -271,8 +278,9 @@ do_memwr() {
     #  and say when the verdict is on a saved log
     local how="engine $(basename "$(echo $ENGINE | awk '{print $NF}')"), $tree_id"
     [ -n "${MEMWR_LOG:-}" ] && how="SAVED LOG $MEMWR_LOG, engine unknown"
-    [ "$e" = 0 ] && gate memwr PASS "R800 OTIR 1024 B upload + readback, phases 1-15, 0 errors ($how)" \
-                 || gate memwr FAIL "$e readback errors ($(grep -hoE "phase [0-9]+ errors [1-9][0-9]*" "$log" | tr '\n' ';'))"
+    if [ "$e" = 0 ] && [ -z "$outside" ]; then gate memwr PASS "R800 OTIR 1024 B upload + readback, phases 1-15, 0 errors ($how)"
+    elif [ "$e" = 0 ]; then gate memwr FAIL "0 errors, but on files outside W:$outside ($how)"
+    else gate memwr FAIL "$e readback errors ($(grep -hoE "phase [0-9]+ errors [1-9][0-9]*" "$log" | tr '\n' ';'))${outside:+ [files outside W:$outside]}"; fi
 }
 
 do_cpuvis() {
@@ -329,7 +337,8 @@ do_cpuvis() {
         gate cpuvis FAIL "check set differs from $(basename "$bl"): $miss missing, $new new (see $d/checks.diff): $tl"; return
     fi
     if grep -q "^CPUVIS PASS" "$d/tree.txt" && [ $n -gt 0 ] && [ $caught -eq $n ]; then
-        gate cpuvis PASS "$tl; check set == $(basename "$bl") ($(wc -l < "$bl")); mutants $caught/$n caught"
+        local blo=""; [ "$(realpath "$bl")" = "$(realpath "$Y/sim/cpuvis/checks_baseline.txt")" ] || blo=" BASELINE OVERRIDE $(realpath "$bl")"
+        gate cpuvis PASS "$tl; check set == $(basename "$bl") ($(wc -l < "$bl"))$blo; mutants $caught/$n caught"
     else
         gate cpuvis FAIL "tree: $(grep -m1 '^CPUVIS' "$d/tree.txt") ${tl}; mutants $caught/$n caught"
     fi

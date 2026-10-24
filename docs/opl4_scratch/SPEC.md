@@ -15,7 +15,7 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 | `mutants` | golden이 실패할 수 있음 | `mutants/make_engine2_mutants.py` 20개 |
 | `cpuvis` | CPU 가시 동작, 접근 하나하나를 openMSX 모델과 같은 클럭에서 비교 | `sim/cpuvis/` (op 스크립트 `cpuvis_ops.py`, 모델 `cpuvis_check.py`), 뮤턴트 `mutants/make_cpuvis_mutants.py` 16개. 판정한 검사 키 목록이 `sim/cpuvis/checks_baseline.txt`(717개)와 같아야 함 |
 | `stress` | MLAB 레지스터 파일: 슬롯 읽기 순간의 쓰기, warm reset, reset 길이 | `sim/lockstep/run_stress.sh` (자체 뮤턴트 4개 + reset_len=8) |
-| `memwr` | fullsys R800 OTIR 1024바이트 업로드 + 읽어 비교. fullsys 생성 소스(`prep.sh` 출력)를 매 실행 시험 트리에서 새로 만들고, `GEN`이 트리 밖이거나 파일 목록이 트리 밖을 읽으면 FAIL. PASS 줄에 트리 커밋과 생성 소스 해시 | `assets/mprobe_r.hex`, 대조 `MEM_WRITE_DELAY 0`, 엔진 뮤턴트(reg 6 주소 증가 없음), 다른 트리의 `GEN` |
+| `memwr` | fullsys R800 OTIR 1024바이트 업로드 + 읽어 비교. fullsys 생성 소스(`prep.sh` 출력)를 매 실행 시험 트리에서 새로 만들고, `GEN`이 트리 밖이거나 파일 목록이 트리 밖을 읽으면 FAIL. PASS 줄에 트리 커밋(`git status --porcelain`이 비어 있지 않으면 +dirty, 추적 안 된 파일 포함), 생성 소스 해시, 엔진+regs 해시. `ENGINE`/`REGS` 파일이 트리 밖이면 0 errors여도 FAIL(대조군은 오류 수를 그대로 보고) | `assets/mprobe_r.hex`, 대조 `MEM_WRITE_DELAY 0`, 엔진 뮤턴트(reg 6 주소 증가 없음), 다른 트리의 `GEN` |
 | `resource` | fit 보고서 ALM. 보고서가 MoonSound RTL보다 오래됐거나, map 보고서가 없거나, `u_pcm`의 모듈이 시험 중인 엔진이 아니면 FAIL. 타이밍은 보지 않는다(PASS 줄에 "timing not judged"); 보고서 경로는 실제 경로로 풀어 트리 밖이면 표시 | — |
 
 아래 표의 "검증" 열은 그 항목을 덮는 시나리오(`sc_*`, cpuvis op 블록 이름 `C-*`/`D*`)와 그 항목이 깨지면 잡히는 뮤턴트(`mut_*`)다.
@@ -89,7 +89,7 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 | I6 | — | 헤더 로드 지연(서비스 창/스톨) — 소리 결과는 dirty mask와 스톨로 openMSX와 같게 맞춤. CPU가 LD가 풀리기 전에 필드 5-9를 읽으면 옛 값이 보일 수 있음(H4) | E:1233-1281 | `sc_dirdep_*`; cpuvis는 LD 해제 후에만 읽음 |
 | I7 | `I7` | **openMSX 지름길.** openMSX는 활성 슬롯이 하나도 없으면 `generateChannels`가 `advance()`까지 건너뜀(eg_cnt, TL 보간, LFO 정지). 바로 그 줄에 `// TODO update internal state, even if muted`(YMF278.cc:509)가 있다: 에뮬레이터의 생략이지 칩 동작이 아니다. RTL은 항상 진행하고, 칩에 더 가까운 쪽은 RTL일 가능성이 크다. 모든 시나리오가 무음 프레임 0으로 시작하므로 EG 위상이 거의 모든 곳에 영향 | YMF278.cc:508-513; E:132-150 | `sc_silence` 외 8개 |
 | I11 | `I11` | **미검증.** 키온·키오프·키온 중 웨이브 쓰기(재트리거)는 그 슬롯 차례에, **그때의** 레지스터로 처리. openMSX는 쓰는 순간 처리하므로 같은 프레임에 키온 **뒤에** 쓴 AR/DL 등은 그 키온에 안 먹는다 | E:1595-1617; YMF278.cc:616-621, 669-673 | `sc_multi`, `sc_eg_dl`, `sc_dirdep_*` 등 11개 |
-| I8 | `I8` | **RTL 결함(보드 배선), 드묾.** reg 2 bit1(메모리 타입)은 저장·읽기만 하고 주소 배치는 mode 0 그대로(RAM이 0x200000부터). openMSX의 MoonSound 배선(MSXMoonSound.cc:30-90 `setupMemPtrs`)은 mode 1에서 RAM이 /MCS6..9 = 0x380000부터 512kB이고 0x200000-0x37FFFF는 비어 있다(읽기 0xFF, 쓰기 무시). openMSX도 "MoonSound에서는 보통 쓰지 않는다"고 적는다. 빈 영역을 읽은 값(0xFF)은 하드웨어 미검증. 3차 검토(msx1-handoff) 전에는 ref278도 이 비트를 무시해서 시나리오가 없었다 | E:1670-1678; YMF278.cc:850-870; MSXMoonSound.cc:30-90 | `sc_memtype1` (I8을 빼면 600프레임 중 418프레임이 다름) |
+| I8 | `I8` | **RTL 결함(보드 배선), 드묾.** reg 2 bit1(메모리 타입)은 저장·읽기만 하고 주소 배치는 mode 0 그대로(RAM이 0x200000부터). openMSX의 MoonSound 배선(MSXMoonSound.cc:30-90 `setupMemPtrs`)은 mode 1에서 RAM이 /MCS6..9 = 0x380000부터 512kB이고 0x200000-0x37FFFF는 비어 있다(읽기 0xFF, 쓰기 무시). openMSX도 "MoonSound에서는 보통 쓰지 않는다"고 적는다. 빈 영역을 읽은 값(0xFF)은 하드웨어 미검증. 3차 검토(msx1-handoff) 전에는 ref278도 이 비트를 무시해서 시나리오가 없었다 | E:1670-1678; YMF278.cc:850-870; MSXMoonSound.cc:30-90 | `sc_memtype1` (모델 대 I8을 뺀 ref278: 600프레임 중 418프레임이 다름; ref278끼리 I8 켬/끔: 410, msx1-handoff 측정) |
 | I9 | `I9` | **RTL 결함.** 소리 메모리: openMSX는 0-2MB가 ROM이라 reg 6 쓰기를 무시하고(`writeMem`, YMF278.cc:882-894), 2MB 이상 RAM에만 쓴다. RTL은 ROM 영역도 쓴다: yrw801 이미지가 SDRAM에 있고 `msx.sv` ch4 브리지(M:1857-1897)는 주소를 보지 않고 모든 쓰기를 넘긴다 → 2MB 아래에 쓰는 소프트웨어는 ROM 샘플을 (다음 로드까지) 망가뜨린다. `sc_memhit`은 0x1000·0x2000에 쓰므로 이 결함 위에서만 재생이 바뀐다(I9를 빼면 400프레임 중 380프레임이 다름) | YMF278.cc:872-894; M:1857-1897 | `sc_memhit` |
 | I10 | — | EG_DEC에서 env를 0x3FF로 클램프(openMSX는 클램프 없음, DL ≤ 0x3E0이라 결과 동일) | E:1073-1081; YMF278.cc:380-389 | — |
 
@@ -122,6 +122,7 @@ D3·D4·D5·D7은 **RTL 결함**이다: openMSX의 해당 동작에 "Verified on
 | H5 | FM 쪽(F8h 믹스, OPL3 상태/타이머 실제 속도)은 이 하네스 밖. cpuvis의 OPL3는 타이머 스텁(clk_sdram 구동) | tb/opl3_stub.sv | P6 |
 | H6 | (해결) I7은 `sc_silence`, I2는 `sc_lfo_off`가 본다(`oracle` 게이트) | — | — |
 | H8 | golden 뮤턴트는 모두 기능 끄기·비교 경계 수정이다. 스케줄링(디스패치 순서, 헤더 스톨, PIPE 캐시 태그, 프레임 끝 예약, `cache_rr` 32프레임 재페치, 노트 중 warm reset)을 건드리는 뮤턴트가 없다. 같은 프레임 key-off→key-on, 슬롯 23→0 경계, 12비트 루프 이음새 홀수 걸침도 전용 시나리오가 없다. cpuvis 뮤턴트 15개도 전부 정적 디코드다 | E:754-757 외 | P2: 스케줄링 뮤턴트 추가 |
+| H11 | golden 모델과 ref278(REF_OMSX)은 mem.bin(0x80100바이트) 너머 4MB를 0으로 채운다. RAM 쪽(0x200000+)은 openMSX도 0으로 지우므로(YMF278.cc:826) 같다. ROM 쪽 0x80100-0x1FFFFF는 **TB 가정**이다: openMSX에서는 실제 2MB ROM 데이터. 이 영역을 읽는 시나리오는 없다(032d200 전후 ref278 출력이 기존 21개에서 바이트 동일, msx1-handoff 4차) | tb/tb_golden_pcm.sv:47; golden_pcm_omsx.py; ref278.cpp main | 그 영역을 쓰는 시나리오가 생기면 yrw801 이미지로 |
 | H9 | golden TB의 메모리 모델은 고정 지연 + 미결 1개뿐: 지터, 리프레시, 다른 채널 경합, CPU 쓰기 busy가 없다 | tb/tb_golden_pcm.sv:44-70 | ch4 지연 실측 뒤 분포를 TB에 |
 | H10 | `dbg_slot_keyon/active/envlive`는 `debug_overlay.sv:28-30`이 쓴다. 드롭인 교체면 새 엔진도 내야 한다 | debug_overlay.sv:28-30 | DESIGN ALM 표에 포함 |
 | H7 | 실제 소프트웨어 레지스터 트레이스(MoonBlaster, vgmplay, OPL4 데모)는 이번에 수집하지 않았다(PLAN P0의 일부) | — | P2 전에 openMSX에서 수집 |
