@@ -836,7 +836,15 @@ wire  [7:0] vdp_gap_rld = use_nz ? vdp_gap_r800 : (vdp18 ? VDP_GAP18 : VDP_GAP38
 //  CPU, whatever VDP takes the writes (no TMS9918 here, so no VDP_GAP18)
 wire  [7:0] vdp_gap_rld = use_nz ? vdp_gap_r800 : VDP_GAP38;
 `endif
-wire        vdp_bus     = ~iorq_n & m1_n & vdp_en & (~rd_n | ~wr_n);
+wire        vdp_bus_all = ~iorq_n & m1_n & vdp_en & (~rd_n | ~wr_n);
+`ifndef MSX_V9968
+wire        vdp_bus     = vdp_bus_all;
+`else
+//  The spacing applies to 98h-9Bh only, as on a turbo R (openMSX VDPIODelay covers
+//  98h-9Bh): 9Ch (extension lock) and Geo3D's 9Dh/9Fh still wait for the transaction
+//  (v99_pending) but not 8.7 us per byte.
+wire        vdp_bus     = vdp_bus_all & (a[7:2] == 6'b100110);
+`endif
 
 logic [7:0] vdp_gap   = 8'd0;
 logic [2:0] vdp_hcnt  = 3'd0;         // ce_10m7_p ticks this strobe has spanned
@@ -891,7 +899,7 @@ wire vdp_pace_n = ~(cpu_paced & vdp_bus & (~vdp_grant_d | (vdp18 & (vdp_hcnt < 3
 wire  [7:0] v99_rdata;        // v9968_bus / the V9968, instanced further down
 wire        v99_int_n;
 wire        v99_done;
-wire v99_pending = vdp_bus & ~v99_done;
+wire v99_pending = vdp_bus_all & ~v99_done;
 `ifndef V99_MUT_NOWAIT
 wire vdp_pace_n  = ~(cpu_paced & ((vdp_bus & ~vdp_grant_d) | v99_pending));
 `else   // negative control (sim/fullsys/vprobe): no wait for the transaction
