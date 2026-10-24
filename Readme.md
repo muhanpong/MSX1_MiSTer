@@ -25,6 +25,7 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   - 화면을 끌 때 붙잡힌 스프라이트 VRAM 요청이 VDP 명령을 멈춤 *(a sprite VRAM request held across display-off froze VDP commands)*
   - R#9 LN을 프레임 중간에 바꾸면 화면 시작이 10줄 움직임(224라인 오버스캔) *(a mid-frame R#9 LN change moved the display start by 10 lines)*
   - status 읽기와 같은 클럭의 인터럽트 이벤트 유실, 그리고 한 클럭 늦은 status 래치로 인한 FH/F 유실 *(interrupt events lost on the clock of a status read, and FH/F lost through the one-clock-late status latch)*
+  - 프레임 인터럽트 시점에 FH가 지워져 늦게 S#1을 읽는 라인 인터럽트 처리가 FH=0을 봄 — ASO 224(R800) 검은 화면의 원인, 실기 확인 *(FH was cleared at the frame interrupt, so a line-interrupt handler that reads S#1 late saw FH = 0 -- the cause of ASO 224's black screen; confirmed on hardware)*
 - **R800/터보 VDP 대기 / R800 and turbo VDP waits** — R800의 VDP 대기(8.66µs)는 실기 터보R처럼 98h–9Bh에만 걸린다. Geo3D 포트 9Dh/9Fh는 대기 없이 동작(R800에서 Geo3D가 빨라짐). V9968 빌드의 터보 Z80에는 VDP 간격 대기가 없다(V9968 버스가 요청을 잃지 않음)
   *The R800 VDP wait (8.66 µs) covers 98h–9Bh only, as on a turbo R; Geo3D's 9Dh/9Fh run unpaced (Geo3D is faster on the R800). A turbo Z80 gets no VDP spacing in the V9968 build (the V9968 bus cannot drop a request).*
 - **빌드 / Build** — `REV=MSX1_V9968 ASM=1 tools/sdram128/compile.sh` (Quartus 17.0, `SEED=N`으로 시드 지정, 시드 비교는 `tools/sdram128/seed_table.sh`). 일반 V9958 빌드는 `tools/sdram128/compile.sh`
@@ -34,8 +35,8 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
 - **라이선스 / Licence** — V9968 RTL 파일 헤더는 HRA!의 3조항 조건(**허가 없는 상업적 이용 금지** 포함), Geo3D는 MIT
   *The V9968 RTL file headers carry HRA!'s 3-clause terms (including **no commercial use without written permission**); Geo3D is MIT.*
 
-**알려진 문제 / Known issues** — ASO 224(R800)가 SPACE 후 검은 화면으로 멈춤(조사 중). 업로드 한도 32MB(V9968 VRAM bank와 겹침). MSX1 기계의 색은 MSX2 표준 팔레트
-*ASO 224 (R800) stops on a black screen after SPACE (under investigation). The upload limit is 32MB (it would overlap the V9968's VRAM bank). MSX1 machines show the MSX2 standard palette.*
+**알려진 문제 / Known issues** — 업로드 한도 32MB(V9968 VRAM bank와 겹침). MSX1 기계의 색은 MSX2 표준 팔레트
+*The upload limit is 32MB (it would overlap the V9968's VRAM bank). MSX1 machines show the MSX2 standard palette.*
 
 ---
 
