@@ -507,7 +507,11 @@ localparam CONF_STR = {
    "hDP6O[119:118],CPU (turbo R),Auto,Force Z80,Force R800;",
    "hDP6O[58:56],Z80 Speed,3.58MHz,5.37MHz (Panasonic),7.16MHz,10.7MHz,21.5MHz;",
    "hDP6O[70],R800 Speed,7.16MHz,21.5MHz;",
+`ifdef MSX_V9968
+   "hDP6O[38:36],R800 VDP access wait,8.66us (real),None,1.0us,2.0us,3.0us,4.7us,6.0us,7.5us;",
+`else
    "hDP6O[38:36],R800 VDP access wait,8.66us (real),10.1us,9.3us,7.5us,6.0us,10.8us,11.8us,4.7us;",
+`endif
    "P1-;",
    "P1-,Audio:;",
    //  Audio order (2026-10-05, user request): PSG, MSX-MUSIC | SCC | MoonSound,

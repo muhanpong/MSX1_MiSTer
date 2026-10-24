@@ -1021,7 +1021,8 @@ module tb;
    //  ── everything the machine needs that nothing else drives ────────────────
    initial begin
       reset = 1'b1; reset_ms = 1'b1; msx_pause = 1'b0;
-      r800_fast = 1'b0; r800_vdpw = 3'd0; r800_set_stb = 1'b0; r800_set = 1'b0;
+      r800_fast = 1'b0; r800_vdpw = 3'd0; begin int v; if ($value$plusargs("vdpw=%d", v)) r800_vdpw = 3'(v); end   // +vdpw=N: OSD R800 VDP access wait entry
+      r800_set_stb = 1'b0; r800_set = 1'b0;
       turbor_en = 1'b1; probe_freeze = 1'b0; dma_active = 1'b0;
       ps2_key = 11'd0; joy0 = 16'd0; joy1 = 16'd0; joymega_en = 2'd0;
       cas_audio_in = 1'b0; rtc_time = 65'd0;

@@ -816,6 +816,21 @@ localparam [7:0] VDP_GAP38 = 8'd32;   // MSX2: >= worst-case VRAM slot period (2
 //  around a register block runs and we cannot derive it -- entry 0 is the real
 //  machine's 8.66 us.
 logic [7:0] vdp_gap_r800;
+`ifdef MSX_V9968
+//  V9968 build (user, 2026-10-24): the V9968 path cannot drop a request (the CPU waits on
+//  v99_pending), so the spacing is only about game timing -- ASO 224 still glitches at 8 us
+//  here.  Entry 0 stays the turbo R's S1990 wait; the rest go down to none.
+always_comb case (r800_vdpw)
+   3'd0: vdp_gap_r800 = 8'd186;   //  8.66 us -- a real turbo R
+   3'd1: vdp_gap_r800 = 8'd0;     //  none
+   3'd2: vdp_gap_r800 = 8'd21;    //  1.0 us
+   3'd3: vdp_gap_r800 = 8'd43;    //  2.0 us
+   3'd4: vdp_gap_r800 = 8'd64;    //  3.0 us
+   3'd5: vdp_gap_r800 = 8'd100;   //  4.7 us
+   3'd6: vdp_gap_r800 = 8'd129;   //  6.0 us
+   3'd7: vdp_gap_r800 = 8'd161;   //  7.5 us
+endcase
+`else
 always_comb case (r800_vdpw)
    3'd0: vdp_gap_r800 = 8'd186;   //  8.66 us -- a real turbo R
    3'd1: vdp_gap_r800 = 8'd217;   // 10.1 us  -- restored ASO's band on 20260919b
@@ -826,6 +841,7 @@ always_comb case (r800_vdpw)
    3'd6: vdp_gap_r800 = 8'd254;   // 11.8 us
    3'd7: vdp_gap_r800 = 8'd100;   //  4.7 us
 endcase
+`endif
 `ifndef MSX_V9968
 wire  [7:0] vdp_gap_rld = use_nz ? vdp_gap_r800 : (vdp18 ? VDP_GAP18 : VDP_GAP38);
 `else
