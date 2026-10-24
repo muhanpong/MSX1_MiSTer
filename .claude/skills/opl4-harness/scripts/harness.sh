@@ -259,7 +259,8 @@ do_memwr() {
         GEN="$gen" PCM_ENGINE="$ENGINE" HEX="$HERE/../assets/mprobe_r.hex" LOG=r800.log bash "$HERE/../assets/run1.sh" "$d" > "$d/run1.out" 2>&1
         #  status, not diff: an untracked (uncommitted new) engine file is dirty too
         local cm; cm=$(git -C "$W" rev-parse --short HEAD); [ -z "$(git -C "$W" status --porcelain)" ] || cm="$cm+dirty"
-        tree_id="tree $cm, gen $(cd "$gen" && cat filelist.txt msx_ports.svh *.v *.sv sv/*.sv | md5sum | cut -c1-8)"
+        #  the gen dir's own path is in its files: hash without it, so equal sources hash equal
+        tree_id="tree $cm, gen $(cd "$gen" && cat filelist.txt msx_ports.svh *.v *.sv sv/*.sv | sed "s|$gen|GEN|g; s|$(realpath "$W")|W|g" | md5sum | cut -c1-8)"
         tree_id="$tree_id, engine+regs $(cat $ENGINE "$regs_src" | md5sum | cut -c1-8)"
         #  ENGINE and REGS join the build after the filelist check: a file outside W is named,
         #  and a PASS on it is not a PASS of this tree (controls still report their errors)
