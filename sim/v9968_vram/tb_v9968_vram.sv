@@ -51,7 +51,8 @@ module tb #(parameter int RELEASE_PH = 0);
         void'($value$plusargs("aso=%d", aso));
         void'($value$plusargs("pollpad=%d", pollpad));
         void'($value$plusargs("ie1=%d", ie1)); void'($value$plusargs("disp=%d", disp)); void'($value$plusargs("ie1off=%d", ie1off));
-        void'($value$plusargs("ie1line=%h", ie1line)); void'($value$plusargs("ie1r9=%h", ie1r9)); void'($value$plusargs("ie1dly=%d", ie1dly));   // +ie1line=D2 +ie1r9=80: ASO's second split (line 210, 212 lines); +ie1dly=clk_vdp from int_n to the S#1 read
+        void'($value$plusargs("ie1line=%h", ie1line)); void'($value$plusargs("ie1r9=%h", ie1r9)); void'($value$plusargs("ie1dly=%d", ie1dly));
+        void'($value$plusargs("ovs=%d", ovs)); void'($value$plusargs("ovsln=%d", ovsln)); void'($value$plusargs("ovscmd=%d", ovscmd));   // +ovs=N trials of Shaolin's overscan + display-off + HMMV/HMMM; +ovsln=0 control (no LN=0); +ovscmd=HMMMs per trial   // +ie1line=D2 +ie1r9=80: ASO's second split (line 210, 212 lines); +ie1dly=clk_vdp from int_n to the S#1 read
         void'($value$plusargs("rpl=%s", rplf)); void'($value$plusargs("rplscale=%d", rplscale));   // +rplscale=P: event times x P/100 (R800 runs ~1.8x openMSX between I/O)   // +rpl=<file>: replay an oracle window (tools: aso_win.txt), paced, reads not forced   // +ie1=N: ASO 224's first in-game wait, line IRQ taken as int_n (no polling); +disp=1 control: display on   // +aso: extra clk_vdp per S#1 poll (moves the read phase against the line match)        // >0: ASO 224's per-frame line-IRQ loop for that many frames
         void'($value$plusargs("lr_sx=%d", lr_sx)); void'($value$plusargs("lr_sy=%d", lr_sy));      // +lr_*: one LRMM with these
         void'($value$plusargs("lr_vx=%d", lr_vx)); void'($value$plusargs("lr_vy=%d", lr_vy));      //  start/vectors (SUPER CAT frames)      // >=0: km224's overscan trick: 212 lines, R#9 LN=0 written at screen line lnsw (0 = never: control)          // 0..6: the seven V9938-referenced workloads of rtl/video/VDP/sim/tb_vdpcmd7.vhd    // >=0: display on 20 ms, then R#1=00 lands offat clk_vdp after the selector's (phase 2, sub 0) edge, then the LRMM      // 1: sprite colour table 0FE00h..0FFFFh = 55h and SAT 10000h..1007Fh = 0 (the oracle's VRAM at the hang)  // 1: write the SAT bytes before the command, no display change (replay's exact state)
@@ -104,7 +105,7 @@ module tb #(parameter int RELEASE_PH = 0);
 
     logic [2:0] bus_address = 0; logic bus_ioreq = 0, bus_write = 0, bus_valid = 0;
     logic [7:0] bus_wdata = 0; wire bus_ready, bus_rdata_en; wire [7:0] bus_rdata;
-    string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1, lr_sx = -1, lr_sy = 0, lr_vx = 0, lr_vy = 0, aso = 0, pollpad = 0, ie1 = 0, disp = 0, ie1off = 0, ie1line = 'h68, ie1r9 = 'h00, ie1dly = 400;
+    string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1, lr_sx = -1, lr_sy = 0, lr_vx = 0, lr_vy = 0, aso = 0, pollpad = 0, ie1 = 0, disp = 0, ie1off = 0, ie1line = 'h68, ie1r9 = 'h00, ie1dly = 400, ovs = 0, ovsln = 1, ovscmd = 64;
     string rplf = ""; int rplscale = 100;
     int scan = 0, sp3 = 0, demo = 0, r1 = 0, r20 = 8'h1F, r21 = 8'h3A, r25 = 3, r8 = 8;
     wire d_hs, d_en; wire [7:0] d_r, d_g, d_b;
@@ -539,6 +540,67 @@ module tb #(parameter int RELEASE_PH = 0);
         //  with the identity vector (V9968 extended command: port-4 unlock, window regs).
         //  Completion is polled on S#2 CE with a 100 ms limit; the port's unanswered-read
         //  count during the command is the figure of merit (the link has no backpressure).
+
+        //  +ovs=N: Shaolin's Road V9968 (e809e2a): SCREEN5, R#20=1Fh (HS SVNS ILNS SP3 EPAL), R#21=0
+        //  (256 KB), R#25=03h.  Every frame R#9 = 00h (LN=0) at screen line 200 and 80h at 223, so
+        //  the active area runs to the end of the frame (+ovsln=0: the control, LN stays 1).  Trial k
+        //  turns the display off (R#1=20h) at line (k*37)%262 of a frame, then HMMV x2 and +ovscmd
+        //  HMMM 8x8 with random SY/DY up to 2047, the LN writes going on meanwhile; each command must
+        //  finish within 50 ms.  The display comes back on (R#1=60h) after the trial.
+        if (ovs > 0) begin
+            int hung = 0, ncmd = 0, lnw = 0, ovfr = 0; logic [7:0] st; bit need0 = 0, need1 = 0, stop = 0;
+            //  the game's per-frame LN writes, raised by a monitor and served by the bus owner below
+            fork
+                while (!stop) begin
+                    @(posedge clk_vdp);
+                    if (`SSG.w_h_count_end && `SSG.ff_v_count[0]) begin
+                        if (`SSG.w_screen_pos_y == 10'd200) need0 = ovsln;
+                        if (`SSG.w_screen_pos_y == 10'd223) need1 = ovsln;
+                        if (`SSG.w_screen_pos_y == 10'h3FF) ovfr++;
+                    end
+                end
+            join_none
+            io(1, 3'd4, 8'h00, q);                                         // unlock R#20/R#21
+            wreg(20, 8'h1F); wreg(21, 8'h00); wreg(25, 8'h03);
+            wreg(0, 8'h06); wreg(2, 8'h1F); wreg(5, 8'hFF); wreg(11, 8'h07); wreg(6, 8'h0F); wreg(8, 8'h08);
+            wreg(9, 8'h80); wreg(19, 8'h16); wreg(23, 8'h00); wreg(1, 8'h60);
+            for (int k = 0; k < ovs; k++) begin
+                int offl; offl = (k * 37) % 262;
+                wait (`SSG.w_screen_pos_y == 10'h3FF); wait (`SSG.w_screen_pos_y == 10'd1);
+                if (offl > 0) wait (`SSG.w_screen_pos_y == 10'(offl < 234 ? offl : 233));
+                wreg(1, 8'h20);
+                for (int c = 0; c < 2 + ovscmd; c++) begin
+                    longint t0; bit busy; int y0, y1;
+                    y0 = $urandom_range(0, 2047); y1 = $urandom_range(0, 2047);
+                    if (need0) begin need0 = 0; wreg(9, 8'h00); lnw++; end
+                    if (need1) begin need1 = 0; wreg(9, 8'h80); lnw++; end
+                    if (c < 2) begin
+                        wreg(36, 8'h00); wreg(37, 8'h00); wreg(38, 8'(y0)); wreg(39, 8'(y0 >> 8));
+                        wreg(40, 8'h00); wreg(41, 8'h01); wreg(42, 8'hD4); wreg(43, 8'h00); wreg(44, 8'h11); wreg(46, 8'hC0);
+                    end else begin
+                        wreg(32, 8'($urandom_range(0, 31) * 8)); wreg(33, 8'h00); wreg(34, 8'(y0)); wreg(35, 8'(y0 >> 8));
+                        wreg(36, 8'($urandom_range(0, 31) * 8)); wreg(37, 8'h00); wreg(38, 8'(y1)); wreg(39, 8'(y1 >> 8));
+                        wreg(40, 8'd8); wreg(41, 8'h00); wreg(42, 8'd8); wreg(43, 8'h00); wreg(45, 8'h00); wreg(46, 8'hD0);
+                    end
+                    ncmd++; t0 = $time; wreg(15, 8'h02);
+                    do begin
+                        if (need0) begin need0 = 0; wreg(9, 8'h00); lnw++; end
+                        if (need1) begin need1 = 0; wreg(9, 8'h80); lnw++; end
+                        wreg(15, 8'h02); io(0, 3'd1, 8'h00, st); busy = st[0];
+                    end while (busy && ($time - t0) < 64'd50_000_000_000);
+                    wreg(15, 8'h00);
+                    repeat ($urandom_range(0, 3000)) begin
+                        @(posedge clk_vdp);
+                        if (need0) begin need0 = 0; wreg(9, 8'h00); lnw++; end
+                        if (need1) begin need1 = 0; wreg(9, 8'h80); lnw++; end
+                    end
+                    if (busy) begin hung++; $display("OVS trial %0d (display off at line %0d) command %0d %s STILL RUNNING", k, offl, c, c < 2 ? "HMMV" : "HMMM"); break; end
+                end
+                wreg(1, 8'h60);
+            end
+            stop = 1;
+            $display("OVS RESULT: %0d hung of %0d commands in %0d trials, %0d frames, LN writes %0d (ovsln=%0d)", hung, ncmd, ovs, ovfr, lnw, ovsln);
+        end
         if (cmd >= 2) begin
             longint t0; int w, noans0, nrd0, nwr0; logic [7:0] st;
             if (cmd == 3 && demo) begin
