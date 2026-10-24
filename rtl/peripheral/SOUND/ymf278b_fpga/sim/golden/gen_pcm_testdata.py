@@ -12,10 +12,11 @@ Waves (header @ wave#*12):
 """
 import math, struct, os
 
-MEM = bytearray([0]*0x40000)
+MEM = bytearray([0]*0x80100)     # 0x80000+: wave-table header bank 1 (sc_tblhdr)
 
-def header(wave, bits, start, loop_pos, end_pos, ar=15, d1r=0, dl=0, d2r=0, rc=15, rr=4, am=0, lfovib=0):
-    base = wave*12
+def header(wave, bits, start, loop_pos, end_pos, ar=15, d1r=0, dl=0, d2r=0, rc=15, rr=4, am=0, lfovib=0,
+           base=None):
+    if base is None: base = wave*12
     MEM[base+0] = (bits << 6) | ((start >> 16) & 0x3F)
     MEM[base+1] = (start >> 8) & 0xFF
     MEM[base+2] = start & 0xFF
@@ -81,6 +82,11 @@ header(122, 0, 0x6000, 0, 64)
 for i in range(64): MEM[0x6000+i] = (i*4 - 128) & 0xFF
 header(123, 0, 0x7000, 0, 64)
 for i in range(64): MEM[0x7000+i] = (128 - i*4) & 0xFF
+
+# wave 386 in wave-table header bank 1 (reg 2 bits 4:2 = 1 -> 0x80000), for
+# sc_tblhdr; 386*12 = 0x1218 is left zero, so a base computed without the bank
+# loads an all-zero header (AR=0: silent)
+header(386, 2, 0x2000, 0, 32, ar=13, d1r=5, dl=2, d2r=2, base=0x80000 + 2*12)
 
 out = os.path.dirname(os.path.abspath(__file__))
 open(f"{out}/mem.bin", "wb").write(MEM)
@@ -237,6 +243,91 @@ for k, fr in enumerate(range(20, 380, 3)):
     W(L, fr, 0x05, a & 0xFF, 1040)
     W(L, fr, 0x06, (MEM[a] ^ 0x5A) & 0xFF, 1060)
 scripts['sc_memhit.txt'] = (L, 400)
+
+# ── 2026-10-24 (opl4_scratch P1): scenarios for behaviour the 12 above never
+# exercised.  Each one exists because a mutant of the engine passed every other
+# scenario (.claude/skills/opl4-harness/mutants/make_engine2_mutants.py).
+
+# EG decay -> sustain exactly at DL (mut_eg_dl_gt).  RC=15 (no key scaling), so
+# D1R=10 is rate 40: +1 per update, env lands on DL exactly; D2R=0 then holds it.
+# Slot 1: a faster decay (rate 52, increments > 1) onto another DL.
+L = []
+keyon(L, 1, 0, wave=0, fn=0x200, oct_=0)
+slotw(L, 1, 0, 6, 0xF0 | 10)          # AR=15 (instant), D1R=10
+slotw(L, 1, 0, 7, (1 << 4) | 0)       # DL=1, D2R=0
+slotw(L, 1, 0, 8, 0xF4)               # RC=15, RR=4
+keyon(L, 1, 1, wave=1, fn=0x155, oct_=0, pan=3)
+slotw(L, 1, 1, 6, 0xF0 | 13)
+slotw(L, 1, 1, 7, (2 << 4) | 1)
+slotw(L, 1, 1, 8, 0xF4)
+scripts['sc_eg_dl.txt'] = (L, 900)
+
+# DAMP and pseudo-reverb (mut_eg_nodamp, mut_eg_noprvb).  Slot 0: a sustained
+# square, damped at frame 200 (field 4 bit 6 with key still on).  Slot 3: PRVB
+# (field 2 bit 3) on a fast release: rate 52 down to dl_tab[6], then rate 20.
+# Slot 5: damp written together with the key-off.
+L = []
+keyon(L, 1, 0, wave=1, fn=0x155, oct_=0)
+slotw(L, 1, 0, 6, 0xF0 | 2); slotw(L, 1, 0, 7, 0xF1); slotw(L, 1, 0, 8, 0xF6)
+W(L, 200, 0x08 + 4*24 + 0, 0x80 | 0x40 | 0x20)
+keyon(L, 1, 3, wave=2, fn=0x2AA, oct_=1, pan=4)
+slotw(L, 1, 3, 2, (1 << 4) | 0x08 | ((0x2AA >> 7) & 7))
+slotw(L, 1, 3, 6, 0xF0); slotw(L, 1, 3, 7, 0x00); slotw(L, 1, 3, 8, 0xF0 | 13)
+W(L, 150, 0x08 + 4*24 + 3, 0x20 | 4)
+keyon(L, 1, 5, wave=0, fn=0x180, oct_=0, pan=12)
+slotw(L, 1, 5, 6, 0xF0); slotw(L, 1, 5, 7, 0x00); slotw(L, 1, 5, 8, 0xF2)
+W(L, 300, 0x08 + 4*24 + 5, 0x40 | 0x20 | 12)
+scripts['sc_eg_damp.txt'] = (L, 1000)
+
+# TL interpolation (field 3 bit 0 = 0): down toward 0x40, later back up toward
+# 0x08 (mut_eg_tlramp2).  Every other scenario loads TL immediately.
+L = []
+keyon(L, 1, 2, wave=1, fn=0x200, oct_=0)
+slotw(L, 100, 2, 3, (0x40 << 1) | 0)
+slotw(L, 600, 2, 3, (0x08 << 1) | 0)
+scripts['sc_tlramp.txt'] = (L, 1000)
+
+# LFO reset (field 4 bit 5) mid-note, then LFO active again: the counter must
+# restart from 0 (mut_lfo_noreset).  Vibrato and tremolo both on.
+L = []
+keyon(L, 1, 4, wave=0, fn=0x100, oct_=-2, lfo_off=False)
+slotw(L, 1, 4, 5, (5 << 3) | 6)
+slotw(L, 1, 4, 9, 3)
+W(L, 400, 0x08 + 4*24 + 4, 0x80 | 0x20)
+W(L, 410, 0x08 + 4*24 + 4, 0x80)
+scripts['sc_lfo_reset.txt'] = (L, 1500)
+
+# Every pan value 0..15, DO1 output select (field 4 bit 4 = muted on MoonSound),
+# and the reg F9h PCM mix level (mut_pan_do1, mut_mix_f9).
+L = []
+keyon(L, 1, 6, wave=1, fn=0x155, oct_=0)
+keyon(L, 1, 7, wave=0, fn=0x200, oct_=0, tl=8)
+for p in range(16):
+    W(L, 50 + 50*p, 0x08 + 4*24 + 6, 0x80 | 0x20 | p)
+W(L, 830, 0x08 + 4*24 + 6, 0x80 | 0x20 | 0x10 | 3)
+W(L, 870, 0x08 + 4*24 + 6, 0x80 | 0x20 | 5)
+W(L, 900, 0xF9, (2 << 3) | 1)
+W(L, 950, 0xF9, (7 << 3) | 5)
+W(L, 1000, 0xF9, (0 << 3) | 6)
+W(L, 1050, 0xF9, 0x00)
+scripts['sc_pan_mix.txt'] = (L, 1100)
+
+# Wave-table header bank (reg 2 bits 4:2 = 1 -> 0x80000) for wave >= 384, and a
+# wave < 384 that must ignore it (mut_hdr_tblhdr).  Wave 386's header sits at
+# 0x80000 + 2*12 (written with the other headers above).
+L = []
+W(L, 1, 0x02, 1 << 2)
+slotw(L, 1, 8, 1, ((0x155 & 0x7F) << 1) | 1)
+slotw(L, 1, 8, 0, 386 & 0xFF)
+slotw(L, 1, 8, 2, (0 << 4) | ((0x155 >> 7) & 7))
+slotw(L, 1, 8, 3, 1)
+slotw(L, 1, 8, 4, 0x80 | 0x20 | 2)
+slotw(L, 1, 9, 1, ((0x100 & 0x7F) << 1) | 1)
+slotw(L, 1, 9, 0, 300 & 0xFF)
+slotw(L, 1, 9, 2, (0 << 4) | ((0x100 >> 7) & 7))
+slotw(L, 1, 9, 3, 1)
+slotw(L, 1, 9, 4, 0x80 | 0x20 | 13)
+scripts['sc_tblhdr.txt'] = (L, 600)
 
 for name, (lines, frames) in scripts.items():
     lines = [t[2] for t in sorted(lines, key=lambda t: (t[0], t[1]))]

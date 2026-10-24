@@ -243,8 +243,22 @@ class Engine:
 
         self.frame += 1
         sat = lambda v: max(-32768, min(32767, v))
-        return sat(left), sat(right)
+        # reg 0xF9 PCM mix level, applied to the raw sum before saturation as the RTL
+        # does (ymf278_pcm_alu.sv pcm_mix_gain: integer x3 and arithmetic shifts).
+        # openMSX YMF278.cc setMixLevel applies the same table as a float volume.
+        mix = lambda i, x: (x, (x*3) >> 2, x >> 1, (x*3) >> 3, x >> 2, (x*3) >> 4, x >> 3, 0)[i]
+        return sat(mix(self.pcm_mix_l, left)), sat(mix(self.pcm_mix_r, right))
 
+
+def apply_frame_writes(eng, writes, fr):
+    """The writes in force for frame fr.  Reg F9h is the exception: the RTL TB writes
+    frame fr+1's registers during frame fr, and the engine applies the mix level to the
+    frame output at that frame's end, so an F9h write already shapes frame fr."""
+    for ad, da in writes.get(fr, []):
+        eng.write(ad, da)
+    for ad, da in writes.get(fr + 1, []):
+        if ad == 0xF9:
+            eng.write(ad, da)
 
 def main():
     script_f, mem_f, frames, out_f = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
@@ -259,8 +273,7 @@ def main():
         writes.setdefault(int(fr), []).append((int(ad, 16), int(da, 16)))
     with open(out_f, 'w') as out:
         for fr in range(frames):
-            for ad, da in writes.get(fr, []):
-                eng.write(ad, da)
+            apply_frame_writes(eng, writes, fr)
             l, r = eng.gen_frame()
             out.write(f"{l} {r}\n")
     print(f"golden: {frames} frames -> {out_f}")

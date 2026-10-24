@@ -56,7 +56,7 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 | S-DAMP | DAMP: env < DL(4)이면 rate 48, 아니면 63 | A:283-294 | YMF278.cc:262-298 | `sc_eg_damp`; `mut_eg_nodamp` |
 | S-PRVB | pseudo-reverb: env ≥ DL(6)이면 rate 20 | A:283-294 | YMF278.cc:262-298 | `sc_eg_damp`; `mut_eg_noprvb` |
 | S-GAIN | env(+AM)와 TL은 **따로** 0x280에서 무음 클립, 두 단 곱 | E:1100-1150 | YMF278.cc:527-537, 483-489 | 전 시나리오 |
-| S-TL | TL 즉시 로드(필드 3 bit0) 또는 보간: 9샘플 주기, 커지는 쪽 27샘플/스텝, 작아지는 쪽 13.5샘플/스텝 | E:1619-1658 | YMF278.cc:335-349, 637-646 | `sc_tlramp`; `mut_eg_tlramp2` |
+| S-TL | TL 즉시 로드(필드 3 bit0) 또는 보간: TL 값이 커지는(소리가 작아지는) 쪽은 27샘플에 1스텝, 작아지는 쪽은 13.5샘플에 1스텝(9샘플 주기 3위상 중 1/2) | E:1619-1658 | YMF278.cc:335-349, 637-646 | `sc_tlramp`; `mut_eg_tlramp2` |
 | S-LFO | 슬롯별 lfo_cnt, 속도 표; 필드 4 bit5=1이면 LFO 정지·카운터 0; AM은 진행 전 값 | E:552-554, 1093-1096; A:54-105 | YMF278.cc:300-329, 351-353, 658-665 | `sc_lfo`, `sc_lfo_reset`; `mut_lfo_speed`, `mut_lfo_noreset` |
 | S-PAN | 팬 표 0..15, 필드 4 bit4(DO1 출력) = 무음(pan 8) | E:1152-1172, 1562; A:179-210 | YMF278.cc:539-547, 648-656 | `sc_pan_mix`, `sc_tri12_loop`; `mut_pan_right7`, `mut_pan_do1` |
 | S-MIX | reg F9h PCM 믹스 레벨 {1, 3/4, 1/2, 3/8, 1/4, 3/16, 1/8, 0}, 포화 전 합에 적용. F8h는 FM 믹스(T의 fm_mix_gain) | E:720-735, 1398-1407; A:113-126; T:427-445 | YMF278.cc:491-504; YMF278B.cc:164-168 | `sc_pan_mix`; `mut_mix_f9`. FM 쪽은 **미검증** |

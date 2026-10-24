@@ -94,8 +94,7 @@ def main():
         writes.setdefault(int(cols[0]), []).append((int(cols[1], 16), int(cols[2], 16)))
     with open(out_f, 'w') as out:
         for fr in range(frames):
-            for ad, da in writes.get(fr, []):
-                eng.write(ad, da)
+            _mod.apply_frame_writes(eng, writes, fr)
             l, r = eng.gen_frame()
             out.write(f"{l} {r}\n")
     print(f"golden(openMSX case0): {frames} frames -> {out_f}")
