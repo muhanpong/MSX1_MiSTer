@@ -37,8 +37,8 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
 - **라이선스 / Licence** — V9968 RTL 파일 헤더는 HRA!의 3조항 조건(**허가 없는 상업적 이용 금지** 포함), Geo3D는 MIT
   *The V9968 RTL file headers carry HRA!'s 3-clause terms (including **no commercial use without written permission**); Geo3D is MIT.*
 
-**알려진 문제 / Known issues** — 업로드 한도 32MB(V9968 VRAM bank와 겹침). MSX1 기계의 색은 MSX2 표준 팔레트. R800 VDP 대기를 3µs 미만으로 낮추면 SUPER CAT·PRISM FLIGHT 화면이 깨짐(원인 미확인, 기본 8.66µs에서는 정상)
-*R800 VDP wait below 3 µs corrupts SUPER CAT / PRISM FLIGHT (cause unknown; fine at the 8.66 µs default). The upload limit is 32MB (it would overlap the V9968's VRAM bank). MSX1 machines show the MSX2 standard palette.*
+**알려진 문제 / Known issues** — 업로드 한도 32MB(V9968 VRAM bank와 겹침). MSX1 기계의 색은 MSX2 표준 팔레트. R800 VDP 대기를 낮추면 SUPER CAT·PRISM FLIGHT 화면이 깨지던 문제는 20261025b에서 수정(명령 실행 중 CPU 쓰기가 두 번 실행되던 V9968 결함, a85c175; 실기 확인 전)
+*SUPER CAT / PRISM FLIGHT corruption at a short R800 VDP wait is fixed in 20261025b (the V9968 ran a CPU write twice while a command was running, a85c175; not yet confirmed on the board). The upload limit is 32MB (it would overlap the V9968's VRAM bank). MSX1 machines show the MSX2 standard palette.*
 
 ---
 
