@@ -297,7 +297,13 @@ module vdp_cpu_interface (
 			ff_bus_valid	<= 1'b0;
 			ff_bus_ready	<= 1'b1;
 		end
-		else if( bus_valid && ff_bus_ready ) begin
+		else if( bus_valid && ff_bus_ready && !ff_busy ) begin
+			//	MSX1 core fix (2026-10-25): take a request only when bus_ready (= ff_bus_ready &
+			//	~ff_busy) says so.  Latching on ff_bus_ready alone took a request the host still
+			//	held while busy; on the edge busy fell it ran (w_write) unseen by the host, which
+			//	then saw bus_ready and had the same write taken again: one VRAM byte written twice
+			//	(address +2), or a 99h byte counted twice.  Needs a command to stretch ff_busy
+			//	(LRMMWR on the board; sim/v9968_vram +mix).
 			ff_bus_ioreq	<= bus_ioreq;
 			ff_bus_write	<= bus_write;
 			ff_bus_wdata	<= bus_wdata;

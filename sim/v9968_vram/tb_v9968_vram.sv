@@ -52,6 +52,7 @@ module tb #(parameter int RELEASE_PH = 0);
         void'($value$plusargs("pollpad=%d", pollpad));
         void'($value$plusargs("ie1=%d", ie1)); void'($value$plusargs("disp=%d", disp)); void'($value$plusargs("ie1off=%d", ie1off));
         void'($value$plusargs("ie1line=%h", ie1line)); void'($value$plusargs("ie1r9=%h", ie1r9)); void'($value$plusargs("ie1dly=%d", ie1dly));
+        void'($value$plusargs("mix=%d", mix)); void'($value$plusargs("mixrep=%d", mixrep)); void'($value$plusargs("iogap=%d", iogap));
         void'($value$plusargs("ovs=%d", ovs)); void'($value$plusargs("ovsln=%d", ovsln)); void'($value$plusargs("ovscmd=%d", ovscmd));   // +ovs=N trials of Shaolin's overscan + display-off + HMMV/HMMM; +ovsln=0 control (no LN=0); +ovscmd=HMMMs per trial   // +ie1line=D2 +ie1r9=80: ASO's second split (line 210, 212 lines); +ie1dly=clk_vdp from int_n to the S#1 read
         void'($value$plusargs("rpl=%s", rplf)); void'($value$plusargs("rplscale=%d", rplscale));   // +rplscale=P: event times x P/100 (R800 runs ~1.8x openMSX between I/O)   // +rpl=<file>: replay an oracle window (tools: aso_win.txt), paced, reads not forced   // +ie1=N: ASO 224's first in-game wait, line IRQ taken as int_n (no polling); +disp=1 control: display on   // +aso: extra clk_vdp per S#1 poll (moves the read phase against the line match)        // >0: ASO 224's per-frame line-IRQ loop for that many frames
         void'($value$plusargs("lr_sx=%d", lr_sx)); void'($value$plusargs("lr_sy=%d", lr_sy));      // +lr_*: one LRMM with these
@@ -106,6 +107,7 @@ module tb #(parameter int RELEASE_PH = 0);
     logic [2:0] bus_address = 0; logic bus_ioreq = 0, bus_write = 0, bus_valid = 0;
     logic [7:0] bus_wdata = 0; wire bus_ready, bus_rdata_en; wire [7:0] bus_rdata;
     string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1, lr_sx = -1, lr_sy = 0, lr_vx = 0, lr_vy = 0, aso = 0, pollpad = 0, ie1 = 0, disp = 0, ie1off = 0, ie1line = 'h68, ie1r9 = 'h00, ie1dly = 400, ovs = 0, ovsln = 1, ovscmd = 64;
+    int mix = 0, mixrep = 1, iogap = 40;   // +mix=N: N bytes to 98h (10000h) while the command runs; +iogap: clk_vdp after each OUT
     string rplf = ""; int rplscale = 100;
     int scan = 0, sp3 = 0, demo = 0, r1 = 0, r20 = 8'h1F, r21 = 8'h3A, r25 = 3, r8 = 8;
     wire d_hs, d_en; wire [7:0] d_r, d_g, d_b;
@@ -292,7 +294,7 @@ module tb #(parameter int RELEASE_PH = 0);
         end
         repeat (4) @(posedge clk_vdp);
         @(negedge clk_vdp); bus_ioreq = 0;
-        repeat (40) @(posedge clk_vdp);         // a turbo-R800 OUT pair is ~0.5 us apart; 40 clk_vdp = 0.47 us
+        repeat (iogap) @(posedge clk_vdp);      // a turbo-R800 OUT pair is ~0.5 us apart; 40 clk_vdp = 0.47 us (+iogap)
     endtask
     task automatic wreg(input int r, input logic [7:0] v);
         logic [7:0] q; io(1, 3'd1, v, q); io(1, 3'd1, 8'h80 | r[7:0], q);
@@ -664,6 +666,45 @@ module tb #(parameter int RELEASE_PH = 0);
             noans0 = noans; nrd0 = nrd; nwr0 = nwr; t0 = $time;
             wreg(46, cmd == 3 ? 8'h30 : cmd == 4 ? 8'hD0 : 8'h90);                    // LRMM / HMMM / LMMM, IMP
             wreg(15, 8'h02);
+            //  +mix=N (LRMMWR on the board): N pattern bytes to 98h at 10000h while the command
+            //  runs, mixrep times, each block read back after the command and compared
+            if (mix > 0) begin
+                automatic int bad = 0, ovl = 0;
+                for (int r = 0; r < mixrep; r++) begin
+                    wreg(14, 8'h04); io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h40, q);
+                    for (int i = 0; i < mix; i++) io(1, 3'd0, 8'((i * 37 + r * 11 + 5) ^ (i >> 3)), q);
+                    io(0, 3'd1, 8'h00, st); if (st[0]) ovl++;
+                    //  read back now if the command is still running (read path under load), check after
+                    wreg(15, 8'h00);
+                    wreg(14, 8'h04); io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h00, q);
+                    for (int i = 0; i < mix; i++) begin
+                        io(0, 3'd0, 8'h00, q);
+                        if (q !== 8'((i * 37 + r * 11 + 5) ^ (i >> 3))) begin
+                            if (bad < 12) $display("MIXBAD rep %0d i %0d exp %02h got %02h (exp i-1 %02h, i+1 %02h, rep-1 %02h)", r, i,
+                                8'((i * 37 + r * 11 + 5) ^ (i >> 3)), q, 8'(((i-1) * 37 + r * 11 + 5) ^ ((i-1) >> 3)),
+                                8'(((i+1) * 37 + r * 11 + 5) ^ ((i+1) >> 3)), 8'((i * 37 + (r-1) * 11 + 5) ^ (i >> 3)));
+                            bad++;
+                        end
+                    end
+                    wreg(15, 8'h02);
+                end
+                $display("MIX %0d bytes x %0d during the command: readback errors %0d, overlap %0d/%0d, iogap %0d",
+                         mix, mixrep, bad, ovl, mixrep, iogap);
+                //  the last block again once the command is done: write errors stay, read errors go
+                do begin repeat (256) @(posedge clk_vdp); io(0, 3'd1, 8'h00, st); end while (st[0]);
+                wreg(15, 8'h00); wreg(14, 8'h04); io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h00, q);
+                begin automatic int bad2 = 0;
+                    for (int i = 0; i < mix; i++) begin
+                        io(0, 3'd0, 8'h00, q);
+                        if (q !== 8'((i * 37 + (mixrep-1) * 11 + 5) ^ (i >> 3))) begin
+                            if (bad2 < 12) $display("MIXBAD2 i %0d exp %02h got %02h", i, 8'((i * 37 + (mixrep-1) * 11 + 5) ^ (i >> 3)), q);
+                            bad2++;
+                        end
+                    end
+                    $display("MIX after the command, last block re-read: errors %0d", bad2);
+                end
+                wreg(15, 8'h02);
+            end
             w = 0;
             do begin repeat (256) @(posedge clk_vdp); w += 256; io(0, 3'd1, 8'h00, st); end while (st[0] && w < 8600000);
             $display("CMD %s hs=%0d demo=%0d offat=%0d r1=%02h r20=%02h r21=%02h r25=%02h r8=%02h: %s after %0.3f ms = %0.1f lines; port reads %0d (not answered %0d), writes %0d; link dropped %0d off-grid %0d",
