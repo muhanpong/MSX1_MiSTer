@@ -9,8 +9,8 @@
 // Same module ports as ymf278_pcm_engine2, and the same CPU-visible semantics
 // (SPEC.md sections B-C; cpuvis flags D3, D4, D7 are kept on purpose until the
 // DESIGN decision 1 is taken), with three differences:
-//   * the slot registers live in ONE memory (RAM-R, 48 words x 5 bytes, byte
-//     enables: M10K), not in 30 MLABs;
+//   * the slot registers live in ONE memory (RAM-R, 240 x 8, simple dual-port:
+//     one M10K), not in 30 MLABs;
 //   * a reg 6 write keeps cpu_mem_busy up until the write has left the ch4
 //     bridge (PLAN goal 5), not only until it was issued -- the top then needs
 //     no 1024-clk MEM_WRITE_DELAY to keep an R800 OTIR from outrunning SDRAM;
@@ -126,46 +126,50 @@ wire [3:0] wr_field    = wr_sf[8:5];
 wire [4:0] wr_snum     = wr_sf[4:0];
 wire       is_slot_reg = (reg_addr >= 8'h08) && (reg_addr <= 8'hF7);
 wire       wr_slot_reg = reg_wr && is_slot_reg;
+wire [7:0] reg_word    = reg_addr - 8'h08;     // RAM-R word of a slot register
 
 // Fields are stored as written.  (engine2 stores field 4 with bit 5 inverted, so its
 // all-zero reset image reads back 20h; openMSX's reset writes 0 to every register,
 // reads back 0 and leaves the LFO running: cpuvis D10.)
 
 // ═══════════════════════════════════════════════════════════════════════════
-// RAM-R: slot s, fields 0-4 at word 2s, fields 5-9 at word 2s+1, byte lane =
-// field mod 5.  Port B: every write (reset sweep, header backfill, CPU) and,
-// when no write needs it, the CPU readback.  Port A: the engine (P2: the wave
-// number for a header fetch; P3: the slot load).
+// RAM-R: one byte per slot register, word = register - 08h (field f of slot s
+// at 24f + s).  One write port, one read port: simple dual-port, one M10K.  (A
+// 48 x 40 word with byte enables took 2 M10K as simple dual-port and 4 as true
+// dual-port: Quartus 17.0 fit of the memory alone, 2026-10-25.)  Write port:
+// the reset sweep, the header backfill, the CPU.  Read port: the engine (P2:
+// the wave number for a header fetch; P3: the slot load) and, in every other
+// cycle, the CPU readback.
 // ═══════════════════════════════════════════════════════════════════════════
-logic        rb_we;
-logic [4:0]  rb_be;
-logic [5:0]  rb_addr;
-logic [39:0] rb_wd, rb_rd;
-logic [5:0]  ra_addr;
-logic [39:0] ra_rd;
-pcm_regram u_regram (.clk, .we_b(rb_we), .be_b(rb_be), .addr_b(rb_addr), .wd_b(rb_wd), .rd_b(rb_rd),
-                     .addr_a(ra_addr), .rd_a(ra_rd));
+logic       rw_we;
+logic [7:0] rw_addr, rw_d;
+logic [7:0] rr_addr, rr_q;
+pcm_regram u_regram (.clk, .we(rw_we), .waddr(rw_addr), .wd(rw_d), .raddr(rr_addr), .rd(rr_q));
 
-// Reset: the memory has no reset, so zeros are swept through all 48 words while
-// rst_n is low.  LOAD-BEARING: rst_n must stay low >= 48 clk (engine2: 24).  The
-// MSX reset (rst_hold, 252 clk) and upload_hold are longer; the harness `reset`
-// gate runs the cpuvis warm reset at 48 (pass) and 40 (must fail).
+// Reset: the memory has no reset, so zeros are swept through it while rst_n is
+// low, counted from the fall of rst_n: fields 5-9 first (words 120-239), then
+// fields 0-4.  LOAD-BEARING: rst_n must stay low >= 240 clk (engine2: 24).  The
+// MSX reset (MSX1.sv rst_hold, 63 clk21m = 378 clk at 128.86 MHz) and
+// upload_hold are longer.  A shorter reset misses the last words, field 4 of the
+// top slots, which the reset header backfill does not rewrite: the harness
+// `reset` gate runs the cpuvis warm reset at 240 (pass) and 239 (must fail).
 wire        clr_run = ~rst_n;
-logic [5:0] clr_idx = '0;
-always_ff @(posedge clk) clr_idx <= (clr_idx == 6'd47) ? 6'd0 : clr_idx + 6'd1;
+logic [7:0] clr_cnt = '0;
+always_ff @(posedge clk) clr_cnt <= rst_n ? 8'd0 : (clr_cnt == 8'd239) ? 8'd239 : clr_cnt + 8'd1;
+wire  [7:0] clr_word = (clr_cnt < 8'd120) ? clr_cnt + 8'd120 : clr_cnt - 8'd120;
 
-// header backfill request (from the service FSM below)
+// header backfill (from the service FSM below): one field per cycle
 logic        bf_now;
-logic [4:0]  bf_slot;
-logic [4:0]  bf_be;
-logic [39:0] bf_wd;
+logic [7:0]  bf_word;
+logic [7:0]  bf_d;
 
 // CPU slot-register write, queued one entry deep: it waits while the sweep or a
-// backfill holds port B, and it always goes AFTER a backfill of the same cycle,
-// so a CPU write wins over the header as openMSX's synchronous backfill does.
+// backfill write holds the write port, and it always goes AFTER a backfill write
+// of the same field, so a CPU write wins over the header as openMSX's synchronous
+// backfill does.  CPU writes come tens of clk apart; a backfill holds the port
+// for at most 5.
 logic        wq_v;
-logic [5:0]  wq_word;
-logic [2:0]  wq_lane;
+logic [7:0]  wq_word;
 logic [7:0]  wq_d;
 wire         wq_go = wq_v && !clr_run && !bf_now;
 always_ff @(posedge clk or negedge rst_n) begin
@@ -174,53 +178,58 @@ always_ff @(posedge clk or negedge rst_n) begin
         if (wq_go) wq_v <= 1'b0;
         if (wr_slot_reg) begin
             wq_v    <= 1'b1;
-            wq_word <= {wr_snum, wr_field >= 4'd5};
-            wq_lane <= 3'((wr_field >= 4'd5) ? wr_field - 4'd5 : wr_field);
+            wq_word <= reg_word;
             wq_d    <= reg_data;
         end
     end
 end
 `ifndef SYNTHESIS
+//  a lost register write: the cpuvis and memwr gates FAIL on this message
 always @(posedge clk) if (rst_n && wr_slot_reg && wq_v && !wq_go)
-    $display("ymf278_pcm_engine3: CPU write queue overflow (writes closer than 2 clk)");
+    $error("ymf278_pcm_engine3: CPU write queue overflow (a slot-register write is lost)");
 `endif
 
-// readback pipeline: address (q1), port B read (q2), byte select (reg_rd_data)
-logic [5:0] rd_word_q1;
-logic [2:0] rd_lane_q1, rd_lane_q2;
-logic       rd_ns_q1, rd_ns_q2, rd_upd_q2;
+always_comb begin
+    rw_we   = 1'b0;
+    rw_addr = wq_word;
+    rw_d    = wq_d;
+    if (clr_run) begin
+        rw_we = 1'b1; rw_addr = clr_word; rw_d = 8'h00;
+    end else if (bf_now) begin
+        rw_we = 1'b1; rw_addr = bf_word; rw_d = bf_d;
+    end else if (wq_v)
+        rw_we = 1'b1;
+end
+
+// Readback pipeline: address (q1), read port (q2), byte (reg_rd_data).  The read
+// port is the engine's in the cycles it reads (eng_rd); the readback skips those
+// and is taken again in the next cycle (reg_addr stays put for the whole I/O
+// access).  A CPU write is passed straight to reg_rd_data in the next clk (the
+// write goes to the latched register, the one being read): it reads back as early
+// as on engine2, not 2 clk later through the write queue and the memory.
+logic       eng_rd;
+logic [7:0] eng_addr;
+logic [7:0] rd_word_q1;
+logic       rd_ns_q1, rd_ns_q2, rd_upd_q2, rd_byp;
+logic [7:0] rd_bypd;
 logic [3:0] rd_nsidx_q1, rd_nsidx_q2;
 wire        ns_hit = (reg_addr <= 8'h07) || (reg_addr >= 8'hF8);
 wire [3:0]  ns_idx = {reg_addr[7], reg_addr[2:0]};
-
-always_comb begin
-    rb_we   = 1'b0;
-    rb_be   = '0;
-    rb_addr = rd_word_q1;
-    rb_wd   = '0;
-    if (clr_run) begin
-        rb_we = 1'b1; rb_be = '1; rb_addr = clr_idx;
-    end else if (bf_now) begin
-        rb_we = 1'b1; rb_be = bf_be; rb_addr = {bf_slot, 1'b1}; rb_wd = bf_wd;
-    end else if (wq_v) begin
-        rb_we = 1'b1; rb_addr = wq_word;
-        rb_be[wq_lane] = 1'b1;
-        rb_wd = {5{wq_d}};
-    end
-end
+assign rr_addr = eng_rd ? eng_addr : rd_word_q1;
 
 logic [7:0] ns_reg [0:15];    // 00h-07h -> 0..7, F8h-FFh -> 8..15
 always_ff @(posedge clk) begin
-    rd_word_q1  <= {wr_snum, wr_field >= 4'd5};
-    rd_lane_q1  <= 3'((wr_field >= 4'd5) ? wr_field - 4'd5 : wr_field);
+    rd_word_q1  <= reg_word;
     rd_ns_q1    <= ns_hit;
     rd_nsidx_q1 <= ns_idx;
-    rd_lane_q2  <= rd_lane_q1;
     rd_ns_q2    <= rd_ns_q1;
     rd_nsidx_q2 <= rd_nsidx_q1;
-    rd_upd_q2   <= !rb_we;            // port B read this cycle (not a write)
-    if (rd_ns_q2)       reg_rd_data <= ns_reg[rd_nsidx_q2];
-    else if (rd_upd_q2) reg_rd_data <= rb_rd[8*rd_lane_q2 +: 8];
+    rd_upd_q2   <= !eng_rd && !(rw_we && rw_addr == rd_word_q1);
+    rd_byp      <= wr_slot_reg;
+    rd_bypd     <= reg_data;
+    if (rd_byp)         reg_rd_data <= rd_bypd;
+    else if (rd_ns_q2)  reg_rd_data <= ns_reg[rd_nsidx_q2];
+    else if (rd_upd_q2) reg_rd_data <= rr_q;
 end
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -259,6 +268,7 @@ logic        hf_busy;         // the service FSM is fetching hf_slot's header
 logic [4:0]  hf_slot;
 logic        hf_again;        // hf_slot's wave number was written during its fetch
 wire         wr_wave = wr_slot_reg && (wr_field == 4'd0);
+logic        bf_done;         // the last backfill cycle: the fetch is over
 
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -271,13 +281,14 @@ always_ff @(posedge clk or negedge rst_n) begin
         hf_again   <= 1'b0;
         for (int i = 0; i < 24; i++) bf_dirty[i] <= '0;
     end else begin
-        if (bf_now) begin
+        if (bf_done) begin
             if (!hf_again) hf_pending[hf_slot] <= 1'b0;
             hf_again <= 1'b0;
         end
         if (wr_wave) begin
             hf_pending[wr_snum] <= 1'b1;
-            if (hf_busy && wr_snum == hf_slot) hf_again <= 1'b1;
+            //  (in the bf_done cycle the pending bit above stays set: no refetch flag)
+            if (hf_busy && wr_snum == hf_slot && !bf_done) hf_again <= 1'b1;
         end
         if (wr_slot_reg) begin
             case (wr_field)
@@ -346,10 +357,11 @@ assign cpu_mem_busy    = cpu_rd_pend | cpu_wr_pend | cpu_rd_out | cpu_wr_out;
 // ═══════════════════════════════════════════════════════════════════════════
 typedef enum logic [3:0] {
     SV_IDLE, SV_RD_WAIT, SV_WR_SETTLE, SV_WR_COMMIT,
-    SV_HDR_WAVE, SV_HDR_WREAD, SV_HDR_BASE, SV_HDR_ISSUE, SV_HDR_WAIT, SV_HDR_STORE
+    SV_HDR_WAVE, SV_HDR_WREAD, SV_HDR_WREAD1, SV_HDR_BASE, SV_HDR_ISSUE, SV_HDR_WAIT,
+    SV_HDR_STORE
 } sv_state_t;
 sv_state_t   sv_state;
-logic [1:0]  sv_cnt;
+logic [2:0]  sv_cnt;                // write settle count; backfill field 0..4
 logic        hf_resume;             // a header fetch is parked behind a CPU op
 logic [2:0]  hf_widx;               // header word 0..6 (7 words cover 12 bytes at any alignment)
 logic [7:0]  hf_buf [0:13];
@@ -369,8 +381,10 @@ always_comb begin
         if (hf_pending[i]) begin hf_found = 1'b1; hf_pick = 5'(i); end
 end
 
-assign ra_addr = {hf_slot, 1'b0};    // fields 0/1 of the slot being fetched
-assign hf_busy = hf_resume || (sv_state >= SV_HDR_WAVE);
+//  the engine's reads of RAM-R: fields 0 and 1 of the slot being fetched
+assign eng_rd   = (sv_state == SV_HDR_WAVE) || (sv_state == SV_HDR_WREAD);
+assign eng_addr = (sv_state == SV_HDR_WAVE) ? {3'd0, hf_slot} : 8'd24 + {3'd0, hf_slot};
+assign hf_busy  = hf_resume || (sv_state >= SV_HDR_WAVE);
 
 wire [21:0] hf_base_c = (hf_wave < 9'd384 || wavetblhdr == 3'd0)
     ? 22'({13'd0, hf_wave} * 22'd12)
@@ -393,14 +407,12 @@ always_ff @(posedge clk or negedge rst_n) begin
         cpu_rd_issue <= 1'b0;
         cpu_wr_issue <= 1'b0;
         cpu_wr_done  <= 1'b0;
-        bf_now       <= 1'b0;
     end else begin
         mem_rd_en    <= 1'b0;
         mem_wr_en    <= 1'b0;
         cpu_rd_issue <= 1'b0;
         cpu_wr_issue <= 1'b0;
         cpu_wr_done  <= 1'b0;
-        bf_now       <= 1'b0;
         case (sv_state)
             SV_IDLE:
                 if (cpu_op) begin
@@ -422,9 +434,8 @@ always_ff @(posedge clk or negedge rst_n) begin
                     hf_resume <= 1'b0;
                     sv_state  <= SV_HDR_ISSUE;
                 //  not while a CPU slot-register write is still queued (the wave
-                //  number read below must see it), and not in the backfill cycle
-                //  (hf_pending of the slot just stored clears at its end)
-                end else if (hf_found && !wq_v && !bf_now) begin
+                //  number read below must see it)
+                end else if (hf_found && !wq_v) begin
                     hf_slot  <= hf_pick;
                     hf_widx  <= '0;
                     sv_state <= SV_HDR_WAVE;
@@ -435,18 +446,22 @@ always_ff @(posedge clk or negedge rst_n) begin
             //  has left IDLE (a memory that never raises mem_busy for a write, the
             //  benches' model, is done after those 3 clk).
             SV_WR_SETTLE: begin
-                sv_cnt <= sv_cnt + 2'd1;
-                if (sv_cnt == 2'd2) sv_state <= SV_WR_COMMIT;
+                sv_cnt <= sv_cnt + 3'd1;
+                if (sv_cnt == 3'd2) sv_state <= SV_WR_COMMIT;
             end
             SV_WR_COMMIT:
                 if (!mem_busy) begin
                     cpu_wr_done <= 1'b1;
                     sv_state    <= SV_IDLE;
                 end
-            SV_HDR_WAVE:  sv_state <= SV_HDR_WREAD;      // port A address -> read
-            SV_HDR_WREAD: begin
-                hf_wave  <= {ra_rd[8], ra_rd[7:0]};       // field 1 bit 0, field 0
-                sv_state <= SV_HDR_BASE;
+            SV_HDR_WAVE:  sv_state <= SV_HDR_WREAD;      // field 0 address -> read port
+            SV_HDR_WREAD: begin                           // field 1 address; field 0 out
+                hf_wave[7:0] <= rr_q;
+                sv_state     <= SV_HDR_WREAD1;
+            end
+            SV_HDR_WREAD1: begin                          // field 1 out: wave bit 8
+                hf_wave[8] <= rr_q[0];
+                sv_state   <= SV_HDR_BASE;
             end
             SV_HDR_BASE: begin
                 hf_base  <= hf_base_c;
@@ -467,27 +482,30 @@ always_ff @(posedge clk or negedge rst_n) begin
                     off = {1'b0, hf_word_addr} - {1'b0, hf_base};
                     if (off <= 23'd13)         hf_buf[off[3:0]]        <= mem_rd_data16[7:0];
                     if (off + 23'd1 <= 23'd13) hf_buf[off[3:0] + 4'd1] <= mem_rd_data16[15:8];
-                    if (hf_widx == 3'd6) sv_state <= SV_HDR_STORE;
-                    else begin
+                    if (hf_widx == 3'd6) begin
+                        sv_cnt   <= '0;
+                        sv_state <= SV_HDR_STORE;
+                    end else begin
                         hf_widx  <= hf_widx + 3'd1;
                         sv_state <= SV_HDR_ISSUE;
                     end
                 end
-            SV_HDR_STORE: begin
-                bf_now   <= 1'b1;
-                sv_state <= SV_IDLE;
+            SV_HDR_STORE: begin                           // fields 5..9, one per clk
+                sv_cnt <= sv_cnt + 3'd1;
+                if (sv_cnt == 3'd4) sv_state <= SV_IDLE;
             end
             default: sv_state <= SV_IDLE;
         endcase
     end
 end
 
-// backfill: header bytes 7..11 -> fields 5..9, except the ones the CPU wrote
-always_comb begin
-    bf_slot = hf_slot;
-    bf_be   = ~bf_dirty[hf_slot];
-    bf_wd   = {hf_buf[11], hf_buf[10], hf_buf[9], hf_buf[8], hf_buf[7]};
-end
+// backfill: header bytes 7..11 -> fields 5..9, except the ones the CPU wrote (the
+// dirty bit is read in the field's own cycle, so a write that lands during the
+// backfill is kept too)
+assign bf_now  = (sv_state == SV_HDR_STORE) && !bf_dirty[hf_slot][sv_cnt];
+assign bf_word = 8'd120 + 8'd24 * {5'd0, sv_cnt} + {3'd0, hf_slot};
+assign bf_d    = hf_buf[4'd7 + {1'b0, sv_cnt}];
+assign bf_done = (sv_state == SV_HDR_STORE) && (sv_cnt == 3'd4);
 
 // The header itself (bits / start / loop / end), for the P3 datapath.
 typedef struct packed {
@@ -497,7 +515,7 @@ typedef struct packed {
     logic [1:0]  bits;
 } slot_header_t;
 slot_header_t hdr_ram [0:23];
-always_ff @(posedge clk) if (bf_now)
+always_ff @(posedge clk) if (bf_done)
     hdr_ram[hf_slot] <= '{startAddr: {hf_buf[0][5:0], hf_buf[1], hf_buf[2]},
                           loopAddr:  {hf_buf[3], hf_buf[4]},
                           endAddr:   {hf_buf[5], hf_buf[6]},
@@ -540,26 +558,21 @@ assign dbg_stage_b_valid       = 1'b0;
 
 endmodule
 
-// RAM-R: 48 x 40, byte enables on port B (read/write), port A read only.  Both
-// reads registered.  Written in the shape Quartus maps to one M10K; whether it did
-// is the map report's RAM summary, never this comment (SKILL rule 3).
+// RAM-R: 240 x 8, one write port, one registered read port.  Written in the
+// shape Quartus maps to one M10K (simple dual-port); whether a build did is its
+// fit report's RAM summary, never this comment (SKILL rule 3).
 module pcm_regram (
-    input  wire         clk,
-    input  wire         we_b,
-    input  wire  [4:0]  be_b,
-    input  wire  [5:0]  addr_b,
-    input  wire  [39:0] wd_b,
-    output logic [39:0] rd_b,
-    input  wire  [5:0]  addr_a,
-    output logic [39:0] rd_a
+    input  wire        clk,
+    input  wire        we,
+    input  wire  [7:0] waddr,
+    input  wire  [7:0] wd,
+    input  wire  [7:0] raddr,
+    output logic [7:0] rd
 );
-    logic [4:0][7:0] m [0:47];
+    logic [7:0] m [0:239];
     always_ff @(posedge clk) begin
-        if (we_b)
-            for (int i = 0; i < 5; i++)
-                if (be_b[i]) m[addr_b][i] <= wd_b[8*i +: 8];
-        rd_b <= m[addr_b];
+        if (we) m[waddr] <= wd;
+        rd <= m[raddr];
     end
-    always_ff @(posedge clk) rd_a <= m[addr_a];
 endmodule
 `default_nettype wire

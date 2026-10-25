@@ -39,6 +39,12 @@ LOAD_DELAY = 10000
 # reg 6 write BUSY/WAIT floor in clk_sdram cycles: ymf278b_regs MEM_WRITE_DELAY as the top
 # sets it (1024 with engine2, 107 = openMSX's 28 master clocks with engine3); run_cpuvis.sh
 RTL_MEM_WRITE_DELAY = int(os.environ.get('CPUVIS_MEMW', '1024'))
+# the bench's SDRAM write latency (tb_cpuvis +wlat, run_cpuvis.sh WLAT)
+RTL_WLAT = int(os.environ.get('CPUVIS_WLAT', '0'))
+# engines whose reg 6 write keeps BUSY up until the write has left the memory port (SPEC
+# H12): with a write latency the BUSY of a reg 6 write cannot fall before it
+ENGINE_HOLDS_WRITE = {'ymf278_pcm_engine3'}
+HOLDS_WRITE = os.environ.get('CPUVIS_ENGINE', '') in ENGINE_HOLDS_WRITE
 
 DEVIATIONS = {
     'D1': "BUSY/LD delays counted in clk_sdram cycles, not master clocks (ymf278b_regs.sv:52-83)",
@@ -56,12 +62,16 @@ DEVIATIONS = {
           "(<= 1 frame) (ymf278b_regs.sv:141; ymf278_pcm_engine2.sv:1722)",
     'D9': "a warm reset clears NEW2 (openMSX keeps reg 105h) (ymf278b_top.sv:90-102)",
     'D10': "after reset the field-4 registers 68h-7Fh read 20h (engine2 stores bit 5 inverted); "
-           "openMSX's reset writes 0 to them (YMF278.cc reset, case 4) (ymf278_pcm_engine2.sv:1454-1456)",
-    'D11': "after reset fields 5-9 read 0; openMSX's reset ends with wave number 0 on every slot, "
-           "which loads wave 0's header into them (YMF278.cc reset -> writeRegDirect case 0)",
-    'D12': "a wave number written again within 64 clk of the previous one on the same slot keeps "
+           "openMSX's reset implementation writes 0 to them (YMF278.cc reset, case 4; no hardware "
+           "note either way) (ymf278_pcm_engine2.sv:1454-1456)",
+    'D11': "after reset fields 5-9 read 0; openMSX's reset implementation ends with wave number 0 "
+           "on every slot, which loads wave 0's header into them (YMF278.cc reset -> writeRegDirect "
+           "case 0; no hardware note either way)",
+    'D12': "a wave number written again within 64 clk of the previous one on the same slot may keep "
            "the previous number's header in fields 5-9 (engine2 fetches the number it saw first and "
-           "clears the request when it stores; characterized only at the op script's 20-clk spacing) "
+           "clears the request when it stores).  Measured 2026-10-25 (AGAIN_GAP x AGAIN_PRE sweep): "
+           "20-60 clk apart the old header at 7 of 8 frame phases, the new one at the 8th; 68+ clk "
+           "always the new one.  The model accepts either header inside 64 clk "
            "(ymf278_pcm_engine2.sv:1277-1278, 1590-1591)",
 }
 # Flags an engine does not have: run_cpuvis.sh drops them from the default list for it.
@@ -125,6 +135,8 @@ class Model:
         self.regs[0xF8] = 0x00 if 'D6' in self.dev else 0x1B
         self.mem_adr = 0
         self.wave_t = {}            # slot -> (time, header) of its last wave-number write (D12)
+        self.alt = {}               # register -> the other value a read may return (D12)
+        self.last_alt = None
         self.opl4latch = 0
         self.opl3latch = 0
         self.busy = (t, t)          # BUSY until (lo, hi): exact when lo == hi
@@ -134,8 +146,10 @@ class Model:
     def new2(self):
         return bool(self.fmreg[0x105] & 0x02)
 
-    def set_busy(self, t, master, engine=False):
+    def set_busy(self, t, master, engine=False, write=False):
         d = RTL_MEM_WRITE_DELAY if master == 'memw' else self.delay(master)
+        if write and HOLDS_WRITE:
+            d = max(d, RTL_WLAT)
         lo = t + d
         hi = t + max(d, self.cpf + 64) if (engine and 'D8' in self.dev) else lo
         self.busy = (lo, hi)
@@ -170,14 +184,19 @@ class Model:
                 base = wave * 12 if (wave < 384 or not tbl) else tbl * 0x80000 + (wave - 384) * 12
                 buf = [self.mem[(base + i) & 0x3FFFFF] for i in range(12)]
                 last = self.wave_t.get(n)
-                if 'D12' in self.dev and last is not None and t - last[0] < 64:
-                    buf = last[1]
+                keep = 'D12' in self.dev and last is not None and t - last[0] < 64
                 self.wave_t[n] = (t, buf)
                 self.regs[reg] = data
                 for i in range(7, 12):               # YMF278.cc:610-615 backfill
-                    self.regs[8 + n + (i - 2) * 24] = buf[i]
+                    r = 8 + n + (i - 2) * 24
+                    self.regs[r] = buf[i]
+                    if keep and last[1][i] != buf[i]:
+                        self.alt[r] = last[1][i]
+                    else:
+                        self.alt.pop(r, None)
                 return
             self.regs[reg] = data
+            self.alt.pop(reg, None)
             return
         if reg == 0x03:
             data &= 0x3F                             # YMF278.cc:726
@@ -197,6 +216,7 @@ class Model:
 
     # ── YMF278::readReg / peekReg (YMF278.cc:759-791) ────────────────────
     def wave_read(self, reg):
+        self.last_alt = self.alt.get(reg) if 0x08 <= reg <= 0xF7 else None
         if reg == 2:
             return (self.regs[2] & 0x1F) | 0x20
         if reg == 6:
@@ -226,7 +246,8 @@ class Model:
                         self.load = t + self.delay(LOAD_DELAY)
                     if 3 <= self.opl4latch <= 6:
                         if 'D2' in self.dev:
-                            self.set_busy(t, 'memw', engine=self.opl4latch in (5, 6))
+                            self.set_busy(t, 'memw', engine=self.opl4latch in (5, 6),
+                                          write=self.opl4latch == 6)
                             hold = True
                         else:
                             self.set_busy(t, MEM_WRITE_DELAY)
@@ -353,8 +374,11 @@ def run(hdr, ops, st, mem, dev):
             else:
                 obs.append((key + " ack", "<=4", f"{lat}", lat is not None and lat <= TOL))
         elif k == 'R':
+            m.last_alt = None
             exp = m.io_read(o['port'], t)
-            obs.append((key + " data", f"{exp:02x}", f"{o['dout']:02x}", exp == o['dout']))
+            alt = m.last_alt
+            obs.append((key + " data", f"{exp:02x}" + (f"|{alt:02x}" if alt is not None else ""),
+                        f"{o['dout']:02x}", o['dout'] in (exp, alt)))
             lat = o['tack'] - t if o['tack'] >= 0 else None
             obs.append((key + " ack", "<=4", f"{lat}", lat is not None and lat <= TOL))
         # BUSY / bit-1 fall after this access, inside (t, tnext]

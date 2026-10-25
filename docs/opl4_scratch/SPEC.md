@@ -13,10 +13,12 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 | `golden` | 슬롯 출력 샘플, 128.86 MHz(PIPE 경로), SDRAM 지연 1·20, 비트 일치(지연 0, ±1도 불허) | `sim/golden/gen_pcm_testdata.py`의 `sc_*` 21개 + `sc_songchange24`(24보이스, 지연 1만), 모델 `golden_pcm_omsx.py` |
 | `load` | 무거운 부하(24보이스 + 한 프레임 96회 쓰기)를 지연 6·10·20에서 비트 일치. **현행 엔진은 FAIL**(H4) | `sc_songchange24` |
 | `mutants` | golden이 실패할 수 있음 | `mutants/make_engine2_mutants.py` 20개 |
-| `cpuvis` | CPU 가시 동작, 접근 하나하나를 openMSX 모델과 같은 클럭에서 비교 | `sim/cpuvis/` (op 스크립트 `cpuvis_ops.py`, 모델 `cpuvis_check.py`), 뮤턴트 `mutants/make_cpuvis_mutants.py` engine2 16개 / engine3 22개. 판정한 검사 키 목록이 `sim/cpuvis/checks_baseline.txt`(1528개)와 같아야 함 |
-| `reset` | 레지스터 파일 리셋 쓸기: cpuvis warm reset을 엔진의 최소 길이(engine2 24 clk, engine3 48 clk)로 돌리면 PASS, 8 clk 짧게 돌리면 FAIL이어야 함 | `sim/cpuvis/cpuvis_ops.py` `G-RESET` 블록, `RESET_LEN` |
+| `cpuvis` | CPU 가시 동작, 접근 하나하나를 openMSX 모델과 같은 클럭에서 비교 | `sim/cpuvis/` (op 스크립트 `cpuvis_ops.py`, 모델 `cpuvis_check.py`), 뮤턴트 `mutants/make_cpuvis_mutants.py` engine2 16개 / engine3 26개. 판정한 검사 키 목록이 엔진별 기준(`sim/cpuvis/checks_baseline.txt` engine2, `checks_baseline_engine3.txt` engine3, 각 2352개)과 같아야 함. 엔진이 "CPU write queue overflow"를 내면 FAIL |
+| `reset` | 레지스터 파일 리셋 쓸기: cpuvis warm reset을 엔진의 최소 길이로 돌리면 PASS, 그보다 짧으면 FAIL이어야 함. engine2 24 clk / 16 clk, engine3 240 clk / 239 clk(정확히 1개 실패: 마지막에 쓸리는 7Fh) | `sim/cpuvis/cpuvis_ops.py` `G-RESET` 블록, `RESET_LEN` |
+| `busylat` | H12: cpuvis를 SDRAM 쓰기 지연 150·300 clk(`WLAT`)으로 돌려 트리는 PASS, engine3의 "쓰기가 포트를 떠날 때까지 BUSY"를 없앤 뮤턴트(`--busylat`)는 FAIL. 읽기 지연은 6 그대로(H13) | `run_cpuvis.sh` `WLAT`, `tb_cpuvis.sv` `+wlat`, `cpuvis_check.py` `HOLDS_WRITE` |
 | `stress` | MLAB 레지스터 파일: 슬롯 읽기 순간의 쓰기, warm reset, reset 길이 | `sim/lockstep/run_stress.sh` (자체 뮤턴트 4개 + reset_len=8) |
-| `memwr` | fullsys R800 OTIR 1024바이트 업로드 + 읽어 비교. fullsys 생성 소스(`prep.sh` 출력)를 매 실행 시험 트리에서 새로 만들고, `GEN`이 트리 밖이거나 파일 목록이 트리 밖을 읽으면 FAIL. PASS 줄에 트리 커밋(`git status --porcelain`이 비어 있지 않으면 +dirty, 추적 안 된 파일 포함), 생성 소스 해시, 엔진+regs 해시. `ENGINE`/`REGS` 파일이 트리 밖이면 0 errors여도 FAIL(대조군은 오류 수를 그대로 보고) | `assets/mprobe_r.hex`, 대조 `MEM_WRITE_DELAY 0`, 엔진 뮤턴트(reg 6 주소 증가 없음), 다른 트리의 `GEN` |
+| `memwr` | fullsys R800 OTIR 1024바이트 업로드 + 읽어 비교. fullsys 생성 소스(`prep.sh` 출력)를 매 실행 시험 트리에서 새로 만들고, `GEN`이 트리 밖이거나 파일 목록이 트리 밖을 읽으면 FAIL. PASS 줄에 트리 커밋(`git status --porcelain`이 비어 있지 않으면 +dirty, 추적 안 된 파일 포함), 생성 소스 해시, 엔진+regs 해시, 빌드가 읽은 W 안 소스 전부(top 포함)의 해시. 로그 줄의 `MEM_WRITE_DELAY`는 실효값(engine3면 top의 107). 엔진이 "queue overflow"를 내면 FAIL. `ENGINE`/`REGS` 파일이 트리 밖이면 0 errors여도 FAIL(대조군은 오류 수를 그대로 보고) | `assets/mprobe_r.hex`, 대조 `MEM_WRITE_DELAY 0`, 엔진 뮤턴트(reg 6 주소 증가 없음), 다른 트리의 `GEN` |
+| (모든 게이트) | `XFAIL="gate=<정규식>"`: 그 사유로 FAIL하면 `GATE <이름> XFAIL`(실행은 통과), PASS하면 XPASS, 다른 사유로 FAIL하면 FAIL. engine2 기본값은 `load`(sc_songchange24 지연 6·10·20 셋 다)와 `resource`(오래된 fit 보고서) | `harness.sh` 머리 |
 | `resource` | fit 보고서 ALM. 보고서가 MoonSound RTL보다 오래됐거나, map 보고서가 없거나, `u_pcm`의 모듈이 시험 중인 엔진이 아니면 FAIL. 타이밍은 보지 않는다(PASS 줄에 "timing not judged"); 보고서 경로는 실제 경로로 풀어 트리 밖이면 표시 | — |
 
 아래 표의 "검증" 열은 그 항목을 덮는 시나리오(`sc_*`, cpuvis op 블록 이름 `C-*`/`D*`)와 그 항목이 깨지면 잡히는 뮤턴트(`mut_*`)다.
@@ -39,7 +41,7 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 | C-SLOTRD | 08h..F7h 읽기 = 마지막으로 쓴 바이트(필드 4 bit5 포함). 헤더 로드가 채운 필드 5-9는 헤더 값 | E:1514-1553 | YMF278.cc:756, 788-789, 610-615 | cpuvis C-SLOTRD, C-HDR; `mut_f4_enc`, `mut_hdr_nobackfill` |
 | C-PLAIN | 00h..07h, F8h..FFh는 쓴 값 그대로 읽힘(reg 3 마스크 제외) | E:1530-1548 | YMF278.cc:756, 788-789 | cpuvis C-MIX |
 | C-FMRD | FM 데이터 포트 읽기 = 래치 주소(원래 값, 뱅크 포함)에 마지막으로 쓴 값. OPL2 모드(105h bit0=0)에서는 뱅크 1 쓰기가 뱅크 0에 들어가고 105h만 예외 | R:100-108, 245-247, 314-317 | YMF262.cc:1025-1042 | cpuvis C-BUSY(C5h), C-OPL2; `mut_fm_rd_remap` |
-| C-RESET | warm reset: 래치, BUSY/LD, 슬롯 레지스터, 메모리 주소 클리어. 레지스터 파일 클리어는 reset이 **24 clk 이상** 유지돼야 함 | E:1423-1438; R:154-165 | YMF278.cc:829-848; YMF278B.cc:57-67 | cpuvis D9 블록; stress(reset_len=8은 반드시 실패) |
+| C-RESET | warm reset: 래치, BUSY/LD, 슬롯 레지스터, 메모리 주소 클리어. 레지스터 파일 클리어는 reset이 **engine2 24 clk, engine3 240 clk 이상** 유지돼야 함(MSX 리셋 rst_hold는 63 clk21m = 378 clk) | E:1423-1438; R:154-165 | YMF278.cc:829-848; YMF278B.cc:57-67 | cpuvis D9 블록; stress(reset_len=8은 반드시 실패) |
 | C-HOLD | 메모리 쓰기(래치 3..6)는 CPU를 BUSY가 풀릴 때까지 WAIT (M의 WAIT_n 핸드셰이크) | R:236-241, 192-197; M:1728-1797 | 없음(openMSX는 CPU를 잡지 않음) | cpuvis(ack 검사); memwr; `mut_memw_nohold`. D2 |
 | C-DROP | WAIT 타임아웃으로 빠져나온 CPU의 다음 wave 접근은 버리되 ack는 줌; FM 포트는 항상 통과 | R:205-216 | 없음 | **미검증** (H3) |
 
@@ -100,6 +102,8 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 
 2026-10-25(P2): op 스크립트에 블록 셋을 더했다. `C-HDR dirty`(웨이브 번호 직후 필드 6 쓰기가 백필 뒤에도 남는지), `C-HDR again`(헤더를 읽는 도중 웨이브 번호 재기록), `G-RESET`(reset 전 24슬롯의 필드 4·9에 값을 쓰고 reset 뒤 다시 읽기, 필드 6 두 개). 접근 625개, 판정 1528개. engine2는 D10·D11·D12가 더 필요하고, engine3(`ymf278_pcm_engine3`, `run_cpuvis.sh`가 엔진 모듈 이름으로 고름)은 D10·D11·D12 없이 통과한다. 앞의 두 블록은 engine3 뮤턴트 `dirty_ignored`, `again_none`이 처음에 통과해서 만들었고, `again_none`은 engine3의 헤더 이중 읽기 버그(저장 사이클에 같은 슬롯을 다시 고름)가 결함을 가려서 그 버그를 고친 뒤에야 걸렸다.
 
+2026-10-25(5차 검토 반영): cpuvis가 자기 메모리 이미지를 쓴다(`run_cpuvis.sh`가 golden `mem.bin`을 복사해 웨이브 0 헤더 바이트 7-11을 31 5A 27 C6 0B로 바꿈; 원래 00 F0 00 F4 00이라 필드 5·7·9는 백필 유무가 안 보였다). golden의 `mem.bin`은 그대로다. `G-RESET`은 reset 뒤 24슬롯의 필드 4-9를 전부 읽는다(144개). 새 블록 `C-RDPORT`: 웨이브 번호를 쓴 뒤 1-16 clk 간격으로 되읽어, 헤더 읽기가 레지스터 파일의 읽기 포트를 쓰는 사이클과 겹치게 한다(engine3 뮤턴트 `rd_engine_clash`가 간격 5에서 40h를 읽음). 접근 863개, 판정 2352개. 두 엔진의 D2 하한(1024/107 clk)이 달라 `C-RDPORT` 뒤 op 시각이 갈라지고 LD 검사 8개가 한쪽은 `ld`, 다른 쪽은 `ld-held`가 되므로 기준 키 목록을 엔진별로 둔다. op 0-296(`C-RDPORT` 앞)의 키는 이전 기준 1528개 중 그 구간 611개와 두 엔진 모두 같다. engine2 플래그 의존: D10 24, D11 120(이전 2), D12 4.
+
 D3·D4·D5·D7·D12는 **RTL 결함**이다: openMSX의 해당 동작에 "Verified on real YMF278" 주석이 있다(D7은 읽는 순간의 메모리를 주는 openMSX 동작, 하드웨어 주석은 없음). 게이트는 고칠 때까지 이 결함을 허용할 뿐 정답으로 삼지 않으며, 출력 줄에 "tolerated RTL defects"로 따로 적는다. D1·D2·D6은 RTL의 선택이고 하드웨어 근거는 어느 쪽에도 없다.
 
 | ID | 차이 | 현행 근거 | openMSX | 성격 | P2에서 |
@@ -113,9 +117,9 @@ D3·D4·D5·D7·D12는 **RTL 결함**이다: openMSX의 해당 동작에 "Verifi
 | D7 | reg 6 읽기는 직전 reg 5 쓰기/reg 6 읽기 때 프리페치한 바이트를 줌. reg 6 쓰기 뒤에 reg 5 없이 읽으면 옛 값 | E:1702, 1716-1721; T:268-271 | 읽는 순간의 메모리 (YMF278.cc:780-782) | **RTL 결함** | 읽기 시점 기준으로 |
 | D8 | reg 5/6 쓰기, reg 6 읽기 뒤 BUSY가 엔진의 메모리 연산 완료까지 늘어남(최대 1프레임) | R:141; E:1722 | 고정 지연 | 구조적(S-BOUND) | 새 엔진에서도 상한 보장 |
 | D9 | warm reset이 NEW2를 지움 | T:90-102 | reg 105h 유지, ID 신호만 재무장 (YMF262.cc:1398-1404) | **의도적**: GoFigure 감지 실패 수정(T:93-99 주석) | 유지 |
-| D10 | reset 후 필드 4(68h-7Fh) 읽기 20h: engine2는 bit 5를 뒤집어 저장한다(전부 0인 리셋 이미지 = LFO 정지) | E:1454-1456, 1551 | openMSX reset은 모든 레지스터에 0을 쓴다: 읽기 0, LFO 동작(YMF278.cc reset → writeRegDirect case 4) | 미검증(하드웨어 근거 없음) | engine3: 저장한 그대로 읽음(플래그 없음) |
-| D11 | reset 후 필드 5-9 읽기 0 | E:1423-1438 | openMSX reset은 F7h→08h 순서로 0을 써서 각 슬롯의 마지막 쓰기가 웨이브 번호 0 → 웨이브 0의 헤더가 필드 5-9에 들어감 | 미검증(openMSX 구현의 결과, 하드웨어 근거 없음) | engine3: reset 해제 뒤 24슬롯 웨이브 0 헤더를 읽어 채움 |
-| D12 | 웨이브 번호를 헤더를 읽는 도중에 다시 쓰면 첫 번호의 헤더가 남음(engine2는 읽기 시작할 때 본 번호로 읽고, 저장할 때 요청을 지움). 모델은 "64 clk 안의 재기록"으로 근사하며 op 스크립트의 20 clk 간격에서만 확인함 | E:1277-1278, 1590-1591 | 쓴 번호의 헤더를 즉시 반영(YMF278.cc:594-615) | **RTL 결함**(P2에서 cpuvis `C-HDR again` 블록으로 처음 드러남) | engine3: 읽는 도중 재기록되면 다시 읽음(`hf_again`) |
+| D10 | reset 후 필드 4(68h-7Fh) 읽기 20h: engine2는 bit 5를 뒤집어 저장한다(전부 0인 리셋 이미지 = LFO 정지) | E:1454-1456, 1551 | openMSX reset은 모든 레지스터에 0을 쓴다: 읽기 0, LFO 동작(YMF278.cc reset → writeRegDirect case 4) | 미검증: openMSX reset **구현**(writeRegDirect 순서)에서 나온 값, 하드웨어 근거 없음. engine3는 이것을 목표로 채택했다(소프트웨어가 reset 직후 이 레지스터를 읽을 일은 거의 없다) | engine3: 저장한 그대로 읽음(플래그 없음) |
+| D11 | reset 후 필드 5-9 읽기 0 | E:1423-1438 | openMSX reset은 F7h→08h 순서로 0을 써서 각 슬롯의 마지막 쓰기가 웨이브 번호 0 → 웨이브 0의 헤더가 필드 5-9에 들어감 | 미검증: openMSX reset **구현**의 결과, 하드웨어 근거 없음. engine3는 이것을 목표로 채택했다 | engine3: reset 해제 뒤 24슬롯 웨이브 0 헤더를 읽어 채움. 5차 검토 전에는 슬롯 0·23만 읽는 뮤턴트도 통과했을 것(필드 5·7·9가 0이라서). 이제 `reset_hdr_partial`이 FAIL |
+| D12 | 웨이브 번호를 헤더를 읽는 도중에 다시 쓰면 첫 번호의 헤더가 남을 수 있음(engine2는 읽기 시작할 때 본 번호로 읽고, 저장할 때 요청을 지움). 실측(2026-10-25, `AGAIN_GAP` × `AGAIN_PRE` 64조합): 두 쓰기 사이 20-60 clk이면 프레임 위상 8개 중 7개에서 옛 헤더, 1개(위상 224)에서 새 헤더; 68 clk 이상이면 항상 새 헤더. 모델은 64 clk 안이면 두 헤더 다 허용 | E:1277-1278, 1590-1591 | 쓴 번호의 헤더를 즉시 반영(YMF278.cc:594-615) | **RTL 결함**(P2에서 cpuvis `C-HDR again` 블록으로 처음 드러남) | engine3: 읽는 도중 재기록되면 다시 읽음(`hf_again`) |
 
 ## E. 위험 · 미검증 (게이트가 아직 못 보는 것)
 
@@ -129,7 +133,10 @@ D3·D4·D5·D7·D12는 **RTL 결함**이다: openMSX의 해당 동작에 "Verifi
 | H6 | (해결) I7은 `sc_silence`, I2는 `sc_lfo_off`가 본다(`oracle` 게이트) | — | — |
 | H8 | golden 뮤턴트는 모두 기능 끄기·비교 경계 수정이다. 스케줄링(디스패치 순서, 헤더 스톨, PIPE 캐시 태그, 프레임 끝 예약, `cache_rr` 32프레임 재페치, 노트 중 warm reset)을 건드리는 뮤턴트가 없다. 같은 프레임 key-off→key-on, 슬롯 23→0 경계, 12비트 루프 이음새 홀수 걸침도 전용 시나리오가 없다. cpuvis 뮤턴트 15개도 전부 정적 디코드다 | E:754-757 외 | P2: 스케줄링 뮤턴트 추가 |
 | H11 | golden 모델과 ref278(REF_OMSX)은 mem.bin(0x80100바이트) 너머 4MB를 0으로 채운다. RAM 쪽(0x200000+)은 openMSX도 0으로 지우므로(YMF278.cc:826) 같다. ROM 쪽 0x80100-0x1FFFFF는 **TB 가정**이다: openMSX에서는 실제 2MB ROM 데이터. 이 영역을 읽는 시나리오는 없다(032d200 전후 ref278 출력이 기존 21개에서 바이트 동일, msx1-handoff 4차) | tb/tb_golden_pcm.sv:47; golden_pcm_omsx.py; ref278.cpp main | 그 영역을 쓰는 시나리오가 생기면 yrw801 이미지로 |
-| H12 | engine3의 "쓰기가 브리지를 떠날 때까지 BUSY"를 없앤 뮤턴트가 memwr에서 0 errors다. WAIT 하한 107 clk가 측정된 ch4 쓰기 지연(최대 29 clk, DESIGN 8절)보다 길어 차이가 드러나지 않는다. cpuvis 메모리 모델은 쓰기에 busy를 올리지 않고, 모델의 D8 창도 넓어서 못 잡는다 | E3:339; DESIGN 8절 | 쓰기 지연이 긴 벤치(예: tb_cpuvis에 쓰기 busy 200 clk) + 창을 좁힌 검사 |
+| H12 | (게이트됨, `busylat`) engine3의 "쓰기가 브리지를 떠날 때까지 BUSY"를 없앤 뮤턴트는 memwr에서 0 errors다(WAIT 하한 107 clk가 실제 쓰기 지연보다 길다). 데이터로는 안 보인다: 두 번째 쓰기는 `cpu_wr_pend`가 BUSY를 잡아 두므로 덮어쓰지 않는다. 보이는 것은 마지막 쓰기 뒤 BUSY 하강 시점뿐이라, cpuvis에 쓰기 지연(`WLAT` 150·300)을 주고 모델이 reg 6 쓰기 BUSY를 쓰기 지연 이상으로 기대하게 했다: 뮤턴트는 109 clk에 내려가 FAIL, 트리 PASS. engine2(하한 1024)도 같은 지연에서 PASS(대조) | E3 `cpu_mem_busy`; `cpuvis_check.py` `HOLDS_WRITE` | 실제 쓰기 지연 분포가 나오면(F4) `WLAT`를 그 최대치 근처로 |
+| H13 | H1은 engine3에도 그대로다: reg 6 읽기는 CPU를 잡아 두지 않는다. cpuvis 읽기 지연 150 clk에서 BUSY를 보지 않는 200 clk 간격 연속 읽기가 이전 프리페치를 받는다(두 엔진 모두 "expected a2 got a1"). 실제 지연(최대 수십 clk)과 R800 I/O 간격(약 100 clk 이상)에서는 안 생긴다 | E3 SV_RD_WAIT; R:282-292 | 읽기 ack를 데이터 도착에 묶을지 DESIGN 결정 |
+| H14 | 쓰기 ack 바로 다음 clk의 되읽기는 두 엔진 모두 이전 값을 준다(cpuvis 간격 0). engine3는 CPU 쓰기를 다음 clk에 `reg_rd_data`로 넘겨 engine2와 같은 1 clk 지연이다(넘기지 않으면 2 clk, 간격 1에서 FAIL). CPU가 I/O를 그만큼 붙여 낼 수는 없다 | E3 readback 파이프라인; `C-RDPORT` | — |
+| H15 | (기존, 범위 밖) `msx.sv:2531` MoonSound `rst_n = ~reset_ms`는 clk21m 쪽 신호를 clk_sdram 비동기 리셋에 바로 쓴다. 해제 동기화기와 recovery/removal STA는 확인 안 함. engine3는 `rst_n`을 데이터로도 쓴다(리셋 쓸기 카운터) | M:2531; E3 `clr_cnt` | Quartus 게이트에서 recovery/removal 확인 |
 | H9 | golden TB의 메모리 모델은 고정 지연 + 미결 1개뿐: 지터, 리프레시, 다른 채널 경합, CPU 쓰기 busy가 없다 | tb/tb_golden_pcm.sv:44-70 | ch4 지연 실측 뒤 분포를 TB에 |
 | H10 | `dbg_slot_keyon/active/envlive`는 `debug_overlay.sv:28-30`이 쓴다. 드롭인 교체면 새 엔진도 내야 한다 | debug_overlay.sv:28-30 | DESIGN ALM 표에 포함 |
 | H7 | 실제 소프트웨어 레지스터 트레이스(MoonBlaster, vgmplay, OPL4 데모)는 이번에 수집하지 않았다(PLAN P0의 일부) | — | P2 전에 openMSX에서 수집 |

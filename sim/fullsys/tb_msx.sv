@@ -1797,14 +1797,21 @@ module tb;
    end
    final if (vp_phase != 15) $display("VPROBE RESULT FAIL (the probe did not finish: phase %0d)", vp_phase);
   `ifdef LPROBE
-   //  -DLPROBE (opl4-harness assets/lprobe.asm): ch4 latency at the MoonSound bridge, per
-   //  vprobe phase, in clk_sdram.  Read = ms_mem_rd_req rise -> ms_mem_rd_valid (what the
-   //  engine waits), write = ms_mem_wr_req rise -> bridge idle again.  The canary's own
-   //  reads are not engine reads and are not counted (ms_mem_rd_valid excludes them), but
-   //  they do occupy the bridge, so they are inside the engine's numbers when they collide.
+   //  -DLPROBE (opl4-harness assets/lprobe.asm, judged by assets/lprobe_check.py): ch4
+   //  latency per vprobe phase, in clk_sdram, at the PCM engine's own ports
+   //  (u_moonsound.u_pcm; ymf278b_top wires them to ms_mem_* with no register between).
+   //  Read = mem_rd_en rise -> mem_rd_valid, write = mem_wr_en rise -> bridge idle again
+   //  (msx.sv pcm_state 0).  One timestamp per direction, so the consistency counts come
+   //  with it: rises, valids / completions, and rises that came while one was still
+   //  open (they would overwrite it).  Per phase also: its length, the keyed-on slots at
+   //  its end, the MoonSound I/O accesses, and M1 fetches of lprobe's idle loop (0x0195),
+   //  so a phase that did not run as written is seen.  The canary's own reads occupy the
+   //  bridge too, so they are inside the engine's numbers when they collide.
    int lp_rd [16][512], lp_wr [16][2048];
+   int lp_nr [16], lp_nv [16], lp_nro [16], lp_nw [16], lp_nwd [16], lp_nwo [16];
+   int lp_iow [16], lp_ior [16], lp_m1 [16], lp_t0 [16];
    int lp_rd_t = -1, lp_wr_t = -1, lp_t = 0, lp_ph = 0;
-   logic lp_rq = 1'b0, lp_wq = 1'b0;
+   logic lp_rq = 1'b0, lp_wq = 1'b0, lp_iowq = 1'b0, lp_iorq = 1'b0, lp_m1q = 1'b0;
    function automatic string lp_stat(input int h [], input int n);
       int tot = 0, c = 0, mn = -1, mx = 0, med = 0, p99 = 0;
       for (int i = 0; i < n; i++) tot += h[i];
@@ -1818,23 +1825,46 @@ module tb;
       end
       return $sformatf("n %0d min %0d median %0d p99 %0d max %0d%s", tot, mn, med, p99, mx, h[n-1] != 0 ? " (max is the cap)" : "");
    endfunction
+   wire [23:0] lp_keyon = MSX.u_moonsound.u_pcm.dbg_slot_keyon;
+   wire lp_m1now = ~MSX.m1_n & ~MSX.mreq_n & (MSX.a == 16'h0195);
+   always @(posedge clk21m) begin
+      lp_m1q <= lp_m1now;
+      if (lp_m1now & ~lp_m1q) lp_m1[lp_ph & 15]++;
+   end
    always @(posedge MSX.clk_sdram) begin
       lp_t++;
-      lp_rq <= MSX.ms_mem_rd_req; lp_wq <= MSX.ms_mem_wr_req;
+      lp_rq <= MSX.u_moonsound.u_pcm.mem_rd_en; lp_wq <= MSX.u_moonsound.u_pcm.mem_wr_en;
+      lp_iowq <= MSX.u_moonsound.io_wr; lp_iorq <= MSX.u_moonsound.io_rd;
       if (vp_phase != lp_ph) begin
          if (lp_ph != 0) begin
-            $display("lprobe: phase %0d read  %s", lp_ph, lp_stat(lp_rd[lp_ph & 15], 512));
-            $display("lprobe: phase %0d write %s", lp_ph, lp_stat(lp_wr[lp_ph & 15], 2048));
+            automatic int k = lp_ph & 15, ko = $countones(lp_keyon);
+            $display("lprobe: phase %0d read  %s", lp_ph, lp_stat(lp_rd[k], 512));
+            $display("lprobe: phase %0d write %s", lp_ph, lp_stat(lp_wr[k], 2048));
+            $display("lprobe: phase %0d count clk %0d keyon %0d io_wr %0d io_rd %0d idle_m1 %0d rd_rise %0d rd_valid %0d rd_overwrite %0d wr_rise %0d wr_done %0d wr_overwrite %0d",
+                     lp_ph, lp_t - lp_t0[k], ko, lp_iow[k], lp_ior[k], lp_m1[k], lp_nr[k], lp_nv[k], lp_nro[k], lp_nw[k], lp_nwd[k], lp_nwo[k]);
          end
          lp_ph = vp_phase;
+         lp_t0[lp_ph & 15] = lp_t;
       end
-      if (MSX.ms_mem_rd_req & ~lp_rq) lp_rd_t = lp_t;
-      if (MSX.ms_mem_rd_valid && lp_rd_t >= 0) begin
+      if (MSX.u_moonsound.io_wr & ~lp_iowq) lp_iow[lp_ph & 15]++;
+      if (MSX.u_moonsound.io_rd & ~lp_iorq) lp_ior[lp_ph & 15]++;
+      if (MSX.u_moonsound.u_pcm.mem_rd_en & ~lp_rq) begin
+         lp_nr[lp_ph & 15]++;
+         if (lp_rd_t >= 0) lp_nro[lp_ph & 15]++;
+         lp_rd_t = lp_t;
+      end
+      if (MSX.u_moonsound.u_pcm.mem_rd_valid && lp_rd_t >= 0) begin
          lp_rd[lp_ph & 15][(lp_t - lp_rd_t) > 511 ? 511 : lp_t - lp_rd_t]++; lp_rd_t = -1;
+         lp_nv[lp_ph & 15]++;
       end
-      if (MSX.ms_mem_wr_req & ~lp_wq) lp_wr_t = lp_t;
+      if (MSX.u_moonsound.u_pcm.mem_wr_en & ~lp_wq) begin
+         lp_nw[lp_ph & 15]++;
+         if (lp_wr_t >= 0) lp_nwo[lp_ph & 15]++;
+         lp_wr_t = lp_t;
+      end
       if (lp_wr_t >= 0 && lp_t > lp_wr_t + 1 && MSX.pcm_state == 2'd0) begin
          lp_wr[lp_ph & 15][(lp_t - lp_wr_t) > 2047 ? 2047 : lp_t - lp_wr_t]++; lp_wr_t = -1;
+         lp_nwd[lp_ph & 15]++;
       end
    end
   `endif

@@ -2,7 +2,7 @@
 """Generate the cpuvis-gate mutants: one CPU-visible edit each, in the engine,
 ymf278b_regs.sv or ymf278b_top.sv.
 
-    make_cpuvis_mutants.py <engine2.sv|engine3.sv> <regs.sv> <top.sv> <out_dir>
+    make_cpuvis_mutants.py [--busylat] <engine2.sv|engine3.sv> <regs.sv> <top.sv> <out_dir>
 
 Output: <out_dir>/mut_<name>__<engine|regs|top>.sv, a full copy of that one file.
 Every one must make sim/cpuvis/run_cpuvis.sh FAIL.  An edit whose anchor does
@@ -68,23 +68,46 @@ ENGINE3 = [
     ("prefetch_none", "engine", "a reg 5 write does not prefetch (the next reg 6 read is stale)",
      "if (cpu_adr_set_l || cpu_rd_06) cpu_rd_pend <= 1'b1;", "if (cpu_rd_06) cpu_rd_pend <= 1'b1;"),
     ("hdr_nobackfill", "engine", "header bytes 7-11 never reach fields 5-9",
-     "bf_be   = ~bf_dirty[hf_slot];", "bf_be   = 5'h00;"),
+     "assign bf_now  = (sv_state == SV_HDR_STORE) && !bf_dirty[hf_slot][sv_cnt];",
+     "assign bf_now  = 1'b0;"),
     ("dirty_ignored", "engine", "the backfill overwrites fields the CPU wrote after the wave number",
-     "bf_be   = ~bf_dirty[hf_slot];", "bf_be   = 5'h1F;"),
-    ("lane_hi_lost", "engine", "fields 5-9 written into the slot's fields 0-4 word",
-     "wq_word <= {wr_snum, wr_field >= 4'd5};", "wq_word <= {wr_snum, 1'b0};"),
+     "assign bf_now  = (sv_state == SV_HDR_STORE) && !bf_dirty[hf_slot][sv_cnt];",
+     "assign bf_now  = (sv_state == SV_HDR_STORE);"),
+    ("bf_lane_off", "engine", "the backfill writes field n+1's byte into field n (wrong lane)",
+     "assign bf_d    = hf_buf[4'd7 + {1'b0, sv_cnt}];", "assign bf_d    = hf_buf[4'd8 + {1'b0, sv_cnt}];"),
+    ("lane_hi_lost", "engine", "fields 5-9 written into the slot's field 0-4 words",
+     "wq_word <= reg_word;", "wq_word <= (reg_word >= 8'd120) ? reg_word - 8'd120 : reg_word;"),
     ("reset_nosweep", "engine", "the reset sweep writes nothing (register file keeps its bytes)",
-     "rb_we = 1'b1; rb_be = '1; rb_addr = clr_idx;", "rb_we = 1'b1; rb_be = '0; rb_addr = clr_idx;"),
+     "rw_we = 1'b1; rw_addr = clr_word; rw_d = 8'h00;", "rw_we = 1'b0; rw_addr = clr_word; rw_d = 8'h00;"),
     ("reset_nohdr", "engine", "no wave-0 header fetch after reset (engine2's D11)",
      "hf_pending <= '1;", "hf_pending <= '0;"),
+    ("reset_hdr_partial", "engine", "after reset only slots 0 and 23 fetch wave 0's header",
+     "hf_pending <= '1;", "hf_pending <= 24'h800001;"),
+    ("rd_engine_clash", "engine", "the readback takes the read port in the engine's cycles too",
+     "rd_upd_q2   <= !eng_rd && !(rw_we && rw_addr == rd_word_q1);",
+     "rd_upd_q2   <= !(rw_we && rw_addr == rd_word_q1);"),
+    ("wq_stuck", "engine", "a queued CPU slot-register write never leaves the queue (overflow)",
+     "wire         wq_go = wq_v && !clr_run && !bf_now;", "wire         wq_go = 1'b0;"),
     ("again_none", "engine", "a wave number rewritten during its header fetch does not fetch again",
-     "if (hf_busy && wr_snum == hf_slot) hf_again <= 1'b1;", "if (1'b0) hf_again <= 1'b1;"),
+     "if (hf_busy && wr_snum == hf_slot && !bf_done) hf_again <= 1'b1;", "if (1'b0) hf_again <= 1'b1;"),
+]
+
+
+# The busylat gate's mutants (run_cpuvis.sh with a write latency, WLAT): an edit the
+# zero-latency bench cannot see.  engine3 only.
+BUSYLAT = [
+    ("busy_at_issue", "engine", "a reg 6 write drops BUSY when it is issued, not when it has left the port",
+     "assign cpu_mem_busy    = cpu_rd_pend | cpu_wr_pend | cpu_rd_out | cpu_wr_out;",
+     "assign cpu_mem_busy    = cpu_rd_pend | cpu_wr_pend | cpu_rd_out;"),
 ]
 
 
 def main():
-    files = dict(engine=sys.argv[1], regs=sys.argv[2], top=sys.argv[3])
-    out = sys.argv[4]
+    args = sys.argv[1:]
+    busylat = '--busylat' in args
+    args = [a for a in args if a != '--busylat']
+    files = dict(engine=args[0], regs=args[1], top=args[2])
+    out = args[3]
     src = {k: open(v).read() for k, v in files.items()}
     os.makedirs(out, exist_ok=True)
     for f in os.listdir(out):
@@ -94,6 +117,8 @@ def main():
         muts = MUTANTS
         if 'module ymf278_pcm_engine3' in src['engine']:
             muts = [m for m in MUTANTS if m[1] != 'engine'] + ENGINE3
+        if busylat:
+            muts = BUSYLAT
         for name, tgt, what, old, new in muts:
             n = src[tgt].count(old)
             if n != 1:

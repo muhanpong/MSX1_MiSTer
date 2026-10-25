@@ -96,11 +96,20 @@ P(0x02, 200)
 for r in (0x81, 0x99, 0xB1):
     rreg(r)
 c("C-HDR again: the wave number rewritten while its header is being fetched")
-wreg(0x0A, 0x00)                 # slot 2, wave 0 ...
-wreg(0x0A, 0x03, gap=8)          # ... then wave 3 a few clk later
+W(0x7E, 0x0A, G + int(os.environ.get('CPUVIS_AGAIN_PRE', '0')))   # (PRE: frame-phase knob)
+W(0x7F, 0x00)                    # slot 2, wave 0 ...
+wreg(0x0A, 0x03, gap=int(os.environ.get('CPUVIS_AGAIN_GAP', '8')))   # ... then wave 3 (AGAIN_GAP clk later)
 P(0x02, 200)
 for r in (0x82, 0x9A, 0xB2, 0xCA):
     rreg(r)
+c("C-RDPORT: the wave number read back 1-16 clk after it was written, while its header fetch "
+  "reads fields 0/1 from the register file (field 1 holds 40h, so a readback that took the "
+  "engine's read cycle returns 40h).  Not 0 clk: both engines' readback lags a write by "
+  "1 clk there (SPEC H14; no CPU issues an I/O that close)")
+wreg(0x20 + 3, 0x40)
+for g in range(1, 17):
+    wreg(0x08 + 3, 0x03)
+    R(0x7F, gap=g)
 c("C-SLOTRD: slot registers read back what was written (field 4 bit 5 included)")
 wreg(0x98, 0x5A); R(0x7F)
 wreg(0x68, 0x2A); R(0x7F)
@@ -140,7 +149,7 @@ for n in range(24):
     wreg(0x68 + n, 0x45)         # damp, pan 5 (key off)
     wreg(0xE0 + n, 0x07)         # AM 7
 c("D9 / D6: warm reset")
-X(int(os.environ.get('CPUVIS_RESET_LEN', '128')))
+X(int(os.environ.get('CPUVIS_RESET_LEN', '256')))
 S()
 rreg(0x02)
 fm(1, 0x05, 0x03)
@@ -148,10 +157,10 @@ S(); S()
 R(0x7F)
 rreg(0x02)
 rreg(0xF8)
-c("G-RESET / D10 / D11: slot registers after the reset")
+c("G-RESET / D10 / D11: slot registers after the reset: field 4 (swept) and fields 5-9 "
+  "(wave 0's header, bytes 7-11 distinct and non-zero in cpuvis's memory image) of every slot")
 for n in range(24):
-    rreg(0x68 + n)
-    rreg(0xE0 + n)
-rreg(0x98); rreg(0xAF)          # field 6 of slots 0 and 23 (wave 0's AR/D1R after an openMSX reset)
+    for f in range(4, 10):
+        rreg(0x08 + 24 * f + n)
 
 print("\n".join(ops))

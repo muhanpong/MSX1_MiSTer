@@ -22,8 +22,9 @@ PLAN.md §0의 "DSP 0"은 MoonSound 전체 표의 오기로 보인다. 현행 PC
 면적이 큰 세 가지를 바꾼다.
 
 1. **상태는 M10K 두 개** (현행: MLAB 22개 + 플립플롭 배열 + 스냅샷 레지스터).
-   - RAM-R (CPU 레지스터): 40비트 × 48워드. 슬롯당 2워드(필드 0-4, 필드 5-9), 바이트 enable.
-     포트 A = 엔진 읽기, 포트 B = CPU 쓰기·헤더 백필·CPU 읽기(readback). 지금의 3중 읽기 포트(MLAB 30개)가 사라진다.
+   - RAM-R (CPU 레지스터): **8비트 × 240워드**(레지스터 하나 = 워드 하나, 주소 = 레지스터 - 08h), simple dual-port.
+     쓰기 포트 = 리셋 쓸기·헤더 백필·CPU 쓰기, 읽기 포트 = 엔진 읽기 + 남는 사이클의 CPU 읽기(readback). 지금의 3중 읽기 포트(MLAB 30개)가 사라진다.
+     (처음 안은 40비트 × 48워드 + 바이트 enable이었으나 M10K 2개(SDP)·4개(TDP)로 fit됐다: 9절.)
    - RAM-S (엔진 상태): 40비트 × 슬롯당 6워드 = 144워드. pos/stepPtr/tl_cur, env/lfo, 헤더 56비트, (선택) 워드 캐시.
      포트 A = 엔진 읽기/쓰기, 포트 B = 헤더 페치 저장.
    - 슬롯별 비동기 플래그(key_retrig, pos_rst, hf_pending, tl_load, key_on_prev, bf_dirty[5])는 지금처럼 24비트 벡터 플립플롭.
@@ -122,8 +123,8 @@ DSP는 1개(목표 ≤ 4), M10K는 PCM 2-3개(현행 0, MoonSound 합계 15 이�
 
 ## 6. 리셋
 
-M10K는 리셋이 없으므로 현행처럼 **reset 동안 쓸기**(RAM-R 48워드, RAM-S 144워드 → 144클럭 이상). 하드웨어 reset_ms ≥ 252 clk(`E:1423-1435`)라 충분하지만
-전제 클럭 수가 24 → 144로 늘어난다. stress의 must-fail 길이(`reset_len=8`)도 새 전제에 맞춰 바꾼다(예: 100은 실패, 256은 통과).
+M10K는 리셋이 없으므로 현행처럼 **reset 동안 쓸기**(RAM-R 240워드 → 240클럭 이상, rst_n 하강부터 셈; RAM-S 144워드). 하드웨어 reset_ms는 rst_hold 63 clk21m = 378 clk(128.86 MHz)라 충분하지만
+전제 클럭 수가 24 → 240으로 늘어난다. stress의 must-fail 길이(`reset_len=8`)도 새 전제에 맞춰 바꾼다(예: 100은 실패, 256은 통과).
 
 ## 7. 하네스와의 연결, 결정이 필요한 것
 
@@ -140,6 +141,8 @@ M10K는 리셋이 없으므로 현행처럼 **reset 동안 쓸기**(RAM-R 48워�
 ## 8. P2 결과 (2026-10-25, 구현·측정)
 
 ### L 측정 (fullsys, `assets/lprobe.asm` + `tb_msx.sv` `-DLPROBE`, engine2)
+
+> **무효 (5차 검토 F4, 9절).** 이 측정의 lprobe는 idle 루틴이 turbor.sv의 CHGCPU 덮개(0180h-018Bh) 위에 있어 idle이 한 번 돌고 끝났고, 그 과정에서 CPU 모드를 바꿨다. 아래 표의 phase 조건(특히 2·3)은 성립하지 않았다. 숫자는 기록으로만 남기고 설계 입력으로 쓰지 않는다. 재측정은 9절.
 
 엔진의 읽기 요청 상승 → `ms_mem_rd_valid` (clk_sdram), FS-A1GT tdm128, 웨이브 384 하나로 24보이스(옥타브 -1..+5) 재생.
 출력 `/data/_claude/tmp/opl4-scratch/lat/v/lat.log`.
@@ -178,3 +181,40 @@ M10K는 리셋이 없으므로 현행처럼 **reset 동안 쓸기**(RAM-R 48워�
 
 1. D3·D4·D7(위 7절 1번): 아직 engine2와 같다. 고치면 해당 cpuvis 플래그를 engine3에서 뺀다.
 2. M10K 예산, 워드 캐시, ch4 쌍 읽기: P3에서.
+
+## 9. 5차 검토 반영 (2026-10-25)
+
+### RAM-R의 M10K 수 (F1: Quartus 17.0, 메모리만 떼어 fit, `/data/_claude/tmp/opl4-scratch/f1/`)
+
+| 구성 | M10K (fit) | 비고 |
+|---|---|---|
+| 48 × 40, 바이트 enable, true dual-port (P2 engine3, 루프로 쓴 바이트 enable) | — | 루프 형태는 **RAM으로 추론되지 않음**: 레지스터 2,000개 |
+| 같은 것, 바이트 enable을 풀어 씀, TDP | 4 | 읽기 포트마다 SDP 사본 2개 |
+| 48 × 40, 바이트 enable, simple dual-port | 2 | x40 + 8비트 바이트 enable은 M10K 하나에 안 들어감 |
+| 48 × 40, 바이트 enable 없음, SDP | 1 | 대조 |
+| **240 × 8, SDP** (지금 engine3) | **1** | engine3 전체를 map하면 같은 `altsyncram_c3n1` 240×8 SDP로 추론됨 |
+
+- engine3 RAM-R은 레지스터 하나 = 워드 하나(240 × 8)로 바꿨다. 백필은 필드당 1 clk(5 clk), 헤더 페치의 웨이브 번호 읽기는 2 clk.
+- 결과: PCM M10K 1개 → MoonSound 15개(OPL3 14). PLAN의 "15개 이하"는 RAM-S를 M10K에 두면 다시 넘는다(16). RAM-S 배치(MLAB 또는 RAM-R과 합치기)는 P3 결정. hdr_ram(24 × 56)은 아직 읽는 곳이 없어 합성에서 사라진다.
+- 리셋 쓸기는 rst_n 하강부터 세고(필드 5-9 먼저, 7Fh가 마지막) 240 clk가 필요하다. `reset` 게이트: 240 PASS, 239 FAIL(정확히 1건, 7Fh).
+- readback: 읽기 포트를 엔진과 나눠 쓴다. 엔진이 쓰는 사이클에는 건너뛰고, CPU 쓰기는 다음 clk에 `reg_rd_data`로 넘긴다(넘기지 않으면 engine2보다 1 clk 늦어 cpuvis `C-RDPORT` 간격 1에서 FAIL했다).
+
+### L 재측정 (F4)
+
+- 원인: P2의 lprobe는 idle 루틴이 turbor.sv의 0180h-018Bh 덮개(CHGCPU `OUT (E5h),A; RET`) 위에 있어 idle이 한 번 돌고 CPU 모드까지 바꿨다. vprobe·mprobe_r는 이미 이 영역을 건너뛰고 있었다. lprobe를 0190h 뒤로 옮겼다.
+- 측정점은 엔진 포트(`u_pcm.mem_rd_en` → `mem_rd_valid`; top이 `ms_mem_*`에 레지스터 없이 연결)로 바꿨다. phase마다 길이, key-on 수, MoonSound I/O 수, idle 루프 M1 수, 요청 상승/완료/덮어쓰기 수를 찍고 `assets/lprobe_check.py`가 판정한다.
+- 대조: 옛 lprobe를 새 카운터로 돌리면 **INVALID**(phase 2 idle 1회 4.3프레임, phase 3 idle 2회 0.4프레임, phase 6·7 idle 1회).
+- 새 lprobe(engine2, `/data/_claude/tmp/opl4-scratch/r6/lat3/lat.log`): phase 조건은 성립한다(key-on 24/0, idle 반복, 18-408프레임). 그러나 **LPROBE INVALID**: phase 2·4·5·6·7에서 앞 요청의 valid 전에 읽기 요청이 다시 오르는 일이 1-6회, valid를 못 받은 요청이 0-6개였다(phase 4: 상승 16444, valid 16438). 원인은 보지 않았다(engine2가 브리지 IDLE 복귀와 valid 사이에 요청을 내는지, 브리지가 그 요청을 버리는지).
+- 참고값(무효 판정이므로 설계 입력 아님): 읽기 최소 17, 중앙 20, p99 29-33, 최대 40(phase 4·6). 쓰기 12/13-15/20/29.
+
+### 게이트 (5차 반영 뒤, 커밋 전 작업 트리)
+
+| 게이트 | engine3 | engine2 | 대조 |
+|---|---|---|---|
+| cpuvis | PASS 863 접근, 2352 판정; 뮤턴트 26/26 | PASS, 뮤턴트 16/16 | 엔진별 기준 키 목록; op 0-296 구간은 이전 기준과 동일 |
+| reset | 240 PASS, 239 FAIL(1건) | 24 PASS, 16 FAIL(16건) | — |
+| busylat | WLAT 150·300 PASS; `busy_at_issue` 2/2 FAIL(109 clk에 하강) | PASS(뮤턴트 없음) | 읽기 지연 150에서는 두 엔진 트리 모두 FAIL(SPEC H13) |
+| memwr | PASS 0 errors, 지연 107(top) | PASS 0 errors, 지연 1024 | 저장 로그에 overflow 줄 추가 → FAIL |
+| all (engine2) | — | HARNESS PASS: load·resource는 XFAIL(등록된 사유) | XFAIL 세 경로(XFAIL / 다른 사유 FAIL / XPASS) 확인 |
+
+- D12(F5): engine2의 옛 헤더 창은 실측 20-60 clk(위상 8개 중 7개), 68 clk 이상은 항상 새 헤더. 모델은 64 clk 안이면 두 헤더 다 허용.

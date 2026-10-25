@@ -69,6 +69,17 @@ start:  di
         ld a,0Fh : out (2Eh),a
 park:   jr park
 
+        ; turbor.sv overlays 0180h-018Bh of the main ROM (CHGCPU / GETCPU stubs) in every
+        ; pack this bench runs: the first lprobe had idle there, so idle returned after one
+        ; pass through the stub (OUT (E5h),A; RET) and switched the CPU mode.  Skip it.
+        assert $ < 0180h
+        ds 0190h - $, 0
+; idle first: its inner loop (.i1) is at 0195h, where tb_msx.sv LPROBE counts M1 fetches
+idle:   ld d,1
+.i0:    ld bc,600
+.i1:    dec bc : ld a,b : or c : jr nz,.i1
+        dec d : jr nz,.i0
+        ret
 ; wave address A:B:C (hi, mid, lo) into regs 3-5, select reg 6
 setw:   push af : ld a,3 : out (7Eh),a : pop af : out (7Fh),a
         ld a,4 : out (7Eh),a : ld a,b : out (7Fh),a
@@ -78,11 +89,6 @@ setw:   push af : ld a,3 : out (7Eh),a : pop af : out (7Fh),a
 upload: ld hl,0 : ld c,7Fh : ld d,N/256
 .o:     ld b,0 : otir
         dec d : jr nz,.o
-        ret
-idle:   ld d,1
-.i0:    ld bc,600
-.i1:    dec bc : ld a,b : or c : jr nz,.i1
-        dec d : jr nz,.i0
         ret
 ; 16-bit, start 201000h, loop 0, end 4096, AR 15, RR 4
 hdr:    db 0A0h, 10h, 00h, 00h, 00h, 0F0h, 00h, 00h, 0F0h, 00h, 04h, 00h

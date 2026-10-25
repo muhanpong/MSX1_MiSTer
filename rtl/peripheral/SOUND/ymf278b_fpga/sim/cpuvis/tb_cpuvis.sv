@@ -14,6 +14,8 @@
 //                 gap = clk cycles between the previous op's completion and this op
 //   +mem=<file>   $readmemh byte file (the sample memory)
 //   +lat=<n>      SDRAM read latency in cycles (default 6)
+//   +wlat=<n>     SDRAM write latency: mem_busy stays up n cycles after a write
+//                 request and the byte lands at the end (default 0: at once)
 //   +log=<file>
 `timescale 1ns/1ps
 
@@ -41,14 +43,27 @@ module tb_cpuvis #(
     logic [15:0] mem_rd_data16;
     logic        mem_rd_valid;
 
-    //  sample memory: same model as tb_golden_pcm (latency, mem_busy while a read waits)
+    //  sample memory: same model as tb_golden_pcm (latency, mem_busy while a read waits),
+    //  plus an optional write latency (mem_busy while a write waits, as the ch4 bridge)
     logic [7:0] mem [0:4194303];
-    int          LAT = 6;
-    logic        rd_pend = 1'b0;
-    int          rd_cnt  = 0;
-    logic [21:0] rd_addr;
+    int          LAT = 6, WLAT = 0;
+    logic        rd_pend = 1'b0, wr_pend = 1'b0;
+    int          rd_cnt  = 0, wr_cnt = 0;
+    logic [21:0] rd_addr, wr_addr;
+    logic [7:0]  wr_byte;
     always_ff @(posedge clk) begin
         mem_rd_valid <= 1'b0;
+        if (mem_wr_req && WLAT > 0) begin
+            wr_pend <= 1'b1;
+            wr_cnt  <= WLAT;
+            wr_addr <= mem_addr;
+            wr_byte <= mem_wr_data;
+        end else if (wr_pend) begin
+            if (wr_cnt <= 1) begin
+                mem[wr_addr] <= wr_byte;
+                wr_pend      <= 1'b0;
+            end else wr_cnt <= wr_cnt - 1;
+        end
         if (mem_rd_req && !rd_pend) begin
             rd_pend <= 1'b1;
             rd_cnt  <= LAT - 1;
@@ -61,7 +76,7 @@ module tb_cpuvis #(
                 rd_pend       <= 1'b0;
             end else rd_cnt <= rd_cnt - 1;
         end
-        if (mem_wr_req) mem[mem_addr] <= mem_wr_data;
+        if (mem_wr_req && WLAT == 0) mem[mem_addr] <= mem_wr_data;
     end
 
     ymf278b_top #(.CLK_HZ(CLK_HZ), .CLK_OPL3(14318182)) dut (
@@ -69,7 +84,7 @@ module tb_cpuvis #(
         .io_port, .io_data_in, .io_wr, .io_rd, .io_data_out, .io_ack,
         .status_export, .status_rd_notify,
         .mem_addr, .mem_rd_req, .mem_rd_data, .mem_rd_data16, .mem_rd_valid,
-        .mem_wr_req, .mem_wr_data, .mem_busy(rd_pend),
+        .mem_wr_req, .mem_wr_data, .mem_busy(rd_pend | wr_pend),
         .audio_left(), .audio_right(), .audio_valid(), .irq_n(),
         .pcm_mute(1'b0), .fm_mute(1'b0), .pcm_vol(4'd0), .fm_vol(4'd0),
         .dbg_pcm_valid(), .dbg_opl3_valid(), .dbg_pcm_level(), .dbg_new2(),
@@ -126,6 +141,7 @@ module tb_cpuvis #(
         if (!$value$plusargs("mem=%s", mem_f)) mem_f = "mem.hex";
         if (!$value$plusargs("log=%s", log_f)) log_f = "cpuvis.log";
         void'($value$plusargs("lat=%d", LAT));
+        void'($value$plusargs("wlat=%d", WLAT));
         $readmemh(mem_f, mem);
         for (int a = 0; a < 4194304; a++) if (mem[a] === 8'hxx) mem[a] = 8'h00;
         fd = $fopen(log_f, "w");
