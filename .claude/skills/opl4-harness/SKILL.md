@@ -24,10 +24,11 @@ What each scenario and each cpuvis block covers, and every intended difference f
 | `mutants` | every engine mutant FAILS golden. For `ymf278_pcm_engine2.sv` they are generated from the file under test by `mutants/make_engine2_mutants.py` (20: interpolation, EG, DAMP/PRVB, TL ramp, LFO, pan/DO1, header backfill/dirty mask/table bank, loop end/loop address, wave-write position reset, F9h mix, +1 LSB, slots 12-23 never dispatched); another engine brings its own `MUT_DIR` | the mutants are the control; none of them touches scheduling yet (SPEC H8) |
 | `cpuvis` | CPU-visible behaviour of `ymf278b_top` access by access against an openMSX YMF278B model (`sim/cpuvis`): read data, status/BUSY/LD timing, io_ack hold, NEW2/ID, reg 2/3-6, slot read-back, F8h/F9h, OPL2 remap, warm reset. Known differences are model flags D1..D9 (`docs/opl4_scratch/SPEC.md` D; D3/D4/D5/D7 are tolerated RTL defects); every flag must change at least one observation; at least `CPUVIS_MIN_CHECKS` (717) judged and at most `CPUVIS_MAX_UNJUDGED` (0) unjudged, and the judged check keys equal `sim/cpuvis/checks_baseline.txt` (`CPUVIS_BASELINE`, named as BASELINE OVERRIDE on the PASS line; a new engine that moves ack timing changes them: review the diff, commit a new baseline) | its 16 mutants (`mutants/make_cpuvis_mutants.py`) must all fail (built in) |
 | `stress` | the current engine's per-byte MLAB register file under writes aimed at slot reads, warm resets (`sim/lockstep/run_stress.sh`) | its own 4 mutants + `reset_len=8` must fail (built in) |
+| `reset` | the register file's reset sweep: the cpuvis warm reset (op block G-RESET: every slot's fields 4 and 9 written before, read after) at the engine's minimum length (engine2 24 clk, engine3 48) passes, 8 clk shorter fails | built in (the short run is the control) |
 | `memwr` | fullsys (FS-A1GT, tdm128, +moonsound), with `ENGINE` swapped in for the filelist's PCM engine (`PCM_ENGINE` in `assets/run1.sh`): R800 OTIR 1024-byte wave-memory upload + readback; PASS needs the probe to reach phase 15 and an error count line for phases 1, 6, 7, 8, 9, all 0 (only per-phase lines are summed: the closing VPROBE line repeats phase 7). The fullsys generated sources are rebuilt from `$W` on every run (`sim/fullsys/prep.sh` into the output dir; `gen/` is gitignored, so another tree's copy carries that tree's ports and stubs); a `GEN` outside `$W` or a filelist path outside the tree is a FAIL; the PASS line names the tree commit (+dirty from `git status --porcelain`, untracked files included), the gen hash and the engine+regs hash; an `ENGINE`/`REGS` file outside `$W` makes even 0 errors a FAIL | `REGS=` a ymf278b_regs.sv with `MEM_WRITE_DELAY` 0 must FAIL (1269 = phase 7 249 + phase 9 1020, 2026-10-24); `MEMWR_LOG=<r800.log>` judges a saved log (truncated / missing-phase logs FAIL); `ENGINE=` an engine whose reg 6 address does not advance: FAIL 2040; `GEN=` sdram128's gen: FAIL |
 | `resource` | fit report (`FIT_DIR`, default `$W/output_files`): PCM (`u_pcm`, whatever the module) <= `PCM_ALM_MAX` (1200), MoonSound <= `MS_ALM_MAX` (2500), no warning 10999. FAIL when the map report is missing, the fit report is older than any MoonSound RTL file, the ALM count is not found, or `u_pcm`'s module is not the engine under test. A PASS line says BUDGET OVERRIDE / which report dir (resolved, so a symlink into another tree shows) when not the defaults. Timing is not judged: a fit that failed timing still passes here | the current engine fails the 1200 budget (2,826 ALM, 2026-10-24) and passes 3000/4200; each FAIL path was run once |
 
-`harness.sh all` = oracle golden mutants cpuvis load resource (the current engine FAILS `load`); `HEAVY=1` adds stress and memwr (fullsys builds take
+`harness.sh all` = oracle golden mutants cpuvis reset load resource (the current engine FAILS `load`); `HEAVY=1` adds stress and memwr (fullsys builds take
 tens of minutes; memwr regenerates the fullsys sources itself, `GEN=` only for a prep.sh output inside the tree).
 `W` defaults to the worktree the skill is installed in and is printed first; check it.
 `ENGINE="<files>"` selects the engine under test; the last file is the one mutants replace.
@@ -79,3 +80,12 @@ cpuvis prints how many BUSY/LD checks it could not judge (the next access starte
 - Report every number with its control: `GATE golden PASS` + `mutant X caught`.
 - Say what was not run (board, FM, 32 MB map, other machines).
 - User-facing text in Korean; commits, code comments and this harness stay English.
+
+## Engine selection (P2, 2026-10-25)
+
+The module the last `ENGINE` file defines picks the engine: `ymf278_pcm_engine3` makes the
+harness (memwr `-DPCM_ENGINE3`, cpuvis `+define+PCM_ENGINE3` in `run_cpuvis.sh`) select it in
+`ymf278b_top.sv`, which also sets ymf278b_regs `MEM_WRITE_DELAY` to 107 for it, and the cpuvis
+model drops the flags that engine does not have (`ENGINE_DROPS` in `cpuvis_check.py`: D10, D11,
+D12) and expects that delay. `harness.sh p2` = cpuvis + reset (+ memwr with HEAVY=1), the P2
+gates; golden on engine3 FAILS until P3 (no sound yet, and `tb_golden_pcm.sv` instantiates engine2).

@@ -193,7 +193,22 @@ wire       pcm_cpu_mem_busy_w;
 wire [7:0] pcm_reg02_readback_w;
 wire [7:0] pcm_reg_rd_data_w;
 
-ymf278_pcm_engine2 #(
+//  PCM engine: engine2 (v3, the board build) unless PCM_ENGINE3 is defined, which
+//  selects the from-scratch engine (ymf278_pcm_engine3.sv, opl4_scratch).  engine3
+//  holds cpu_mem_busy until a wave-memory write has left the ch4 bridge, so the
+//  reg 6 write WAIT drops from 1024 clk to openMSX's 28 master clocks (107 clk at
+//  128.86 MHz, PLAN goal 5); engine2 releases at issue and keeps 1024.
+//  engine2 leaves the delay to ymf278b_regs' own default, so a regs file with
+//  another default (the harness memwr control) still takes effect.
+`ifdef PCM_ENGINE3
+`define YMF278_PCM_ENGINE ymf278_pcm_engine3
+localparam int PCM_MEM_WRITE_DELAY = (28 * (CLK_HZ / 1000) + 33868 / 2) / 33868;
+`define YMF278_REGS_PARAMS .CLK_HZ (CLK_HZ), .MEM_WRITE_DELAY (PCM_MEM_WRITE_DELAY)
+`else
+`define YMF278_PCM_ENGINE ymf278_pcm_engine2
+`define YMF278_REGS_PARAMS .CLK_HZ (CLK_HZ)
+`endif
+`YMF278_PCM_ENGINE #(
     .CLK_HZ (CLK_HZ)
 ) u_pcm (
     .clk             (clk),
@@ -281,7 +296,7 @@ assign dbg_mem_nonzero = 1'b0;
 logic busy_reg, load_busy_reg;
 
 ymf278b_regs #(
-    .CLK_HZ (CLK_HZ)
+    `YMF278_REGS_PARAMS
 ) u_regs (
     .clk            (clk),
     .rst_n          (rst_n),

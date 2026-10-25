@@ -12,6 +12,8 @@ Gaps: 200 clk (1.55 us at 128.86 MHz) is about an R800 OUT-to-OUT; 4..20 clk
 polls look at BUSY right after an access.  Writes to sample RAM stay at
 0x200000+ (RAM on a MoonSound; openMSX ignores CPU writes to the 2 MB ROM).
 """
+import os
+
 G = 200
 ops = []
 
@@ -87,6 +89,18 @@ S(20)
 P(0x02, 200)
 for r in (0x08, 0x80, 0x98, 0xB0, 0xC8, 0xE0):
     rreg(r)
+c("C-HDR dirty: a field written right after the wave number survives the header backfill")
+wreg(0x09, 0x03)                 # slot 1, wave 3
+wreg(0x99, 0x5C, gap=4)          # slot 1 field 6, before the header is in
+P(0x02, 200)
+for r in (0x81, 0x99, 0xB1):
+    rreg(r)
+c("C-HDR again: the wave number rewritten while its header is being fetched")
+wreg(0x0A, 0x00)                 # slot 2, wave 0 ...
+wreg(0x0A, 0x03, gap=8)          # ... then wave 3 a few clk later
+P(0x02, 200)
+for r in (0x82, 0x9A, 0xB2, 0xCA):
+    rreg(r)
 c("C-SLOTRD: slot registers read back what was written (field 4 bit 5 included)")
 wreg(0x98, 0x5A); R(0x7F)
 wreg(0x68, 0x2A); R(0x7F)
@@ -121,8 +135,12 @@ R(0xC7)
 W(0xC4, 0xA1); R(0xC5)
 fm(1, 0x05, 0x03)
 S()
+c("G-RESET: every slot's field 4 and field 9 non-zero before the reset (the register file has no reset: it is swept)")
+for n in range(24):
+    wreg(0x68 + n, 0x45)         # damp, pan 5 (key off)
+    wreg(0xE0 + n, 0x07)         # AM 7
 c("D9 / D6: warm reset")
-X(0x80)
+X(int(os.environ.get('CPUVIS_RESET_LEN', '128')))
 S()
 rreg(0x02)
 fm(1, 0x05, 0x03)
@@ -130,5 +148,10 @@ S(); S()
 R(0x7F)
 rreg(0x02)
 rreg(0xF8)
+c("G-RESET / D10 / D11: slot registers after the reset")
+for n in range(24):
+    rreg(0x68 + n)
+    rreg(0xE0 + n)
+rreg(0x98); rreg(0xAF)          # field 6 of slots 0 and 23 (wave 0's AR/D1R after an openMSX reset)
 
 print("\n".join(ops))

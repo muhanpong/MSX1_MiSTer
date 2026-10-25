@@ -10,8 +10,10 @@
 #    harness.sh stress            the current engine's MLAB register-file stress lockstep (run_stress.sh)
 #    harness.sh memwr             fullsys R800 OTIR wave-memory upload + readback (mprobe_r), 0 errors
 #    harness.sh cpuvis            CPU-visible lockstep vs the openMSX model (sim/cpuvis) + its mutants
+#    harness.sh reset             register-file reset sweep: cpuvis warm reset at the minimum length passes, 8 clk shorter fails
 #    harness.sh resource          ALM / warning-10999 gates from the last fit report
-#    harness.sh all               oracle golden mutants cpuvis load resource (+ stress memwr if HEAVY=1)
+#    harness.sh p2                the P2 (CPU-side skeleton) gates: cpuvis reset (+ memwr if HEAVY=1)
+#    harness.sh all               oracle golden mutants cpuvis reset load resource (+ stress memwr if HEAVY=1)
 #
 #  env:
 #    W         worktree (default: the worktree this skill is installed in)
@@ -69,6 +71,8 @@ LATS=${LATS:-"1 20"}
 MUT_LATS=${MUT_LATS:-1}
 ALL_OK=1
 gate() { echo "GATE $1 $2 ${3:-}"; [ "$2" = PASS ] || ALL_OK=0; }
+#  the module the last ENGINE file defines (engine2, engine3, ...)
+engine_mod() { grep -m1 -oE '^\s*module\s+[A-Za-z0-9_]+' $(echo $ENGINE | awk '{print $NF}') | awk '{print $2}'; }
 
 #  Reference streams, regenerated on every harness run (a cached stream can outlive the
 #  scenario it was made from).
@@ -244,6 +248,8 @@ do_memwr() {
     #  MEMWR_LOG=<r800.log> judges an existing log instead of running (checks the judge itself)
     if [ -n "${MEMWR_LOG:-}" ]; then cp "$MEMWR_LOG" "$d/r800.log"
     else
+        #  engine3 is selected in the top by PCM_ENGINE3 (and brings its own write delay)
+        local edefs=""; [ "$(engine_mod)" = ymf278_pcm_engine3 ] && edefs="-DPCM_ENGINE3"
         #  the generated sources must come from the tree under test: regenerate them here (4 s)
         #  unless GEN is given, and then it must live inside $W
         local gen="${GEN:-$d/gen}" rw rg
@@ -256,7 +262,7 @@ do_memwr() {
         local stray; stray=$(grep '^/' "$gen/filelist.txt" | while read -r f; do
             f=$(realpath "$f"); case "$f" in "$(realpath "$W")"/*|"$(realpath "$gen")"/*) ;; *) echo "$f";; esac; done)
         [ -z "$stray" ] || { gate memwr FAIL "filelist reads outside the tree: $(echo $stray)"; return; }
-        GEN="$gen" PCM_ENGINE="$ENGINE" HEX="$HERE/../assets/mprobe_r.hex" LOG=r800.log bash "$HERE/../assets/run1.sh" "$d" > "$d/run1.out" 2>&1
+        EXTRA_DEFS="$edefs" GEN="$gen" PCM_ENGINE="$ENGINE" HEX="$HERE/../assets/mprobe_r.hex" LOG=r800.log bash "$HERE/../assets/run1.sh" "$d" > "$d/run1.out" 2>&1
         #  status, not diff: an untracked (uncommitted new) engine file is dirty too
         local cm; cm=$(git -C "$W" rev-parse --short HEAD); [ -z "$(git -C "$W" status --porcelain)" ] || cm="$cm+dirty"
         #  the gen dir's own path is in its files: hash without it, so equal sources hash equal
@@ -292,7 +298,7 @@ do_cpuvis() {
     local others; others=$(echo $ENGINE | awk '{for(i=1;i<NF;i++) printf "%s ", $i}')
     local regs=${REGS:-$Y/rtl/ymf278b_regs.sv} top=${TOP:-$Y/rtl/ymf278b_top.sv}
     local md=${CPU_MUT_DIR:-}
-    if [ -z "$md" ] && [ "$(basename "$last")" = ymf278_pcm_engine2.sv ]; then
+    if [ -z "$md" ] && { [ "$(basename "$last")" = ymf278_pcm_engine2.sv ] || [ "$(basename "$last")" = ymf278_pcm_engine3.sv ]; }; then
         md=$d/mutants
         python3 "$HERE/../mutants/make_cpuvis_mutants.py" "$last" "$regs" "$top" "$md" > /dev/null \
             || { gate cpuvis FAIL "mutant generation failed (an anchor no longer matches)"; return; }
@@ -320,10 +326,10 @@ do_cpuvis() {
     done
     local tl; tl=$(grep -m1 "^cpuvis:" "$d/tree.txt")
     #  a floor on what was judged: a model change that widens windows must not turn
-    #  checks into "unjudged" passes (2026-10-24: 717 judged, 0 unjudged)
+    #  checks into "unjudged" passes (2026-10-25: 1528 judged, 0 unjudged, both engines)
     local nj nu; nj=$(echo "$tl" | grep -oE '[0-9]+ checks' | grep -oE '[0-9]+'); nu=$(echo "$tl" | grep -oE '[0-9]+ unjudged' | grep -oE '[0-9]+')
-    if [ "${nj:-0}" -lt "${CPUVIS_MIN_CHECKS:-717}" ] || [ "${nu:-999}" -gt "${CPUVIS_MAX_UNJUDGED:-0}" ]; then
-        gate cpuvis FAIL "judged ${nj:-?} (min ${CPUVIS_MIN_CHECKS:-717}), unjudged ${nu:-?} (max ${CPUVIS_MAX_UNJUDGED:-0}): $tl"; return
+    if [ "${nj:-0}" -lt "${CPUVIS_MIN_CHECKS:-1528}" ] || [ "${nu:-999}" -gt "${CPUVIS_MAX_UNJUDGED:-0}" ]; then
+        gate cpuvis FAIL "judged ${nj:-?} (min ${CPUVIS_MIN_CHECKS:-1528}), unjudged ${nu:-?} (max ${CPUVIS_MAX_UNJUDGED:-0}): $tl"; return
     fi
     #  the count alone can be kept while checks are dropped or relabelled: the judged check
     #  keys ("op<n> <kind> <port> <check>") must equal the committed baseline.  A new engine
@@ -342,6 +348,26 @@ do_cpuvis() {
         gate cpuvis PASS "$tl; check set == $(basename "$bl") ($(wc -l < "$bl"))$blo; mutants $caught/$n caught"
     else
         gate cpuvis FAIL "tree: $(grep -m1 '^CPUVIS' "$d/tree.txt") ${tl}; mutants $caught/$n caught"
+    fi
+}
+
+do_reset() {
+    #  The register file is a memory without reset: zeros are swept through it while rst_n
+    #  is low, so rst_n must stay low for a minimum (engine2 24 clk: one MLAB per field,
+    #  24 entries; engine3 48: RAM-R words).  The cpuvis warm reset (G-RESET block: every
+    #  slot's field 4 and 9 written before, read after) must pass at that length and fail
+    #  8 clk shorter.
+    local d="$OUT/reset" min; rm -rf "$d"; mkdir -p "$d"
+    case "$(engine_mod)" in ymf278_pcm_engine3) min=48;; *) min=24;; esac
+    local regs=${REGS:-$Y/rtl/ymf278b_regs.sv} top=${TOP:-$Y/rtl/ymf278b_top.sv}
+    RESET_LEN=$min ENGINE="$ENGINE" REGS="$regs" TOP="$top" "$Y/sim/cpuvis/run_cpuvis.sh" "$d/ok" > "$d/ok.txt" 2>&1 &
+    RESET_LEN=$((min - 8)) ENGINE="$ENGINE" REGS="$regs" TOP="$top" "$Y/sim/cpuvis/run_cpuvis.sh" "$d/short" > "$d/short.txt" 2>&1 &
+    wait
+    local nshort; nshort=$(grep -m1 '^cpuvis:' "$d/short.txt" | grep -oE '[0-9]+ failed')
+    if grep -q '^CPUVIS PASS' "$d/ok.txt" && grep -q '^CPUVIS FAIL' "$d/short.txt" && ! grep -q 'FAIL: build' "$d/short.txt"; then
+        gate reset PASS "$(engine_mod): warm reset $min clk passes, $((min - 8)) clk fails (${nshort:-?})"
+    else
+        gate reset FAIL "$(engine_mod): $min clk $(grep -m1 '^CPUVIS' "$d/ok.txt"), $((min - 8)) clk $(grep -m1 '^CPUVIS' "$d/short.txt")"
     fi
 }
 
@@ -389,10 +415,12 @@ case "${1:-all}" in
     memwr) do_memwr;;
     resource) do_resource;;
     cpuvis) do_cpuvis;;
+    reset) do_reset;;
     oracle) do_oracle;;
     load) do_load;;
-    all) do_oracle; do_golden; do_mutants; do_cpuvis; do_load; do_resource; [ -n "${HEAVY:-}" ] && { do_stress; do_memwr; };;
-    *) echo "usage: $0 oracle|golden|mutants|cpuvis|load|stress|memwr|resource|all"; exit 2;;
+    all) do_oracle; do_golden; do_mutants; do_cpuvis; do_reset; do_load; do_resource; [ -n "${HEAVY:-}" ] && { do_stress; do_memwr; };;
+    p2) do_cpuvis; do_reset; [ -n "${HEAVY:-}" ] && do_memwr;;
+    *) echo "usage: $0 oracle|golden|mutants|cpuvis|reset|load|stress|memwr|resource|p2|all"; exit 2;;
 esac
 [ $ALL_OK = 1 ] && echo "HARNESS PASS" || echo "HARNESS FAIL"
 [ $ALL_OK = 1 ]

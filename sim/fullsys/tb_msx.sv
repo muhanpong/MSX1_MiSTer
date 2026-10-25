@@ -1796,6 +1796,48 @@ module tb;
       end
    end
    final if (vp_phase != 15) $display("VPROBE RESULT FAIL (the probe did not finish: phase %0d)", vp_phase);
+  `ifdef LPROBE
+   //  -DLPROBE (opl4-harness assets/lprobe.asm): ch4 latency at the MoonSound bridge, per
+   //  vprobe phase, in clk_sdram.  Read = ms_mem_rd_req rise -> ms_mem_rd_valid (what the
+   //  engine waits), write = ms_mem_wr_req rise -> bridge idle again.  The canary's own
+   //  reads are not engine reads and are not counted (ms_mem_rd_valid excludes them), but
+   //  they do occupy the bridge, so they are inside the engine's numbers when they collide.
+   int lp_rd [16][512], lp_wr [16][2048];
+   int lp_rd_t = -1, lp_wr_t = -1, lp_t = 0, lp_ph = 0;
+   logic lp_rq = 1'b0, lp_wq = 1'b0;
+   function automatic string lp_stat(input int h [], input int n);
+      int tot = 0, c = 0, mn = -1, mx = 0, med = 0, p99 = 0;
+      for (int i = 0; i < n; i++) tot += h[i];
+      if (tot == 0) return "n 0";
+      for (int i = 0; i < n; i++) if (h[i] != 0) begin
+         if (mn < 0) mn = i;
+         mx = i;
+         if (c < (tot + 1) / 2 && c + h[i] >= (tot + 1) / 2) med = i;
+         if (c < (tot * 99 + 99) / 100 && c + h[i] >= (tot * 99 + 99) / 100) p99 = i;
+         c += h[i];
+      end
+      return $sformatf("n %0d min %0d median %0d p99 %0d max %0d%s", tot, mn, med, p99, mx, h[n-1] != 0 ? " (max is the cap)" : "");
+   endfunction
+   always @(posedge MSX.clk_sdram) begin
+      lp_t++;
+      lp_rq <= MSX.ms_mem_rd_req; lp_wq <= MSX.ms_mem_wr_req;
+      if (vp_phase != lp_ph) begin
+         if (lp_ph != 0) begin
+            $display("lprobe: phase %0d read  %s", lp_ph, lp_stat(lp_rd[lp_ph & 15], 512));
+            $display("lprobe: phase %0d write %s", lp_ph, lp_stat(lp_wr[lp_ph & 15], 2048));
+         end
+         lp_ph = vp_phase;
+      end
+      if (MSX.ms_mem_rd_req & ~lp_rq) lp_rd_t = lp_t;
+      if (MSX.ms_mem_rd_valid && lp_rd_t >= 0) begin
+         lp_rd[lp_ph & 15][(lp_t - lp_rd_t) > 511 ? 511 : lp_t - lp_rd_t]++; lp_rd_t = -1;
+      end
+      if (MSX.ms_mem_wr_req & ~lp_wq) lp_wr_t = lp_t;
+      if (lp_wr_t >= 0 && lp_t > lp_wr_t + 1 && MSX.pcm_state == 2'd0) begin
+         lp_wr[lp_ph & 15][(lp_t - lp_wr_t) > 2047 ? 2047 : lp_t - lp_wr_t]++; lp_wr_t = -1;
+      end
+   end
+  `endif
  `endif
 `endif
 

@@ -22,7 +22,7 @@ if [ -n "${PCM_ENGINE:-}" ]; then
 fi
 FILES=$(echo "$FILES" | tr ' ' '\n' | grep -vx "$GEN/vdp\(18_core\)\?\.v" | grep -v '/gen/vdp\(18_core\)\?\.v$' | tr '\n' ' ')
 FILES="$FILES $(ls rtl/video/v9968/*.v | tr '\n' ' ') rtl/video/v9968_link.sv rtl/video/v9968_bus.sv rtl/video/v9968_cmdwait.sv rtl/video/geo3d/geo3d_core.v rtl/video/geo3d/geo3d_engine.v rtl/video/geo3d/geo3d_bus.v"
-DEFS="-DPRELOAD -DPRELOAD_SVH=\"$OUT/pre.state.svh\" -DTDM128 -DMSX_V9968 -DVPROBE"
+DEFS="-DPRELOAD -DPRELOAD_SVH=\"$OUT/pre.state.svh\" -DTDM128 -DMSX_V9968 -DVPROBE ${EXTRA_DEFS:-}"
 verilator --binary --timing --public-flat-rw \
    -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL \
    -Wno-UNDRIVEN -Wno-PINMISSING -Wno-IMPLICIT -Wno-MULTIDRIVEN -Wno-CASEINCOMPLETE \

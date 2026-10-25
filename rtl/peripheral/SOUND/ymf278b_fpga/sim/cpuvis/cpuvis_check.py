@@ -36,13 +36,14 @@ WAVE_REG_WRITE_DELAY = 88
 MEM_READ_DELAY = 38
 MEM_WRITE_DELAY = 28
 LOAD_DELAY = 10000
-# ymf278b_regs.sv:82 (clk_sdram cycles)
-RTL_MEM_WRITE_DELAY = 1024
+# reg 6 write BUSY/WAIT floor in clk_sdram cycles: ymf278b_regs MEM_WRITE_DELAY as the top
+# sets it (1024 with engine2, 107 = openMSX's 28 master clocks with engine3); run_cpuvis.sh
+RTL_MEM_WRITE_DELAY = int(os.environ.get('CPUVIS_MEMW', '1024'))
 
 DEVIATIONS = {
     'D1': "BUSY/LD delays counted in clk_sdram cycles, not master clocks (ymf278b_regs.sv:52-83)",
     'D2': "a write to the wave data port with latch 3..6 holds the CPU (io_ack) until BUSY clears; "
-          "BUSY = 1024 clk (ymf278b_regs.sv:82,236-241,192-197)",
+          f"BUSY = {RTL_MEM_WRITE_DELAY} clk (ymf278b_regs.sv MEM_WRITE_DELAY, set by ymf278b_top.sv)",
     'D3': "reg 6 reads/writes ignore reg 2 bit 0 (memory access mode) (ymf278_pcm_engine2.sv:1666-1722)",
     'D4': "reg 3/4 writes change the memory address at once; openMSX latches it only on reg 5 "
           "(ymf278_pcm_engine2.sv:1683-1684)",
@@ -54,7 +55,17 @@ DEVIATIONS = {
     'D8': "after a reg 5/6 write or a reg 6 read BUSY also waits for the engine's memory op "
           "(<= 1 frame) (ymf278b_regs.sv:141; ymf278_pcm_engine2.sv:1722)",
     'D9': "a warm reset clears NEW2 (openMSX keeps reg 105h) (ymf278b_top.sv:90-102)",
+    'D10': "after reset the field-4 registers 68h-7Fh read 20h (engine2 stores bit 5 inverted); "
+           "openMSX's reset writes 0 to them (YMF278.cc reset, case 4) (ymf278_pcm_engine2.sv:1454-1456)",
+    'D11': "after reset fields 5-9 read 0; openMSX's reset ends with wave number 0 on every slot, "
+           "which loads wave 0's header into them (YMF278.cc reset -> writeRegDirect case 0)",
+    'D12': "a wave number written again within 64 clk of the previous one on the same slot keeps "
+           "the previous number's header in fields 5-9 (engine2 fetches the number it saw first and "
+           "clears the request when it stores; characterized only at the op script's 20-clk spacing) "
+           "(ymf278_pcm_engine2.sv:1277-1278, 1590-1591)",
 }
+# Flags an engine does not have: run_cpuvis.sh drops them from the default list for it.
+ENGINE_DROPS = {'ymf278_pcm_engine3': {'D10', 'D11', 'D12'}}
 
 # Of those, the ones where openMSX follows a "Verified on real YMF278" comment (or, for
 # D7, plain read-time semantics) are RTL defects the gate tolerates until they are fixed,
@@ -65,6 +76,7 @@ DEFECTS = {
     'D4': "YMF278.cc:717-736, 'Verified on real YMF278'",
     'D5': "YMF262.cc:1101-1110, 'Verified on real YMF278'",
     'D7': "YMF278.cc:780-782 (read-time memory; no hardware note either way)",
+    'D12': "YMF278.cc:594-615 (the header of the number written, synchronously)",
 }
 
 TOL = 4
@@ -101,8 +113,18 @@ class Model:
             self.fmreg[0x105] = 0
         self.rtl_new2_prev = self.new2()
         self.regs = [0] * 256
+        if 'D10' in self.dev:
+            for n in range(24):
+                self.regs[0x68 + n] = 0x20
+        if 'D11' not in self.dev:
+            # YMF278::reset writes 0 to F7h..08h in that order: each slot's wave number
+            # (field 0) comes after its fields 5-9, so wave 0's header backfills them
+            for n in range(24):
+                for i in range(7, 12):
+                    self.regs[8 + n + (i - 2) * 24] = self.mem[i]
         self.regs[0xF8] = 0x00 if 'D6' in self.dev else 0x1B
         self.mem_adr = 0
+        self.wave_t = {}            # slot -> (time, header) of its last wave-number write (D12)
         self.opl4latch = 0
         self.opl3latch = 0
         self.busy = (t, t)          # BUSY until (lo, hi): exact when lo == hi
@@ -147,6 +169,10 @@ class Model:
                 tbl = (self.regs[2] >> 2) & 7
                 base = wave * 12 if (wave < 384 or not tbl) else tbl * 0x80000 + (wave - 384) * 12
                 buf = [self.mem[(base + i) & 0x3FFFFF] for i in range(12)]
+                last = self.wave_t.get(n)
+                if 'D12' in self.dev and last is not None and t - last[0] < 64:
+                    buf = last[1]
+                self.wave_t[n] = (t, buf)
                 self.regs[reg] = data
                 for i in range(7, 12):               # YMF278.cc:610-615 backfill
                     self.regs[8 + n + (i - 2) * 24] = buf[i]
@@ -374,7 +400,7 @@ def main():
     args = sys.argv[1:]
     quiet = '--quiet' in args
     args = [a for a in args if a != '--quiet']
-    dev = set(DEVIATIONS)
+    dev = set(DEVIATIONS) - ENGINE_DROPS.get(os.environ.get('CPUVIS_ENGINE', ''), set())
     if '--dev' in args:
         i = args.index('--dev')
         dev = set() if args[i + 1] == 'none' else set(args[i + 1].split(','))
