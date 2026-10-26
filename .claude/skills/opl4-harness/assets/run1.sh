@@ -31,5 +31,5 @@ verilator --binary --timing --public-flat-rw \
    $DEFS --top-module tb -o tbmsx -Mdir "$OUT/v" \
    "+incdir+$GEN" $FILES "$GEN/sdram_sim.sv" "$GEN/sdram_tdm_sim.sv" sim/fullsys/tb_msx.sv \
    > "$OUT/build.log" 2>&1 || { echo "BUILD FAIL $1"; grep -E '%Error' "$OUT/build.log" | head; exit 1; }
-"$OUT/v/tbmsx" "+pack=$P" +ms=${MS:-160} "+preload=$OUT/pre" +moonsound +kprobe=${HEX:-$V/../mprobe.hex} > $V/${LOG:-run.log} 2>&1 || true
+"$OUT/v/tbmsx" "+pack=$P" +ms=${MS:-160} "+preload=$OUT/pre" +moonsound +kprobe=${HEX:-$V/../mprobe.hex} ${RUN_ARGS:-} > $V/${LOG:-run.log} 2>&1 || true
 grep -E "^vprobe: phase [0-9]+ (at|errors)|VPROBE RESULT" $V/${LOG:-run.log} | sed -E 's/ \(VRAM.*//'

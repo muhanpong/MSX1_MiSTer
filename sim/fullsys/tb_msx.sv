@@ -1809,7 +1809,11 @@ module tb;
    //  bridge too, so they are inside the engine's numbers when they collide.
    int lp_rd [16][512], lp_wr [16][2048];
    int lp_nr [16], lp_nv [16], lp_nro [16], lp_nw [16], lp_nwd [16], lp_nwo [16];
-   int lp_iow [16], lp_ior [16], lp_m1 [16], lp_t0 [16];
+   int lp_iow [16], lp_ior [16], lp_m1 [16], lp_t0 [16], lp_rcan [16], lp_can [16];
+   logic lp_canq = 1'b0;
+   //  +nocanary: the ch4 canary (msx.sv) never takes the bridge -- the control for
+   //  "an engine request rising while the canary owns the bridge is lost"
+   initial if ($test$plusargs("nocanary")) force MSX.can_owns = 1'b0;
    int lp_rd_t = -1, lp_wr_t = -1, lp_t = 0, lp_ph = 0;
    logic lp_rq = 1'b0, lp_wq = 1'b0, lp_iowq = 1'b0, lp_iorq = 1'b0, lp_m1q = 1'b0;
    function automatic string lp_stat(input int h [], input int n);
@@ -1840,16 +1844,23 @@ module tb;
             automatic int k = lp_ph & 15, ko = $countones(lp_keyon);
             $display("lprobe: phase %0d read  %s", lp_ph, lp_stat(lp_rd[k], 512));
             $display("lprobe: phase %0d write %s", lp_ph, lp_stat(lp_wr[k], 2048));
-            $display("lprobe: phase %0d count clk %0d keyon %0d io_wr %0d io_rd %0d idle_m1 %0d rd_rise %0d rd_valid %0d rd_overwrite %0d wr_rise %0d wr_done %0d wr_overwrite %0d",
-                     lp_ph, lp_t - lp_t0[k], ko, lp_iow[k], lp_ior[k], lp_m1[k], lp_nr[k], lp_nv[k], lp_nro[k], lp_nw[k], lp_nwd[k], lp_nwo[k]);
+            $display("lprobe: phase %0d count clk %0d keyon %0d io_wr %0d io_rd %0d idle_m1 %0d rd_rise %0d rd_valid %0d rd_overwrite %0d wr_rise %0d wr_done %0d wr_overwrite %0d canary %0d rd_rise_in_canary %0d",
+                     lp_ph, lp_t - lp_t0[k], ko, lp_iow[k], lp_ior[k], lp_m1[k], lp_nr[k], lp_nv[k], lp_nro[k], lp_nw[k], lp_nwd[k], lp_nwo[k], lp_can[k], lp_rcan[k]);
          end
          lp_ph = vp_phase;
          lp_t0[lp_ph & 15] = lp_t;
       end
       if (MSX.u_moonsound.io_wr & ~lp_iowq) lp_iow[lp_ph & 15]++;
       if (MSX.u_moonsound.io_rd & ~lp_iorq) lp_ior[lp_ph & 15]++;
+      lp_canq <= MSX.can_owns;
+      if (MSX.can_owns & ~lp_canq) lp_can[lp_ph & 15]++;
       if (MSX.u_moonsound.u_pcm.mem_rd_en & ~lp_rq) begin
          lp_nr[lp_ph & 15]++;
+         if (MSX.can_owns) begin
+            lp_rcan[lp_ph & 15]++;
+            $display("lprobe: t=%0d phase %0d engine read rose while the canary owns the bridge (pcm_state %0d, addr %06x)",
+                     lp_t, lp_ph, MSX.pcm_state, MSX.u_moonsound.u_pcm.mem_addr);
+         end
          if (lp_rd_t >= 0) lp_nro[lp_ph & 15]++;
          lp_rd_t = lp_t;
       end
