@@ -36,14 +36,16 @@ module tb #(parameter int RELEASE_PH = 5);
     initial begin #5820; forever begin clk_geo = ~clk_geo; #11640; end end
 
     string stimf = "texdemo_sys.txt";
-    int r20 = 1, v9938 = 0, pace = 3, maxfr = 1000000, disp = 1;
+    int r20 = 1, v9938 = 0, pace = 3, maxfr = 1000000, disp = 1, hmmv = 0;
+    wire [4:0] vdp_screen_mode;
     initial begin
         void'($value$plusargs("stim=%s", stimf));
         void'($value$plusargs("r20=%h", r20));      // R#20 (bit0 = high-speed commands)
         void'($value$plusargs("v9938=%d", v9938));  // cmd_wait table: 0 V9968 (OSD default), 1 V9938
         void'($value$plusargs("pace=%d", pace));    // clk_vdp after each bus access (upstream tb: 3)
         void'($value$plusargs("frames=%d", maxfr)); // stop after this many R
-        void'($value$plusargs("disp=%d", disp));    // 1: display on (R#1=40), 0: off
+        void'($value$plusargs("disp=%d", disp));
+        void'($value$plusargs("hmmv=%d", hmmv));  // Geo3D fill: 1 = HMMV rows in SCREEN 8 (OSD)    // 1: display on (R#1=40), 0: off
     end
 
     //  ── SDRAM controller + model ──────────────────────────────────────────
@@ -99,6 +101,7 @@ module tb #(parameter int RELEASE_PH = 5);
         .bus_valid(bus_valid), .bus_wdata(bus_wdata),
         .hit(geo_hit), .bus_ready(geo_ready), .bus_rdata(geo_rdata), .bus_rdata_en(geo_rdata_en),
         .cmd_wr(geo_cmd_wr), .cmd_num(geo_cmd_num), .cmd_data(geo_cmd_data), .cmd_ce(vdp_ext_ce),
+        .fill_hmmv(hmmv != 0 && vdp_screen_mode == 5'b11100),
         .run_busy(geo_busy));
     assign bus_ready    = geo_hit ? geo_ready : vdp_bus_ready;
     assign bus_rdata_en = geo_rdata_en | vdp_bus_rdata_en;
@@ -117,6 +120,7 @@ module tb #(parameter int RELEASE_PH = 5);
         .vram_rdata(vram_rdata), .vram_rdata_en(vram_rdata_en), .vram_refresh(),
         .display_hs(), .display_vs(), .display_en(), .display_r(), .display_g(), .display_b(),
         .force_highspeed(1'b0),
+        .screen_mode(vdp_screen_mode),
         .ext_cmd_wr(geo_cmd_wr), .ext_cmd_num(geo_cmd_num), .ext_cmd_data(geo_cmd_data), .ext_cmd_ce(vdp_ext_ce),
         .scanline_level(2'd0), .cmd_wait(cmdw),
         .button(2'b00),
@@ -155,7 +159,7 @@ module tb #(parameter int RELEASE_PH = 5);
     endtask
 
     initial begin
-        int fd, rc, p1, p2, frames, nr, nx, nxs; logic [7:0] q, st; string op;
+        int fd, rc, p1, p2, frames, nr, nx, nxs; logic [7:0] q, st; string op, qf; int qfd;
         longint t0, tmax, tsum; int vaddr;
         repeat (20) @(posedge clk_sdram);
         init = 0;
@@ -204,6 +208,17 @@ module tb #(parameter int RELEASE_PH = 5);
                     nx++;
                 end
                 "D": begin rc = $fscanf(fd, "%d", p1); wreg(2, 8'h1F | 8'(((p1 / 256) & 3) << 5)); end
+                "Q": begin   // Q page file: read the SCREEN 8 page back (256 x 212 bytes) through 98h
+                    rc = $fscanf(fd, "%d %s", p1, qf);
+                    repeat (4) @(negedge clk_vdp);
+                    while (vdp_ext_ce) @(negedge clk_vdp);
+                    qfd = $fopen(qf, "wb");
+                    wreg(14, 8'(p1 * 4));
+                    io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h00, q);
+                    for (int k = 0; k < 256 * 212; k++) begin io(0, 3'd0, 8'h00, q); $fwrite(qfd, "%c", q); end
+                    $fclose(qfd);
+                    vaddr = -1;
+                end
                 default: ;
             endcase
         end

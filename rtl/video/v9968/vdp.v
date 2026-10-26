@@ -95,6 +95,7 @@ module vdp (
 	input		[5:0]	ext_cmd_num,
 	input		[7:0]	ext_cmd_data,
 	output				ext_cmd_ce,			//	geo3d: S#2 CE
+	output		[4:0]	screen_mode,		//	MSX1 core: {M5,M4,M3,M2,M1} for geo3d's HMMV fill (local change)
 
 	//	MSX1 core: scanline strength, 0 off, 1/2/3 = 25/50/75% (vdp_video_out)
 	input		[ 1:0]	scanline_level,
@@ -206,6 +207,7 @@ module vdp (
 	wire		[8:0]	w_status_border_position;
 
 	wire		[4:0]	reg_screen_mode;
+	assign screen_mode = reg_screen_mode;
 	wire				reg_sprite_magify;
 	wire				reg_sprite_16x16;
 	wire				reg_display_on;

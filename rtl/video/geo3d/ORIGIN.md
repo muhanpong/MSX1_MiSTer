@@ -13,3 +13,14 @@
   (upstream leaves it free for MegaRAM).  clk = clk_vdp 85.909 MHz, clk_eng = clk_geo
   42.954 MHz from the same PLL (rtl/pll_v9968.v outclk_3, phase 0).  The engine drives the
   V9968's ext_cmd_wr / ext_cmd_num / ext_cmd_data and reads ext_cmd_ce.
+
+## Local change (2026-10-27, feature): flat rows as one-row HMMV (OSD "Geo3D fill (SCREEN 8)")
+
+- `geo3d_engine.v`: input `fill_hmmv`; when set and LOP = IMP, a filled face's row is issued as
+  HMMV (DX, DY, NX = pixels, NY = 1, CLR, CMD C0h) instead of LINE (NX = pixels - 1, NY = 0,
+  CMD 7xh). `geo3d_bus.v` passes it through. msx.sv drives it from OSD status[35] AND the V9968
+  in SCREEN 8 (1 byte per pixel), so other modes keep LINE.
+- Why: V9968 RTL, HS, SCREEN 8: one-row HMMV 0.34 us + 0.063 us/px, LINE 0.77 + 0.177 us/px
+  (cmdcmp/gen_g7.py). NICCC 3D frames 495-505 (sim/geo3d_perf + stream2stim): RUN time per frame
+  17.1 -> 9.2 ms; the read-back pages are identical to LINE's (0 px) and to the geo3d.py model.
+  texdemo (SCREEN 5) RUN times are unchanged with the switch on.

@@ -46,6 +46,7 @@ module geo3d_bus #(
     output reg  [5:0] cmd_num,
     output reg  [7:0] cmd_data,
     input  wire       cmd_ce,
+    input  wire       fill_hmmv,      // MSX1 core: see geo3d_engine (quasi-static level)
     output wire       run_busy
 );
     assign hit = (bus_address == PORT_INDEX) || (bus_address == PORT_DATA);
@@ -128,7 +129,7 @@ module geo3d_bus #(
     geo3d_engine u_engine (
         .clk(clk_eng), .rst(rst_e),
         .sel(a_sel), .wr_stb(e_wr), .rd_stb(e_rd), .din(a_data), .dout(eng_dout),
-        .cmd_wr(e_cmd_wr), .cmd_num(e_cmd_num), .cmd_data(e_cmd_data), .cmd_ce(ce_s),
+        .cmd_wr(e_cmd_wr), .cmd_num(e_cmd_num), .cmd_data(e_cmd_data), .cmd_ce(ce_s), .fill_hmmv(fill_hmmv),
         .run_busy(run_busy)
     );
 

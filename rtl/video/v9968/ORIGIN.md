@@ -88,3 +88,8 @@ Driven from the OSD "Scandoubler Fx" (MSX1.sv: CRT 25/50/75% -> 1/2/3, others 0)
   `vdp_video_out.v` active area / h_en 1600 -> 1440 clocks; `vdp.v` bilinear scaler
   `reg_denominator` 200 -> 180, `reg_normalize` 41 -> 46.  The other upstream commits since 7820668
   (31d82b8 detect tool, a678a53 system controller + updater) touch no file copied here.
+
+## Local change (2026-10-27, feature): screen mode output for Geo3D's HMMV fill
+
+- `vdp.v`: new output `screen_mode[4:0]` = `reg_screen_mode` ({M5,M4,M3,M2,M1}); msx.sv enables
+  Geo3D's HMMV rows only in SCREEN 8 (11100). No behaviour inside the VDP changes.

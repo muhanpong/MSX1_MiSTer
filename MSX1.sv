@@ -307,7 +307,7 @@ wire      [64:0] rtc;
 //[28:26] SRAM SIZE 
 //[31:29] SLOT B CART TYPE
 //[34:32] ROM B TYPE MAPPER
-//[35]    RESERVA
+//[35]    V9968 build: Geo3D flat rows in SCREEN 8, 0 = LINE (upstream), 1 = HMMV
 //[37:36] CPU SPEED (turbo)
 //[38]    BORDER
 //[48]    DEBUG OVERLAY
@@ -425,6 +425,9 @@ localparam CONF_STR = {
    //  V9968 build: normal-speed (HS=0) VDP commands at the V9938's speed, for software that
    //  times the VDP (Go Figure: "Abnormal fast VDP").  Never used before, so saved .CFG = 0.
    "P1O[127],VDP command speed,V9968,V9938;",
+   //  Geo3D draws flat faces row by row; in SCREEN 8 a row can be one HMMV instead of a LINE
+   //  (about 2.7x faster on the V9968). Bit 35 was never an option: saved .CFG = 0 = LINE.
+   "P1O[35],Geo3D fill (SCREEN 8),LINE,HMMV;",
 `endif
    //  How long the CPU is held between two VDP port accesses while NextZ80 owns
    //  the bus.  A real turbo R waits 8.66 us; this core used to wait 1.49 us,
@@ -783,6 +786,7 @@ wire  [1:0] v99_scanline = (status[5:3] == 3'd3) ? 2'd1 :
                            (status[5:3] == 3'd4) ? 2'd2 :
                            (status[5:3] == 3'd5) ? 2'd3 : 2'd0;
 wire        v99_cmd_v9938 = status[127];   // OSD: HS=0 command waits of the V9938 (v9968_cmdwait)
+wire        v99_geo_hmmv  = status[35];    // OSD: Geo3D flat rows as HMMV in SCREEN 8 (never used before: .CFG = 0 = LINE)
 wire  [3:0] v99_tdm_ph;
 wire        v99_req, v99_we, v99_grant, v99_rvalid;
 wire [15:0] v99_addr; wire [31:0] v99_wdata, v99_rdata; wire [3:0] v99_be;
@@ -1247,7 +1251,7 @@ msx MSX
    .v99_vram_address(v99_vram_address), .v99_vram_write(v99_vram_write), .v99_vram_valid(v99_vram_valid),
    .v99_vram_wdata(v99_vram_wdata), .v99_vram_wdata_mask(v99_vram_wdata_mask),
    .v99_vram_rdata(v99_vram_rdata), .v99_vram_rdata_en(v99_vram_rdata_en),
-   .v99_late_cnt(v99_late_cnt), .v99_video(v99_video), .v99_scanline(v99_scanline), .v99_cmd_v9938(v99_cmd_v9938), .clk_geo(clk_geo),
+   .v99_late_cnt(v99_late_cnt), .v99_video(v99_video), .v99_scanline(v99_scanline), .v99_cmd_v9938(v99_cmd_v9938), .v99_geo_hmmv(v99_geo_hmmv), .clk_geo(clk_geo),
 `endif
    .cpu_turbo(cpu_turbo),
    .cpu_speed_q(cpu_speed_q),

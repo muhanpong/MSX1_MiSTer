@@ -59,6 +59,7 @@ module msx
    output                   v99_video,         // 1: the video below is the V9968's (31 kHz, 800x480)
    input              [1:0] v99_scanline,      // V9968 scanlines: 0 off, 1/2/3 = 25/50/75% (OSD, quasi-static)
    input                    v99_cmd_v9938,     // V9968 HS=0 command waits: 0 upstream, 1 V9938 (OSD, quasi-static)
+   input                    v99_geo_hmmv,      // Geo3D flat rows as HMMV in SCREEN 8 (OSD, quasi-static)
    input                    clk_geo,           // 42.954 MHz = clk_vdp / 2, same PLL, phase 0 (Geo3D engine)
 `endif
    //Video
@@ -1472,6 +1473,13 @@ logic [1:0] v99_scanline_v = 2'd0;           // OSD setting, re-registered on cl
 always @(posedge clk_vdp) v99_scanline_v <= v99_scanline;
 logic       v99_cmd_v9938_v = 1'b0;          // OSD setting, re-registered on clk_vdp
 always @(posedge clk_vdp) v99_cmd_v9938_v <= v99_cmd_v9938;
+//  Geo3D fill (OSD "Geo3D fill"): one-row HMMV instead of LINE for flat faces, only while the
+//  V9968 is in SCREEN 8 (G7, 1 byte per pixel: {M5,M4,M3,M2,M1} = 11100); the engine also
+//  requires LOP = IMP. Elsewhere LINE stays (in 2-pixel/byte modes HMMV cannot start or end
+//  on an odd pixel).
+logic       v99_geo_hmmv_v = 1'b0;
+wire  [4:0] v99_screen_mode;
+always @(posedge clk_vdp) v99_geo_hmmv_v <= v99_geo_hmmv & (v99_screen_mode == 5'b11100);
 wire [95:0] v99_cmd_wait;
 v9968_cmdwait v99_cmdwait (.v9938(v99_cmd_v9938_v), .cmd_wait(v99_cmd_wait));
 //  Geo3D (rtl/video/geo3d, MIT, Alex Moncks): ports 9Dh / 9Fh of the same host bus.  Its
@@ -1488,6 +1496,7 @@ geo3d_bus #(.PORT_INDEX(3'd5), .PORT_DATA(3'd7)) u_geo3d (
    .bus_valid(v99_bus_valid), .bus_wdata(v99_bus_wdata),
    .hit(geo_hit), .bus_ready(geo_ready), .bus_rdata(geo_rdata), .bus_rdata_en(geo_rdata_en),
    .cmd_wr(geo_cmd_wr), .cmd_num(geo_cmd_num), .cmd_data(geo_cmd_data), .cmd_ce(vdp_ext_ce),
+   .fill_hmmv(v99_geo_hmmv_v),
    .run_busy(geo_busy)
 );
 assign v99_bus_ready    = geo_hit ? geo_ready : vdp_bus_ready;
@@ -1505,6 +1514,7 @@ vdp v9968 (
    .display_hs(v99_hs), .display_vs(v99_vs), .display_en(v99_de),
    .display_r(v99_r), .display_g(v99_g), .display_b(v99_b),
    .force_highspeed(1'b0),
+   .screen_mode(v99_screen_mode),
 `ifndef V99_MUT_NOGEO_CMD
    .ext_cmd_wr(geo_cmd_wr), .ext_cmd_num(geo_cmd_num), .ext_cmd_data(geo_cmd_data), .ext_cmd_ce(vdp_ext_ce),
 `else   // negative control (sim/fullsys/vprobe phase 6): the engine's command writes never arrive
