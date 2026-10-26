@@ -61,6 +61,20 @@ ENGINE3 = [
      "wavetblhdr            <= reg_data[4:2];", "wavetblhdr            <= reg_data[3:1];"),
     ("rd6_noinc", "engine", "reg 6 read does not advance the memory address",
      "if ((cpu_rd_06 || cpu_wr_issue) && !cpu_adr_set_l)", "if ((cpu_wr_issue) && !cpu_adr_set_l)"),
+    ("d3_wr_through", "engine", "D3 undone: a reg 6 write lands with reg 2 bit 0 off",
+     "wire cpu_wr_06     = reg_wr && (reg_addr == 8'h06) && mem_on;", "wire cpu_wr_06     = reg_wr && (reg_addr == 8'h06);"),
+    ("d3_rd_through", "engine", "D3 undone: a reg 6 read with reg 2 bit 0 off reads memory and moves the address",
+     "wire cpu_rd_06     = reg_rd && (reg_addr == 8'h06) && mem_on;", "wire cpu_rd_06     = reg_rd && (reg_addr == 8'h06);"),
+    ("d3_no_ff", "engine", "D3 undone: a reg 6 read with reg 2 bit 0 off returns the prefetched byte, not FFh",
+     "assign cpu_mem_rd_data = mem_on ? cpu_mem_rd_buf : 8'hFF;", "assign cpu_mem_rd_data = cpu_mem_rd_buf;"),
+    ("d4_reg4_moves", "engine", "D4 undone: a reg 4 write moves the address at once",
+     "if (cpu_adr_set_l) cpu_mem_adr <= {ns_reg[3], ns_reg[4], reg_data};",
+     "if (cpu_adr_set_l) cpu_mem_adr <= {ns_reg[3], ns_reg[4], reg_data};\n        if (reg_wr && reg_addr == 8'h04) cpu_mem_adr[15:8] <= reg_data;"),
+    ("d4_reg3_moves", "engine", "D4 undone: a reg 3 write moves the address at once",
+     "if (cpu_adr_set_l) cpu_mem_adr <= {ns_reg[3], ns_reg[4], reg_data};",
+     "if (cpu_adr_set_l) cpu_mem_adr <= {ns_reg[3], ns_reg[4], reg_data};\n        if (reg_wr && reg_addr == 8'h03) cpu_mem_adr[23:16] <= {2'b00, reg_data[5:0]};"),
+    ("d7_no_refetch", "engine", "D7 undone: no prefetch after a reg 6 write (a read returns the byte from before it)",
+     "        if (cpu_wr_06) cpu_rd_after_wr <= 1'b1;", "        if (1'b0) cpu_rd_after_wr <= 1'b1;"),
     ("wr6_noinc", "engine", "reg 6 write does not advance the memory address",
      "if ((cpu_rd_06 || cpu_wr_issue) && !cpu_adr_set_l)", "if ((cpu_rd_06) && !cpu_adr_set_l)"),
     ("reg3_nomask", "engine", "reg 3 reads back its two upper bits",
@@ -97,7 +111,7 @@ ENGINE3 = [
 # zero-latency bench cannot see.  engine3 only.
 BUSYLAT = [
     ("busy_at_issue", "engine", "a reg 6 write drops BUSY when it is issued, not when it has left the port",
-     "assign cpu_mem_busy    = cpu_rd_pend | cpu_wr_pend | cpu_rd_out | cpu_wr_out;",
+     "assign cpu_mem_busy    = cpu_rd_pend | cpu_wr_pend | cpu_rd_out | cpu_wr_out | cpu_rd_after_wr;",
      "assign cpu_mem_busy    = cpu_rd_pend | cpu_wr_pend | cpu_rd_out;"),
 ]
 

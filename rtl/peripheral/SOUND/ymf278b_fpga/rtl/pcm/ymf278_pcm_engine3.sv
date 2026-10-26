@@ -7,8 +7,10 @@
 // output is silence at 44.1 kHz (P3 adds the datapath).
 //
 // Same module ports as ymf278_pcm_engine2, and the same CPU-visible semantics
-// (SPEC.md sections B-C; cpuvis flags D3, D4, D7 are kept on purpose until the
-// DESIGN decision 1 is taken), with three differences:
+// (SPEC.md sections B-C), with these differences:
+//   * the wave-memory port follows openMSX (DESIGN decision 1, 2026-10-26): reg 2
+//     bit 0 gates reg 6 (D3), only a reg 5 write moves the address (D4), and a
+//     reg 6 write refreshes the prefetched byte (D7);
 //   * the slot registers live in ONE memory (RAM-R, 240 x 8, simple dual-port:
 //     one M10K), not in 30 MLABs;
 //   * a reg 6 write keeps cpu_mem_busy up until the write has left the ch4
@@ -250,7 +252,7 @@ always_ff @(posedge clk or negedge rst_n) begin
         if (reg_addr == 8'h02) begin
             wavetblhdr            <= reg_data[4:2];
             reg02_mem_type        <= reg_data[1];   // stored for readback only (SPEC I8)
-            reg02_mem_access_mode <= reg_data[0];   // not consulted by reg 6 (cpuvis D3)
+            reg02_mem_access_mode <= reg_data[0];   // gates reg 6 (D3)
         end
         if (reg_addr == 8'hF8) begin fm_mix_l  <= reg_data[2:0]; fm_mix_r  <= reg_data[5:3]; end
         if (reg_addr == 8'hF9) begin pcm_mix_l <= reg_data[2:0]; pcm_mix_r <= reg_data[5:3]; end
@@ -302,18 +304,28 @@ always_ff @(posedge clk or negedge rst_n) begin
 end
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CPU wave-memory port (regs 3-6), engine2 semantics: reg 3/4 move the address
-// at once (cpuvis D4), a reg 5 write or reg 6 read prefetches the next byte
-// (D7), reg 6 reads/writes do not look at reg 2 bit 0 (D3).
+// CPU wave-memory port (regs 3-6), openMSX semantics (YMF278.cc:716-748, 759-786,
+// "Verified on real YMF278"):
+//   * reg 3/4 are only stored (ns_reg); a reg 5 write loads all three bytes (D4);
+//   * with reg 2 bit 0 = 0 a reg 6 write is ignored and a reg 6 read returns FFh,
+//     neither moves the address (D3);
+//   * a reg 6 read returns a byte prefetched at the last reg 5 write, reg 6 read or
+//     (new) reg 6 write, so the SDRAM latency stays hidden; after a write the
+//     prefetch is taken again at the advanced address once the write has left the
+//     port, so a read never returns a byte from before the write (D7).  Left: the
+//     prefetch is the memory at prefetch time, not at read time; only CPU writes
+//     change the memory and each one refreshes it, so the two differ only if a read
+//     comes before the prefetch is in (SPEC H13).
 // ═══════════════════════════════════════════════════════════════════════════
 logic [23:0] cpu_mem_adr;
 logic [7:0]  cpu_wr_data;
-logic        cpu_rd_pend, cpu_wr_pend, cpu_rd_out, cpu_wr_out;
+logic        cpu_rd_pend, cpu_wr_pend, cpu_rd_out, cpu_wr_out, cpu_rd_after_wr;
 logic        cpu_rd_issue, cpu_wr_issue, cpu_wr_done;
 logic [7:0]  cpu_mem_rd_buf;
 wire cpu_adr_set_l = reg_wr && (reg_addr == 8'h05);
-wire cpu_rd_06     = reg_rd && (reg_addr == 8'h06);
-wire cpu_wr_06     = reg_wr && (reg_addr == 8'h06);
+wire mem_on        = reg02_mem_access_mode;           // reg 2 bit 0 (D3)
+wire cpu_rd_06     = reg_rd && (reg_addr == 8'h06) && mem_on;
+wire cpu_wr_06     = reg_wr && (reg_addr == 8'h06) && mem_on;
 
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -323,11 +335,10 @@ always_ff @(posedge clk or negedge rst_n) begin
         cpu_wr_pend <= 1'b0;
         cpu_rd_out  <= 1'b0;
         cpu_wr_out  <= 1'b0;
+        cpu_rd_after_wr <= 1'b0;
         cpu_mem_rd_buf <= '0;
     end else begin
-        if (reg_wr && reg_addr == 8'h03) cpu_mem_adr[23:16] <= reg_data;
-        if (reg_wr && reg_addr == 8'h04) cpu_mem_adr[15:8]  <= reg_data;
-        if (cpu_adr_set_l)               cpu_mem_adr[7:0]   <= reg_data;
+        if (cpu_adr_set_l) cpu_mem_adr <= {ns_reg[3], ns_reg[4], reg_data};
         if ((cpu_rd_06 || cpu_wr_issue) && !cpu_adr_set_l) cpu_mem_adr <= cpu_mem_adr + 24'd1;
         if (cpu_wr_06) cpu_wr_data <= reg_data;
 
@@ -335,6 +346,12 @@ always_ff @(posedge clk or negedge rst_n) begin
         if (cpu_adr_set_l || cpu_rd_06) cpu_rd_pend <= 1'b1;
         if (cpu_wr_issue) cpu_wr_pend <= 1'b0;
         if (cpu_wr_06)    cpu_wr_pend <= 1'b1;
+        //  D7: the prefetch again after the last queued write has left the port
+        if (cpu_wr_06) cpu_rd_after_wr <= 1'b1;
+        else if (cpu_rd_after_wr && cpu_wr_done && !cpu_wr_pend) begin
+            cpu_rd_after_wr <= 1'b0;
+            cpu_rd_pend     <= 1'b1;
+        end
 
         if (cpu_rd_issue) cpu_rd_out <= 1'b1;
         else if (mem_rd_valid && cpu_rd_out) begin
@@ -345,9 +362,9 @@ always_ff @(posedge clk or negedge rst_n) begin
         else if (cpu_wr_done) cpu_wr_out <= 1'b0;
     end
 end
-assign cpu_mem_rd_data = cpu_mem_rd_buf;
+assign cpu_mem_rd_data = mem_on ? cpu_mem_rd_buf : 8'hFF;
 //  a write counts until it has left the bridge (cpu_wr_out), not until it is issued
-assign cpu_mem_busy    = cpu_rd_pend | cpu_wr_pend | cpu_rd_out | cpu_wr_out;
+assign cpu_mem_busy    = cpu_rd_pend | cpu_wr_pend | cpu_rd_out | cpu_wr_out | cpu_rd_after_wr;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Service FSM: owns the memory port.  A CPU read, a CPU write, then the header

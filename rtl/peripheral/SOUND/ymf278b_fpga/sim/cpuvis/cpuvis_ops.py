@@ -102,6 +102,23 @@ wreg(0x0A, 0x03, gap=int(os.environ.get('CPUVIS_AGAIN_GAP', '8')))   # ... then 
 P(0x02, 200)
 for r in (0x82, 0x9A, 0xB2, 0xCA):
     rreg(r)
+c("D3x: reg 6 with reg 2 bit 0 off: a write is ignored, a read gives FFh, neither moves the address")
+memadr(0x200200); W(0x7E, 0x06); W(0x7F, 0x61); W(0x7F, 0x62)      # 200200, 200201 = 61 62
+wreg(0x02, 0x10)                                                    # mode 0
+memadr(0x200200); W(0x7E, 0x06); W(0x7F, 0x99); R(0x7F); R(0x7F)   # ignored write, FFh, FFh
+wreg(0x02, 0x11)                                                    # mode 1, no reg 5
+W(0x7E, 0x06); R(0x7F); R(0x7F)                                     # 61 62: nothing moved the address
+c("D4x: reg 3 or reg 4 written alone does not move the address")
+memadr(0x200210); W(0x7E, 0x06); W(0x7F, 0x71); W(0x7F, 0x72); W(0x7F, 0x73)
+memadr(0x200210); wreg(0x04, 0x03)                                  # reg 4 alone
+W(0x7E, 0x06); R(0x7F); R(0x7F)                                     # 71 72 (still 200210)
+wreg(0x03, 0x21)                                                    # reg 3 alone
+W(0x7E, 0x06); W(0x7F, 0x74); R(0x7F)                               # writes 200212, reads 200213
+memadr(0x200210); W(0x7E, 0x06); R(0x7F); R(0x7F); R(0x7F); R(0x7F)
+c("D7x: a reg 6 read right after reg 6 writes returns the byte after them, then the bytes again")
+memadr(0x200220); W(0x7E, 0x06); W(0x7F, 0x81); W(0x7F, 0x82); R(0x7F)   # 200222 (0)
+W(0x7F, 0x83); R(0x7F)                                              # write 200223, read 200224
+memadr(0x200220); W(0x7E, 0x06); R(0x7F); R(0x7F); R(0x7F); R(0x7F)
 c("C-RDPORT: the wave number read back 1-16 clk after it was written, while its header fetch "
   "reads fields 0/1 from the register file (field 1 holds 40h, so a readback that took the "
   "engine's read cycle returns 40h).  Not 0 clk: both engines' readback lags a write by "

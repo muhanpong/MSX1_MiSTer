@@ -357,10 +357,10 @@ do_cpuvis() {
     done
     local tl; tl=$(grep -m1 "^cpuvis:" "$d/tree.txt")
     #  a floor on what was judged: a model change that widens windows must not turn
-    #  checks into "unjudged" passes (2026-10-25 round 6: 2352 judged, 0 unjudged, both engines)
+    #  checks into "unjudged" passes (2026-10-26: 2627 judged, 0 unjudged, both engines)
     local nj nu; nj=$(echo "$tl" | grep -oE '[0-9]+ checks' | grep -oE '[0-9]+'); nu=$(echo "$tl" | grep -oE '[0-9]+ unjudged' | grep -oE '[0-9]+')
-    if [ "${nj:-0}" -lt "${CPUVIS_MIN_CHECKS:-2352}" ] || [ "${nu:-999}" -gt "${CPUVIS_MAX_UNJUDGED:-0}" ]; then
-        gate cpuvis FAIL "judged ${nj:-?} (min ${CPUVIS_MIN_CHECKS:-2352}), unjudged ${nu:-?} (max ${CPUVIS_MAX_UNJUDGED:-0}): $tl"; return
+    if [ "${nj:-0}" -lt "${CPUVIS_MIN_CHECKS:-2627}" ] || [ "${nu:-999}" -gt "${CPUVIS_MAX_UNJUDGED:-0}" ]; then
+        gate cpuvis FAIL "judged ${nj:-?} (min ${CPUVIS_MIN_CHECKS:-2627}), unjudged ${nu:-?} (max ${CPUVIS_MAX_UNJUDGED:-0}): $tl"; return
     fi
     #  the count alone can be kept while checks are dropped or relabelled: the judged check
     #  keys ("op<n> <kind> <port> <check>") must equal the committed baseline.  A new engine

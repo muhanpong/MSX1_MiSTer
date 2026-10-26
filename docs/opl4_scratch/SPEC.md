@@ -13,7 +13,7 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 | `golden` | 슬롯 출력 샘플, 128.86 MHz(PIPE 경로), SDRAM 지연 1·20, 비트 일치(지연 0, ±1도 불허) | `sim/golden/gen_pcm_testdata.py`의 `sc_*` 21개 + `sc_songchange24`(24보이스, 지연 1만), 모델 `golden_pcm_omsx.py` |
 | `load` | 무거운 부하(24보이스 + 한 프레임 96회 쓰기)를 지연 6·10·20에서 비트 일치. **현행 엔진은 FAIL**(H4) | `sc_songchange24` |
 | `mutants` | golden이 실패할 수 있음 | `mutants/make_engine2_mutants.py` 20개 |
-| `cpuvis` | CPU 가시 동작, 접근 하나하나를 openMSX 모델과 같은 클럭에서 비교 | `sim/cpuvis/` (op 스크립트 `cpuvis_ops.py`, 모델 `cpuvis_check.py`), 뮤턴트 `mutants/make_cpuvis_mutants.py` engine2 16개 / engine3 26개. 판정한 검사 키 목록이 엔진별 기준(`sim/cpuvis/checks_baseline.txt` engine2, `checks_baseline_engine3.txt` engine3, 각 2352개)과 같아야 함. 엔진이 "CPU write queue overflow"를 내면 FAIL |
+| `cpuvis` | CPU 가시 동작, 접근 하나하나를 openMSX 모델과 같은 클럭에서 비교 | `sim/cpuvis/` (op 스크립트 `cpuvis_ops.py`, 모델 `cpuvis_check.py`), 뮤턴트 `mutants/make_cpuvis_mutants.py` engine2 16개 / engine3 32개. 판정한 검사 키 목록이 엔진별 기준(`sim/cpuvis/checks_baseline.txt` engine2, `checks_baseline_engine3.txt` engine3, 각 2627개)과 같아야 함. 엔진이 "CPU write queue overflow"를 내면 FAIL |
 | `reset` | 레지스터 파일 리셋 쓸기: cpuvis warm reset을 엔진의 최소 길이로 돌리면 PASS, 그보다 짧으면 FAIL이어야 함. engine2 24 clk / 16 clk, engine3 240 clk / 239 clk(정확히 1개 실패: 마지막에 쓸리는 7Fh) | `sim/cpuvis/cpuvis_ops.py` `G-RESET` 블록, `RESET_LEN` |
 | `busylat` | H12: cpuvis를 SDRAM 쓰기 지연 150·300 clk(`WLAT`)으로 돌려 트리는 PASS, engine3의 "쓰기가 포트를 떠날 때까지 BUSY"를 없앤 뮤턴트(`--busylat`)는 FAIL. 읽기 지연은 6 그대로(H13) | `run_cpuvis.sh` `WLAT`, `tb_cpuvis.sv` `+wlat`, `cpuvis_check.py` `HOLDS_WRITE` |
 | `stress` | MLAB 레지스터 파일: 슬롯 읽기 순간의 쓰기, warm reset, reset 길이 | `sim/lockstep/run_stress.sh` (자체 뮤턴트 4개 + reset_len=8) |
@@ -102,6 +102,8 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 
 2026-10-25(P2): op 스크립트에 블록 셋을 더했다. `C-HDR dirty`(웨이브 번호 직후 필드 6 쓰기가 백필 뒤에도 남는지), `C-HDR again`(헤더를 읽는 도중 웨이브 번호 재기록), `G-RESET`(reset 전 24슬롯의 필드 4·9에 값을 쓰고 reset 뒤 다시 읽기, 필드 6 두 개). 접근 625개, 판정 1528개. engine2는 D10·D11·D12가 더 필요하고, engine3(`ymf278_pcm_engine3`, `run_cpuvis.sh`가 엔진 모듈 이름으로 고름)은 D10·D11·D12 없이 통과한다. 앞의 두 블록은 engine3 뮤턴트 `dirty_ignored`, `again_none`이 처음에 통과해서 만들었고, `again_none`은 engine3의 헤더 이중 읽기 버그(저장 사이클에 같은 슬롯을 다시 고름)가 결함을 가려서 그 버그를 고친 뒤에야 걸렸다.
 
+2026-10-26(결정 1): op 블록 `D3x`(bit0=0에서 쓰기·읽기 뒤 bit0=1로 같은 주소 읽기), `D4x`(reg 4만, reg 3만 쓰고 reg 6 접근), `D7x`(reg 6 쓰기 직후 다음 주소 읽기, 다시 처음부터 읽기)를 더했다. 접근 949개, 판정 2627개(op 0-296 키는 그대로). engine2 의존 검사 D3 1→2, D4 2→5, D7 1→3. engine3는 `ENGINE_DROPS`에서 D3·D4·D7도 빼고 PASS(허용 결함은 D5만 남음).
+
 2026-10-25(5차 검토 반영): cpuvis가 자기 메모리 이미지를 쓴다(`run_cpuvis.sh`가 golden `mem.bin`을 복사해 웨이브 0 헤더 바이트 7-11을 31 5A 27 C6 0B로 바꿈; 원래 00 F0 00 F4 00이라 필드 5·7·9는 백필 유무가 안 보였다). golden의 `mem.bin`은 그대로다. `G-RESET`은 reset 뒤 24슬롯의 필드 4-9를 전부 읽는다(144개). 새 블록 `C-RDPORT`: 웨이브 번호를 쓴 뒤 1-16 clk 간격으로 되읽어, 헤더 읽기가 레지스터 파일의 읽기 포트를 쓰는 사이클과 겹치게 한다(engine3 뮤턴트 `rd_engine_clash`가 간격 5에서 40h를 읽음). 접근 863개, 판정 2352개. 두 엔진의 D2 하한(1024/107 clk)이 달라 `C-RDPORT` 뒤 op 시각이 갈라지고 LD 검사 8개가 한쪽은 `ld`, 다른 쪽은 `ld-held`가 되므로 기준 키 목록을 엔진별로 둔다. op 0-296(`C-RDPORT` 앞)의 키는 이전 기준 1528개 중 그 구간 611개와 두 엔진 모두 같다. engine2 플래그 의존: D10 24, D11 120(이전 2), D12 4.
 
 D3·D4·D5·D7·D12는 **RTL 결함**이다: openMSX의 해당 동작에 "Verified on real YMF278" 주석이 있다(D7은 읽는 순간의 메모리를 주는 openMSX 동작, 하드웨어 주석은 없음). 게이트는 고칠 때까지 이 결함을 허용할 뿐 정답으로 삼지 않으며, 출력 줄에 "tolerated RTL defects"로 따로 적는다. D1·D2·D6은 RTL의 선택이고 하드웨어 근거는 어느 쪽에도 없다.
@@ -110,11 +112,11 @@ D3·D4·D5·D7·D12는 **RTL 결함**이다: openMSX의 해당 동작에 "Verifi
 |---|---|---|---|---|---|
 | D1 | BUSY/LD 지연을 clk_sdram 클럭으로 셈(마스터 클럭이 아님): 128.86 MHz에서 openMSX보다 3.8배 짧음 (LD 10000 clk = 77.6 µs, openMSX 295 µs) | R:52-83 | YMF278B.cc:10-39 | 2026-10-04 의도적으로 유지(R:56-62 주석) | 그대로 또는 스케일. 상태 비트일 뿐 |
 | D2 | 래치 3..6 쓰기의 BUSY = 1024 clk(7.95 µs), 그동안 CPU WAIT | R:82, 236-241, 192-197 | 28 마스터 클럭(0.83 µs), WAIT 없음 | R800 OTIR 업로드 손실 회피용(PLAN §0, memwr) | **바꿀 대상**: 쓰기가 SDRAM에 반영되는 시점에 BUSY 해제, WAIT ≈ 107 clk (PLAN 목표 5) |
-| D3 | reg 6 읽기/쓰기가 reg 2 bit0(메모리 접근 모드)를 무시 | E:1666-1722 | 모드 0이면 쓰기 무시·주소 유지, 읽기 FFh (YMF278.cc:739-748, 780-786, **실칩 확인 주석**) | **RTL 결함** | 고침(소프트웨어는 bit0을 세우고 접근하므로 영향은 비정상 코드뿐) |
-| D4 | reg 3/4 쓰기가 메모리 주소를 즉시 바꿈 | E:1683-1684 | reg 5 쓰기 때만 주소 갱신 (YMF278.cc:716-737, 실칩 확인 주석) | **RTL 결함** | openMSX대로 고침 |
+| D3 | reg 6 읽기/쓰기가 reg 2 bit0(메모리 접근 모드)를 무시 | E:1666-1722 | 모드 0이면 쓰기 무시·주소 유지, 읽기 FFh (YMF278.cc:739-748, 780-786, **실칩 확인 주석**) | **RTL 결함** | **engine3 고침**(2026-10-26 사용자 결정 1): bit0=0이면 쓰기 무시, 읽기 FFh, 둘 다 주소 그대로(openMSX `readReg`: 증가도 bit0일 때만). 되돌린 뮤턴트 `d3_wr_through`, `d3_rd_through`, `d3_no_ff` FAIL. engine2는 허용 결함 그대로 |
+| D4 | reg 3/4 쓰기가 메모리 주소를 즉시 바꿈 | E:1683-1684 | reg 5 쓰기 때만 주소 갱신 (YMF278.cc:716-737, 실칩 확인 주석) | **RTL 결함** | **engine3 고침**: reg 3/4는 저장만, reg 5 쓰기에서 세 바이트를 주소로. 뮤턴트 `d4_reg3_moves`, `d4_reg4_moves` FAIL |
 | D5 | NEW2 0→1마다 ID 1회 신호 재무장 | R:166-169 | reset 후 한 번만 (YMF262.cc:1101-1110, **실칩 확인 주석**) | **RTL 결함** | 고침(D9와 함께: warm reset은 재무장) |
 | D6 | reset 후 F8h 읽기 00h, FM 믹스 x1 | E:1542-1547, 1398-1403 | 1Bh (YMF278.cc:842), FM 믹스 레벨도 그 값 | 미확인 | 읽기값만이면 맞추기 쉬움 |
-| D7 | reg 6 읽기는 직전 reg 5 쓰기/reg 6 읽기 때 프리페치한 바이트를 줌. reg 6 쓰기 뒤에 reg 5 없이 읽으면 옛 값 | E:1702, 1716-1721; T:268-271 | 읽는 순간의 메모리 (YMF278.cc:780-782) | **RTL 결함** | 읽기 시점 기준으로 |
+| D7 | reg 6 읽기는 직전 reg 5 쓰기/reg 6 읽기 때 프리페치한 바이트를 줌. reg 6 쓰기 뒤에 reg 5 없이 읽으면 옛 값 | E:1702, 1716-1721; T:268-271 | 읽는 순간의 메모리 (YMF278.cc:780-782) | **RTL 결함** | **engine3 범위를 줄여 고침**: reg 6 쓰기가 포트를 떠난 뒤 다음 주소에서 다시 미리 읽어, "쓰기 뒤 reg 5 없이 읽으면 옛 값"이 없어짐(뮤턴트 `d7_no_refetch` FAIL). 미리 읽기 구조(SDRAM 지연 숨기기)는 그대로라 **읽는 순간 값과의 차이는 남는다(실칩 미확인)**. 메모리를 바꾸는 것은 CPU 쓰기뿐이고 쓰기마다 다시 읽으므로, 남는 차이는 미리 읽기가 끝나기 전에 읽는 경우(H13)뿐이다. 그래서 따로 플래그(D7b)는 두지 않았다: 0 clk 지연 벤치에서는 관측이 없어 플래그가 "쓰이지 않음"으로 FAIL한다 |
 | D8 | reg 5/6 쓰기, reg 6 읽기 뒤 BUSY가 엔진의 메모리 연산 완료까지 늘어남(최대 1프레임) | R:141; E:1722 | 고정 지연 | 구조적(S-BOUND) | 새 엔진에서도 상한 보장 |
 | D9 | warm reset이 NEW2를 지움 | T:90-102 | reg 105h 유지, ID 신호만 재무장 (YMF262.cc:1398-1404) | **의도적**: GoFigure 감지 실패 수정(T:93-99 주석) | 유지 |
 | D10 | reset 후 필드 4(68h-7Fh) 읽기 20h: engine2는 bit 5를 뒤집어 저장한다(전부 0인 리셋 이미지 = LFO 정지) | E:1454-1456, 1551 | openMSX reset은 모든 레지스터에 0을 쓴다: 읽기 0, LFO 동작(YMF278.cc reset → writeRegDirect case 4) | 미검증: openMSX reset **구현**(writeRegDirect 순서)에서 나온 값, 하드웨어 근거 없음. engine3는 이것을 목표로 채택했다(소프트웨어가 reset 직후 이 레지스터를 읽을 일은 거의 없다) | engine3: 저장한 그대로 읽음(플래그 없음) |

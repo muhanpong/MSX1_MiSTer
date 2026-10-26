@@ -75,7 +75,7 @@ DEVIATIONS = {
            "(ymf278_pcm_engine2.sv:1277-1278, 1590-1591)",
 }
 # Flags an engine does not have: run_cpuvis.sh drops them from the default list for it.
-ENGINE_DROPS = {'ymf278_pcm_engine3': {'D10', 'D11', 'D12'}}
+ENGINE_DROPS = {'ymf278_pcm_engine3': {'D3', 'D4', 'D7', 'D10', 'D11', 'D12'}}
 
 # Of those, the ones where openMSX follows a "Verified on real YMF278" comment (or, for
 # D7, plain read-time semantics) are RTL defects the gate tolerates until they are fixed,
@@ -247,7 +247,7 @@ class Model:
                     if 3 <= self.opl4latch <= 6:
                         if 'D2' in self.dev:
                             self.set_busy(t, 'memw', engine=self.opl4latch in (5, 6),
-                                          write=self.opl4latch == 6)
+                                          write=self.opl4latch == 6 and bool(self.mem_access_on()))
                             hold = True
                         else:
                             self.set_busy(t, MEM_WRITE_DELAY)
