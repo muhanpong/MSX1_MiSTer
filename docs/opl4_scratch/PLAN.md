@@ -22,7 +22,7 @@
 
 1. **비트 정확**: PCM은 openMSX `YMF278.cc` 포트(`sim/golden/ref278.cpp`)와 샘플 단위 일치, FM은 Nuked-OPL3와 일치(현행 수준 이상).
 2. **드롭인**: `ymf278b_top`의 포트, I/O 의미(7Eh/7Fh, C4h-C7h, 상태/BUSY/타이머/ID, reg 0x02-0x06 메모리 접근, 헤더 재배치, DAMP, pseudo-reverb, LFO, F8h/F9h 믹스)를 그대로 유지. 새 PCM 엔진은 `ymf278_pcm_engine2`와 **같은 모듈 포트**를 갖는다(기존 벤치가 그대로 돈다).
-3. **면적**: PCM ≤ 1,200 ALM, MoonSound 전체 ≤ 2,500 ALM (FM을 재제작할 경우). M10K는 현재 15개 이하, DSP ≤ 4.
+3. **면적**: PCM ≤ 1,200 ALM, MoonSound 전체 ≤ 2,500 ALM (FM을 재제작할 경우). M10K는 MoonSound 합계 ≤ 20, 그중 PCM ≤ 6(2026-10-26 사용자 결정으로 "현재 15개 이하"를 폐기: M10K는 553개 중 323개 사용 58 %, 빠듯한 쪽은 ALM 81 %. `resource` 게이트가 판정), DSP ≤ 4.
 4. **타이밍**: 128.86 MHz 단일 클럭 내부 경로는 SDC 예외 없이 통과. CDC는 문서화된 동기화기만.
 5. **CPU에 보이는 시간**: 메모리 쓰기 BUSY는 **쓰기가 SDRAM에 실제로 반영된 시점**에 내린다(현행은 엔진이 쓰기를 *발행*할 때 내림: `ymf278_pcm_engine2.sv:1703,1722`, 그래서 `MEM_WRITE_DELAY`가 그 틈을 덮고 있다). 그 위에서 CPU WAIT은 openMSX 수준(약 0.83 µs = 107 clk). BUSY 상한은 구조적으로 보장(현행 v3의 장점 유지).
 6. **메모리**: `sdram_tdm` ch4(16비트 워드 쌍 읽기, 가변 지연 1~40 clk)에서 출력이 지연과 무관.

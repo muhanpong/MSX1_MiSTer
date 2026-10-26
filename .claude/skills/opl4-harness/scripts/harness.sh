@@ -36,6 +36,7 @@
 #    REV       Quartus revision whose reports `resource` reads (default MSX1_V9968)
 #    FIT_DIR   directory holding $REV.fit.rpt / $REV.map.rpt (default $W/output_files)
 #    PCM_ALM_MAX / MS_ALM_MAX   budgets (default 1200 / 2500)
+#    PCM_M10K_MAX / MS_M10K_MAX M10K budgets (default 6 / 20; PLAN goal 3, user decision 2026-10-26)
 #    REGS      ymf278b_regs.sv to use in memwr (default the worktree's)
 #    TOP       ymf278b_top.sv for cpuvis (default the worktree's); CPU_MUT_DIR its mutants
 #    GEN       fullsys generated sources (sim/fullsys/prep.sh output).  Default: memwr runs
@@ -55,6 +56,7 @@ OUT=${OUT:-/data/_claude/tmp/opl4h}; mkdir -p "$OUT"
 ENGINE=${ENGINE:-"$Y/rtl/pcm/ymf278_pcm_alu.sv $Y/rtl/pcm/ymf278_pcm_eg_step.sv $Y/rtl/pcm/ymf278_pcm_engine2.sv"}
 REV=${REV:-MSX1_V9968}
 PCM_ALM_MAX=${PCM_ALM_MAX:-1200}; MS_ALM_MAX=${MS_ALM_MAX:-2500}
+PCM_M10K_MAX=${PCM_M10K_MAX:-6}; MS_M10K_MAX=${MS_M10K_MAX:-20}
 #  Scenarios: <name>:<frames>:<model>.  model g = golden_pcm.py, m = golden_pcm_memwr.py (adds the
 #  reg 03h-06h wave-memory writes), o = golden_pcm_omsx.py.  Override with SCEN="..." (same format).
 #  The default model is o: golden_pcm.py + the wave-write position reset + reg 06h writes, which
@@ -448,8 +450,10 @@ do_busylat() {
             else echo "  busylat mutant $base@$l: NOT CAUGHT"; fi
         done
     done
+    local mres="mutants $caught/$n caught"
+    [ "$(engine_mod)" != ymf278_pcm_engine3 ] && mres="mutants N/A (this engine has no write hold to break; control run)"
     if [ -z "$bad" ] && [ $caught = $n ] && { [ $n -gt 0 ] || [ "$(engine_mod)" != ymf278_pcm_engine3 ]; }; then
-        gate busylat PASS "$(engine_mod) at write latency {$lats}:$res mutants $caught/$n caught"
+        gate busylat PASS "$(engine_mod) at write latency {$lats}:$res $mres"
     else
         gate busylat FAIL "$(engine_mod):${bad:- tree passes};$res mutants $caught/$n caught"
     fi
@@ -471,9 +475,15 @@ do_resource() {
     local ms pcm pmod want
     want=$(grep -m1 -oE '^\s*module\s+[A-Za-z0-9_]+' $(echo $ENGINE | awk '{print $NF}') | awk '{print $2}')
     ms=$(grep -E '^\s*;\s*\|ymf278b_top:u_moonsound\|?\s*;' "$rpt" | head -1 | awk -F';' '{split($3,a," "); print a[1]}')
+    #  M10Ks: the hierarchy table's column named "M10Ks", found by its header (not by position)
+    local mcol msm pcmm
+    mcol=$(grep -m1 'Compilation Hierarchy Node.*M10Ks' "$rpt" | awk -F';' '{for(i=1;i<=NF;i++) if($i ~ /^ *M10Ks *$/) print i}')
+    msm=$(grep -E '^\s*;\s*\|ymf278b_top:u_moonsound\|?\s*;' "$rpt" | head -1 | awk -F';' -v c="$mcol" '{gsub(/ /,"",$c); print $c}')
     local pl; pl=$(grep -E '^\s*;\s*\|[A-Za-z0-9_]+:u_pcm\|?\s*;.*u_moonsound\|' "$rpt" | head -1)
     pcm=$(echo "$pl" | awk -F';' '{split($3,a," "); print a[1]}')
     pmod=$(echo "$pl" | sed -E 's/^\s*;\s*\|([A-Za-z0-9_]+):u_pcm.*/\1/')
+    pcmm=$(echo "$pl" | awk -F';' -v c="$mcol" '{gsub(/ /,"",$c); print $c}')
+    [[ "$msm" =~ ^[0-9]+$ && "$pcmm" =~ ^[0-9]+$ ]] || { gate resource FAIL "M10K counts not found in $(basename "$rpt") (column ${mcol:-?})"; return; }
     [ -n "$ms" ] || { gate resource FAIL "u_moonsound not found in $(basename "$rpt")"; return; }
     [[ "$pcm" =~ ^[0-9]+(\.[0-9]+)?$ ]] || { gate resource FAIL "u_pcm ALM count not found in $(basename "$rpt")"; return; }
     [ "$pmod" = "$want" ] || { gate resource FAIL "report's u_pcm is $pmod, the engine under test is $want"; return; }
@@ -482,13 +492,14 @@ do_resource() {
     awk -v a="$pcm" -v b="$PCM_ALM_MAX" 'BEGIN{exit !(a<=b)}' || ok=0
     awk -v a="$ms"  -v b="$MS_ALM_MAX"  'BEGIN{exit !(a<=b)}' || ok=0
     [ "$w10999" = 0 ] || ok=0
-    local ovr=""; [ "$PCM_ALM_MAX/$MS_ALM_MAX" = 1200/2500 ] || ovr=" BUDGET OVERRIDE (default 1200/2500)"
+    [ "$pcmm" -le "$PCM_M10K_MAX" ] && [ "$msm" -le "$MS_M10K_MAX" ] || ok=0
+    local ovr=""; [ "$PCM_ALM_MAX/$MS_ALM_MAX/$PCM_M10K_MAX/$MS_M10K_MAX" = 1200/2500/6/20 ] || ovr=" BUDGET OVERRIDE (default ALM 1200/2500, M10K 6/20)"
     #  resolved, so an output_files symlink into another tree is named too
     local rr; rr=$(realpath "$rpt")
     case "$rr" in "$(realpath "$W")"/*) ;; *) ovr="$ovr, report from $(dirname "$rr")";; esac
     #  ALMs only: whether that fit met timing is the Quartus gate's question, not this one
-    [ $ok = 1 ] && gate resource PASS "PCM $pcm <= $PCM_ALM_MAX, MoonSound $ms <= $MS_ALM_MAX, 10999 x0 ($(basename "$rpt"); timing not judged)$ovr" \
-                || gate resource FAIL "PCM $pcm (max $PCM_ALM_MAX), MoonSound $ms (max $MS_ALM_MAX), 10999 x$w10999 ($(basename "$rpt"))"
+    [ $ok = 1 ] && gate resource PASS "PCM $pcm <= $PCM_ALM_MAX ALM, $pcmm <= $PCM_M10K_MAX M10K; MoonSound $ms <= $MS_ALM_MAX ALM, $msm <= $MS_M10K_MAX M10K; 10999 x0 ($(basename "$rpt"); timing not judged)$ovr" \
+                || gate resource FAIL "PCM $pcm ALM (max $PCM_ALM_MAX) $pcmm M10K (max $PCM_M10K_MAX), MoonSound $ms ALM (max $MS_ALM_MAX) $msm M10K (max $MS_M10K_MAX), 10999 x$w10999 ($(basename "$rpt"))"
     echo "  RAM check: read the map report's RAM summary for every intended MLAB/M10K -- warnings alone are not proof"
 }
 

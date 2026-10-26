@@ -19,7 +19,7 @@ openMSX = `~/data/openmsx_v9968/src/sound/` (`YMF278B.cc`, `YMF278.cc`, `YMF262.
 | `stress` | MLAB 레지스터 파일: 슬롯 읽기 순간의 쓰기, warm reset, reset 길이 | `sim/lockstep/run_stress.sh` (자체 뮤턴트 4개 + reset_len=8) |
 | `memwr` | fullsys R800 OTIR 1024바이트 업로드 + 읽어 비교. fullsys 생성 소스(`prep.sh` 출력)를 매 실행 시험 트리에서 새로 만들고, `GEN`이 트리 밖이거나 파일 목록이 트리 밖을 읽으면 FAIL. PASS 줄에 트리 커밋(`git status --porcelain`이 비어 있지 않으면 +dirty, 추적 안 된 파일 포함), 생성 소스 해시, 엔진+regs 해시, 빌드가 읽은 W 안 소스 전부(top 포함)의 해시. 로그 줄의 `MEM_WRITE_DELAY`는 실효값(engine3면 top의 107). 엔진이 "queue overflow"를 내면 FAIL. `ENGINE`/`REGS` 파일이 트리 밖이면 0 errors여도 FAIL(대조군은 오류 수를 그대로 보고) | `assets/mprobe_r.hex`, 대조 `MEM_WRITE_DELAY 0`, 엔진 뮤턴트(reg 6 주소 증가 없음), 다른 트리의 `GEN` |
 | (모든 게이트) | `XFAIL="gate=<정규식>"`: 그 사유로 FAIL하면 `GATE <이름> XFAIL`(실행은 통과), PASS하면 XPASS, 다른 사유로 FAIL하면 FAIL. engine2 기본값은 `load`(sc_songchange24 지연 6·10·20 셋 다)와 `resource`(오래된 fit 보고서) | `harness.sh` 머리 |
-| `resource` | fit 보고서 ALM. 보고서가 MoonSound RTL보다 오래됐거나, map 보고서가 없거나, `u_pcm`의 모듈이 시험 중인 엔진이 아니면 FAIL. 타이밍은 보지 않는다(PASS 줄에 "timing not judged"); 보고서 경로는 실제 경로로 풀어 트리 밖이면 표시 | — |
+| `resource` | fit 보고서 ALM과 M10K(PCM ≤ 6, MoonSound ≤ 20; 열은 머리줄의 "M10Ks"로 찾음). 보고서가 MoonSound RTL보다 오래됐거나, map 보고서가 없거나, `u_pcm`의 모듈이 시험 중인 엔진이 아니면 FAIL. 타이밍은 보지 않는다(PASS 줄에 "timing not judged"); 보고서 경로는 실제 경로로 풀어 트리 밖이면 표시 | — |
 
 아래 표의 "검증" 열은 그 항목을 덮는 시나리오(`sc_*`, cpuvis op 블록 이름 `C-*`/`D*`)와 그 항목이 깨지면 잡히는 뮤턴트(`mut_*`)다.
 
