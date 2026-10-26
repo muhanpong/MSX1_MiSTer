@@ -424,10 +424,13 @@ localparam CONF_STR = {
 `else
    //  V9968 build: normal-speed (HS=0) VDP commands at the V9938's speed, for software that
    //  times the VDP (Go Figure: "Abnormal fast VDP").  Never used before, so saved .CFG = 0.
+`ifndef V9968_UPSTREAM
+   //  custom-build options (the upstream build, V9968_UPSTREAM, has neither feature)
    "P1O[127],VDP command speed,V9968,V9938;",
    //  Geo3D draws flat faces row by row; in SCREEN 8 a row can be one HMMV instead of a LINE
    //  (about 2.7x faster on the V9968). Bit 35 was never an option: saved .CFG = 0 = LINE.
    "P1O[35],Geo3D fill (SCREEN 8),LINE,HMMV;",
+`endif
 `endif
    //  How long the CPU is held between two VDP port accesses while NextZ80 owns
    //  the bus.  A real turbo R waits 8.66 us; this core used to wait 1.49 us,

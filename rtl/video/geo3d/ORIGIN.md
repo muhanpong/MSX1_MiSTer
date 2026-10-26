@@ -24,3 +24,14 @@
   (cmdcmp/gen_g7.py). NICCC 3D frames 495-505 (sim/geo3d_perf + stream2stim): RUN time per frame
   17.1 -> 9.2 ms; the read-back pages are identical to LINE's (0 px) and to the geo3d.py model.
   texdemo (SCREEN 5) RUN times are unchanged with the switch on.
+
+## Build switch: V9968_UPSTREAM (2026-10-27, user request)
+
+Every local change above sits in `ifndef V9968_UPSTREAM ... `else <upstream text> `endif, generated with
+`diff --ifdef` against the pristine upstream files (ORIGIN.md5 sums). Default (macro undefined) is the
+MSX1 core's custom build. `V9968_UPSTREAM=1 tools/sdram128/mk_v9968_qsf.sh` (or compile.sh with that
+env) builds the RTL as upstream ships it; the ports the core added (scanline_level, cmd_wait, screen_mode,
+fill_hmmv) stay in both builds, unused in the upstream one, and the OSD hides the custom-only rows.
+Checked 2026-10-27 with `verilator -E`: custom == the previous custom files; upstream == pristine except
+those port lines. Behaviour: upstream build reproduces the double write (run_mix bench 1567/74 errors)
+and ignores the HMMV switch; custom build: run_gates.sh GATES PASS.

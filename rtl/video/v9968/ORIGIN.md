@@ -93,3 +93,21 @@ Driven from the OSD "Scandoubler Fx" (MSX1.sv: CRT 25/50/75% -> 1/2/3, others 0)
 
 - `vdp.v`: new output `screen_mode[4:0]` = `reg_screen_mode` ({M5,M4,M3,M2,M1}); msx.sv enables
   Geo3D's HMMV rows only in SCREEN 8 (11100). No behaviour inside the VDP changes.
+
+## Local change (2026-10-25, bug): a host request latched while busy ran twice (a85c175)
+
+- `vdp_cpu_interface.v`: the host-bus latch also requires `!ff_busy`, like `bus_ready`. Upstream latched
+  on `ff_bus_ready` alone, so a write the host held during a busy VRAM access ran on the edge busy fell
+  and again when the host saw bus_ready: the byte written twice, later addresses +1 (SUPER CAT / PRISM
+  FLIGHT glitches; board LRMMWR). Gate: sim/v9968_vram/run_mix.sh.
+
+## Build switch: V9968_UPSTREAM (2026-10-27, user request)
+
+Every local change above sits in `ifndef V9968_UPSTREAM ... `else <upstream text> `endif, generated with
+`diff --ifdef` against the pristine upstream files (ORIGIN.md5 sums). Default (macro undefined) is the
+MSX1 core's custom build. `V9968_UPSTREAM=1 tools/sdram128/mk_v9968_qsf.sh` (or compile.sh with that
+env) builds the RTL as upstream ships it; the ports the core added (scanline_level, cmd_wait, screen_mode,
+fill_hmmv) stay in both builds, unused in the upstream one, and the OSD hides the custom-only rows.
+Checked 2026-10-27 with `verilator -E`: custom == the previous custom files; upstream == pristine except
+those port lines. Behaviour: upstream build reproduces the double write (run_mix bench 1567/74 errors)
+and ignores the HMMV switch; custom build: run_gates.sh GATES PASS.

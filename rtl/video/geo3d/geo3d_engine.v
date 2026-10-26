@@ -782,7 +782,9 @@ module geo3d_engine #(
     wire [11:0] lsx = {3'd0, texx} + us_s[11:0];
     wire [12:0] lsy = texy + {2'd0, lev_off} + vs_s[12:0];
     wire [10:0] lnxp = snx[10:0] + 11'd1;     // LRMM counts pixels
+`ifndef V9968_UPSTREAM
     wire        use_hmmv = fill_hmmv && (lop == 4'd0);
+`endif
 
     integer k;
 
@@ -1345,22 +1347,34 @@ module geo3d_engine #(
                         st <= D_YNEXT;
                     end
                     else if (!hold_valid) begin
+`ifndef V9968_UPSTREAM
                         //  MSX1 core (local change, ORIGIN.md): with fill_hmmv (SCREEN 8, set by
                         //  the core) and LOP = IMP the row goes out as a one-row HMMV, NX = pixels:
                         //  same pixels, about 2.7x faster on the V9968 (0.34 us + 0.063 us/px
                         //  against LINE's 0.77 + 0.177, RTL, HS). HMMV has no logical operation.
+`endif
                         hlrmm  <= 1'b0;
                         hb[0]  <= scl_r[7:0];
                         hb[1]  <= {7'd0, scl_r[8]};
                         hb[2]  <= sdy[7:0];
                         hb[3]  <= {5'd0, sdy[10:8]};
+`ifndef V9968_UPSTREAM
                         hb[4]  <= use_hmmv ? lnxp[7:0] : snx[7:0];
                         hb[5]  <= use_hmmv ? {5'd0, lnxp[10:8]} : {5'd0, snx[10:8]};
                         hb[6]  <= use_hmmv ? 8'd1 : 8'd0;
+`else
+                        hb[4]  <= snx[7:0];
+                        hb[5]  <= {5'd0, snx[10:8]};
+                        hb[6]  <= 8'd0;
+`endif
                         hb[7]  <= 8'd0;
                         hb[8]  <= dcol;
                         hb[9]  <= 8'd0;
+`ifndef V9968_UPSTREAM
                         hb[10] <= use_hmmv ? 8'hC0 : {4'h7, lop};
+`else
+                        hb[10] <= {4'h7, lop};
+`endif
                         hold_valid <= 1'b1;
                         st <= D_YNEXT;
                     end

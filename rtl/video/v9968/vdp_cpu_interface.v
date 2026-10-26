@@ -297,6 +297,7 @@ module vdp_cpu_interface (
 			ff_bus_valid	<= 1'b0;
 			ff_bus_ready	<= 1'b1;
 		end
+`ifndef V9968_UPSTREAM
 		else if( bus_valid && ff_bus_ready && !ff_busy ) begin
 			//	MSX1 core fix (2026-10-25): take a request only when bus_ready (= ff_bus_ready &
 			//	~ff_busy) says so.  Latching on ff_bus_ready alone took a request the host still
@@ -304,6 +305,9 @@ module vdp_cpu_interface (
 			//	then saw bus_ready and had the same write taken again: one VRAM byte written twice
 			//	(address +2), or a 99h byte counted twice.  Needs a command to stretch ff_busy
 			//	(LRMMWR on the board; sim/v9968_vram +mix).
+`else
+		else if( bus_valid && ff_bus_ready ) begin
+`endif
 			ff_bus_ioreq	<= bus_ioreq;
 			ff_bus_write	<= bus_write;
 			ff_bus_wdata	<= bus_wdata;
@@ -870,6 +874,7 @@ module vdp_cpu_interface (
 
 	// --------------------------------------------------------------------
 	//	Interrupt
+`ifndef V9968_UPSTREAM
 	//	MSX1 core: the clears (status read, Port#4 write) are applied first and the events
 	//	after them, so an event that lands on the clock of a status read or a Port#4 write
 	//	still sets its flag.  Upstream had them in one if / else-if chain: a line match (a
@@ -877,6 +882,7 @@ module vdp_cpu_interface (
 	//	F and the command-end flag.  A program that polls a status register while it waits
 	//	for FH (ASO 224's status bar: R#19 = C6h, poll S#1) then waits for ever -- one miss
 	//	in a few frames in sim/v9968_vram +aso.
+`endif
 	// --------------------------------------------------------------------
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
@@ -885,6 +891,7 @@ module vdp_cpu_interface (
 			ff_command_end_interrupt	<= 1'b0;
 			ff_lock_extregs				<= 1'b1;
 		end
+`ifndef V9968_UPSTREAM
 		else begin
 			//	clears by the CPU.  MSX1 core: a status read clears F / FH only when the byte it
 			//	returns shows the flag.  ff_status_register is latched one clock behind the flags,
@@ -915,16 +922,57 @@ module vdp_cpu_interface (
 					ff_command_end_interrupt <= 1'b0;
 				end
 				ff_lock_extregs <= ff_bus_wdata[7];
+`else
+		else if( w_read && ff_port1 ) begin
+			if( ff_status_register_pointer == 4'd0 ) begin
+				//	Clear frame interrupt flag
+				ff_frame_interrupt <= 1'b0;
+`endif
 			end
+`ifndef V9968_UPSTREAM
 
 			//	events (assigned last: they win over a clear on the same clock)
+`else
+			else if( ff_status_register_pointer == 4'd1 ) begin
+				//	Clear line interrupt flag
+				ff_line_interrupt <= 1'b0;
+			end
+		end
+		else if( w_write && ff_port4 ) begin
+			if( ff_bus_wdata[0] == 1'b1 ) begin
+				//	Clear frame interrupt flag
+				ff_frame_interrupt <= 1'b0;
+			end
+			if( ff_bus_wdata[1] == 1'b1 ) begin
+				//	Clear line interrupt flag
+				ff_line_interrupt <= 1'b0;
+			end
+			if( ff_bus_wdata[2] == 1'b1 ) begin
+				//	Clear command end interrupt flag
+				ff_command_end_interrupt <= 1'b0;
+			end
+			ff_lock_extregs <= ff_bus_wdata[7];
+		end
+		else begin
+`endif
 			if( intr_frame ) begin
+`ifndef V9968_UPSTREAM
 				//	Happend frame interrupt
+`else
+				//	Happend line interrupt
+`endif
 				ff_frame_interrupt <= 1'b1;
 			end
 
+`ifndef V9968_UPSTREAM
 			//	FH is not cleared at the frame interrupt (MSX1 core, 2026-10-24): see ORIGIN.md
 			if( ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19) ) begin
+`else
+			if( clear_line_interrupt || intr_frame ) begin
+				ff_line_interrupt <= 1'b0;
+			end
+			else if( ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19) ) begin
+`endif
 				ff_line_interrupt <= 1'b0;
 			end
 			else if( intr_line ) begin
@@ -933,7 +981,11 @@ module vdp_cpu_interface (
 			end
 
 			if( intr_command_end ) begin
+`ifndef V9968_UPSTREAM
 				//	Happend command end interrupt
+`else
+				//	Happend line interrupt
+`endif
 				ff_command_end_interrupt <= 1'b1;
 			end
 		end

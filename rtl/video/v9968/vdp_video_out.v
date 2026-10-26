@@ -82,6 +82,9 @@ module vdp_video_out (
 	input		[7:0]	reg_normalize,				//	8192 / reg_denominator
 	input				reg_50hz_mode
 );
+`ifdef V9968_UPSTREAM
+	wire				has_scanline = 1'b1;		//	upstream vdp.v ties the port to 1; scanline_level unused
+`endif
 	localparam		c_v_count_max_60	= 10'd523;
 	localparam		c_v_count_max_50	= 10'd625;
 	localparam		active_area_start	= 12'd747;
@@ -349,13 +352,21 @@ module vdp_video_out (
 	//	Scanline
 	// --------------------------------------------------------------------
 	assign w_scanline_gain	= { 2'd0, w_bilinear_r } + { 2'd0, w_bilinear_g } + { 2'd0, w_bilinear_b } + { 10'd128 };
+`ifndef V9968_UPSTREAM
 	//	MSX1 core: the dim line takes a fixed gain from scanline_level (128 = 1.0) instead of
 	//	upstream's brightness-dependent { 1'b0, w_scanline_gain[9:3] }.
 	assign w_gain			= (scanline_level == 2'd0) ? 8'd128:
+`else
+	assign w_gain			= (has_scanline == 1'b0  ) ? 8'd128:
+`endif
 							  (w_interlace           ) ? ( (v_count[0] == ~field) ? 8'd128: 8'd0 ):
+`ifndef V9968_UPSTREAM
 							  (v_count[0]   == 1'b1  ) ? 8'd128:
 							  (scanline_level == 2'd1) ? 8'd96 :
 							  (scanline_level == 2'd2) ? 8'd64 : 8'd32;
+`else
+							  (v_count[0]   == 1'b1  ) ? 8'd128: { 1'b0, w_scanline_gain[9:3] };
+`endif
 
 	assign w_display_r	= ff_bilinear_r * ff_gain;
 	assign w_display_g	= ff_bilinear_g * ff_gain;

@@ -1479,7 +1479,9 @@ always @(posedge clk_vdp) v99_cmd_v9938_v <= v99_cmd_v9938;
 //  on an odd pixel).
 logic       v99_geo_hmmv_v = 1'b0;
 wire  [4:0] v99_screen_mode;
+`ifndef V9968_UPSTREAM
 always @(posedge clk_vdp) v99_geo_hmmv_v <= v99_geo_hmmv & (v99_screen_mode == 5'b11100);
+`endif
 wire [95:0] v99_cmd_wait;
 v9968_cmdwait v99_cmdwait (.v9938(v99_cmd_v9938_v), .cmd_wait(v99_cmd_wait));
 //  Geo3D (rtl/video/geo3d, MIT, Alex Moncks): ports 9Dh / 9Fh of the same host bus.  Its
