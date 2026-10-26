@@ -1,0 +1,42 @@
+# Geo3D: flat rows as HMMV in SCREEN 8 — material and upstream TODO (2026-10-27)
+
+In this core (custom build, 59dcd96 / b1fff1f): OSD "Geo3D fill (SCREEN 8)" = LINE (default) / HMMV;
+active only with the V9968 in SCREEN 8 and Geo3D LOP = IMP. Release rbf 20261027a (f227328).
+Upstream checked 2026-10-27: hra1129 main (geo3d last changed 7820668, v2.0.0) and alexmoncks
+geo3d-v2.0 (d354695) both issue LINE only; no issue/PR about it (alexmoncks has issues disabled;
+the Geo3D discussion lives in hra1129 issue #9).
+
+## TODO (separate from the core's work; nothing posted, nothing pushed)
+
+- [ ] Upstream-style patch on the pristine v2.0 `geo3d_engine.v`: enable by a Geo3D register bit
+      (a free CTRL/XCTRL bit) instead of the core's OSD + V9968 screen-mode port, so no V9968
+      change is needed; software turns it on because it chose SCREEN 8 itself.
+- [ ] Verify that patch with upstream's own benches (`gen_scenes.py`, filled/textured scenes):
+      bit-exact with the bit off, identical VRAM with it on in SCREEN 8.
+- [ ] A neutral SCREEN 8 demo scene of our own (no third-party data; NICCC 3D uses Megus's
+      PICONICCC models, so not for this) if a video/ROM is wanted at all.
+- [ ] English proposal text for hra1129 issue #9 with the numbers below and the patch inline
+      (user posts it). Push of V9968_Geo3D (59dcd96, b1fff1f, f227328) only if a link is wanted.
+
+## Numbers (V9968 RTL in sim/v9968_vram's bench, SCREEN 8, R#20 HS = 1)
+
+`gen_g7.py` writes the command file; run the bench built from `sim/v9968_vram/tb_v9968_vram.sv`
+with `+m128=1 +cmdf=cmds_g7.txt`. Per-command times in `rtl_g7_rows.txt` (ps). Linear fits:
+
+| command (one row) | fixed | per pixel | 200 x 32-px rows, mean |
+|---|---|---|---|
+| LINE | 0.77 us | 0.177 us | 6.36 us |
+| HMMV | 0.34 us | 0.063 us | 2.39 us |
+
+## A real scene (NICCC 3D, frames 495-505, 3 RUNs a frame)
+
+`sim/geo3d_perf` (+hmmv, Q page read-back op) driven by `~/data/msx_niccc_3d/tools/stream2stim.py`.
+RUN times in `niccc3d_f495_505_{line,hmmv}.txt`: per frame 17.1 ms (LINE) -> 9.2 ms (HMMV).
+Pages read back after frames 500 and 505: LINE and HMMV identical (0 px), and equal to the
+niccc_3d `geo3d.py` model; negative control frame 500 vs 505: 36,914 px differ. texdemo (SCREEN 5)
+RUN times identical with the switch on (mode gate works).
+
+## The core's change
+
+`core_custom_vs_upstream_geo3d_{engine,bus}.diff`: the custom build against pristine v2.0 (with the
+`V9968_UPSTREAM` ifdefs in place). Details and history: `rtl/video/geo3d/ORIGIN.md`.
