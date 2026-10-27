@@ -505,9 +505,15 @@ module tb;
       .ch2_rdtog(sdram_rdtog), .ch2_hit(sdram_hit),
       .ch3_addr(flash_addr), .ch3_din(flash_din), .ch3_req(flash_req),
       .ch3_rnw(1'b0), .ch3_ready(flash_ready),
+`ifdef CH4GEN
+      .ch4_addr(cg_addr), .ch4_din(8'h5A), .ch4_req(cg_req),
+      .ch4_rnw(cg_rnw), .ch4_dout(), .ch4_dout16(cg_d0), .ch4_dout16b(cg_d1),
+      .ch4_ready(cg_ready)
+`else
       .ch4_addr(pcm_sdram_addr), .ch4_din(pcm_sdram_din), .ch4_req(pcm_sdram_req),
       .ch4_rnw(pcm_sdram_rnw), .ch4_dout(pcm_sdram_dout), .ch4_dout16(pcm_sdram_dout16),
       .ch4_ready(pcm_sdram_ready)
+`endif
    );
 
 `ifndef TDM
@@ -1888,6 +1894,129 @@ module tb;
                MSX.msx_slots.midi_gt, MSX.msx_slots.midi_mu, MSX.msx_slots.midi_ext, MSX.msx_slots.midi_io_en,
                MSX.msx_slots.dev_midi.cs, MSX.msx_slots.dev_midi.external, MSX.msx_slots.dev_midi.ext_ctl);
    endtask
+
+`ifdef CH4GEN
+   //  -DCH4GEN (with -DVPROBE): a model of the planned engine3 ch4 schedule drives
+   //  sdram_tdm's ch4 instead of the machine's PCM bridge (PLAN goal 6, 2026-10-27).
+   //  Each slot (2,922 clk / 24) consumes its wave data at a fixed time C = slot start
+   //  + 60; its +cg_pairs pair reads (ch4_dout16 + ch4_dout16b) become eligible
+   //  +cg_lead slots before C.  Also +cg_wr CPU memory writes per frame (evenly spaced,
+   //  RAM at +2 MB) and +cg_hdr header fetches per frame (3 pair reads).  One request
+   //  outstanding, as msx.sv's bridge; earliest deadline first.  A read whose data comes
+   //  after its slot's C is LATE.  The machine's own bridge gets a zero-wait responder
+   //  (its PCM output is meaningless here; the CPU side keeps running).  Per vprobe
+   //  phase: jobs, late reads / slots, request -> data latency, minimum slack.
+   logic [26:0] cg_addr = '0;
+   logic        cg_req = 1'b0, cg_rnw = 1'b1;
+   wire         cg_ready;
+   wire  [15:0] cg_d0, cg_d1;
+   //  responder for the machine's bridge: ready drops the clock after a request edge,
+   //  rises two later
+   logic cg_mq = 1'b0; int cg_mcnt = 0;
+   initial pcm_sdram_ready = 1'b1;
+   assign pcm_sdram_dout = 8'h00;
+   assign pcm_sdram_dout16 = 16'h0000;
+   always @(posedge clk_sdram) begin
+      cg_mq <= pcm_sdram_req;
+      if (pcm_sdram_req & ~cg_mq) begin pcm_sdram_ready <= 1'b0; cg_mcnt <= 3; end
+      else if (cg_mcnt > 0) begin cg_mcnt <= cg_mcnt - 1; if (cg_mcnt == 1) pcm_sdram_ready <= 1'b1; end
+   end
+
+   typedef struct { longint dl; logic [26:0] a; bit rnw; int kind; longint grp; } cg_job_t;
+   cg_job_t cg_q [$];
+   int cg_pairs = 2, cg_wr = 27, cg_hdr = 1, cg_lead = 2, cg_step = 12;
+   initial begin
+      void'($value$plusargs("cg_pairs=%d", cg_pairs)); void'($value$plusargs("cg_wr=%d", cg_wr));
+      void'($value$plusargs("cg_hdr=%d", cg_hdr));     void'($value$plusargs("cg_lead=%d", cg_lead));
+      void'($value$plusargs("cg_step=%d", cg_step));
+      $display("cg: pairs/slot %0d, CPU writes/frame %0d, headers/frame %0d, lead %0d slots, step %0d B/frame",
+               cg_pairs, cg_wr, cg_hdr, cg_lead, cg_step);
+   end
+   longint cg_t = 0;                    // clk_sdram since the generator started
+   bit     cg_on = 1'b0;
+   int     cg_wcnt = 0, cg_hw = 0;
+   int     cg_pos [24];
+   function automatic longint cg_start(input longint g);   // start clock of global slot g
+      return (g / 24) * 2922 + ((g % 24) * 2922) / 24;
+   endfunction
+   function automatic logic [26:0] cg_voice(input int k);   // a voice's wave start, in the 2 MB ROM
+      return 27'((k * 86243 + 12345) * 37 % 27'h1F0000);
+   endfunction
+   //  stats per vprobe phase
+   int cg_lat [16][1024];
+   int cg_nj [16][3], cg_late [16], cg_lslot [16], cg_nslot [16], cg_qmax [16];
+   longint cg_slack_min [16];
+   bit cg_slot_late [longint];
+   int cg_ph = 0;
+   initial for (int i = 0; i < 16; i++) cg_slack_min[i] = 1 << 30;
+   always @(posedge clk_sdram) begin
+      if (!cg_on && vp_phase >= 1) cg_on <= 1'b1;
+      if (cg_on) begin
+         automatic longint off = cg_t % 2922;
+         cg_t <= cg_t + 1;
+         //  at each slot boundary queue the slot cg_lead ahead
+         for (int j = 0; j < 24; j++) if (off == (j * 2922) / 24) begin
+            automatic longint g = (cg_t / 2922) * 24 + j + cg_lead;
+            automatic int k = int'(g % 24);
+            automatic logic [26:0] va = pcm_rom_base + cg_voice(k) + 27'(cg_pos[k]);
+            for (int i = 0; i < cg_pairs; i++)
+               cg_q.push_back('{dl: cg_start(g) + 60, a: {va[26:2], 2'b00} + 27'(4 * i), rnw: 1, kind: 0, grp: g});
+            cg_pos[k] += cg_step;
+            if (cg_pos[k] > 27'h8000) cg_pos[k] = 0;
+            cg_nslot[cg_ph & 15]++;
+         end
+         for (int w = 0; w < cg_wr; w++) if (off == (w * 2922) / cg_wr) begin
+            cg_q.push_back('{dl: cg_t + 243, a: pcm_rom_base + 27'h200000 + 27'(cg_wcnt & 16'hFFFF), rnw: 0, kind: 1, grp: -1});
+            cg_wcnt++;
+         end
+         for (int h = 0; h < cg_hdr; h++) if (off == 1000 + h * 997) begin
+            for (int i = 0; i < 3; i++)
+               cg_q.push_back('{dl: cg_t + 243, a: pcm_rom_base + 27'(cg_hw * 12) + 27'(4 * i), rnw: 1, kind: 2, grp: -1});
+            cg_hw = (cg_hw + 1) % 384;
+         end
+         if (cg_q.size() > cg_qmax[cg_ph & 15]) cg_qmax[cg_ph & 15] = cg_q.size();
+      end
+      if (vp_phase != cg_ph) begin
+         if (cg_ph != 0) begin
+            automatic int k = cg_ph & 15;
+            $display("cg: phase %0d jobs slot-reads %0d cpu-writes %0d header-reads %0d | slots %0d late-slots %0d late-reads %0d | min slack %0d clk | queue max %0d | L %s",
+                     cg_ph, cg_nj[k][0], cg_nj[k][1], cg_nj[k][2], cg_nslot[k], cg_lslot[k], cg_late[k],
+                     cg_slack_min[k], cg_qmax[k], lp_stat(cg_lat[k], 1024));
+         end
+         cg_ph = vp_phase;
+      end
+   end
+   //  the executor: one request at a time, as the bridge (req held until ready rises
+   //  again, then one idle clock so the next request is an edge)
+   initial begin
+      forever begin
+         automatic int bi = -1;
+         automatic cg_job_t j;
+         automatic longint t0, tv;
+         @(posedge clk_sdram);
+         if (cg_q.size() == 0) continue;
+         for (int i = 0; i < cg_q.size(); i++) if (bi < 0 || cg_q[i].dl < cg_q[bi].dl) bi = i;
+         j = cg_q[bi]; cg_q.delete(bi);
+         cg_addr <= j.a; cg_rnw <= j.rnw; cg_req <= 1'b1;
+         t0 = cg_t;
+         @(posedge clk_sdram);
+         while (cg_ready) @(posedge clk_sdram);
+         while (!cg_ready) @(posedge clk_sdram);
+         cg_req <= 1'b0;
+         tv = cg_t + 1;                  // the bridge's valid: the clock after ready is seen
+         cg_lat[cg_ph & 15][(tv - t0) > 1023 ? 1023 : tv - t0]++;
+         cg_nj[cg_ph & 15][j.kind]++;
+         if (j.kind == 0) begin
+            if (j.dl - tv < cg_slack_min[cg_ph & 15]) cg_slack_min[cg_ph & 15] = j.dl - tv;
+            if (tv > j.dl) begin
+               cg_late[cg_ph & 15]++;
+               if (!cg_slot_late.exists(j.grp)) begin cg_slot_late[j.grp] = 1; cg_lslot[cg_ph & 15]++; end
+            end
+         end
+      end
+   end
+`endif
+
 endmodule
 
 //  32 MB behavioural SDRAM: {BA, row, col} = 24 bits of 16-bit words.  The one
