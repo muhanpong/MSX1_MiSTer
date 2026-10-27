@@ -1948,13 +1948,26 @@ module tb;
    typedef struct { longint dl; logic [26:0] a; bit rnw; int kind; longint grp; } cg_job_t;
    cg_job_t cg_q [$];
    int cg_pairs = 2, cg_wr = 27, cg_hdr = 1, cg_lead = 2, cg_step = 12;
+   //  +cg_bunch=1: DESIGN 2026-10-28 instead -- pass A starts at frame_cycle K = 2,850
+   //  of the previous frame, makes one slot every +cg_apace clk (first at K + 25) and
+   //  queues its pairs at once, but stalls while the unissued slot reads would exceed
+   //  +cg_fifo entries; slot s is consumed at C_s = 190 + 116 s; CPU writes go before
+   //  everything else, the rest earliest deadline first.
+   int cg_bunch = 0, cg_apace = 45, cg_fifo = 64;
    initial begin
       void'($value$plusargs("cg_pairs=%d", cg_pairs)); void'($value$plusargs("cg_wr=%d", cg_wr));
       void'($value$plusargs("cg_hdr=%d", cg_hdr));     void'($value$plusargs("cg_lead=%d", cg_lead));
       void'($value$plusargs("cg_step=%d", cg_step));
+      void'($value$plusargs("cg_bunch=%d", cg_bunch)); void'($value$plusargs("cg_apace=%d", cg_apace));
+      void'($value$plusargs("cg_fifo=%d", cg_fifo));
       $display("cg: pairs/slot %0d, CPU writes/frame %0d, headers/frame %0d, lead %0d slots, step %0d B/frame",
                cg_pairs, cg_wr, cg_hdr, cg_lead, cg_step);
+      if (cg_bunch) $display("cg: bunched pass A (K 2850, C_s = 190 + 116 s), %0d clk/slot, FIFO %0d, CPU writes first",
+                             cg_apace, cg_fifo);
    end
+   int     cg_a_next = 24;              // bunched mode: next slot pass A makes (24 = done)
+   longint cg_a_t = 0, cg_a_base = 0;   // its earliest clock; the frame it fills
+   int     cg_aend_max [16], cg_fifo_max [16];
    longint cg_t = 0;                    // clk_sdram since the generator started
    bit     cg_on = 1'b0;
    int     cg_wcnt = 0, cg_hw = 0;
@@ -1997,8 +2010,29 @@ module tb;
       if (cg_on) begin
          automatic longint off = cg_t % 2922;
          cg_t <= cg_t + 1;
+         //  bunched: pass A
+         if (cg_bunch) begin
+            automatic int nf = 0;
+            foreach (cg_q[i]) if (cg_q[i].kind == 0) nf++;
+            if (nf > cg_fifo_max[cg_ph & 15]) cg_fifo_max[cg_ph & 15] = nf;
+            if (off == 2850) begin
+               cg_a_next <= 0; cg_a_t <= cg_t + 25; cg_a_base <= (cg_t / 2922 + 1) * 2922;
+            end else if (cg_a_next < 24 && cg_t >= cg_a_t && nf + cg_pairs <= cg_fifo) begin
+               automatic int k = cg_a_next;
+               automatic longint g = (cg_a_base / 2922) * 24 + k;
+               automatic logic [26:0] va = pcm_rom_base + cg_voice(k) + 27'(cg_pos[k]);
+               for (int i = 0; i < cg_pairs; i++)
+                  cg_q.push_back('{dl: cg_a_base + 190 + 116 * k, a: {va[26:2], 2'b00} + 27'(4 * i), rnw: 1, kind: 0, grp: g});
+               cg_pos[k] += cg_step;
+               if (cg_pos[k] > 27'h8000) cg_pos[k] = 0;
+               cg_nslot[cg_ph & 15]++;
+               cg_a_next <= k + 1; cg_a_t <= cg_t + cg_apace;
+               if (k == 23 && int'(cg_t - cg_a_base) > cg_aend_max[cg_ph & 15])
+                  cg_aend_max[cg_ph & 15] = int'(cg_t - cg_a_base);
+            end
+         end
          //  at each slot boundary queue the slot cg_lead ahead
-         for (int j = 0; j < 24; j++) if (off == (j * 2922) / 24) begin
+         if (!cg_bunch) for (int j = 0; j < 24; j++) if (off == (j * 2922) / 24) begin
             automatic longint g = (cg_t / 2922) * 24 + j + cg_lead;
             automatic int k = int'(g % 24);
             automatic logic [26:0] va = pcm_rom_base + cg_voice(k) + 27'(cg_pos[k]);
@@ -2025,6 +2059,8 @@ module tb;
             $display("cg: phase %0d jobs slot-reads %0d cpu-writes %0d header-reads %0d | slots %0d late-slots %0d late-reads %0d | min slack %0d clk | queue max %0d | L %s",
                      cg_ph, cg_nj[k][0], cg_nj[k][1], cg_nj[k][2], cg_nslot[k], cg_lslot[k], cg_late[k],
                      cg_slack_min[k], cg_qmax[k], lp_stat(cg_lat[k], 1024));
+            if (cg_bunch) $display("cg: phase %0d pass A last slot at most %0d clk into its frame, FIFO max %0d slot reads",
+                                   cg_ph, cg_aend_max[k], cg_fifo_max[k]);
             $display("cg: phase %0d urgent VRAM-chip refresh at %0d of %0d G decisions, %0d of them with ch4 queued for that chip",
                      cg_ph, cg_nurg[k], cg_ngdec[k], cg_nurg4[k]);
             $display("cg: phase %0d V-request frames %0d of %0d, longest run %0d", cg_ph, cg_vbusy[k], cg_vfr[k], cg_vrun_max[k]);
@@ -2042,7 +2078,8 @@ module tb;
          automatic longint t0, tv;
          @(posedge clk_sdram);
          if (cg_q.size() == 0) continue;
-         for (int i = 0; i < cg_q.size(); i++) if (bi < 0 || cg_q[i].dl < cg_q[bi].dl) bi = i;
+         if (cg_bunch) for (int i = 0; i < cg_q.size(); i++) if (cg_q[i].kind == 1) begin bi = i; break; end
+         if (bi < 0) for (int i = 0; i < cg_q.size(); i++) if (bi < 0 || cg_q[i].dl < cg_q[bi].dl) bi = i;
          j = cg_q[bi]; cg_q.delete(bi);
          cg_addr <= j.a; cg_rnw <= j.rnw; cg_req <= 1'b1;
          t0 = cg_t;
@@ -2070,7 +2107,8 @@ module tb;
          automatic longint t0, tv;
          @(posedge clk_sdram);
          if (cg_q.size() == 0 || cg_busy) continue;
-         for (int i = 0; i < cg_q.size(); i++) if (bi < 0 || cg_q[i].dl < cg_q[bi].dl) bi = i;
+         if (cg_bunch) for (int i = 0; i < cg_q.size(); i++) if (cg_q[i].kind == 1) begin bi = i; break; end
+         if (bi < 0) for (int i = 0; i < cg_q.size(); i++) if (bi < 0 || cg_q[i].dl < cg_q[bi].dl) bi = i;
          j = cg_q[bi]; cg_q.delete(bi);
          cg_baddr <= 22'(j.a - pcm_rom_base);
          if (j.rnw) cg_brd <= 1'b1; else cg_bwr <= 1'b1;
