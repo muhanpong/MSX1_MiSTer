@@ -1977,6 +1977,16 @@ module tb;
    wire cg_gdec  = u_sdram.ps[2] | u_sdram.ps[6];
    wire cg_ch4v  = u_sdram.ch4_rq & (u_sdram.cand_l[3].c == u_sdram.v_chip);
    int  cg_nurg [16], cg_nurg4 [16], cg_ngdec [16];
+   //  V-request frames (the VRAM chip refreshes only in a frame without one; ~60 in a
+   //  row make it urgent): per phase the frames, the busy ones and the longest busy run
+   int  cg_vfr [16], cg_vbusy [16], cg_vrun_max [16], cg_vrun = 0;
+   always @(posedge clk_sdram) if (cg_on && v99_tdm_ph == 4'd11) begin
+      cg_vfr[cg_ph & 15]++;
+      if (v99_req) begin
+         cg_vbusy[cg_ph & 15]++; cg_vrun++;
+         if (cg_vrun > cg_vrun_max[cg_ph & 15]) cg_vrun_max[cg_ph & 15] = cg_vrun;
+      end else cg_vrun = 0;
+   end
    always @(posedge clk_sdram) if (cg_on && cg_gdec) begin
       cg_ngdec[cg_ph & 15]++;
       if (cg_urg) begin cg_nurg[cg_ph & 15]++; if (cg_ch4v) cg_nurg4[cg_ph & 15]++; end
@@ -2017,6 +2027,7 @@ module tb;
                      cg_slack_min[k], cg_qmax[k], lp_stat(cg_lat[k], 1024));
             $display("cg: phase %0d urgent VRAM-chip refresh at %0d of %0d G decisions, %0d of them with ch4 queued for that chip",
                      cg_ph, cg_nurg[k], cg_ngdec[k], cg_nurg4[k]);
+            $display("cg: phase %0d V-request frames %0d of %0d, longest run %0d", cg_ph, cg_vbusy[k], cg_vfr[k], cg_vrun_max[k]);
          end
          cg_ph = vp_phase;
       end

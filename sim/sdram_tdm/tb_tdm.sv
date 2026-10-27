@@ -37,6 +37,8 @@ module tb;
     int switch_n = 0;
     bit stock_now = 0;
     int ven = 1, vbusy = 60, vrun = 12, vrun_n = 0;
+    int ch4ser = 0;
+    int ch4_hist [0:1023];
     int e0_vcnt; bit e0_urg, e0_early; bit [2:0] e0_cmask;      // diagnosis of a LATE read                          // +ven=0: no VRAM port (MSX1.sv today: v_en = 0)
     initial begin
         void'($value$plusargs("m128=%d", m128));
@@ -51,7 +53,8 @@ module tb;
         void'($value$plusargs("r800wr=%d", r800wr));
         void'($value$plusargs("ven=%d", ven));
         void'($value$plusargs("vbusy=%d", vbusy));
-        void'($value$plusargs("vrun=%d", vrun));   // at most this many V-request frames in a row (0 = no cap)
+        void'($value$plusargs("vrun=%d", vrun));
+        void'($value$plusargs("ch4ser=%d", ch4ser));   // 1: ch4 back to back (the PCM engine's serial reads), latency histogram   // at most this many V-request frames in a row (0 = no cap)
         void'($urandom(seed));
     end
 
@@ -134,6 +137,8 @@ module tb;
     int  gph;                            // the grid's phase against the TDM frame: per seed
     initial begin #1; gph = $urandom % 36; void'($value$plusargs("gph=%d", gph)); end
     always @(posedge clk) gclk++;
+    int nurg = 0;
+    always @(posedge clk) if (dut.urg_blk && (dut.ps[2] || dut.ps[6])) nurg++;
 
     task automatic agent(int ag);
         int r = 0;
@@ -153,7 +158,7 @@ module tb;
             bit  started;
             byte expect_v;
             bit  have_expect;
-            if (($urandom % 100) >= busy) begin @(posedge clk); continue; end
+            if (!(ag == 3 && ch4ser) && ($urandom % 100) >= busy) begin @(posedge clk); continue; end
             ad  = region_addr(ag, r++);
             //  ch2 reads back what it just touched half the time: the read cache's hits
             if (ag == 1 && last != 0 && ($urandom % 2 == 0)) ad = last;
@@ -263,6 +268,7 @@ module tb;
             end
             c_req[ag] = 0;
             if (t0 > lat_max[ag]) lat_max[ag] = t0;
+            if (ag == 3) ch4_hist[t0 > 1023 ? 1023 : t0]++;
             done[ag]++;
             if (rnw) begin
                 nread[ag]++;
@@ -390,6 +396,19 @@ module tb;
         for (int i = 0; i < 4; i++)
             $display("  ch%0d: done=%0d reads=%0d max latency=%0d clk", i + 1, done[i], nread[i], lat_max[i]);
         $display("  ch4 word1 checked=%0d", nw1);
+        begin
+            int tot = 0, c = 0, med = 0, p99 = 0, p999 = 0, mx = 0;
+            for (int i = 0; i < 1024; i++) tot += ch4_hist[i];
+            for (int i = 0; i < 1024; i++) if (ch4_hist[i] != 0) begin
+                mx = i;
+                if (c < (tot + 1) / 2 && c + ch4_hist[i] >= (tot + 1) / 2) med = i;
+                if (c < (tot * 99 + 99) / 100 && c + ch4_hist[i] >= (tot * 99 + 99) / 100) p99 = i;
+                if (c < (tot * 999 + 999) / 1000 && c + ch4_hist[i] >= (tot * 999 + 999) / 1000) p999 = i;
+                c += ch4_hist[i];
+            end
+            $display("  ch4 latency (req -> done, clk): n %0d median %0d p99 %0d p99.9 %0d max %0d | urgent VRAM-chip refresh G decisions %0d",
+                     tot, med, p99, p999, mx, nurg);
+        end
         $display("  ch2 cache hits=%0d  V: granted=%0d reads checked=%0d refused=%0d", nhit, vdone, vreads, vden);
         if (stock) $display("  ch2 stock: grid phase %0d: LATE=%0d  completion max E0+%0d (deadline E0+%0d)", gph, nlate, stock_lat_max, dl);
         $display("  chip: ACT=%0d READ=%0d WRITE=%0d REFRESH=%0d ras_lockout=%0d errors=%0d",

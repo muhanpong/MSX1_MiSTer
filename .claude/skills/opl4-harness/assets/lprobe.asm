@@ -6,7 +6,7 @@
 ;  3 R800: idle loop, 24 voices playing               (playback + R800 fetches)
 ;  4 R800: OTIR 1024 B -> 220000h while playing       (playback + upload)
 ;  5 R800: 1024 reg 6 reads while playing             (playback + readback)
-;  8 R800: SCREEN 5 display on + a full-screen HMMV running, idle   (playback + VDP load)
+;  8 R800: SCREEN 8 + sprites, HS, full-page HMMM copies waited on CE   (playback + VDP load)
 ;  6 R800: keys off, idle                             (upload with nothing playing)
 ;     R800: OTIR 1024 B -> 224000h
 ;  7 idle (only so that phase 6 is reported before the probe ends)
@@ -93,26 +93,34 @@ upload: ld hl,0 : ld c,7Fh : ld d,N/256
 .o:     ld b,0 : otir
         dec d : jr nz,.o
         ret
-; SCREEN 5 (as vprobe.asm phase 2), display on; one HMMV of 256 x 212 dots, not waited
-; for: the V9968 model's HMMV writes a 32-bit word every ~8 us, so the fill keeps VRAM
-; busy for the whole phase (VK idle passes, ~0.4 ms each) and into the next ones
-VK      equ 24
+; The heaviest VRAM load at hand: SCREEN 8 (display fetch twice SCREEN 5's), sprites on,
+; V9968 high-speed commands (port 9Ch bit 7 = 0 unlocks R#20; R#20 bit 0 = HS), and VK
+; full-page HMMM copies (read + write per dot) page 0 -> page 1, each waited for on S#2 CE
+; (timeout -> EEh on port 2Fh)
+VK      equ 6
 vdpload:
-        ld a,06h : ld e,0 : call vdpw
+        xor a : out (9Ch),a                                  ; unlock the V9968 registers
+        ld a,01h : ld e,20 : call vdpw                       ; HS
+        ld a,0Eh : ld e,0 : call vdpw                        ; G7
         ld a,40h : ld e,1 : call vdpw
         ld a,1Fh : ld e,2 : call vdpw
-        ld a,08h : ld e,8 : call vdpw
+        ld a,08h : ld e,8 : call vdpw                        ; sprites on, 64K x 4
         xor a : ld e,9 : call vdpw
-        ld a,36 : ld e,17 : call vdpw                        ; R#17: auto-increment from R#36
-        ld hl,vcmd : ld b,11 : ld c,9Bh : otir
-        ld b,VK
-.v:     push bc : call idle : pop bc
-        djnz .v
+        ld d,VK
+.v:     ld a,32 : ld e,17 : call vdpw                        ; R#17: auto-increment from R#32
+        ld hl,vcmd : ld b,15 : ld c,9Bh : otir
+        ld a,2 : ld e,15 : call vdpw
+        ld bc,0
+.ce:    in a,(99h) : and 1 : jr z,.done
+        dec bc : ld a,b : or c : jr nz,.ce
+        ld a,0EEh : out (2Fh),a
+.done:  xor a : ld e,15 : call vdpw
+        dec d : jr nz,.v
         ret
 vdpw:   out (99h),a : ld a,e : or 80h : out (99h),a
         ret
 ; 16-bit, start 201000h, loop 0, end 4096, AR 15, RR 4
 hdr:    db 0A0h, 10h, 00h, 00h, 00h, 0F0h, 00h, 00h, 0F0h, 00h, 04h, 00h
-; HMMV: DX 0, DY 0, NX 256, NY 212, CLR 5Ah, ARG 0, CMD C0h
-vcmd:   db 0, 0, 0, 0, 0, 1, 212, 0, 5Ah, 0, 0C0h
+; HMMM: SX 0, SY 0, DX 0, DY 256 (page 1), NX 256, NY 212, CLR -, ARG 0, CMD D0h
+vcmd:   db 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 212, 0, 0, 0, 0D0h
         assert $ < 4000h
