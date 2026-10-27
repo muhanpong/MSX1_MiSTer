@@ -12,6 +12,13 @@
 //  question.  See sim/fullsys/README.md.
 `timescale 1ns/1ps
 
+//  -DCH4GEN drives sdram_tdm's ch4 straight; with -DCH4GEN_BR it drives the
+//  engine's side of msx.sv's bridge instead, so the bridge is in the loop
+`ifdef CH4GEN
+`ifndef CH4GEN_BR
+`define CG_DIRECT
+`endif
+`endif
 module tb;
 
    //  ── clocks ───────────────────────────────────────────────────────────────
@@ -505,7 +512,7 @@ module tb;
       .ch2_rdtog(sdram_rdtog), .ch2_hit(sdram_hit),
       .ch3_addr(flash_addr), .ch3_din(flash_din), .ch3_req(flash_req),
       .ch3_rnw(1'b0), .ch3_ready(flash_ready),
-`ifdef CH4GEN
+`ifdef CG_DIRECT
       .ch4_addr(cg_addr), .ch4_din(8'h5A), .ch4_req(cg_req),
       .ch4_rnw(cg_rnw), .ch4_dout(), .ch4_dout16(cg_d0), .ch4_dout16b(cg_d1),
       .ch4_ready(cg_ready)
@@ -1910,6 +1917,7 @@ module tb;
    logic        cg_req = 1'b0, cg_rnw = 1'b1;
    wire         cg_ready;
    wire  [15:0] cg_d0, cg_d1;
+`ifdef CG_DIRECT
    //  responder for the machine's bridge: ready drops the clock after a request edge,
    //  rises two later
    logic cg_mq = 1'b0; int cg_mcnt = 0;
@@ -1921,6 +1929,21 @@ module tb;
       if (pcm_sdram_req & ~cg_mq) begin pcm_sdram_ready <= 1'b0; cg_mcnt <= 3; end
       else if (cg_mcnt > 0) begin cg_mcnt <= cg_mcnt - 1; if (cg_mcnt == 1) pcm_sdram_ready <= 1'b1; end
    end
+`else
+   //  bridge in the loop: the model takes the engine's place at br_addr/br_rd_req/
+   //  br_wr_req (the engine's own requests are cut off; its CPU side keeps running).
+   //  Like the engine it pulses a request for one clock in the clock after it sees
+   //  ms_mem_busy low; a read is done at ms_mem_rd_valid, a write when busy falls.
+   logic [21:0] cg_baddr = '0;
+   logic        cg_brd = 1'b0, cg_bwr = 1'b0;
+   wire         cg_busy  = MSX.ms_mem_busy;
+   wire         cg_valid = MSX.ms_mem_rd_valid;
+   initial begin
+      force MSX.br_addr   = cg_baddr;
+      force MSX.br_rd_req = cg_brd;
+      force MSX.br_wr_req = cg_bwr;
+   end
+`endif
 
    typedef struct { longint dl; logic [26:0] a; bit rnw; int kind; longint grp; } cg_job_t;
    cg_job_t cg_q [$];
@@ -1948,6 +1971,16 @@ module tb;
    longint cg_slack_min [16];
    bit cg_slot_late [longint];
    int cg_ph = 0;
+   //  sdram_tdm's urgent refresh of the VRAM chip (urg_blk): at how many G decisions it
+   //  was up, and at how many it was up with a ch4 request queued for the VRAM chip
+   wire cg_urg   = u_sdram.urg_blk;
+   wire cg_gdec  = u_sdram.ps[2] | u_sdram.ps[6];
+   wire cg_ch4v  = u_sdram.ch4_rq & (u_sdram.cand_l[3].c == u_sdram.v_chip);
+   int  cg_nurg [16], cg_nurg4 [16], cg_ngdec [16];
+   always @(posedge clk_sdram) if (cg_on && cg_gdec) begin
+      cg_ngdec[cg_ph & 15]++;
+      if (cg_urg) begin cg_nurg[cg_ph & 15]++; if (cg_ch4v) cg_nurg4[cg_ph & 15]++; end
+   end
    initial for (int i = 0; i < 16; i++) cg_slack_min[i] = 1 << 30;
    always @(posedge clk_sdram) begin
       if (!cg_on && vp_phase >= 1) cg_on <= 1'b1;
@@ -1982,10 +2015,13 @@ module tb;
             $display("cg: phase %0d jobs slot-reads %0d cpu-writes %0d header-reads %0d | slots %0d late-slots %0d late-reads %0d | min slack %0d clk | queue max %0d | L %s",
                      cg_ph, cg_nj[k][0], cg_nj[k][1], cg_nj[k][2], cg_nslot[k], cg_lslot[k], cg_late[k],
                      cg_slack_min[k], cg_qmax[k], lp_stat(cg_lat[k], 1024));
+            $display("cg: phase %0d urgent VRAM-chip refresh at %0d of %0d G decisions, %0d of them with ch4 queued for that chip",
+                     cg_ph, cg_nurg[k], cg_ngdec[k], cg_nurg4[k]);
          end
          cg_ph = vp_phase;
       end
    end
+`ifdef CG_DIRECT
    //  the executor: one request at a time, as the bridge (req held until ready rises
    //  again, then one idle clock so the next request is an edge)
    initial begin
@@ -2014,7 +2050,41 @@ module tb;
             end
          end
       end
+   end`else
+   //  the executor (bridge in the loop): one request at a time, as the engine
+   initial begin
+      forever begin
+         automatic int bi = -1;
+         automatic cg_job_t j;
+         automatic longint t0, tv;
+         @(posedge clk_sdram);
+         if (cg_q.size() == 0 || cg_busy) continue;
+         for (int i = 0; i < cg_q.size(); i++) if (bi < 0 || cg_q[i].dl < cg_q[bi].dl) bi = i;
+         j = cg_q[bi]; cg_q.delete(bi);
+         cg_baddr <= 22'(j.a - pcm_rom_base);
+         if (j.rnw) cg_brd <= 1'b1; else cg_bwr <= 1'b1;
+         t0 = cg_t;
+         @(posedge clk_sdram);
+         cg_brd <= 1'b0; cg_bwr <= 1'b0;
+         if (j.rnw) while (!cg_valid) @(posedge clk_sdram);
+         else begin
+            while (!cg_busy) @(posedge clk_sdram);
+            while (cg_busy) @(posedge clk_sdram);
+         end
+         tv = cg_t;
+         cg_lat[cg_ph & 15][(tv - t0) > 1023 ? 1023 : tv - t0]++;
+         cg_nj[cg_ph & 15][j.kind]++;
+         if (j.kind == 0) begin
+            if (j.dl - tv < cg_slack_min[cg_ph & 15]) cg_slack_min[cg_ph & 15] = j.dl - tv;
+            if (tv > j.dl) begin
+               cg_late[cg_ph & 15]++;
+               if (!cg_slot_late.exists(j.grp)) begin cg_slot_late[j.grp] = 1; cg_lslot[cg_ph & 15]++; end
+            end
+         end
+      end
    end
+`endif
+
 `endif
 
 endmodule

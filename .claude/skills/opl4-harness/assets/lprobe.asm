@@ -6,6 +6,7 @@
 ;  3 R800: idle loop, 24 voices playing               (playback + R800 fetches)
 ;  4 R800: OTIR 1024 B -> 220000h while playing       (playback + upload)
 ;  5 R800: 1024 reg 6 reads while playing             (playback + readback)
+;  8 R800: SCREEN 5 display on + a full-screen HMMV running, idle   (playback + VDP load)
 ;  6 R800: keys off, idle                             (upload with nothing playing)
 ;     R800: OTIR 1024 B -> 224000h
 ;  7 idle (only so that phase 6 is reported before the probe ends)
@@ -57,6 +58,8 @@ start:  di
 .r:     ld b,0
 .r1:    in a,(7Fh) : djnz .r1
         dec d : jr nz,.r
+        ld a,8 : out (2Eh),a
+        call vdpload
         ld a,6 : out (2Eh),a
         ld e,0
 .ko:    ld a,e : add a,68h : out (7Eh),a : xor a : out (7Fh),a
@@ -90,6 +93,26 @@ upload: ld hl,0 : ld c,7Fh : ld d,N/256
 .o:     ld b,0 : otir
         dec d : jr nz,.o
         ret
+; SCREEN 5 (as vprobe.asm phase 2), display on; one HMMV of 256 x 212 dots, not waited
+; for: the V9968 model's HMMV writes a 32-bit word every ~8 us, so the fill keeps VRAM
+; busy for the whole phase (VK idle passes, ~0.4 ms each) and into the next ones
+VK      equ 24
+vdpload:
+        ld a,06h : ld e,0 : call vdpw
+        ld a,40h : ld e,1 : call vdpw
+        ld a,1Fh : ld e,2 : call vdpw
+        ld a,08h : ld e,8 : call vdpw
+        xor a : ld e,9 : call vdpw
+        ld a,36 : ld e,17 : call vdpw                        ; R#17: auto-increment from R#36
+        ld hl,vcmd : ld b,11 : ld c,9Bh : otir
+        ld b,VK
+.v:     push bc : call idle : pop bc
+        djnz .v
+        ret
+vdpw:   out (99h),a : ld a,e : or 80h : out (99h),a
+        ret
 ; 16-bit, start 201000h, loop 0, end 4096, AR 15, RR 4
 hdr:    db 0A0h, 10h, 00h, 00h, 00h, 0F0h, 00h, 00h, 0F0h, 00h, 04h, 00h
+; HMMV: DX 0, DY 0, NX 256, NY 212, CLR 5Ah, ARG 0, CMD C0h
+vcmd:   db 0, 0, 0, 0, 0, 1, 212, 0, 5Ah, 0, 0C0h
         assert $ < 4000h

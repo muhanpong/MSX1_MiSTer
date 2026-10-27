@@ -91,7 +91,9 @@ module sdram_tdm
     input      [26:0] ch4_addr,
     output      [7:0] ch4_dout,
     output     [15:0] ch4_dout16,
-    output     [15:0] ch4_dout16b,  // the read's other word in its aligned pair (word addr ^ 1): BL2's word1
+    output     [15:0] ch4_dout16b,  // the read's other word in its aligned pair (word addr ^ 1): BL2's word1.
+                                    // Valid from the clock AFTER ch4_ready rises (msx.sv's valid), one
+                                    // clock after ch4_dout16: on the ready edge itself it is still old
     input       [7:0] ch4_din,
     input             ch4_req,
     input             ch4_rnw,
