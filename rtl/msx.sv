@@ -1839,30 +1839,18 @@ wire        ms_mem_rd_req;
 wire        ms_mem_wr_req;
 wire  [7:0] ms_mem_wr_data;
 
-// ─── SDRAM ch4 read-integrity CANARY (instrumentation) ─────────────────────
-// Functional sim has exonerated the engine (5s bit-exact), register path
-// (0.995), and the SDRAM controller logic (concurrency TB).  The remaining
-// hardware-only suspect is a PHYSICAL ch4 read corruption under playback load
-// (the thin 0.303ns slack / SDRAM_DQ path).  This canary re-reads a FIXED
-// known SRAM word (header 0 @ 0x200000, stable during playback) through the
-// REAL ch4 path whenever the engine's bridge is idle, latches the first value,
-// and counts any later mismatch.  can_errs>0 == ch4 SDRAM reads corrupt under
-// load == root cause confirmed.  Exposed on the overlay via dbg_env_min.
-localparam [21:0] CAN_ADDR = 22'h200000;
-logic        can_owns = 1'b0, can_rd_req = 1'b0, can_ref_set = 1'b0;
-logic [15:0] can_ref = 16'd0, can_errs = 16'd0, can_bad = 16'd0;
-logic [13:0] can_timer = 14'd0;
-
-// muxed bridge inputs: canary takes over only when the engine is fully idle
-wire [21:0] br_addr   = can_owns ? CAN_ADDR     : ms_mem_addr;
-wire        br_rd_req = can_owns ? can_rd_req   : ms_mem_rd_req;
-wire        br_wr_req = can_owns ? 1'b0         : ms_mem_wr_req;
+// The ch4 read-integrity canary that used to share this bridge is removed: it
+// took the bridge in the cycle after it saw the engine idle, so an engine read
+// request rising in that same cycle was masked and never answered (opl4_scratch
+// lprobe, DESIGN.md section 9).  The engine drives the bridge directly.
+wire [21:0] br_addr   = ms_mem_addr;
+wire        br_rd_req = ms_mem_rd_req;
+wire        br_wr_req = ms_mem_wr_req;
 
 // Address: add PCM ROM base offset (set by memory_upload when loading yrw801.rom)
 assign pcm_sdram_addr = pcm_rom_base + {5'd0, br_addr};
 assign dbg_pcm_base_set = (pcm_rom_base != 27'h1800000);
 
-// Read/Write bridge → SDRAM ch4
 // Read/Write bridge → SDRAM ch4
 // SDRAM controller uses edge detection: ch4_req & ~ch4_req_1
 // So pcm_sdram_req must stay HIGH long enough for the edge to be captured.
@@ -1886,7 +1874,7 @@ always_ff @(posedge clk_sdram) begin
     end else begin
         br_rd_req_prev <= br_rd_req;
         case (pcm_state)
-            2'd0: begin // IDLE — detect rising edge of read request (engine OR canary)
+            2'd0: begin // IDLE — detect rising edge of read request
                 if (br_rd_req && !br_rd_req_prev) begin
                     pcm_is_write <= 1'b0;
                     pcm_state <= 2'd1;
@@ -1908,46 +1896,10 @@ always_ff @(posedge clk_sdram) begin
     end
 end
 
-// canary control: start a re-read when the bridge AND engine are idle; on the
-// DONE cycle, latch the reference (first time) or count a mismatch.
-always_ff @(posedge clk_sdram) begin
-    if (reset) begin
-        can_owns <= 1'b0; can_rd_req <= 1'b0; can_ref_set <= 1'b0;
-        can_ref <= 16'd0; can_errs <= 16'd0; can_bad <= 16'd0; can_timer <= 14'd0;
-    end else begin
-        can_timer <= can_timer + 14'd1;
-        // any wave-memory WRITE (sample upload / FixUp) legitimately changes
-        // SRAM → re-arm the reference so it latches the FINAL settled content.
-        // Playback issues no writes, so the reference is stable while monitoring.
-        if (ms_mem_wr_req) begin can_ref_set <= 1'b0; can_errs <= 16'd0; end
-        if (!can_owns) begin
-            // fire periodically, only when nothing else wants the bridge
-            if ((&can_timer) && pcm_state == 2'd0 && !ms_mem_rd_req && !ms_mem_wr_req) begin
-                can_owns   <= 1'b1;
-                can_rd_req <= 1'b1;
-                can_timer  <= 14'd0;
-            end
-        end else begin
-            can_rd_req <= 1'b1;                 // hold req through the transaction
-            if (pcm_state == 2'd3) begin        // data ready this cycle
-                if (!can_ref_set) begin
-                    can_ref     <= pcm_sdram_dout16;
-                    can_ref_set <= 1'b1;
-                end else if (pcm_sdram_dout16 != can_ref) begin
-                    if (can_errs != 16'hFFFF) can_errs <= can_errs + 16'd1;
-                    can_bad <= pcm_sdram_dout16;
-                end
-                can_owns   <= 1'b0;
-                can_rd_req <= 1'b0;
-            end
-        end
-    end
-end
-
 wire  [7:0] ms_mem_rd_data  = pcm_sdram_dout;
 wire [15:0] ms_mem_rd_data16 = pcm_sdram_dout16;
-wire        ms_mem_rd_valid = (pcm_state == 2'd3) && !pcm_is_write && !can_owns;
-wire        ms_mem_busy     = (pcm_state != 2'd0) || can_owns;
+wire        ms_mem_rd_valid = (pcm_state == 2'd3) && !pcm_is_write;
+wire        ms_mem_busy     = (pcm_state != 2'd0);
 
 // ─── slot-0 multi-probe REMOVED ────────────────────────────────────────────
 // The 96-bit MPRB capture BRAM found the root cause (stale-pos loud read during
@@ -2042,7 +1994,7 @@ end
 // wave-123 header @0x5C4): GREEN(0) = header words read clean → corruption is
 // NOT the header read; RED(>0) = ch4 returns corrupt header bytes under the
 // wave-change contention = root cause.  Saturate to the 10-bit overlay field.
-assign dbg_env_min = (can_errs[15:10] != 6'd0) ? 10'h3FF : can_errs[9:0];  // overlay canary = ch4 SDRAM read errors (Cause B diag)
+assign dbg_env_min = 10'd0;  // the canary error count it showed is gone (overlay: green stub)
 
 // ─── ymf278b_top instance ────────────────────────────────────────────────────
 wire        ms_io_ack;

@@ -213,6 +213,7 @@ M10K는 리셋이 없으므로 현행처럼 **reset 동안 쓸기**(RAM-R 240워
 - 증거: phase마다 "canary가 브리지를 잡은 사이클에 오른 엔진 요청" 수 = 덮어쓴 타임스탬프 수 = 누락 수(phase 2·4·5·6·7에서 1·5·1·5·1, canary 발동 159번 중 13번). 대조: `+nocanary`(TB가 `can_owns`를 0으로 고정)로 같은 실행을 하면 누락 0, **LPROBE VALID**.
 - 빈도: R800 업로드와 재생이 겹치는 phase 4에서 8.77 ms에 5번(초당 약 570번). 보드 빌드의 msx.sv에도 같은 canary가 있다. 소리에 미치는 영향(프레임 하나의 남은 슬롯 빠짐)은 시뮬레이션 출력으로 확인하지 않았다.
 - engine3도 같은 브리지를 쓰므로 같은 누락을 겪는다. 고치는 곳은 msx.sv(canary를 없애거나, canary 중 오른 엔진 요청을 붙잡아 두었다가 처리).
+- **해결 (2026-10-27, 사용자 결정: canary 제거):** 이 worktree의 `msx.sv`에서 canary를 없앴다. 브리지 입력은 엔진 신호 그대로, `ms_mem_busy = (pcm_state != 0)`, `dbg_env_min = 0`(오버레이는 초록 stub). TB의 canary 카운터와 `+nocanary`도 없앴다. 결과(`/data/_claude/tmp/opl4-scratch/lp/fix/lat.log`): **LPROBE VALID**, 모든 phase에서 상승 = valid, 덮어쓰기 0. 지연 줄은 `+nocanary` 대조와 한 글자도 다르지 않다. 대조: canary가 있던 70f6009의 같은 실행은 INVALID(`lp/can`). 보드 빌드(sdram128 트리)의 msx.sv는 건드리지 않았다.
 
 ### L 측정값 (유효, `+nocanary`, engine2, `/data/_claude/tmp/opl4-scratch/lp/nocan/lat.log`)
 
@@ -226,7 +227,7 @@ M10K는 리셋이 없으므로 현행처럼 **reset 동안 쓸기**(RAM-R 240워
 | 6 | 키오프 뒤 R800 업로드(릴리스 진행 중) | 408 | 17431 | 17 | 20 | 29 | 40 | n 1024, 12/15/20/23 |
 | 7 | 유휴 | 19 | 788 | 17 | 20 | 29 | 35 | — |
 
-- 7개 phase 모두 `lprobe_check.py` VALID. **설계 입력: L 중앙 20, p99 29, 최대 40 clk**(시뮬레이션 모델 `sdram_tdm_sim.sv` 기준, 보드 측정 아님). canary가 있는 실제 빌드에서는 여기에 canary 한 번(약 20 clk)이 겹칠 수 있다.
+- 7개 phase 모두 `lprobe_check.py` VALID. **설계 입력: L 중앙 20, p99 29, 최대 40 clk**(시뮬레이션 모델 `sdram_tdm_sim.sv` 기준, 보드 측정 아님). canary를 없앤 트리의 실행(`lp/fix`)도 같은 값이다.
 
 ### 게이트 (5차 반영 뒤, 커밋 전 작업 트리)
 
