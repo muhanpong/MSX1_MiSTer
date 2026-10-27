@@ -193,7 +193,7 @@ RAM-R 쓸기 240 clk(P2, `reset` 게이트 240 PASS / 239 FAIL). RAM-S 96워드�
 | late (신설) | 엔진 내부 단언: 골든·load 전 실행에서 `late_cnt = 0`; fullsys lprobe 8 phase(CH4GEN 없이 실제 엔진)에서 `late_cnt = 0` | TB 메모리 모델 지연을 늘려(예: 지연 120) `late_cnt > 0`이고 그때 출력 차이가 늦은 슬롯에만 있음 |
 | cpuvis, reset, busylat, memwr | P2 그대로 | P2 뮤턴트 그대로 |
 | resource | PCM ≤ 1,200 ALM, M10K ≤ 6, DSP ≤ 4 | 오래된 보고서 → FAIL(기존) |
-| A 창 | 골든·load 실행에서 A의 마지막 슬롯이 프레임의 1,500 전(TB 단언) | K를 2,700으로 당긴 뮤턴트 → golden FAIL |
+| A 창 | 골든·load 실행에서 A의 마지막 슬롯이 프레임의 1,500 전(TB 단언) | late 게이트의 대조 실행(TB 지연 120, FIFO 16이면 A가 멈춰 늦게 끝남)에서 이 단언이 발화해야 함 — 두 게이트의 공용 대조. K = 2,700 뮤턴트는 K 선택(골든 창)의 대조로 golden 행에 둔다 |
 
 stress 게이트(engine2 lockstep)는 engine3에 못 쓴다. 대신 "K 직전·직후, A가 그 슬롯을 읽는 clk 근처" 무작위 쓰기 + 프레임 출력 비교(TB가 K를 엔진에서 읽어 모델에 쓰기 반영 프레임을 알림)를 P3에서 만든다.
 
