@@ -13,10 +13,10 @@ the Geo3D discussion lives in hra1129 issue #9).
       change is needed; software turns it on because it chose SCREEN 8 itself.
 - [ ] Verify that patch with upstream's own benches (`gen_scenes.py`, filled/textured scenes):
       bit-exact with the bit off, identical VRAM with it on in SCREEN 8.
-- [ ] A neutral SCREEN 8 demo scene of our own (no third-party data; NICCC 3D uses Megus's
-      PICONICCC models, so not for this) if a video/ROM is wanted at all.
-- [ ] English proposal text for hra1129 issue #9 with the numbers below and the patch inline
-      (user posts it). Push of V9968_Geo3D (59dcd96, b1fff1f, f227328) only if a link is wanted.
+- [ ] English proposal text for hra1129 issue #9 with numbers only (user 2026-10-27): the
+      per-row LINE/HMMV fits (synthetic bench) and the NICCC 3D frame times named as a scene,
+      plus the patch inline. No video, ROM or model data attached (PICONICCC models have no
+      licence file; putting them into an upstream repo would need Megus's OK). User posts it. Push of V9968_Geo3D (59dcd96, b1fff1f, f227328) only if a link is wanted.
 
 ## Numbers (V9968 RTL in sim/v9968_vram's bench, SCREEN 8, R#20 HS = 1)
 
