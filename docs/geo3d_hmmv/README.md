@@ -40,3 +40,21 @@ RUN times identical with the switch on (mode gate works).
 
 `core_custom_vs_upstream_geo3d_{engine,bus}.diff`: the custom build against pristine v2.0 (with the
 `V9968_UPSTREAM` ifdefs in place). Details and history: `rtl/video/geo3d/ORIGIN.md`.
+
+## NICCC 3D real-time engine stream (2026-10-27)
+
+The R800 engine's ops (msx_niccc_3d `out/rt_expect.bin`, op 08 expanded: `rt_flat.bin`) through
+`sim/geo3d_perf`, four frames from each of six places, Geo3D RUN time per frame (ms):
+
+| frames | LINE | HMMV |
+|---|---|---|
+| 18-21 (letters) | 9.2-9.6 | 7.0-7.3 |
+| 338-341 | 16.9-17.2 | 8.2-8.5 |
+| 698-701 | 15.8-16.2 | 7.2-7.4 |
+| 998-1001 | 13.3-13.4 | 6.1-6.2 |
+| 1298-1301 | 13.2-13.4 | 6.2-6.4 |
+| 1698-1701 (cubes) | 18.3-18.5 | 10.8-11.0 |
+
+Pages after frames 701 and 1701: LINE = HMMV = geo3d.py model (0 px); the two frames differ in
+all 54,272 bytes. With LINE the RTL needs more than one 60 Hz period in three of six places, so
+mode A (and mode 1) cannot hold 60 fps on the board there; with HMMV every sampled frame fits.
