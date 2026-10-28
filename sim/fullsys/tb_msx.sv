@@ -1837,7 +1837,27 @@ module tb;
       end
       return $sformatf("n %0d min %0d median %0d p99 %0d max %0d%s", tot, mn, med, p99, mx, h[n-1] != 0 ? " (max is the cap)" : "");
    endfunction
+`ifdef PCM_ENGINE3
+   //  engine3: dbg_slot_keyon reads 0; per phase also its late count (SPEC F-LATE) and
+   //  pass A's latest end within a frame
+   wire [15:0] lp_late = MSX.u_moonsound.u_pcm.late_cnt;
+   //  key-on from the engine's register writes (field 4, 68h-7Fh, bit 7): engine3 keeps it
+   //  in an MLAB word that Verilator does not resolve from here
+   logic [23:0] lp_keyon = '0;
+   always @(posedge MSX.clk_sdram)
+      if (MSX.u_moonsound.u_pcm.reg_wr && MSX.u_moonsound.u_pcm.reg_addr >= 8'h68 && MSX.u_moonsound.u_pcm.reg_addr <= 8'h7F)
+         lp_keyon[MSX.u_moonsound.u_pcm.reg_addr - 8'h68] <= MSX.u_moonsound.u_pcm.reg_data[7];
+   int lp_late0 = 0, lp_aend = 0;
+   logic lp_abq = 1'b0;
+   always @(posedge MSX.clk_sdram) begin
+      lp_abq <= MSX.u_moonsound.u_pcm.a_busy;
+      if (lp_abq && !MSX.u_moonsound.u_pcm.a_busy && int'(MSX.u_moonsound.u_pcm.frame_cycle) < MSX.u_moonsound.u_pcm.T_K
+          && int'(MSX.u_moonsound.u_pcm.frame_cycle) > lp_aend)
+         lp_aend = int'(MSX.u_moonsound.u_pcm.frame_cycle);
+   end
+`else
    wire [23:0] lp_keyon = MSX.u_moonsound.u_pcm.dbg_slot_keyon;
+`endif
    wire lp_m1now = ~MSX.m1_n & ~MSX.mreq_n & (MSX.a == 16'h0195);
    always @(posedge clk21m) begin
       lp_m1q <= lp_m1now;
@@ -1854,6 +1874,12 @@ module tb;
             $display("lprobe: phase %0d write %s", lp_ph, lp_stat(lp_wr[k], 2048));
             $display("lprobe: phase %0d count clk %0d keyon %0d io_wr %0d io_rd %0d idle_m1 %0d rd_rise %0d rd_valid %0d rd_overwrite %0d wr_rise %0d wr_done %0d wr_overwrite %0d",
                      lp_ph, lp_t - lp_t0[k], ko, lp_iow[k], lp_ior[k], lp_m1[k], lp_nr[k], lp_nv[k], lp_nro[k], lp_nw[k], lp_nwd[k], lp_nwo[k]);
+`ifdef PCM_ENGINE3
+            $display("lprobe: phase %0d engine3 late %0d a_end_max %0d", lp_ph,
+                     int'(lp_late) - lp_late0, lp_aend);
+            lp_late0 = int'(lp_late);
+            lp_aend  = 0;
+`endif
          end
          lp_ph = vp_phase;
          lp_t0[lp_ph & 15] = lp_t;
