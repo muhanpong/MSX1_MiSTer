@@ -65,7 +65,7 @@ SCEN=${SCEN:-"sc_single8:900:o sc_square16:900:o sc_tri12_loop:1000:o sc_multi:1
   sc_pitchbend:1000:o sc_wavehi:800:o sc_odd16:900:o sc_relwave:300:o sc_dirdep_good:700:o
   sc_dirdep_bad:700:o sc_memhit:400:o sc_eg_dl:900:o sc_eg_damp:1000:o sc_tlramp:1000:o
   sc_lfo_reset:1500:o sc_pan_mix:1100:o sc_tblhdr:600:o sc_lfo_off:900:o sc_silence:900:o
-  sc_memtype1:600:o sc_lfo_long:3400:o
+  sc_memtype1:600:o sc_lfo_long:3400:o sc_eg_long:9000:o
   sc_songchange24:800:o:1"}
 #  24 voices, mass key-off / wave-number rewrite: bit-exact at lat 1, not at longer
 #  latencies on the current engine (one header fetch per frame, SPEC H4)

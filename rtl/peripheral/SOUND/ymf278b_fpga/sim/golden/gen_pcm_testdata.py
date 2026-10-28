@@ -165,6 +165,28 @@ slotw(L, 1, 8, 5, (6 << 3) | 4)
 slotw(L, 1, 8, 9, 5)
 scripts['sc_lfo_long.txt'] = (L, 3400)
 
+# S5c: long envelopes.  Every other scenario ends by frame 3,400, so the EG counter's
+# bits 12-14 (slow rates: shift 11-12, phase bits up to 14) and the LFO counter's
+# wrap at 2^18 (frame 6,242 at speed 7) never ran.  Slot 2: slow decay to DL 15,
+# then a slow sustain decay, LFO speed 7 with vibrato and tremolo, key-off at 7,000
+# into a slow release.  Slot 9: AR 15, D1R 1 with RC 1 at octave 0, F-Num < 200h:
+# decay rate 4 + 2 = 6 (shift 11, increment row {0,1,1,1,0,1,1,1}), so the EG phase
+# at frame 4,096 is 2, not the 0 a 12-bit counter would give; released at 8,000.
+L = []
+keyon(L, 1, 2, wave=1, fn=0x200, oct_=0, tl=4, pan=3, lfo_off=False)
+slotw(L, 1, 2, 5, (7 << 3) | 3)                   # lfo speed 7, vib depth 3
+slotw(L, 1, 2, 6, (15 << 4) | 2)                  # AR 15, D1R 2
+slotw(L, 1, 2, 7, (15 << 4) | 1)                  # DL 15, D2R 1
+slotw(L, 1, 2, 8, (15 << 4) | 1)                  # RC 15, RR 1
+slotw(L, 1, 2, 9, 3)                              # AM depth 3
+W(L, 7000, 0x08 + 4*24 + 2, 0x03)                 # key-off (LFO stays on)
+keyon(L, 100, 9, wave=0, fn=0x180, oct_=0, tl=2, pan=13)
+slotw(L, 100, 9, 6, (15 << 4) | 1)
+slotw(L, 100, 9, 7, (8 << 4) | 0)
+slotw(L, 100, 9, 8, (1 << 4) | 2)                # RC 1, RR 2
+W(L, 8000, 0x08 + 4*24 + 9, 0x2D)                 # key-off
+scripts['sc_eg_long.txt'] = (L, 9000)
+
 # S6: pitch-bend bombardment — vgmplay clock-compensation pattern: keyed slot
 # gets field-1 (FN low) writes every few frames.  Field 1 must NOT reload the
 # header (openMSX case 1); the old RTL reloaded+muted on every write.
