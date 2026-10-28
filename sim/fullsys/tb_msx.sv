@@ -519,7 +519,7 @@ module tb;
 `else
       .ch4_addr(pcm_sdram_addr), .ch4_din(pcm_sdram_din), .ch4_req(pcm_sdram_req),
       .ch4_rnw(pcm_sdram_rnw), .ch4_dout(pcm_sdram_dout), .ch4_dout16(pcm_sdram_dout16),
-      .ch4_ready(pcm_sdram_ready)
+      .ch4_dout16b(pcm_sdram_dout16b), .ch4_ready(pcm_sdram_ready)
 `endif
    );
 
@@ -1924,6 +1924,7 @@ module tb;
    initial pcm_sdram_ready = 1'b1;
    assign pcm_sdram_dout = 8'h00;
    assign pcm_sdram_dout16 = 16'h0000;
+   assign pcm_sdram_dout16b = 16'h0000;
    always @(posedge clk_sdram) begin
       cg_mq <= pcm_sdram_req;
       if (pcm_sdram_req & ~cg_mq) begin pcm_sdram_ready <= 1'b0; cg_mcnt <= 3; end

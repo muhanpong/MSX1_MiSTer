@@ -52,7 +52,7 @@ MUTANTS = [
 ]
 
 
-# engine3 (from-scratch engine, P2 skeleton): its own anchors for the engine edits; the
+# engine3 (from-scratch engine, P3 datapath): its own anchors for the engine edits; the
 # regs/top mutants above apply to both engines.
 ENGINE3 = [
     ("id_bits", "engine", "reg 2 device ID 010 instead of 001",
@@ -82,13 +82,13 @@ ENGINE3 = [
     ("prefetch_none", "engine", "a reg 5 write does not prefetch (the next reg 6 read is stale)",
      "if (cpu_adr_set_l || cpu_rd_06) cpu_rd_pend <= 1'b1;", "if (cpu_rd_06) cpu_rd_pend <= 1'b1;"),
     ("hdr_nobackfill", "engine", "header bytes 7-11 never reach fields 5-9",
-     "assign bf_now  = (sv_state == SV_HDR_STORE) && !bf_dirty[hf_slot][sv_cnt];",
+     "assign bf_now  = bf_step && !bf_dirty[hf_slot][sv_cnt];",
      "assign bf_now  = 1'b0;"),
     ("dirty_ignored", "engine", "the backfill overwrites fields the CPU wrote after the wave number",
-     "assign bf_now  = (sv_state == SV_HDR_STORE) && !bf_dirty[hf_slot][sv_cnt];",
-     "assign bf_now  = (sv_state == SV_HDR_STORE);"),
+     "assign bf_now  = bf_step && !bf_dirty[hf_slot][sv_cnt];",
+     "assign bf_now  = bf_step;"),
     ("bf_lane_off", "engine", "the backfill writes field n+1's byte into field n (wrong lane)",
-     "assign bf_d    = hf_buf[4'd7 + {1'b0, sv_cnt}];", "assign bf_d    = hf_buf[4'd8 + {1'b0, sv_cnt}];"),
+     "assign bf_d    = hbv[{4'd7 + {1'b0, sv_cnt}, 3'd0} +: 8];", "assign bf_d    = hbv[{4'd8 + {1'b0, sv_cnt}, 3'd0} +: 8];"),
     ("lane_hi_lost", "engine", "fields 5-9 written into the slot's field 0-4 words",
      "wq_word <= reg_word;", "wq_word <= (reg_word >= 8'd120) ? reg_word - 8'd120 : reg_word;"),
     ("reset_nosweep", "engine", "the reset sweep writes nothing (register file keeps its bytes)",
@@ -101,7 +101,7 @@ ENGINE3 = [
      "rd_upd_q2   <= !eng_rd && !(rw_we && rw_addr == rd_word_q1);",
      "rd_upd_q2   <= !(rw_we && rw_addr == rd_word_q1);"),
     ("wq_stuck", "engine", "a queued CPU slot-register write never leaves the queue (overflow)",
-     "wire         wq_go = wq_v && !clr_run && !bf_now;", "wire         wq_go = 1'b0;"),
+     "wire         wq_go = wq_v && !clr_run;", "wire         wq_go = 1'b0;"),
     ("again_none", "engine", "a wave number rewritten during its header fetch does not fetch again",
      "if (hf_busy && wr_snum == hf_slot && !bf_done) hf_again <= 1'b1;", "if (1'b0) hf_again <= 1'b1;"),
 ]

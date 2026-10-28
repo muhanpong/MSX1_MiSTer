@@ -4,7 +4,8 @@
 #
 #      run_cpuvis.sh [out_dir]
 #
-#  env: ENGINE (PCM engine files, last one the engine module), REGS, TOP (files
+#  env: TB_DEFS (extra bench defines, e.g. +define+TB_W1_MUT: word1 = word0, a negative
+#  control), ENGINE (PCM engine files, last one the engine module), REGS, TOP (files
 #  under test, default the tree's), LAT (SDRAM read latency, default 6),
 #  WLAT (SDRAM write latency, default 0), CLK_HZ (default 128863620), DEV (deviation
 #  flags for the model, default all), RESET_LEN / AGAIN_GAP (cpuvis_ops.py knobs).
@@ -45,7 +46,7 @@ CPUVIS_RESET_LEN=${RESET_LEN:-256} CPUVIS_AGAIN_GAP=${AGAIN_GAP:-8} CPUVIS_AGAIN
 verilator --binary --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-TIMESCALEMOD \
    -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-CASEINCOMPLETE -Wno-BLKANDNBLK \
    -Wno-MULTIDRIVEN -Wno-PINMISSING -Wno-UNDRIVEN -Wno-SIDEEFFECT -Wno-PINCONNECTEMPTY \
-   $VDEFS -GCLK_HZ=$CLK_HZ --top-module tb_cpuvis -o vcpu -Mdir "$O/v" \
+   $VDEFS ${TB_DEFS:-} -GCLK_HZ=$CLK_HZ --top-module tb_cpuvis -o vcpu -Mdir "$O/v" \
    "$O3/top_level/pkg/opl3_pkg.sv" "$O3/misc/src/edge_detector.sv" \
    "$O3/timers/src/timer.sv" "$O3/timers/src/timers.sv" "$Y/tb/opl3_stub.sv" \
    $ENGINE "$REGS" "$TOP" "$HERE/tb_cpuvis.sv" > "$O/build.log" 2>&1

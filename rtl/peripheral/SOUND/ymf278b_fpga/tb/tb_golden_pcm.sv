@@ -36,6 +36,7 @@ module tb_golden_pcm #(
     logic [7:0]  mem_wr_data;
     logic [7:0]  mem_rd_data;
     logic [15:0] mem_rd_data16;
+    logic [15:0] mem_rd_data16b;    // the pair's other word (engine3; byte addr ^ 2)
     logic        mem_rd_valid;
     logic signed [15:0] pcm_l, pcm_r;
     logic        pcm_v;
@@ -57,6 +58,7 @@ module tb_golden_pcm #(
             if (LAT <= 1) begin
                 mem_rd_data   <= mem[mem_addr[21:0]];
                 mem_rd_data16 <= {mem[{mem_addr[21:1], 1'b1}], mem[{mem_addr[21:1], 1'b0}]};
+                mem_rd_data16b <= w1(mem_addr[21:0]);
                 mem_rd_valid  <= 1'b1;
             end else begin
                 rd_pend <= 1'b1;
@@ -67,6 +69,7 @@ module tb_golden_pcm #(
             if (rd_cnt <= 1) begin
                 mem_rd_data   <= mem[rd_addr];
                 mem_rd_data16 <= {mem[{rd_addr[21:1], 1'b1}], mem[{rd_addr[21:1], 1'b0}]};
+                mem_rd_data16b <= w1(rd_addr);
                 mem_rd_valid  <= 1'b1;
                 rd_pend       <= 1'b0;
             end else rd_cnt <= rd_cnt - 1;
@@ -74,7 +77,22 @@ module tb_golden_pcm #(
         if (mem_wr_en) mem[mem_addr[21:0]] <= mem_wr_data;
     end
 
+    //  word1 of the pair; TB_W1_MUT gives word0 again (negative control: engine3 FAILs)
+    function automatic logic [15:0] w1(input logic [21:0] a);
+`ifdef TB_W1_MUT
+        return {mem[{a[21:1], 1'b1}], mem[{a[21:1], 1'b0}]};
+`else
+        return {mem[{a[21:1] ^ 21'd1, 1'b1}], mem[{a[21:1] ^ 21'd1, 1'b0}]};
+`endif
+    endfunction
+
+`ifdef PCM_ENGINE3
+    logic [15:0] late_cnt;
+    ymf278_pcm_engine3 #(.CLK_HZ(CLK_HZ)) dut (
+        .mem_rd_data16b(mem_rd_data16b), .dbg_late_cnt(late_cnt),
+`else
     ymf278_pcm_engine2 #(.CLK_HZ(CLK_HZ)) dut (
+`endif
         .clk(clk), .rst_n(rst_n),
         .reg_addr(reg_addr), .reg_data(reg_data), .reg_wr(reg_wr), .reg_rd(1'b0),
         .cpu_mem_rd_data(), .cpu_mem_busy(), .reg02_readback(),
@@ -93,6 +111,20 @@ module tb_golden_pcm #(
         .dbg_slot0_hdr_start(), .dbg_slot0_hdr_loop(),
         .dbg_slot0_hdr_end(), .dbg_slot0_hdr_bits()
     );
+
+`ifdef PCM_ENGINE3
+    //  DESIGN section 11 "A window": the latest cycle into its frame at which pass A
+    //  finishes (a pass that ends before the frame boundary counts as 0).  Frames 0-1
+    //  are left out: the pass right after reset is not T_K-anchored.
+    int   a_end_max = 0;
+    logic a_busy_q  = 1'b0;
+    always @(posedge clk) begin
+        a_busy_q <= dut.a_busy;
+        if (a_busy_q && !dut.a_busy && cur_frame >= 2 && int'(dut.frame_cycle) < dut.T_K
+            && int'(dut.frame_cycle) > a_end_max)
+            a_end_max = int'(dut.frame_cycle);
+    end
+`endif
 
     // script storage
     int s_frame [0:16383];
@@ -239,6 +271,10 @@ module tb_golden_pcm #(
             if (cur_frame + 1 >= frames) begin
                 $fclose(fd_out);
                 $display("RTL: %0d frames done", frames);
+`ifdef PCM_ENGINE3
+                $display("engine3: late slot-frames %0d", late_cnt);
+                $display("engine3: pass A last end %0d clk into a frame (frames %0d..)", a_end_max, 2);
+`endif
                 $finish;
             end
         end

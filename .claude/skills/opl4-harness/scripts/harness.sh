@@ -118,6 +118,9 @@ gold_make() {
 #  a scenario's own latency list ("1/20") wins over the run's, except in mutant runs (MUT_LATS)
 scen_lats() { if [ -n "$1" ] && [ -z "${IN_MUT:-}" ]; then echo "${1//\// }"; else echo "$2"; fi; }
 
+#  the golden TB instantiates engine3 (its extra ports) when the last engine file defines it
+golden_defs() { local f; for f in "$@"; do :; done; grep -qE '^\s*module\s+ymf278_pcm_engine3\b' "$f" && echo -DPCM_ENGINE3; }
+#  TB_DEFS   extra defines for the golden TB build (e.g. -DTB_W1_MUT, the word1 negative control)
 #  golden_run <tag> <lats> <engine files...>: 0 = every scenario at every latency bit-exact
 #  (comparator lag 0, no off-by-1, no bad sample), 1 = mismatch, 2 = no binary
 golden_run() {
@@ -129,7 +132,7 @@ golden_run() {
        -Wno-DECLFILENAME -Wno-UNUSEDSIGNAL -Wno-CASEINCOMPLETE -Wno-BLKANDNBLK \
        -Wno-MULTIDRIVEN -Wno-PINMISSING -Wno-UNDRIVEN -Wno-SIDEEFFECT \
        -GCLK_HZ=$CLK_HZ --top-module tb_golden_pcm -o vgold -Mdir "$d/v" \
-       "$@" "$Y/tb/tb_golden_pcm.sv" > "$d/build.log" 2>&1
+       $(golden_defs "$@") ${TB_DEFS:-} "$@" "$Y/tb/tb_golden_pcm.sv" > "$d/build.log" 2>&1
     [ -x "$d/v/vgold" ] || { grep -m3 %Error "$d/build.log" > "$d/why"; return 2; }
     local e n f m sl lat
     for e in $SCEN; do

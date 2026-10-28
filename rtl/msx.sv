@@ -156,6 +156,7 @@ module msx
    output              [7:0] pcm_sdram_din,
    input               [7:0] pcm_sdram_dout,
    input              [15:0] pcm_sdram_dout16,
+   input              [15:0] pcm_sdram_dout16b,   // the pair's other word (ch4 BL2 word1), valid with dout16
    input                     pcm_sdram_ready,
    // PCM ROM base address in SDRAM (set by memory_upload)
    input              [26:0] pcm_rom_base,
@@ -2493,6 +2494,7 @@ ymf278b_top #(
     .mem_rd_req   (ms_mem_rd_req),
     .mem_rd_data  (ms_mem_rd_data),
     .mem_rd_data16(ms_mem_rd_data16),
+    .mem_rd_data16b(pcm_sdram_dout16b),
     .mem_rd_valid (ms_mem_rd_valid),
     .mem_wr_req   (ms_mem_wr_req),
     .mem_wr_data  (ms_mem_wr_data),

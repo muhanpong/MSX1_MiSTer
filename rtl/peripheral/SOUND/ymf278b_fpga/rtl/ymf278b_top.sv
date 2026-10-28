@@ -29,6 +29,7 @@ module ymf278b_top #(
     output logic        mem_rd_req,
     input  wire  [7:0]  mem_rd_data,
     input  wire  [15:0] mem_rd_data16,
+    input  wire  [15:0] mem_rd_data16b,  // the other word of the aligned 4-byte pair (engine3)
     input  wire         mem_rd_valid,
     output logic        mem_wr_req,
     output logic [7:0]  mem_wr_data,
@@ -229,6 +230,9 @@ localparam int PCM_MEM_WRITE_DELAY = (28 * (CLK_HZ / 1000) + 33868 / 2) / 33868;
     .mem_rd_en       (mem_rd_req),
     .mem_rd_data     (mem_rd_data),
     .mem_rd_data16   (mem_rd_data16),
+`ifdef PCM_ENGINE3
+    .mem_rd_data16b  (mem_rd_data16b),
+`endif
     .mem_rd_valid    (mem_rd_valid),
     .mem_wr_en       (mem_wr_req),
     .mem_wr_data     (mem_wr_data),

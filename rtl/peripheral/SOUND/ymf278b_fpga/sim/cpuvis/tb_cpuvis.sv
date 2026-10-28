@@ -41,6 +41,7 @@ module tb_cpuvis #(
     wire [7:0]  mem_wr_data;
     logic [7:0]  mem_rd_data;
     logic [15:0] mem_rd_data16;
+    logic [15:0] mem_rd_data16b;    // the pair's other word (engine3)
     logic        mem_rd_valid;
 
     //  sample memory: same model as tb_golden_pcm (latency, mem_busy while a read waits),
@@ -72,6 +73,11 @@ module tb_cpuvis #(
             if (rd_cnt <= 1) begin
                 mem_rd_data   <= mem[rd_addr];
                 mem_rd_data16 <= {mem[{rd_addr[21:1], 1'b1}], mem[{rd_addr[21:1], 1'b0}]};
+`ifdef TB_W1_MUT
+                mem_rd_data16b <= {mem[{rd_addr[21:1], 1'b1}], mem[{rd_addr[21:1], 1'b0}]};
+`else
+                mem_rd_data16b <= {mem[{rd_addr[21:1] ^ 21'd1, 1'b1}], mem[{rd_addr[21:1] ^ 21'd1, 1'b0}]};
+`endif
                 mem_rd_valid  <= 1'b1;
                 rd_pend       <= 1'b0;
             end else rd_cnt <= rd_cnt - 1;
@@ -83,7 +89,7 @@ module tb_cpuvis #(
         .clk, .clk_opl3, .rst_n,
         .io_port, .io_data_in, .io_wr, .io_rd, .io_data_out, .io_ack,
         .status_export, .status_rd_notify,
-        .mem_addr, .mem_rd_req, .mem_rd_data, .mem_rd_data16, .mem_rd_valid,
+        .mem_addr, .mem_rd_req, .mem_rd_data, .mem_rd_data16, .mem_rd_data16b, .mem_rd_valid,
         .mem_wr_req, .mem_wr_data, .mem_busy(rd_pend | wr_pend),
         .audio_left(), .audio_right(), .audio_valid(), .irq_n(),
         .pcm_mute(1'b0), .fm_mute(1'b0), .pcm_vol(4'd0), .fm_vol(4'd0),
