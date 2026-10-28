@@ -975,7 +975,12 @@ module vdp_cpu_interface (
 `endif
 				ff_line_interrupt <= 1'b0;
 			end
+`ifndef V9968_UPSTREAM
+			//	FH arms only while IE1 (R#0 bit4) is on (MSX1 core, 2026-10-29): see ORIGIN.md
+			else if( intr_line && ff_line_interrupt_enable ) begin
+`else
 			else if( intr_line ) begin
+`endif
 				//	Happend line interrupt
 				ff_line_interrupt <= 1'b1;
 			end

@@ -81,6 +81,22 @@ Driven from the OSD "Scandoubler Fx" (MSX1.sv: CRT 25/50/75% -> 1/2/3, others 0)
   frames at 20 / 48 / 90 us and 0 of 6 at 5 / 10 us; fixed: 0 of 6 at every delay.  Control line 68h
   at 48 us: 0 of 6 on both.  Worth reporting upstream (hra1129/V9968_Cartridge).
 
+## Local change (2026-10-29, bug): FH arms only while IE1 is on (Knightmare 224 v2 does not run)
+
+- `vdp_cpu_interface.v` (~980): upstream sets FH on every line match, whatever IE1 (R#0 bit4) says;
+  only `int_n` is gated.  The frame-interrupt clear (removed above for ASO) used to wipe that stray
+  FH before a VBLANK handler could see it.  With the clear gone, FH set at the R#19 line while IE1
+  is off stays set into VBLANK.  Now the line match sets FH only with `ff_line_interrupt_enable`.
+  openMSX does the same (VDP::execHScan: `if (controlRegs[0] & 0x10) irqHorizontal.set()`), and so
+  does this core's ESE VDP (vdp_interrupt.vhd, the Zanac-EX note).
+- Why it matters: Knightmare 224 v2 (knightmare_ex src/bank4.asm `isr`) reads S#1 first and takes
+  FH = 1 as a line interrupt; in its 192-line mode (IE1 off, frame interrupt only) that path ends
+  in `isr_s0` and the game frame (G_FRAME) never runs.  rbf 20261024b..20261027a (b82ef60 and
+  later) did not start the game; 20261024a and earlier did, because of the frame-time clear.
+- Bench: sim/v9968_vram `+fhoff=6` (IE1 off, R#19 = 68h, R#1 = 62h; the VBLANK handler reads S#1
+  first): before 6 of 6 frames read FH = 1, fixed 0 of 6.  Gate `run_fhoff.sh` (mutant = the gate
+  removed, must read FH = 1), now part of `run_gates.sh`; `run_irq.sh` (ASO, IE1 on) still passes.
+
 ## Upstream sync (2026-10-24): 8a37b33 "Modified" -- horizontal display width
 
 - upstream changed two lines in files that also carry local changes, so they were applied by hand

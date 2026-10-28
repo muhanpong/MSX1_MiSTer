@@ -50,7 +50,7 @@ module tb #(parameter int RELEASE_PH = 0);
         void'($value$plusargs("lnsw=%d", lnsw));
         void'($value$plusargs("aso=%d", aso));
         void'($value$plusargs("pollpad=%d", pollpad));
-        void'($value$plusargs("ie1=%d", ie1)); void'($value$plusargs("disp=%d", disp)); void'($value$plusargs("ie1off=%d", ie1off));
+        void'($value$plusargs("ie1=%d", ie1)); void'($value$plusargs("disp=%d", disp)); void'($value$plusargs("ie1off=%d", ie1off)); void'($value$plusargs("fhoff=%d", fhoff));   // +fhoff=N: IE1 off, VBLANK IRQ handler reads S#1 first (Knightmare 224 v2)
         void'($value$plusargs("ie1line=%h", ie1line)); void'($value$plusargs("ie1r9=%h", ie1r9)); void'($value$plusargs("ie1dly=%d", ie1dly));
         void'($value$plusargs("mix=%d", mix)); void'($value$plusargs("mixrep=%d", mixrep)); void'($value$plusargs("iogap=%d", iogap));
         void'($value$plusargs("ovs=%d", ovs)); void'($value$plusargs("ovsln=%d", ovsln)); void'($value$plusargs("ovscmd=%d", ovscmd));   // +ovs=N trials of Shaolin's overscan + display-off + HMMV/HMMM; +ovsln=0 control (no LN=0); +ovscmd=HMMMs per trial   // +ie1line=D2 +ie1r9=80: ASO's second split (line 210, 212 lines); +ie1dly=clk_vdp from int_n to the S#1 read
@@ -106,7 +106,7 @@ module tb #(parameter int RELEASE_PH = 0);
 
     logic [2:0] bus_address = 0; logic bus_ioreq = 0, bus_write = 0, bus_valid = 0;
     logic [7:0] bus_wdata = 0; wire bus_ready, bus_rdata_en; wire [7:0] bus_rdata;
-    string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1, lr_sx = -1, lr_sy = 0, lr_vx = 0, lr_vy = 0, aso = 0, pollpad = 0, ie1 = 0, disp = 0, ie1off = 0, ie1line = 'h68, ie1r9 = 'h00, ie1dly = 400, ovs = 0, ovsln = 1, ovscmd = 64;
+    string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1, lr_sx = -1, lr_sy = 0, lr_vx = 0, lr_vy = 0, aso = 0, pollpad = 0, ie1 = 0, disp = 0, ie1off = 0, fhoff = 0, ie1line = 'h68, ie1r9 = 'h00, ie1dly = 400, ovs = 0, ovsln = 1, ovscmd = 64;
     int mix = 0, mixrep = 1, iogap = 40;   // +mix=N: N bytes to 98h (10000h) while the command runs; +iogap: clk_vdp after each OUT
     string rplf = ""; int rplscale = 100;
     int scan = 0, sp3 = 0, demo = 0, r1 = 0, r20 = 8'h1F, r21 = 8'h3A, r25 = 3, r8 = 8;
@@ -452,6 +452,31 @@ module tb #(parameter int RELEASE_PH = 0);
             end
             $display("IE1 RESULT: %0d of %0d line interrupts reached int_n, %0d stuck, %0d read FH=0 (line %02h, R#9 %02h, delay %0d clk, display %s)",
                      got, ie1, stuck, fh0, ie1line, ie1r9, ie1dly, disp ? "on" : "off");
+        end
+        //  +fhoff=N: Knightmare 224 v2's interrupt handler reads S#1 first and treats FH = 1 as a
+        //  line interrupt.  In its 192-line mode IE1 is off (R#0 = 06h) and only the frame
+        //  interrupt runs (R#1 = 62h); R#19 still holds a line.  The real chip / openMSX
+        //  (VDP::execHScan: controlRegs[0] & 0x10) never set FH with IE1 off, so the handler must
+        //  read FH = 0 at every VBLANK.  Counted: frames whose S#1 read shows FH = 1.
+        if (fhoff > 0) begin
+            logic [7:0] st; int got = 0, stuck = 0, fh1 = 0;
+            wreg(3, 8'hDA); wreg(4, 8'h00); wreg(6, 8'h0F); wreg(7, 8'h01); wreg(10, 8'h01); wreg(11, 8'h00);
+            wreg(2, 8'h3F); wreg(5, 8'hBF); wreg(8, 8'h28); wreg(23, 8'h00); wreg(25, 8'h02); wreg(26, 8'h00); wreg(27, 8'h00);
+            wreg(9, 8'h00); wreg(19, 8'h68); wreg(0, 8'h06); wreg(1, 8'h62);
+            for (int fr = 0; fr < fhoff; fr++) begin
+                longint t0; t0 = $time;
+                while (v_int_n && ($time - t0) < 64'd25_000_000_000) @(posedge clk_vdp);
+                if (v_int_n) begin stuck++; $display("FHOFF frame %0d: int_n never fell", fr); end
+                else begin
+                    got++;
+                    repeat (400) @(posedge clk_vdp);
+                    wreg(15, 8'h01); io(0, 3'd1, 8'h00, st);        // the handler's first read: S#1
+                    if (st[0]) begin fh1++; $display("FHOFF frame %0d: S#1=%02h (FH=1 with IE1 off)", fr, st); end
+                    wreg(15, 8'h00); io(0, 3'd1, 8'h00, st);        // S#0: clears F, int_n rises
+                end
+            end
+            $display("FHOFF RESULT: %0d of %0d frame interrupts, %0d stuck, %0d read FH=1 with IE1 off (R#19 68h)",
+                     got, fhoff, stuck, fh1);
         end
         if (aso > 0) begin
             logic [7:0] st; int stuck = 0, fmid = 0;
