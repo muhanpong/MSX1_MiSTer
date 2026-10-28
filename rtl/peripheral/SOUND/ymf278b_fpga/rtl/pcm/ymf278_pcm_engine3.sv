@@ -797,7 +797,7 @@ end
 typedef enum logic [5:0] {
     A_IDLE, A_SEL, A_LD, A_SKIP, A_SKIPWB,
     A_VIB, A_STEP1, A_STEP2, A_ADV1, A_ADV2, A_NP1, A_NP2, A_NP3,
-    A_OFF, A_ADR, A_PAIR1, A_PAIR2, A_ENQ,
+    A_OFF, A_PAIR1, A_PAIR2, A_ENQ,
     A_EG0, A_EG1, A_EG2, A_EG3, A_EG4, A_EG5,
     A_AM, A_ENV, A_TL, A_GAIN, A_GAIN2, A_LFO,
     A_PLAN0, A_WB0, A_WB1, A_NEXT, A_SCAN
@@ -838,7 +838,7 @@ logic [8:0]  t_inc;
 logic        a_np_b;               // next_pos unit: 0 = advance by t_inc, 1 = posB
 logic        a_ab;                 // address unit: 0 = sample A, 1 = sample B
 logic [15:0] t_p, t_posb;
-logic [16:0] t_w, t_off;
+logic [16:0] t_w;
 logic [21:0] t_ma, t_mb;
 logic        t_eq0, t_eq1, t_eqm;  // B's pair = A's, A's + 1, A's - 1
 logic [1:0]  t_ka1, t_kb0, t_kb1;
@@ -1109,10 +1109,10 @@ always_ff @(posedge clk or negedge rst_n) begin
             A_STEP2: begin
                 //  (fn + 1024 + vib) << (8 + oct) >> 3; oct = -8 is a step of 0
                 logic [3:0] sh;
+                logic [27:0] v;
                 sh = {~f_oct[3], f_oct[2:0]};
-                if (sh == 4'd0)      t_step <= '0;
-                else if (sh < 4'd3)  t_step <= 24'({11'd0, t_x} >> (4'd3 - sh));
-                else                 t_step <= 24'({11'd0, t_x} << (sh - 4'd3));
+                v      = {15'd0, t_x} << sh;
+                t_step <= (sh == 4'd0) ? 24'd0 : v[26:3];
                 a_state <= A_ADV1;
             end
             A_ADV1: begin
@@ -1158,23 +1158,18 @@ always_ff @(posedge clk or negedge rst_n) begin
             // ── sample addresses and pairs ──
             //  the sample's first byte: 8-bit start + p, 12-bit start + 3(p >> 1) + (p & 1)
             //  (odd: low nibble byte, then the high byte), 16-bit start + 2p
+            //  (12-bit: 3(p >> 1) + (p & 1) = p + (p >> 1); one three-input add)
             A_OFF: begin
                 logic [15:0] p;
+                logic [21:0] m;
                 p = a_ab ? t_posb : d_pos;
-                case (h_bits)
-                    2'd0:    t_off <= {1'b0, p};
-                    2'd1:    t_off <= {1'b0, p[15:1], 1'b0} + {2'd0, p[15:1]} + {16'd0, p[0]};
-                    default: t_off <= {p, 1'b0};
-                endcase
-                a_state <= A_ADR;
-            end
-            A_ADR: begin
+                m = h_start + (h_bits[1] ? {5'd0, p, 1'b0} : {6'd0, p})
+                            + ((h_bits == 2'd1) ? {7'd0, p[15:1]} : 22'd0);
                 if (!a_ab) begin
-                    t_ma    <= h_start + 22'(t_off);
-                    a_ab    <= 1'b1;
-                    a_state <= A_OFF;
+                    t_ma <= m;
+                    a_ab <= 1'b1;
                 end else begin
-                    t_mb    <= h_start + 22'(t_off);
+                    t_mb    <= m;
                     a_state <= A_PAIR1;
                 end
             end
