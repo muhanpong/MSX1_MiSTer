@@ -265,6 +265,27 @@ SDC(128.86 MHz)를 넣은 단독 fit: 엔진 1,294.5 ALM, setup slack +0.935 ns(
 - **남은 것**: 블록을 통째로 떼는 fit ablation에서 hf_pending −18.5, B 바이트 캡처 −27, a_def +9 ALM — 하나하나가 30 아래다. 전체 설계 환산은 engine2 하나에서 나온 비율(×1.055)이라 engine3(M10K·MLAB 다수)에 맞는다는 근거가 없다 — 1,292 × 1.055 ≈ 1,363은 추정이고 P4 전체 fit 값으로 바꾼다. 남은 면적은 A 상태기계의 레지스터마다 붙은 상태별 입력 mux에 퍼져 있다고 본다(측정 아님). 더 줄이려면 A를 공용 ALU + 레지스터 파일(마이크로코드) 구조로 다시 짜야 할 것으로 보인다.
 - `dbg_late_cnt`는 전체 설계에서 어디에도 연결되지 않아 잘린다. 단독 wrapper는 이것을 살려 두므로 단독 값이 그만큼(카운터 16비트) 크다.
 
+## P4 결과 (2026-10-29, 사용자: "P4 진행하세요"; 1,200 ALM은 예산, golden 완화 없음)
+
+**fullsys lprobe 8 phase, 실제 engine3** (`/data/_claude/tmp/opl4-scratch/p4/tree/lat.log`, `-DLPROBE -DPCM_ENGINE3`, FS-A1GT, tdm128): `lprobe_check.py` 8 phase 모두 VALID, **late 0 (8 phase 모두)**, A 끝 최대 1,185. 읽기 지연 최소 17, 중앙 18-22, p99 26-36, 최대 36(`sdram_tdm_sim.sv` 모델). R800 OTIR 1024 B 업로드 phase 4가 63.2프레임(engine2 386) — 쓰기 BUSY를 반영까지 유지하고 WAIT 하한을 107 clk로 내린 효과. 대조: 슬롯 5의 응답을 버리는 engine3 뮤턴트는 phase마다 프레임당 1 늦음(phase 8: 2,319.2프레임에 2,319). keyon 수는 TB가 필드 4 쓰기로 센다(engine3의 MLAB 워드를 Verilator가 TB에서 찾지 못함 — 상수 색인도 안 됨).
+
+**전체 설계 fit (이 worktree, MSX1_V9968, Quartus 17.0.2, 같은 트리에서 엔진만 바꿈)**
+
+| | engine3 (`PCM_ENGINE3=1`) | engine2 (대조) |
+|---|---|---|
+| PCM 엔진 엔티티 ALM | **1,293.3** | 2,816.7 |
+| 장치 ALM | 32,656 (78 %) | 34,213 (82 %) |
+| RAM 블록 / DSP | 326 / 62 | 323 / 67 |
+| setup slack V9968 클록 (general[2]) | −0.317 (TNS −7.49) | −0.485 (TNS −8.24) |
+| setup slack 128.86 MHz (general[0]) | −0.185 (TNS −0.26) | −0.079 (TNS −0.11) |
+
+- engine3의 전체 설계 값은 단독 1,292.0과 같다(×1.055 환산은 engine3에 맞지 않았다).
+- 실패 경로는 엔진 밖: V9968 클록은 `v9968_link`·`vdp_vram_interface`(engine2 대조에서 더 나쁨), 128.86 MHz는 `sdram_tdm` 중재(`cand_l` → `g1.word[25]`, ch4 word1 캡처가 아님). engine3 안 경로는 위반 목록 40개에 없다. 보드 트리(sdram128, 10-24 빌드)는 같은 두 클록에서 −0.028/−0.010. 같은 소스에서 배치에 따라 흔들리는 경로로 보이며(엔진2 대조도 실패), 고치는 것은 이 작업 범위 밖이다.
+
+**보드 트리 이식 준비**: PCM 경로 8개 파일(MSX1.sv, msx.sv, sdram_tdm.sv, ymf278b_top.sv, ymf278b_regs.sv, engine3, sound.qip, MSX1_V9968.qsf 매크로)의 base(b90a9d49) 이후 diff를 sdram128 HEAD(81eff3a)의 `git archive` 사본에 `git apply --check`: 오프셋만, 충돌 없음. 이식 때 Quartus가 쓰는 `LAST_QUARTUS_VERSION` 줄은 뺀다. sdram128 트리는 건드리지 않았다.
+
+**실행하지 않은 것**: 보드(실기) 시험, OPL4 감지·vgmplay fullsys, 기능 뮤턴트 생성기 engine3판, 커버리지 훑기(handoff 권고, 선택).
+
 ## 12. 열린 것
 
 1. A의 LOAD를 격 clk로 할지(CPU readback 1 clk 보장, A 50 clk)와 연속으로 할지(A 40 clk, readback 최대 10 clk 늦음 → cpuvis 규칙 변경 필요). 권장: 격 clk.

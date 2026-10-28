@@ -387,3 +387,5 @@ set_global_assignment -name ENABLE_SIGNALTAP OFF
 # (LogicLock block removed 20260914: Quartus Lite has no LogicLock license -- fit.log Critical Warning 140003.)
 # the V9968 build
 set_global_assignment -name VERILOG_MACRO "MSX_V9968=1"
+#  PCM engine3 (opl4_scratch, docs/opl4_scratch); remove for engine2
+set_global_assignment -name VERILOG_MACRO "PCM_ENGINE3=1"
