@@ -832,7 +832,6 @@ logic [15:0] h_loop, h_end;
 // temporaries
 logic signed [6:0]  t_vib;
 logic [12:0] t_x;
-logic [23:0] t_step;
 logic [16:0] t_sum;
 logic [8:0]  t_inc;
 logic        a_np_b;               // next_pos unit: 0 = advance by t_inc, 1 = posB
@@ -853,7 +852,6 @@ logic [2:0]  t_ph;
 logic [3:0]  t_einc;
 logic [11:0] t_att;
 logic [10:0] t_esum;
-logic [8:0]  t_am;
 logic [9:0]  t_envt;
 
 // the deadline of a_slot in pass frame a_fr has passed
@@ -885,16 +883,40 @@ function automatic logic [127:0][5:0] mk_vibq();
 endfunction
 localparam logic [127:0][5:0] VIBQ = mk_vibq();
 
-// openMSX vol_factor's multiplier: (0x8000 x (0x80 - (att & 0x3F))) >> (7 + att >> 6)
-function automatic logic [15:0] vscale(input logic [9:0] att);
-    logic [7:0] m;
-    m = 8'h80 - {2'b00, att[5:0]};
-    if (att >= MAX_ATT_INDEX) return 16'd0;
-    if (att[9:6] == 4'd9)     return 16'({1'b0, m[7:1]});
-    return 16'({m, 8'd0} >> att[9:6]);
-endfunction
+// Pass A's multiplier (one DSP, product registered in the clk it is enabled):
+//   A_STEP2  step = (fn + 1024 + vib) << (8 + oct) >> 3 = (t_x x 2^sh)[26:3]
+//   A_AM     AM   = (triangle(lfo) x am_depth) >> 7 (compute_am)
+//   A_TL / leaving A_GAIN: openMSX vol_factor's multiplier for the env / TL
+//            attenuation, (0x8000 x (0x80 - (att & 0x3F))) >> (7 + att >> 6)
+//            = ((0x80 - att[5:0]) x 2^(9 - att[9:6])) >> 1 (att[9:6] = 9 is
+//            floor(m / 2) too); 0 from MAX_ATT_INDEX = 0x280 (att[9:6] >= 10)
+logic [12:0] a_mx;
+logic [15:0] a_my;
+logic [28:0] a_mp;
+logic        a_mp_en;
+wire  [9:0]  a_att = (a_state == A_TL) ? t_envt : {d_tl, 2'b00};
+always_comb begin
+    logic [3:0] sh;
+    logic [7:0] lam;
+    sh  = {~f_oct[3], f_oct[2:0]};
+    lam = d_lfo[17] ? ~d_lfo[17:10] : d_lfo[17:10];
+    a_mx = {5'd0, 8'h80 - {2'b00, a_att[5:0]}};
+    a_my = (a_att[9:6] <= 4'd9) ? 16'(10'd1 << (4'd9 - a_att[9:6])) : 16'd0;
+    if (a_state == A_STEP2) begin
+        a_mx = t_x;
+        a_my = (sh == 4'd0) ? 16'd0 : 16'd1 << sh;
+    end else if (a_state == A_AM) begin
+        a_mx = {5'd0, lam};
+        a_my = {8'd0, am_depth_rom(f_am)};
+    end
+end
+always_ff @(posedge clk) if (a_mp_en) a_mp <= 29'(a_mx * a_my);
+wire [23:0] t_step = a_mp[26:3];
+wire [8:0]  t_am   = (f_lfoact && f_am != 3'd0) ? a_mp[15:7] : 9'd0;
+wire [15:0] a_vs   = a_mp[16:1];
 
-wire [15:0] a_vs = vscale((a_state == A_GAIN) ? t_envt : {d_tl, 2'b00});
+assign a_mp_en = (a_state == A_STEP2) || (a_state == A_AM) || (a_state == A_TL) ||
+                 (a_state == A_GAIN && (!pd_rv || a_dead));
 
 // the plan for pass B
 wire [39:0] a_plan0 = {3'd0, a_edge | a_pclr, t_need, h_bits, t_kb1, t_mb[1:0], t_kb0,
@@ -1106,15 +1128,8 @@ always_ff @(posedge clk or negedge rst_n) begin
                 t_x     <= 13'({3'd0, f_fn} + 13'd1024 + {{6{t_vib[6]}}, t_vib});
                 a_state <= A_STEP2;
             end
-            A_STEP2: begin
-                //  (fn + 1024 + vib) << (8 + oct) >> 3; oct = -8 is a step of 0
-                logic [3:0] sh;
-                logic [27:0] v;
-                sh = {~f_oct[3], f_oct[2:0]};
-                v      = {15'd0, t_x} << sh;
-                t_step <= (sh == 4'd0) ? 24'd0 : v[26:3];
-                a_state <= A_ADV1;
-            end
+            //  (fn + 1024 + vib) << (8 + oct) >> 3 on the multiplier; oct = -8 is 0
+            A_STEP2: a_state <= A_ADV1;
             A_ADV1: begin
                 if (a_edge || a_pclr) begin
                     d_pos   <= '0;
@@ -1294,10 +1309,7 @@ always_ff @(posedge clk or negedge rst_n) begin
             end
 
             // ── AM, gains, LFO ──
-            A_AM: begin
-                t_am    <= (f_lfoact && f_am != 3'd0) ? compute_am(d_lfo, f_am) : 9'd0;
-                a_state <= A_ENV;
-            end
+            A_AM: a_state <= A_ENV;                          // AM on the multiplier
             A_ENV: begin
                 logic [10:0] e;
                 e = {1'b0, d_env} + {2'd0, t_am};
