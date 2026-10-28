@@ -301,26 +301,59 @@ assign reg02_readback = {3'b001, wavetblhdr, reg02_mem_type, reg02_mem_access_mo
 //   key_retrig  key-on edge, or a wave-number write while keyed on (keyOnHelper)
 //   pos_clr     a wave-number write while keyed off (position reset only)
 //   tl_load     a field 3 write with bit 0 (TL jumps to TLdest)
-// A set in the cycle pass A consumes the flag wins, so an event after A's read
-// is kept for the next frame.  (tl_load uses TLdest as pass A reads it: two
-// field 3 writes to one slot inside one frame, the first with bit 0, load the
-// second's level, not the first's.  SPEC F-REG.)
+// One 4-bit word per slot {keyon, tl_load, pos_clr, key_retrig} in two MLAB
+// copies (the CPU's read-modify-write reads at wr_snum, pass A at a_slot), one
+// write port.  A CPU write takes the port; pass A's consumption (clear the flags
+// it read as set) waits for a clk without one, and pass A stays on the slot until
+// it is done.  A flag the CPU sets on the same slot in that clk is kept: an event after A's read is kept for the next
+// frame, as a set winning over a clear in one clk.  (tl_load uses TLdest as pass
+// A reads it: two field 3 writes to one slot inside one frame, the first with
+// bit 0, load the second's level, not the first's.  SPEC F-REG.)
 // ═══════════════════════════════════════════════════════════════════════════
-logic [23:0] keyon_v;
 logic [23:0] hf_pending;      // header fetch wanted (set by a wave-number write)
 logic        hf_busy;         // the header FSM is fetching hf_slot's header
 logic [4:0]  hf_slot;
 logic        hf_again;        // hf_slot's wave number was written during its fetch
 wire         wr_wave = wr_slot_reg && (wr_field == 4'd0);
 logic        bf_done;         // the last backfill cycle: the fetch is over
-logic [23:0] key_retrig, pos_clr, tl_load;
-logic        a_take;          // pass A consumes the flags of a_slot (mask a_take_m)
+logic        a_take;          // pass A has flags of a_slot to clear (mask a_take_m)
 logic [2:0]  a_take_m;        // {tl_load, pos_clr, key_retrig}
 logic [4:0]  a_slot;
 
+logic [3:0] ev_a [0:31] /* synthesis ramstyle = "MLAB, no_rw_check" */;
+logic [3:0] ev_b [0:31] /* synthesis ramstyle = "MLAB, no_rw_check" */;
+wire  [3:0] ev_cpu = ev_a[wr_snum];
+wire  [3:0] ev_rd  = ev_b[a_slot];            // pass A's view
+wire        keyon_cur   = ev_cpu[3];
+wire        key_retrig_a = ev_rd[0];
+wire        pos_clr_a    = ev_rd[1];
+wire        tl_load_a    = ev_rd[2];
+//  the CPU write's new word, and the flags it sets (ev_cs)
+logic [3:0] ev_cw;
+logic [2:0] ev_cs;
+logic       ev_cwe;
+always_comb begin
+    ev_cs  = '0;
+    ev_cwe = 1'b0;
+    if (wr_slot_reg)
+        case (wr_field)
+            4'd0: begin ev_cwe = 1'b1; ev_cs = keyon_cur ? 3'b001 : 3'b010; end
+            4'd3: begin ev_cwe = reg_data[0]; ev_cs = 3'b100; end
+            4'd4: begin ev_cwe = 1'b1; ev_cs = {2'b00, reg_data[7] && !keyon_cur}; end
+            default: ;
+        endcase
+    ev_cw = {(wr_field == 4'd4) ? reg_data[7] : ev_cpu[3], ev_cpu[2:0] | ev_cs};
+end
+wire        ev_we = clr_run ? (clr_cnt < 8'd32) : (ev_cwe || a_take);
+wire  [4:0] ev_wa = clr_run ? clr_cnt[4:0] : ev_cwe ? wr_snum : a_slot;
+wire  [3:0] ev_wd = clr_run ? 4'd0 : ev_cwe ? ev_cw : ev_rd & ~{1'b0, a_take_m};
+always_ff @(posedge clk) if (ev_we) begin
+    ev_a[ev_wa] <= ev_wd;
+    ev_b[ev_wa] <= ev_wd;
+end
+
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
-        keyon_v    <= '0;
         //  openMSX's reset writes 0 to every register, so the last writes, wave
         //  number 0 on each slot, load wave 0's header and backfill fields 5-9 from
         //  it (YMF278.cc reset -> writeRegDirect case 0).  engine2 leaves them 0
@@ -328,9 +361,6 @@ always_ff @(posedge clk or negedge rst_n) begin
         //  pass A does not wait for them.
         hf_pending <= '1;
         hf_again   <= 1'b0;
-        key_retrig <= '0;
-        pos_clr    <= '0;
-        tl_load    <= '0;
     end else begin
         if (bf_done) begin
             if (!hf_again) hf_pending[hf_slot] <= 1'b0;
@@ -340,25 +370,6 @@ always_ff @(posedge clk or negedge rst_n) begin
             hf_pending[wr_snum] <= 1'b1;
             //  (in the bf_done cycle the pending bit above stays set: no refetch flag)
             if (hf_busy && wr_snum == hf_slot && !bf_done) hf_again <= 1'b1;
-        end
-        if (a_take) begin
-            if (a_take_m[0]) key_retrig[a_slot] <= 1'b0;
-            if (a_take_m[1]) pos_clr[a_slot]    <= 1'b0;
-            if (a_take_m[2]) tl_load[a_slot]    <= 1'b0;
-        end
-        if (wr_slot_reg) begin
-            case (wr_field)
-                4'd0: begin
-                    if (keyon_v[wr_snum]) key_retrig[wr_snum] <= 1'b1;
-                    else                  pos_clr[wr_snum]    <= 1'b1;
-                end
-                4'd3: if (reg_data[0]) tl_load[wr_snum] <= 1'b1;
-                4'd4: begin
-                    keyon_v[wr_snum] <= reg_data[7];
-                    if (reg_data[7] && !keyon_v[wr_snum]) key_retrig[wr_snum] <= 1'b1;
-                end
-                default: ;
-            endcase
         end
     end
 end
@@ -983,7 +994,12 @@ always_ff @(posedge clk or negedge rst_n) begin
         a_np_b  <= 1'b0;
         a_ab    <= 1'b0;
     end else begin
-        a_take <= 1'b0;
+        //  the clear is done in a clk without a CPU flag write; one on the same
+        //  slot keeps the flags it sets
+        if (a_take) begin
+            if (!ev_cwe) a_take <= 1'b0;
+            else if (wr_snum == a_slot) a_take_m <= a_take_m & ~ev_cs;
+        end
         if (frame_cycle == FRAME_W'(T_K)) a_go <= 1'b1;
 
 
@@ -1020,32 +1036,32 @@ always_ff @(posedge clk or negedge rst_n) begin
                     5'd2: begin
                         logic run;
                         {d_pos, d_sp, d_tl} <= s_q;
-                        run = (d_est != EG_OFF) || key_retrig[a_slot];
+                        run = (d_est != EG_OFF) || key_retrig_a;
                         a_stall <= 1'b0;
                         if (!run) begin
                             //  silent slot: TL ramp only (S-SKIP)
-                            a_tll    <= tl_load[a_slot];
+                            a_tll    <= tl_load_a;
                             a_take   <= 1'b1;
-                            a_take_m <= {tl_load[a_slot], 2'b00};
+                            a_take_m <= {tl_load_a, 2'b00};
                             a_state  <= A_SKIP;
                         end else if (hf_pending[a_slot]) begin
                             if (a_dead) begin
                                 //  its header is not in by its deadline: S-STALL
                                 a_stall  <= 1'b1;
-                                a_tll    <= tl_load[a_slot];
+                                a_tll    <= tl_load_a;
                                 a_take   <= 1'b1;
-                                a_take_m <= {tl_load[a_slot], 2'b00};
+                                a_take_m <= {tl_load_a, 2'b00};
                                 a_state  <= A_SKIP;
                             end else begin
                                 a_def[a_slot] <= 1'b1;
                                 a_state       <= A_NEXT;
                             end
                         end else begin
-                            a_edge   <= key_retrig[a_slot];
-                            a_pclr   <= pos_clr[a_slot];
-                            a_tll    <= tl_load[a_slot];
+                            a_edge   <= key_retrig_a;
+                            a_pclr   <= pos_clr_a;
+                            a_tll    <= tl_load_a;
                             a_take   <= 1'b1;
-                            a_take_m <= {tl_load[a_slot], pos_clr[a_slot], key_retrig[a_slot]};
+                            a_take_m <= {tl_load_a, pos_clr_a, key_retrig_a};
                         end
                     end
                     5'd3: begin
@@ -1310,7 +1326,8 @@ always_ff @(posedge clk or negedge rst_n) begin
 
             // ── the pass ──
             A_NEXT:
-                if (a_rev) a_state <= A_SCAN;
+                if (a_take) ;                           // the flag clear first
+                else if (a_rev) a_state <= A_SCAN;
                 else if (a_slot == 5'd23) begin
                     if (a_def != 24'd0) begin
                         a_rev   <= 1'b1;
@@ -1340,7 +1357,7 @@ always_ff @(posedge clk or negedge rst_n) begin
         endcase
 
         //  end of a pass: the next frame's counters
-        if ((a_state == A_NEXT && !a_rev && a_slot == 5'd23 && a_def == 24'd0) ||
+        if ((a_state == A_NEXT && !a_take && !a_rev && a_slot == 5'd23 && a_def == 24'd0) ||
             (a_state == A_SCAN && a_def == 24'd0)) begin
             a_busy <= 1'b0;
             a_fcnt <= a_fcnt + 16'd1;
@@ -1575,14 +1592,14 @@ assign dbg_wavetblhdr  = wavetblhdr;
 assign dbg_hf_pending  = hf_pending;
 assign fm_mix_l_o      = fm_mix_l;
 assign fm_mix_r_o      = fm_mix_r;
-assign dbg_slot_keyon  = keyon_v;
+assign dbg_slot_keyon  = '0;
 assign dbg_slot_active = '0;
 assign dbg_slot_envlive = '0;
 assign dbg_slot0_wave  = '0;
 assign dbg_slot0_fn    = '0;
 assign dbg_slot0_oct   = '0;
 assign dbg_slot0_prvb  = 1'b0;
-assign dbg_slot0_keyon = keyon_v[0];
+assign dbg_slot0_keyon = 1'b0;
 assign dbg_slot0_damp  = 1'b0;
 assign dbg_slot0_pan   = '0;
 assign dbg_slot0_ar    = '0;
