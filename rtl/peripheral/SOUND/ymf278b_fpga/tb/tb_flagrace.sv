@@ -84,6 +84,13 @@ module tb_flagrace #(parameter int CLK_HZ = 128863620);
     endtask
 
     int n_fail = 0, n_pass = 0, n_hit = 0, n_k0 = 0;
+`ifdef FR_TRACE
+    //  every flag-word write to slot FR_TRACE, and pass A's read of it
+    always @(negedge clk) if (rst_n && dut.ev_we && dut.ev_wa == 5'(`FR_TRACE))
+        $display("t%0t fc %0d EVW %b cpu %0d take %0d", $time, dut.frame_cycle, dut.ev_wd, dut.ev_cwe, dut.a_take);
+    always @(negedge clk) if (rst_n && dut.a_flags_rd && dut.a_slot == 5'(`FR_TRACE))
+        $display("t%0t fc %0d AREAD %b", $time, dut.frame_cycle, dut.ev_rd);
+`endif
     int SL [3] = '{0, 7, 23};
     localparam int K_RETRIG = 0, K_TL = 1, K_PCLR = 2, K_KOFF = 3;
     function automatic string kname(input int k);
@@ -128,9 +135,18 @@ module tb_flagrace #(parameter int CLK_HZ = 128863620);
             n_fail++;
         end else n_pass++;
         repeat (2 * dut.CYCLES_PER_FRAME) @(negedge clk);
-        if (k == K_KOFF) begin                    // key on again (an edge: retrig), settle
+        if (k == K_KOFF) begin
+            //  key on again away from the pass (frame cycle 1000) and check it took: a
+            //  restore that lands in A's clear clk by accident is what showed the stale
+            //  mutant wiping keyon on slot 0, unchecked, before this check (2026-10-29)
+            wait_frame_cycle(1000);
             wr(sreg(4, s), 8'hA0);
-            repeat (3 * dut.CYCLES_PER_FRAME) @(negedge clk);
+            do @(negedge clk); while (!a_reads(s));
+            if (dut.ev_b[s][3] !== 1'b1) begin
+                $display("BAD slot %0d keyoff off %0d: key-on again did not stick (keyon bit 0)", s, off);
+                n_fail++;
+            end
+            repeat (2 * dut.CYCLES_PER_FRAME) @(negedge clk);
         end
     endtask
 
