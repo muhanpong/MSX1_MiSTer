@@ -467,15 +467,17 @@ do_flagrace() {
     #  clk without a CPU flag write and keeps the bits that write sets.  tb_flagrace writes the
     #  slot's event register so that it is sampled in A's read clk - 1, the clear clk itself, and
     #  + 1 (slots 0, 7, 23; retrig and tl_load) and reads the flag at A's next visit.  PASS = the
-    #  tree passes with all 6 clear-clk collisions hit, and both mutants fail: the set-wins mask
-    #  dropped (nomask) and the clear taking the port over the CPU write (clearwins).
+    #  tree passes with every clear-clk collision hit, and the three mutants fail: the set-wins
+    #  mask dropped (nomask), the clear taking the port over the CPU write (clearwins), and the
+    #  clear writing the word A read in its flag-read clk (stale: writes an old keyon back).
     local d="$OUT/flagrace"; rm -rf "$d"; mkdir -p "$d/m"
     if [ "$(engine_mod)" != ymf278_pcm_engine3 ]; then gate flagrace PASS "N/A ($(engine_mod) has no flag word)"; return; fi
     local last; last=$(echo $ENGINE | awk '{print $NF}')
     local others; others=$(echo $ENGINE | awk '{for(i=1;i<NF;i++) printf "%s ", $i}')
     sed 's/a_take_m <= a_take_m & ~ev_cs;/a_take_m <= a_take_m;/' "$last" > "$d/m/nomask.sv"
     sed "s/ev_cwe ? wr_snum : a_slot;/a_take ? a_slot : wr_snum;/; s/ev_cwe ? ev_cw : ev_rd & ~{1'b0, a_take_m};/a_take ? ev_rd \& ~{1'b0, a_take_m} : ev_cw;/" "$last" > "$d/m/clearwins.sv"
-    local m n; for m in nomask:1 clearwins:2; do
+    sed "s/ev_cwe ? ev_cw : ev_rd & ~{1'b0, a_take_m};/ev_cwe ? ev_cw : ev_hold \& ~{1'b0, a_take_m};/; s/^wire        a_flags_rd; .*$/\0\nlogic [3:0] ev_hold; always_ff @(posedge clk) if (a_flags_rd) ev_hold <= ev_rd;/" "$last" > "$d/m/stale.sv"
+    local m n; for m in nomask:1 clearwins:2 stale:2; do
         n=$(diff "$last" "$d/m/${m%%:*}.sv" | grep -c '^>')
         [ "$n" = "${m#*:}" ] || { gate flagrace FAIL "mutant ${m%%:*} did not apply ($n lines changed)"; return; }
     done
@@ -490,13 +492,19 @@ do_flagrace() {
     fr_run "$ENGINE" "$d/tree" &
     fr_run "$others $d/m/nomask.sv" "$d/nomask" &
     fr_run "$others $d/m/clearwins.sv" "$d/clearwins" &
+    fr_run "$others $d/m/stale.sv" "$d/stale" &
     wait
-    local t c1 c2
-    t=$(grep -m1 '^FLAGRACE' "$d/tree/run.log"); c1=$(grep -m1 '^FLAGRACE' "$d/nomask/run.log"); c2=$(grep -m1 '^FLAGRACE' "$d/clearwins/run.log")
-    if [[ "$t" == "FLAGRACE PASS"* ]] && [[ "$c1" == "FLAGRACE FAIL"*"hit 6/6"* ]] && [[ "$c2" == "FLAGRACE FAIL"*"hit 6/6"* ]]; then
-        gate flagrace PASS "${t#FLAGRACE PASS: }; mutants nomask, clearwins caught (${c1#FLAGRACE FAIL: } / ${c2#FLAGRACE FAIL: })"
+    #  a mutant counts as caught only on a FAIL with every collision hit (not a watchdog or NOHIT)
+    caught() { [[ "$1" =~ ^FLAGRACE\ FAIL:\ [0-9]+\ cases\ pass,\ [1-9][0-9]*\ fail\;\ offset-0\ collisions\ hit\ ([0-9]+)/([0-9]+)$ ]] \
+               && [ "${BASH_REMATCH[1]}" = "${BASH_REMATCH[2]}" ] && ! grep -q '^NOHIT' "$2"; }
+    local t c1 c2 c3
+    t=$(grep -m1 '^FLAGRACE' "$d/tree/run.log"); c1=$(grep -m1 '^FLAGRACE' "$d/nomask/run.log")
+    c2=$(grep -m1 '^FLAGRACE' "$d/clearwins/run.log"); c3=$(grep -m1 '^FLAGRACE' "$d/stale/run.log")
+    if [[ "$t" == "FLAGRACE PASS"* ]] && caught "$c1" "$d/nomask/run.log" && caught "$c2" "$d/clearwins/run.log" \
+       && caught "$c3" "$d/stale/run.log"; then
+        gate flagrace PASS "${t#FLAGRACE PASS: }; mutants caught: nomask (${c1#FLAGRACE FAIL: }), clearwins (${c2#FLAGRACE FAIL: }), stale (${c3#FLAGRACE FAIL: })"
     else
-        gate flagrace FAIL "tree: ${t:-no result}; nomask: ${c1:-no result}; clearwins: ${c2:-no result}"
+        gate flagrace FAIL "tree: ${t:-no result}; nomask: ${c1:-no result}; clearwins: ${c2:-no result}; stale: ${c3:-no result}"
     fi
 }
 
