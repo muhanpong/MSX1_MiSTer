@@ -61,10 +61,10 @@ A가 몰려 있어도 메모리 요청은 B의 시각표(프레임 전체)에 �
 | RAM-PD | 256 × 40 SDP, M10K 1 (P3: 슬롯당 8워드) | w0 계획(stepPtr, 바이트 위치, 형식, 필요한 쌍), w1 {팬, env 이득}, w2-w5 쌍 k0-k3 {valid, 32비트}, w6 TL 이득, w7 {프레임 mod 4, 상태 NONE/QUIET/PLAN} | B 단계만 읽음 |
 | 이전 샘플 | 24 × 16 MLAB | 늦음 처리용 보간 결과 | B 단계만 씀 |
 | 요청 FIFO | 16 × 29 MLAB | {쌍 주소 20, 슬롯 5, k 2, 프레임 mod 4} | A가 넣고 시퀀서가 꺼냄 |
-| 슬롯 플래그 | FF, MLAB | FF: keyon, key_retrig, pos_clr, tl_load, hf_pending, 미룬 슬롯(A). bf_dirty는 MLAB 24×5 두 벌(P3). 쌍 valid·회차·소비됨은 P3에서 없앰(아래 P3 결과) | |
+| 슬롯 플래그 | FF, MLAB | FF: hf_pending, 미룬 슬롯(A). keyon·key_retrig·pos_clr·tl_load는 슬롯당 4비트 워드로 MLAB 두 벌(P3 2차), bf_dirty는 MLAB 24×5 두 벌(P3). 쌍 valid·회차·소비됨은 P3에서 없앰(아래 P3 결과) | |
 
 연산 자원은 단계별로 따로 둔다(공유 중재를 없애 시각표를 결정적으로).
-A: 24비트 ALU 1, 시프터 1, 표(LUT ROM), DSP 1(attack `(~env×inc)>>4`, AM 깊이). B: DSP 1(보간, ×env, ×TL, ×gl, ×gr를 연달아), 24비트 덧셈기 1.
+A: 24비트 ALU 1, 표(LUT ROM), DSP 1(P3 2차: step의 2^sh, AM 깊이, env·TL 감쇠 배율을 상태마다 연달아). B: DSP 1(보간, ×env, ×TL, ×gl, ×gr, 프레임 끝 믹스 이득을 연달아; 27×27), 24비트 덧셈기 1.
 "한 상태 = 연산 1개" 규칙(128.86 MHz, SDC 예외 없음)은 그대로.
 
 ## 3. 시각표 (프레임 2,922 clk, `frame_cycle` 기준)
@@ -244,6 +244,24 @@ stress 게이트(engine2 lockstep)는 engine3에 못 쓴다. 대신 "K 직전·�
 - 목표 1,200까지 약 380(전체 설계 환산 약 450) 남았다. 남은 후보(추정): 비슬롯 레지스터 16 × 8 그림자를 RAM-R 남는 워드로(약 −70, 리셋 쓸기 240 → 256이라 reset 게이트 숫자가 바뀜), 쓰기 사건 플래그 72비트를 MLAB 카운터 + RAM-S의 "본 값"으로(약 −70), A 단계 연산 단계 합치기·임시 레지스터 공유(약 −100), 마감 순 비교 단순화(약 −40).
 
 **실행하지 않은 것**: 전체 설계 fit(보드 트리 아님, 단독 fit만), 타이밍(단독 fit은 SDC 없음), fullsys lprobe 8 phase를 실제 엔진으로(P4), 기능 뮤턴트(보간·EG·루프·팬) 생성기의 engine3판, memwr 대조 재실행.
+
+### P3 면적 2차 (2026-10-29, 169b6a5 → 9182bd6; 사용자: "golden is golden" — 완화 목록은 쓰지 않는다)
+
+| 커밋 | 바꾼 것 | 엔진 ALM | 대조 |
+|---|---|---|---|
+| efcc8ea | 믹스 이득을 B 곱셈기(27×27)로: (x·g)>>>4, g = {16,12,8,6,4,3,2,0} — floor까지 pcm_mix_gain과 같음. CPF−3/−2에 L/R, `pcm_valid`는 그대로 frame_cycle 1 | 1,514.5 | g[1] = 13 → sc_pan_mix FAIL(50) |
+| c76854e | keyon·key_retrig·pos_clr·tl_load를 슬롯당 4비트 워드로 MLAB 두 벌. CPU 쓰기가 포트 우선, A의 지우기는 빈 clk에, 그 clk에 CPU가 같은 슬롯에 세운 비트는 남김 | 1,441.5 | 지우기 없음 → FAIL. **세움 우선 마스크를 빼도 PASS** — 같은 clk 경합은 어떤 게이트도 안 봄 |
+| 79c878b | EDF: 시각 두 개(14비트) 대신 "늦음이면 헤더, 앞 프레임이면 헤더, 같은 프레임이면 s_h ≤ s_q + 1" | 1,407.5 | 옛 비교와 모든 rel·슬롯 쌍 전수 비교 0 불일치 |
+| 879e49a | 12비트 오프셋 3(p>>1)+(p&1) = p+(p>>1), 주소를 3입력 덧셈 하나로(A_ADR 없앰, A 끝 1,243 → 1,195); step 시프트 한 방향 | 1,391.0 | — |
+| 2b1e081 | golden에 sc_lfo_long(LFO 속도 7, 3,400프레임): 기존 시나리오는 lfo_cnt 37,500/262,144까지만 가서 vib 접기·부호, AM 접기를 한 번도 안 돌렸다(AM 접기를 뺀 뮤턴트가 22개 모두 PASS) | — | AM 접기 없음 FAIL(556), vib 접기 없음 FAIL(3,180); 879e49a·작업 트리 PASS |
+| 9182bd6 | A 곱셈기(13×16, 곱 레지스터, 상태별 enable): step = (t_x·2^sh)[26:3], AM, 감쇠 배율 = ((0x80 − att[5:0])·2^(9 − att[9:6]))>>1(0x280부터 0). compute_am의 9×9 DSP를 대신해 DSP 2 그대로 | **1,292.0** | vscale 지수 하나 어긋남 → FAIL |
+
+게이트(9182bd6, `/data/_claude/tmp/opl4-scratch/p3/h9182`): golden 23 × {1, 20} 비트 일치, A 끝 최대 1,195; load 지연 6·10·20 비트 일치, 늦음 0, A 끝 1,204; cpuvis 2,627/0, 뮤턴트 32/32; reset 240 PASS·239 FAIL; busylat PASS 2/2; memwr 0 errors. 대조: TB_W1_MUT 23/23 FAIL, K = 2,600 FAIL 2, 지연 120 FAIL(A 끝 2,761).
+SDC(128.86 MHz)를 넣은 단독 fit: 엔진 1,294.5 ALM, setup slack +0.935 ns(slow 100C) — A 곱셈기의 입력 mux 경로 포함.
+
+- **측정 방법의 교훈**: map만 돌리는 ablation(블록을 상수·XOR로 바꿔 ALUT를 봄)은 fit과 맞지 않았다. VIBQ 표를 곱셈기로, TL 비교 하나로, 헤더 주소 3입력 덧셈, late 증가 한 곳 — map은 late −33 ALUT를 보였지만 fit에서는 넷 다 0 이상(합쳐서 +40 ALM)이라 되돌렸다. 비슬롯 레지스터를 RAM-R로 옮긴 것도 레지스터 −135인데 ALUT +29, ALM +15라 되돌렸다(reset 게이트 숫자도 그대로). fit은 같은 넷리스트에서 재현되지만, 덧셈을 XOR로 바꾼 ablation이 오히려 ALUT를 늘리는 등(next_pos +47) "블록 비용"으로 읽을 수 없다. 판단은 fit의 엔진 ALM과 ALUT 둘 다로 한다.
+- **남은 것**: 블록을 통째로 떼는 fit ablation에서 hf_pending −18.5, B 바이트 캡처 −27, a_def +9 ALM — 하나하나가 30 아래다. 전체 설계 환산 1,292 × 1.055 ≈ 1,363, 목표 1,200까지 약 160. 남은 면적은 A 상태기계의 레지스터마다 붙은 상태별 입력 mux에 퍼져 있다고 본다(측정 아님). 더 줄이려면 A를 공용 ALU + 레지스터 파일(마이크로코드) 구조로 다시 짜야 할 것으로 보인다.
+- `dbg_late_cnt`는 전체 설계에서 어디에도 연결되지 않아 잘린다. 단독 wrapper는 이것을 살려 두므로 단독 값이 그만큼(카운터 16비트) 크다.
 
 ## 12. 열린 것
 
