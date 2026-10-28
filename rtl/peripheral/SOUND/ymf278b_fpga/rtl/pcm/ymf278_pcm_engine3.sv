@@ -118,7 +118,7 @@ localparam int T_K              = CPF - 72;           // pass A start (previous 
 localparam int T_C0             = 190;                // pass B, slot 0
 localparam int T_CSTEP          = (CPF - 254) / 23;   // pass B slot spacing
 localparam int T_AMARGIN        = 128;                // A must start a slot this long before C_s
-localparam int DLW              = FRAME_W + 2;        // deadlines up to 3 frames ahead
+
 
 logic [FRAME_W-1:0] frame_cycle;
 logic [1:0]         bfr;              // frame index mod 4 (the frame pass B is in)
@@ -638,7 +638,7 @@ logic [4:0]  hq_slot;
 logic [1:0]  hq_k;
 logic [1:0]  hq_r;
 logic        hq_stale;
-logic [DLW-1:0] hq_dl, hf_dl;
+logic        hf_first;              // the header's deadline is not after the head's
 
 // pass A's position, for the header deadline
 logic        a_busy, a_rev;
@@ -649,21 +649,19 @@ wire  hf_inpass = a_busy && ((!a_rev && hf_slot >= a_slot) || a_def[hf_slot]);
 wire  [1:0] hf_tgt = (a_busy && !hf_inpass) ? a_fr + 2'd1 : a_fr;
 wire  [1:0] hf_rel = hf_tgt - bfr;               // 3 = overdue: due now
 wire  [1:0] hq_rel = (hq_r - bfr == 2'd3) ? 2'd0 : hq_r - bfr;
-
-function automatic logic [DLW-1:0] frame_base(input logic [1:0] rel);
-    case (rel)
-        2'd1:    return DLW'(CPF);
-        2'd2:    return DLW'(2 * CPF);
-        default: return '0;
-    endcase
-endfunction
+//  header deadline rel x CPF + C_s - 128 against sample deadline rel x CPF + C_s,
+//  C_s = 190 + 116 s: in one frame the header is first iff s_h <= s_q + 1; an
+//  earlier frame is always first and a later one never (|s_h - s_q| <= 23 and
+//  CPF - 128 > 23 x 116).  Exact, no times.
+wire        hf_first_c = (hf_rel == 2'd3) || (hf_rel < hq_rel) ||
+                         (hf_rel == hq_rel && {1'b0, hf_slot} <= {1'b0, hq_slot} + 6'd1);
 
 assign fq_pop = !hq_v && (fq_n != 5'd0);
 
 wire hdr_c    = (h_state == H_REQ);
 wire smp_c    = hq_ok && !hq_stale;
 wire q_drop   = (q_state == Q_IDLE) && hq_ok && hq_stale;
-wire q_pick_h = hdr_c && (!smp_c || hf_dl <= hq_dl);
+wire q_pick_h = hdr_c && (!smp_c || hf_first);
 wire q_go     = (q_state == Q_IDLE) && mem_free && !cpu_op;
 assign q_take_h = q_go && q_pick_h;
 wire q_take_s = q_go && !q_pick_h && smp_c;
@@ -672,13 +670,11 @@ always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         hq_v <= 1'b0; hq_ok <= 1'b0; hq_stale <= 1'b0;
         hq_pair <= '0; hq_slot <= '0; hq_k <= '0; hq_r <= '0;
-        hq_dl <= '0; hf_dl <= '0;
+        hf_first <= 1'b0;
     end else begin
         hq_ok    <= hq_v;               // stage 2 is one clk behind a load
         hq_stale <= c_past(hq_r, bfr, frame_cycle, hq_slot);
-        hq_dl    <= frame_base(hq_rel) + DLW'(cs_of(hq_slot));
-        hf_dl    <= (hf_rel == 2'd3) ? '0
-                  : frame_base(hf_rel) + DLW'(cs_of(hf_slot)) - DLW'(T_AMARGIN);
+        hf_first <= hf_first_c;
         if (fq_pop) begin
             {hq_pair, hq_slot, hq_k, hq_r} <= fq_m[fq_rp];
             hq_v  <= 1'b1;
