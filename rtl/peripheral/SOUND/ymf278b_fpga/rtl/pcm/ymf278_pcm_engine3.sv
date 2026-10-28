@@ -134,8 +134,12 @@ always_ff @(posedge clk or negedge rst_n) begin
     end
 end
 
+function automatic logic [31:0][FRAME_W-1:0] mk_cs();
+    for (int s = 0; s < 32; s++) mk_cs[s] = FRAME_W'(T_C0 + T_CSTEP * s);
+endfunction
+localparam logic [31:0][FRAME_W-1:0] CS_TAB = mk_cs();
 function automatic logic [FRAME_W-1:0] cs_of(input logic [4:0] s);
-    return FRAME_W'(T_C0 + T_CSTEP * int'(s));
+    return CS_TAB[s];
 endfunction
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -304,7 +308,6 @@ assign reg02_readback = {3'b001, wavetblhdr, reg02_mem_type, reg02_mem_access_mo
 // ═══════════════════════════════════════════════════════════════════════════
 logic [23:0] keyon_v;
 logic [23:0] hf_pending;      // header fetch wanted (set by a wave-number write)
-logic [4:0]  bf_dirty [0:23]; // fields 5..9 written since the wave-number write: no backfill
 logic        hf_busy;         // the header FSM is fetching hf_slot's header
 logic [4:0]  hf_slot;
 logic        hf_again;        // hf_slot's wave number was written during its fetch
@@ -325,7 +328,6 @@ always_ff @(posedge clk or negedge rst_n) begin
         //  pass A does not wait for them.
         hf_pending <= '1;
         hf_again   <= 1'b0;
-        for (int i = 0; i < 24; i++) bf_dirty[i] <= '0;
         key_retrig <= '0;
         pos_clr    <= '0;
         tl_load    <= '0;
@@ -347,7 +349,6 @@ always_ff @(posedge clk or negedge rst_n) begin
         if (wr_slot_reg) begin
             case (wr_field)
                 4'd0: begin
-                    bf_dirty[wr_snum] <= '0;
                     if (keyon_v[wr_snum]) key_retrig[wr_snum] <= 1'b1;
                     else                  pos_clr[wr_snum]    <= 1'b1;
                 end
@@ -356,11 +357,25 @@ always_ff @(posedge clk or negedge rst_n) begin
                     keyon_v[wr_snum] <= reg_data[7];
                     if (reg_data[7] && !keyon_v[wr_snum]) key_retrig[wr_snum] <= 1'b1;
                 end
-                4'd5, 4'd6, 4'd7, 4'd8, 4'd9: bf_dirty[wr_snum][wr_field - 4'd5] <= 1'b1;
                 default: ;
             endcase
         end
     end
+end
+
+// Fields 5..9 written since the slot's wave-number write: the backfill skips them.
+// One 5-bit word per slot, in two MLAB copies (the write's own read-modify-write
+// reads at wr_snum, the backfill at hf_slot); the reset sweep clears them.
+logic [4:0] dirty_a [0:31] /* synthesis ramstyle = "MLAB, no_rw_check" */;
+logic [4:0] dirty_b [0:31] /* synthesis ramstyle = "MLAB, no_rw_check" */;
+wire        dirty_we = clr_run ? (clr_cnt < 8'd32)
+                     : wr_slot_reg && (wr_field == 4'd0 || wr_field >= 4'd5);
+wire  [4:0] dirty_wa = clr_run ? clr_cnt[4:0] : wr_snum;
+wire  [4:0] dirty_wd = (clr_run || wr_field == 4'd0) ? 5'd0
+                     : dirty_a[wr_snum] | (5'd1 << (wr_field - 4'd5));
+always_ff @(posedge clk) if (dirty_we) begin
+    dirty_a[dirty_wa] <= dirty_wd;
+    dirty_b[dirty_wa] <= dirty_wd;
 end
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -431,6 +446,7 @@ assign cpu_mem_busy    = cpu_rd_pend | cpu_wr_pend | cpu_rd_out | cpu_wr_out | c
 //   RAM-S  {slot, w}: w0 {pos, stepPtr, TL}, w1 {lfo_cnt, env_vol, env_state},
 //          w2 {startAddr, bits, loopAddr}, w3 {endAddr}
 //   RAM-PD {slot, w}: w0-w1 pass A's plan for pass B, w2-w5 the pairs k0-k3
+//          ({valid, pair}: pass A writes 0 when it queues the pair, the response 1)
 // ═══════════════════════════════════════════════════════════════════════════
 localparam logic [39:0] S_W1_INIT = {9'd0, 18'd0, MAX_ATT_INDEX, EG_OFF};
 
@@ -444,21 +460,29 @@ logic [7:0]  pd_waddr, pd_raddr;
 logic [39:0] pd_wd, pd_q;
 pcm_sdp #(.W(40), .AW(8)) u_rampd (.clk, .we(pd_we), .waddr(pd_waddr), .wd(pd_wd), .raddr(pd_raddr), .rd(pd_q));
 
-// per-slot status between pass A, the sequencer and pass B
+// What pass A left for pass B, in RAM-PD w7 {frame mod 4, status}.  Nothing else
+// per slot is shared: a request or a response is stale once its frame's C_s has
+// passed (pass B has taken the slot), and pass A starts a slot only after pass B
+// has finished with the slot's previous frame (C_s + T_BDONE).
 localparam logic [1:0] ST_NONE = 2'd0, ST_QUIET = 2'd1, ST_PLAN = 2'd2;
-logic [23:0] s_rnd;           // frame parity pass A last started the slot for
-logic [1:0]  s_st   [0:23];   // what that visit left for pass B
-logic [23:0] s_cons;          // pass B has taken the slot since pass A's last start
-logic [3:0]  s_val  [0:23];   // pairs k0-k3 in RAM-PD for round s_rnd
+localparam int T_BDONE = 40;          // pass B has read all of a slot's RAM-PD words
+
+// the slot's C_s of frame f (mod 4) has passed
+function automatic logic c_past(input logic [1:0] f, input logic [1:0] bf,
+                                input logic [FRAME_W-1:0] fc, input logic [4:0] slot);
+    logic [1:0] d;
+    d = f - bf;
+    return (d == 2'd3) || (d == 2'd0 && fc >= cs_of(slot));
+endfunction
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Request FIFO (MLAB, 16 x 28): {pair address, slot, k, round}
+// Request FIFO (MLAB, 16 x 29): {pair address, slot, k, frame mod 4}
 // ═══════════════════════════════════════════════════════════════════════════
-logic [27:0] fq_m [0:15] /* synthesis ramstyle = "MLAB, no_rw_check" */;
+logic [28:0] fq_m [0:15] /* synthesis ramstyle = "MLAB, no_rw_check" */;
 logic [3:0]  fq_wp, fq_rp;
 logic [4:0]  fq_n;
 logic        fq_push, fq_pop;
-logic [27:0] fq_wd;
+logic [28:0] fq_wd;
 always_ff @(posedge clk) if (fq_push) fq_m[fq_wp] <= fq_wd;
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -490,7 +514,7 @@ typedef enum logic [3:0] {
 h_state_t    h_state;
 logic [2:0]  sv_cnt;               // backfill field 0..4
 logic [1:0]  hf_widx;              // pair 0..2
-logic [31:0] hf_buf [0:2];
+logic [31:0] hf_b0, hf_b1;         // pair 0 (then pair 2), pair 1
 logic [21:0] hf_base;
 logic [8:0]  hf_wave;
 logic        hf_resp;              // the sequencer stored pair hf_widx this clk
@@ -541,18 +565,17 @@ always_ff @(posedge clk or negedge rst_n) begin
                 h_state <= H_REQ;
             end
             H_REQ: if (q_take_h) h_state <= H_WAIT;
-            H_WAIT: if (hf_resp) begin               // the pair is in hf_buf[hf_widx]
-                if (hf_widx == 2'd2) h_state <= H_ST0;
-                else begin
-                    hf_widx <= hf_widx + 2'd1;
-                    h_state <= H_REQ;
-                end
+            //  pairs 0 and 1, RAM-S w2/w3, pair 2 (bytes 8-11), the backfill
+            H_WAIT: if (hf_resp) begin
+                hf_widx <= hf_widx + 2'd1;
+                case (hf_widx)
+                    2'd1:    h_state <= H_ST0;
+                    2'd2:    begin sv_cnt <= '0; h_state <= H_BF; end
+                    default: h_state <= H_REQ;
+                endcase
             end
             H_ST0: if (!a_s_we && !clr_run) h_state <= H_ST1;
-            H_ST1: if (!a_s_we && !clr_run) begin
-                sv_cnt  <= '0;
-                h_state <= H_BF;
-            end
+            H_ST1: if (!a_s_we && !clr_run) h_state <= H_REQ;
             H_BF: if (bf_step) begin                   // fields 5..9, one per free clk
                 sv_cnt <= sv_cnt + 3'd1;
                 if (sv_cnt == 3'd4) h_state <= H_IDLE;
@@ -562,8 +585,9 @@ always_ff @(posedge clk or negedge rst_n) begin
     end
 end
 
-// header bytes 0..11 = hf_buf[0..2] little-endian: byte i = hbv[8i +: 8]
-wire [95:0] hbv = {hf_buf[2], hf_buf[1], hf_buf[0]};
+// header bytes 0..7 = {hf_b1, hf_b0} little-endian (byte i = hbv[8i +: 8]); bytes 8-11
+// are hf_b0 again once pair 2 is in
+wire [63:0] hbv = {hf_b1, hf_b0};
 // RAM-S w2 {startAddr, bits, loopAddr}, w3 {endAddr (stored 2's complement form)}
 wire [39:0] hf_w2 = {hbv[5:0], hbv[15:8], hbv[23:16], hbv[7:6], hbv[31:24], hbv[39:32]};
 wire [39:0] hf_w3 = {24'd0, hbv[47:40], hbv[55:48]};
@@ -573,9 +597,10 @@ wire        hf_s_we = (h_state == H_ST0 || h_state == H_ST1) && !a_s_we && !clr_
 // dirty bit is read in the field's own cycle, so a write that lands during the
 // backfill is kept too)
 assign bf_step = (h_state == H_BF) && !wq_v && !clr_run;   // the write port is free
-assign bf_now  = bf_step && !bf_dirty[hf_slot][sv_cnt];
+wire   [4:0] bf_dirty = dirty_b[hf_slot];
+assign bf_now  = bf_step && !bf_dirty[sv_cnt];
 assign bf_word = 8'd120 + 8'd24 * {5'd0, sv_cnt} + {3'd0, hf_slot};
-assign bf_d    = hbv[{4'd7 + {1'b0, sv_cnt}, 3'd0} +: 8];
+assign bf_d    = (sv_cnt == 3'd0) ? hf_b1[31:24] : hf_b0[{sv_cnt[1:0] - 2'd1, 3'd0} +: 8];
 assign bf_done = bf_step && (sv_cnt == 3'd4);
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -590,7 +615,7 @@ logic [2:0]  q_cnt;                 // write settle count
 logic        q_hdr;                 // the pair in flight is the header's
 logic [4:0]  q_slot;
 logic [1:0]  q_k;
-logic        q_r;
+logic [1:0]  q_r;
 
 wire mem_free = !mem_busy && !mem_rd_en && !mem_wr_en;
 wire cpu_op   = (cpu_rd_pend || cpu_wr_pend) && !cpu_rd_issue && !cpu_wr_issue;
@@ -600,7 +625,7 @@ logic        hq_v, hq_ok;
 logic [19:0] hq_pair;
 logic [4:0]  hq_slot;
 logic [1:0]  hq_k;
-logic        hq_r;
+logic [1:0]  hq_r;
 logic        hq_stale;
 logic [DLW-1:0] hq_dl, hf_dl;
 
@@ -612,7 +637,7 @@ wire  [1:0]  a_fr = a_fcnt[1:0];
 wire  hf_inpass = a_busy && ((!a_rev && hf_slot >= a_slot) || a_def[hf_slot]);
 wire  [1:0] hf_tgt = (a_busy && !hf_inpass) ? a_fr + 2'd1 : a_fr;
 wire  [1:0] hf_rel = hf_tgt - bfr;               // 3 = overdue: due now
-wire  [1:0] hq_rel = (hq_r == bfr[0]) ? 2'd0 : 2'd1;
+wire  [1:0] hq_rel = (hq_r - bfr == 2'd3) ? 2'd0 : hq_r - bfr;
 
 function automatic logic [DLW-1:0] frame_base(input logic [1:0] rel);
     case (rel)
@@ -635,11 +660,11 @@ wire q_take_s = q_go && !q_pick_h && smp_c;
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
         hq_v <= 1'b0; hq_ok <= 1'b0; hq_stale <= 1'b0;
-        hq_pair <= '0; hq_slot <= '0; hq_k <= '0; hq_r <= 1'b0;
+        hq_pair <= '0; hq_slot <= '0; hq_k <= '0; hq_r <= '0;
         hq_dl <= '0; hf_dl <= '0;
     end else begin
         hq_ok    <= hq_v;               // stage 2 is one clk behind a load
-        hq_stale <= (hq_r != s_rnd[hq_slot]) || s_cons[hq_slot];
+        hq_stale <= c_past(hq_r, bfr, frame_cycle, hq_slot);
         hq_dl    <= frame_base(hq_rel) + DLW'(cs_of(hq_slot));
         hf_dl    <= (hf_rel == 2'd3) ? '0
                   : frame_base(hf_rel) + DLW'(cs_of(hf_slot)) - DLW'(T_AMARGIN);
@@ -656,12 +681,11 @@ always_ff @(posedge clk or negedge rst_n) begin
 end
 
 
-// the response of a sample pair: written to RAM-PD next clk (holding register)
-logic        pd_rv;
-logic [7:0]  pd_raddr_r;
-logic [31:0] pd_rd32;
+// the response of a sample pair is written to RAM-PD in its own clk (pd_rv: pass A's
+// writes wait), with its valid bit, if its slot still wants it
 wire         q_resp   = (q_state == Q_P_WAIT) && mem_rd_valid;
-wire         q_accept = q_resp && !q_hdr && (q_r == s_rnd[q_slot]) && !s_cons[q_slot];
+wire         pd_rv    = q_resp && !q_hdr;
+wire         q_accept = pd_rv && !c_past(q_r, bfr, frame_cycle, q_slot);
 
 always_ff @(posedge clk or negedge rst_n) begin
     if (!rst_n) begin
@@ -670,7 +694,7 @@ always_ff @(posedge clk or negedge rst_n) begin
         q_hdr        <= 1'b0;
         q_slot       <= '0;
         q_k          <= '0;
-        q_r          <= 1'b0;
+        q_r          <= '0;
         mem_addr     <= '0;
         mem_rd_en    <= 1'b0;
         mem_wr_en    <= 1'b0;
@@ -679,8 +703,8 @@ always_ff @(posedge clk or negedge rst_n) begin
         cpu_wr_issue <= 1'b0;
         cpu_wr_done  <= 1'b0;
         hf_resp      <= 1'b0;
-        pd_rv        <= 1'b0;
-        for (int i = 0; i < 3; i++) hf_buf[i] <= '0;
+        hf_b0 <= '0;
+        hf_b1 <= '0;
     end else begin
         mem_rd_en    <= 1'b0;
         mem_wr_en    <= 1'b0;
@@ -688,7 +712,6 @@ always_ff @(posedge clk or negedge rst_n) begin
         cpu_wr_issue <= 1'b0;
         cpu_wr_done  <= 1'b0;
         hf_resp      <= 1'b0;
-        pd_rv        <= 1'b0;
         case (q_state)
             Q_IDLE:
                 if (cpu_op) begin
@@ -737,12 +760,9 @@ always_ff @(posedge clk or negedge rst_n) begin
             Q_P_WAIT:
                 if (mem_rd_valid) begin
                     if (q_hdr) begin
-                        hf_buf[hf_widx] <= {mem_rd_data16b, mem_rd_data16};
+                        if (hf_widx == 2'd1) hf_b1 <= {mem_rd_data16b, mem_rd_data16};
+                        else                 hf_b0 <= {mem_rd_data16b, mem_rd_data16};
                         hf_resp         <= 1'b1;
-                    end else if (q_accept) begin
-                        pd_rv      <= 1'b1;
-                        pd_raddr_r <= {q_slot, 1'b0, q_k} + 8'd2;
-                        pd_rd32    <= {mem_rd_data16b, mem_rd_data16};
                     end
                     q_state <= Q_IDLE;
                 end
@@ -763,16 +783,17 @@ end
 // stalled for the frame (state frozen, silent, counted late: S-STALL).
 // A slot first reached after its A deadline (pass A behind) still steps its
 // state but issues no reads and leaves no plan: pass B plays it late.
-// Interlock: pass A starts slot s for frame F only after pass B has taken slot s
-// of frame F-1 (s_cons), so a plan or a pair is never overwritten before use.
+// Interlock: pass A starts slot s for frame F only after pass B has finished with
+// slot s of frame F-1 (C_s + T_BDONE), so a plan or a pair is never overwritten
+// before use.
 // ═══════════════════════════════════════════════════════════════════════════
 typedef enum logic [5:0] {
     A_IDLE, A_SEL, A_LD, A_SKIP, A_SKIPWB,
     A_VIB, A_STEP1, A_STEP2, A_ADV1, A_ADV2, A_NP1, A_NP2, A_NP3,
     A_OFF, A_ADR, A_PAIR1, A_PAIR2, A_ENQ,
     A_EG0, A_EG1, A_EG2, A_EG3, A_EG4, A_EG5,
-    A_AM, A_ENV, A_TL, A_GAIN, A_LFO,
-    A_PLAN0, A_PLAN1, A_WB0, A_WB1, A_NEXT, A_SCAN
+    A_AM, A_ENV, A_TL, A_GAIN, A_GAIN2, A_LFO,
+    A_PLAN0, A_WB0, A_WB1, A_NEXT, A_SCAN
 } a_state_t;
 a_state_t a_state;
 
@@ -812,7 +833,7 @@ logic        a_ab;                 // address unit: 0 = sample A, 1 = sample B
 logic [15:0] t_p, t_posb;
 logic [16:0] t_w, t_off;
 logic [21:0] t_ma, t_mb;
-logic [19:0] t_pa1, t_pb1;
+logic        t_eq0, t_eq1, t_eqm;  // B's pair = A's, A's + 1, A's - 1
 logic [1:0]  t_ka1, t_kb0, t_kb1;
 logic [3:0]  t_need, t_left;
 logic [1:0]  t_mode;               // EG: 0 normal, 1 key-on edge, 2 to release
@@ -827,11 +848,12 @@ logic [11:0] t_att;
 logic [10:0] t_esum;
 logic [8:0]  t_am;
 logic [9:0]  t_envt;
-logic [15:0] t_senv, t_stl;
 
 // the deadline of a_slot in pass frame a_fr has passed
 wire [1:0] a_dfr  = bfr - a_fr;
 wire       a_past = (a_dfr == 2'd1) || (a_dfr == 2'd2) || (a_dfr == 2'd0 && frame_cycle >= a_cs);
+//  pass B is done with a_slot of frame a_fr - 1
+wire       a_free = (a_dfr != 2'd3) || (frame_cycle >= a_cs + FRAME_W'(T_AMARGIN + T_BDONE));
 
 // RAM-R reads: field order 3, 4, 1, 2, 5, 6, 7, 8, 9 at a_lcnt 0, 2, .., 16
 function automatic logic [7:0] a_fbase(input logic [3:0] i);
@@ -845,18 +867,16 @@ assign a_rr_en   = (a_state == A_LD) && !a_lcnt[0] && (a_lcnt <= 5'd16);
 assign a_rr_addr = a_fbase(a_lcnt[4:1]) + {3'd0, a_slot};
 
 // vibrato F-Num offset magnitude: floor(|lfo_fm| x vib_depth / 12), a 128-entry table
-function automatic logic [767:0] mk_vibq();
-    logic [767:0] t;
+function automatic logic [127:0][5:0] mk_vibq();
     int d;
     for (int v = 0; v < 8; v++)
         for (int m = 0; m < 16; m++) begin
             d = (v == 0) ? 0 : (v == 1) ? 2 : (v == 2) ? 3 : (v == 3) ? 4 :
                 (v == 4) ? 6 : (v == 5) ? 12 : (v == 6) ? 24 : 48;
-            t[(v * 16 + m) * 6 +: 6] = 6'((m * d) / 12);
+            mk_vibq[v * 16 + m] = 6'((m * d) / 12);
         end
-    return t;
 endfunction
-localparam logic [767:0] VIBQ = mk_vibq();
+localparam logic [127:0][5:0] VIBQ = mk_vibq();
 
 // openMSX vol_factor's multiplier: (0x8000 x (0x80 - (att & 0x3F))) >> (7 + att >> 6)
 function automatic logic [15:0] vscale(input logic [9:0] att);
@@ -867,10 +887,11 @@ function automatic logic [15:0] vscale(input logic [9:0] att);
     return 16'({m, 8'd0} >> att[9:6]);
 endfunction
 
+wire [15:0] a_vs = vscale((a_state == A_GAIN) ? t_envt : {d_tl, 2'b00});
+
 // the plan for pass B
 wire [39:0] a_plan0 = {3'd0, a_edge | a_pclr, t_need, h_bits, t_kb1, t_mb[1:0], t_kb0,
                        t_ka1, t_ma[1:0], t_posb[0], d_pos[0], d_sp};
-wire [39:0] a_plan1 = {4'd0, f_pan, t_stl, t_senv};
 
 always_comb begin
     a_s_we  = 1'b0;
@@ -896,26 +917,43 @@ end
 //  RAM-S reads: w1, w0, w2, w3 at a_lcnt 0-3
 assign s_raddr = {a_slot, (a_lcnt == 5'd0) ? 2'd1 : (a_lcnt == 5'd1) ? 2'd0 : a_lcnt[1:0]};
 
-//  RAM-PD writes: a response first (it is held one clk), pass A's plan waits
-wire a_pd_we = (a_state == A_PLAN0 || a_state == A_PLAN1) && !pd_rv && !a_dead;
+//  RAM-PD writes: a response first; pass A's plan and the invalidation of a pair it
+//  queues wait for a clk without one
+//  (plan0 at w0; the env gain with pan at w1 and the TL gain at w6 as A computes them)
+//  and the slot's status at w7 (its first visit, and when it is done)
+logic        a_pd_req;
+logic [2:0]  a_pd_w;
+logic [39:0] a_pd_d;
 always_comb begin
-    pd_we    = pd_rv | a_pd_we;
-    pd_waddr = pd_rv ? pd_raddr_r : {a_slot, 2'd0, a_state == A_PLAN1};
-    pd_wd    = pd_rv ? {8'd0, pd_rd32} : (a_state == A_PLAN1) ? a_plan1 : a_plan0;
+    a_pd_req = 1'b0;
+    a_pd_w   = 3'd7;
+    a_pd_d   = {36'd0, a_fr, ST_NONE};
+    case (a_state)
+        A_SEL:    a_pd_req = !a_rev && (a_past || a_free);
+        A_ENQ:    begin a_pd_req = fq_push; a_pd_w = {1'b0, a_qk} + 3'd2; a_pd_d = '0; end
+        A_GAIN:   begin a_pd_req = !a_dead; a_pd_w = 3'd1; a_pd_d = {20'd0, f_pan, a_vs}; end
+        A_GAIN2:  begin a_pd_req = !a_dead; a_pd_w = 3'd6; a_pd_d = {24'd0, a_vs}; end
+        A_PLAN0:  begin a_pd_req = !a_dead; a_pd_w = 3'd0; a_pd_d = a_plan0; end
+        A_SKIPWB: begin a_pd_req = 1'b1; a_pd_d = {36'd0, a_fr, a_stall ? ST_NONE : ST_QUIET}; end
+        A_WB1:    begin a_pd_req = 1'b1; a_pd_d = {36'd0, a_fr, a_dead ? ST_NONE : ST_PLAN}; end
+        default: ;
+    endcase
+    pd_we    = q_accept | (a_pd_req && !pd_rv);
+    pd_waddr = pd_rv ? {q_slot, 1'b0, q_k} + 8'd2 : {a_slot, a_pd_w};
+    pd_wd    = pd_rv ? {7'd0, 1'b1, mem_rd_data16b, mem_rd_data16} : a_pd_d;
 end
 
 // FIFO push from A_ENQ: the lowest pair still to send
 wire [1:0]  a_qk   = t_left[0] ? 2'd0 : t_left[1] ? 2'd1 : t_left[2] ? 2'd2 : 2'd3;
-wire [19:0] a_qpr  = (a_qk == 2'd0) ? t_ma[21:2] : (a_qk == 2'd1) ? t_pa1 :
-                     (a_qk == 2'd2) ? t_mb[21:2] : t_pb1;
-assign fq_push = (a_state == A_ENQ) && !a_dead && (t_left != 4'd0) && !fq_full;
-assign fq_wd   = {a_qpr, a_slot, a_qk, a_fr[0]};
+wire [19:0] a_qpr  = (a_qk[1] ? t_mb[21:2] : t_ma[21:2]) + {19'd0, a_qk[0]};
+assign fq_push = (a_state == A_ENQ) && !a_dead && (t_left != 4'd0) && !fq_full && !pd_rv;
+assign fq_wd   = {a_qpr, a_slot, a_qk, a_fr};
 
 logic       b_busy;
 logic [4:0] b_cur;
 typedef enum logic [4:0] {
-    B_IDLE, B_P0, B_P1, B_D0, B_D1, B_D2, B_D3, B_DEC,
-    B_I0, B_I1, B_I2, B_SAVE, B_E1, B_E2, B_T1, B_T2, B_L1, B_L2, B_R1, B_R2
+    B_IDLE, B_ST, B_P0, B_D0, B_D1, B_D2, B_D3, B_DEC,
+    B_I1, B_I2, B_SAVE, B_E1, B_E2, B_T1, B_T2, B_L1, B_L2, B_R2
 } b_state_t;
 b_state_t    b_state;
 logic [4:0]  b_slot;               // next slot to take (24 = done for the frame)
@@ -944,16 +982,10 @@ always_ff @(posedge clk or negedge rst_n) begin
         a_take_m <= '0;
         a_np_b  <= 1'b0;
         a_ab    <= 1'b0;
-        s_rnd   <= '0;
-        s_cons  <= '1;
-        for (int i = 0; i < 24; i++) begin s_st[i] <= ST_NONE; s_val[i] <= '0; end
     end else begin
         a_take <= 1'b0;
         if (frame_cycle == FRAME_W'(T_K)) a_go <= 1'b1;
 
-        //  pass B takes a slot; a response lands
-        if (b_take) s_cons[b_slot] <= 1'b1;
-        if (q_accept) s_val[q_slot][q_k] <= 1'b1;
 
         case (a_state)
             A_IDLE: if (a_go) begin
@@ -966,23 +998,15 @@ always_ff @(posedge clk or negedge rst_n) begin
             end
 
             //  interlock and deadline; a revisit has done both at its first visit
+            //  (a first visit marks the slot {a_fr, NONE} in w7)
             A_SEL: begin
                 a_lcnt <= '0;
                 if (a_rev) begin
                     a_dead  <= a_past;
                     a_state <= A_LD;
-                end else if (a_past) begin
-                    a_dead        <= 1'b1;
-                    s_rnd[a_slot] <= a_fr[0];
-                    s_st[a_slot]  <= ST_NONE;
-                    a_state       <= A_LD;
-                end else if (s_cons[a_slot] && !(b_busy && b_cur == a_slot)) begin
-                    a_dead         <= 1'b0;
-                    s_cons[a_slot] <= 1'b0;
-                    s_rnd[a_slot]  <= a_fr[0];
-                    s_st[a_slot]   <= ST_NONE;
-                    s_val[a_slot]  <= '0;
-                    a_state        <= A_LD;
+                end else if ((a_past || a_free) && !pd_rv) begin
+                    a_dead  <= a_past;
+                    a_state <= A_LD;
                 end
             end
 
@@ -1053,10 +1077,7 @@ always_ff @(posedge clk or negedge rst_n) begin
                 end
                 a_state <= (a_state == A_SKIP) ? A_SKIPWB : A_GAIN;
             end
-            A_SKIPWB: begin
-                s_st[a_slot] <= a_stall ? ST_NONE : ST_QUIET;
-                a_state      <= A_NEXT;
-            end
+            A_SKIPWB: if (!pd_rv) a_state <= A_NEXT;          // w0 and w7
 
             // ── pitch and position ──
             A_VIB: begin
@@ -1064,7 +1085,7 @@ always_ff @(posedge clk or negedge rst_n) begin
                 logic [5:0] q;
                 fm6 = d_lfo[17:12];
                 if (fm6[4]) fm6 = fm6 ^ 6'h1F;
-                q = VIBQ[{f_vib, fm6[3:0]} * 6 +: 6];
+                q = VIBQ[{f_vib, fm6[3:0]}];
                 t_vib <= (f_lfoact && f_vib != 3'd0) ? (fm6[5] ? -$signed({1'b0, q}) : $signed({1'b0, q}))
                                                       : 7'sd0;
                 a_state <= A_STEP1;
@@ -1146,8 +1167,11 @@ always_ff @(posedge clk or negedge rst_n) begin
                 end
             end
             A_PAIR1: begin
-                t_pa1   <= t_ma[21:2] + 20'd1;
-                t_pb1   <= t_mb[21:2] + 20'd1;
+                logic [19:0] d;
+                d = t_mb[21:2] - t_ma[21:2];
+                t_eq0   <= (d == 20'd0);
+                t_eq1   <= (d == 20'd1);
+                t_eqm   <= (d == 20'hFFFFF);
                 a_state <= A_PAIR2;
             end
             //  pairs: k0 = A's, k1 = the one after it, k2 = B's, k3 = the one after
@@ -1158,9 +1182,9 @@ always_ff @(posedge clk or negedge rst_n) begin
                 two = (h_bits != 2'd0);
                 xa  = two && (t_ma[1:0] == 2'd3);
                 xb  = two && (t_mb[1:0] == 2'd3);
-                eq0 = (t_mb[21:2] == t_ma[21:2]);
-                eq1 = (t_mb[21:2] == t_pa1);
-                eqm = (t_pb1 == t_ma[21:2]);
+                eq0 = t_eq0;
+                eq1 = t_eq1;
+                eqm = t_eqm;
                 ka1 = xa ? 2'd1 : 2'd0;
                 kb0 = eq0 ? 2'd0 : eq1 ? 2'd1 : 2'd2;
                 kb1 = !xb ? kb0 : eqm ? 2'd0 : eq0 ? 2'd1 : 2'd3;
@@ -1213,10 +1237,16 @@ always_ff @(posedge clk or negedge rst_n) begin
                 a_state <= A_EG4;
             end
             A_EG4: begin
-                logic signed [10:0] inv;
+                logic signed [15:0] inv;
                 logic signed [15:0] prod;
-                inv    = ~{1'b0, d_env};                      // -env - 1
-                prod   = inv * $signed({1'b0, t_einc});
+                inv    = 16'($signed(~{1'b0, d_env}));         // -env - 1
+                case (t_einc)                                 // inv x inc
+                    4'd1:    prod = inv;
+                    4'd2:    prod = inv <<< 1;
+                    4'd4:    prod = inv <<< 2;
+                    4'd8:    prod = inv <<< 3;
+                    default: prod = '0;
+                endcase
                 t_att  <= 12'($signed({2'b00, d_env}) + (prod >>> 4));
                 t_esum <= {1'b0, d_env} + {7'd0, t_einc};
                 a_state <= A_EG5;
@@ -1267,23 +1297,16 @@ always_ff @(posedge clk or negedge rst_n) begin
                 t_envt  <= (e >= {1'b0, MAX_ATT_INDEX}) ? MAX_ATT_INDEX : e[9:0];
                 a_state <= A_TL;
             end
-            A_GAIN: begin
-                t_senv  <= vscale(t_envt);
-                t_stl   <= vscale({d_tl, 2'b00});
-                a_state <= A_LFO;
-            end
+            //  the gains go straight to RAM-PD (a response there first)
+            A_GAIN:  if (!pd_rv || a_dead) a_state <= A_GAIN2;
+            A_GAIN2: if (!pd_rv || a_dead) a_state <= A_LFO;
             A_LFO: begin
                 d_lfo   <= f_lfoact ? d_lfo + {12'd0, lfo_period_rom(f_lfo)} : 18'd0;
                 a_state <= A_PLAN0;
             end
-            A_PLAN0: if (a_dead) a_state <= A_WB0;
-                     else if (!pd_rv) a_state <= A_PLAN1;
-            A_PLAN1: if (!pd_rv) a_state <= A_WB0;
+            A_PLAN0: if (!pd_rv || a_dead) a_state <= A_WB0;
             A_WB0: a_state <= A_WB1;
-            A_WB1: begin
-                s_st[a_slot] <= a_dead ? ST_NONE : ST_PLAN;
-                a_state      <= A_NEXT;
-            end
+            A_WB1: if (!pd_rv) a_state <= A_NEXT;             // w1 and w7
 
             // ── the pass ──
             A_NEXT:
@@ -1332,44 +1355,46 @@ end
 // samples, interpolation, x env, x TL, x pan, accumulate -- one multiplier.
 // ═══════════════════════════════════════════════════════════════════════════
 
-logic [39:0] b_p0;
-logic [15:0] b_senv, b_stl;
+//  plan0 without its stepPtr (B reads that again when it interpolates):
+//  {zero, need, fmt, kb1, ob, kb0, ka1, oa, pb, pa}
+logic [18:0] b_pf;
 logic [3:0]  b_pan;
 logic [7:0]  b_a0, b_a1, b_b0, b_b1;
-logic [3:0]  b_val;
-logic signed [15:0] b_sa, b_sb, b_smp, b_v;
-logic        b_late;
+logic        b_miss;               // a needed pair was not in by C_s
+logic signed [15:0] b_smp;
 logic [15:0] late_cnt;
 logic signed [17:0] mul_a, mul_b;
 logic signed [35:0] mul_p;
 logic signed [23:0] acc_l, acc_r;
-logic signed [23:0] out_gl, out_gr;
 logic        out_pend;
 
 logic [15:0] prev_m [0:31] /* synthesis ramstyle = "MLAB, no_rw_check" */;
 always_ff @(posedge clk) if (b_state == B_SAVE) prev_m[b_cur] <= b_smp;
 
-//  plan0 fields
-wire [15:0] bp_sp   = b_p0[15:0];
-wire        bp_pa   = b_p0[16];
-wire        bp_pb   = b_p0[17];
-wire [1:0]  bp_oa   = b_p0[19:18];
-wire [1:0]  bp_ka1  = b_p0[21:20];
-wire [1:0]  bp_kb0  = b_p0[23:22];
-wire [1:0]  bp_ob   = b_p0[25:24];
-wire [1:0]  bp_kb1  = b_p0[27:26];
-wire [1:0]  bp_fmt  = b_p0[29:28];
-wire [3:0]  bp_need = b_p0[33:30];
-wire        bp_zero = b_p0[34];
+wire        bp_pa   = b_pf[0];
+wire        bp_pb   = b_pf[1];
+wire [1:0]  bp_oa   = b_pf[3:2];
+wire [1:0]  bp_ka1  = b_pf[5:4];
+wire [1:0]  bp_kb0  = b_pf[7:6];
+wire [1:0]  bp_ob   = b_pf[9:8];
+wire [1:0]  bp_kb1  = b_pf[11:10];
+wire [1:0]  bp_fmt  = b_pf[13:12];
+wire [3:0]  bp_need = b_pf[17:14];
+wire        bp_zero = b_pf[18];
 
+//  RAM-PD reads: w7 (status), plan0, the pairs k0-k3, plan0 again (stepPtr),
+//  w1 {pan, env gain}, w6 {TL gain}
 always_comb begin
     case (b_state)
-        B_IDLE:  pd_raddr = {b_slot, 3'd0};
-        B_P0:    pd_raddr = {b_cur, 3'd1};
-        B_P1:    pd_raddr = {b_cur, 3'd2};
-        B_D0:    pd_raddr = {b_cur, 3'd3};
-        B_D1:    pd_raddr = {b_cur, 3'd4};
-        default: pd_raddr = {b_cur, 3'd5};
+        B_IDLE:                   pd_raddr = {b_slot, 3'd7};
+        B_ST:                     pd_raddr = {b_cur, 3'd0};
+        B_P0:                     pd_raddr = {b_cur, 3'd2};
+        B_D0:                     pd_raddr = {b_cur, 3'd3};
+        B_D1:                     pd_raddr = {b_cur, 3'd4};
+        B_D2:                     pd_raddr = {b_cur, 3'd5};
+        B_D3:                     pd_raddr = {b_cur, 3'd0};
+        B_DEC, B_I1, B_I2:        pd_raddr = {b_cur, 3'd1};
+        default:                  pd_raddr = {b_cur, 3'd6};
     endcase
 end
 
@@ -1393,12 +1418,10 @@ always_ff @(posedge clk or negedge rst_n) begin
         b_c       <= FRAME_W'(T_C0);
         b_cur     <= '0;
         b_busy    <= 1'b0;
-        b_late    <= 1'b0;
+        b_miss    <= 1'b0;
         late_cnt  <= '0;
         acc_l     <= '0;
         acc_r     <= '0;
-        out_gl    <= '0;
-        out_gr    <= '0;
         out_pend  <= 1'b0;
         pcm_left  <= '0;
         pcm_right <= '0;
@@ -1409,31 +1432,34 @@ always_ff @(posedge clk or negedge rst_n) begin
         pcm_valid <= 1'b0;
         case (b_state)
             B_IDLE: if (b_take) begin
+                b_cur   <= b_slot;
+                b_miss  <= 1'b0;
+                b_slot  <= b_slot + 5'd1;
+                b_c     <= b_c + FRAME_W'(T_CSTEP);
+                b_busy  <= 1'b1;
+                b_state <= B_ST;
+            end
+            B_ST: begin
                 logic ok;
-                ok     = (s_rnd[b_slot] == bfr[0]);
-                b_cur  <= b_slot;
-                b_val  <= s_val[b_slot];
-                b_slot <= b_slot + 5'd1;
-                b_c    <= b_c + FRAME_W'(T_CSTEP);
-                if (ok && s_st[b_slot] == ST_PLAN) begin
-                    b_busy  <= 1'b1;
-                    b_state <= B_P0;
-                end else if (!(ok && s_st[b_slot] == ST_QUIET)) begin
-                    //  no plan for this frame: pass A was behind or the slot stalled
-                    if (late_cnt != 16'hFFFF) late_cnt <= late_cnt + 16'd1;
+                ok = (pd_q[3:2] == bfr);
+                if (ok && pd_q[1:0] == ST_PLAN) b_state <= B_P0;
+                else begin
+                    //  no plan for this frame (pass A was behind or the slot stalled),
+                    //  unless the slot is silent
+                    if (!(ok && pd_q[1:0] == ST_QUIET) && late_cnt != 16'hFFFF)
+                        late_cnt <= late_cnt + 16'd1;
+                    b_busy  <= 1'b0;
+                    b_state <= B_IDLE;
                 end
             end
-            B_P0: begin b_p0 <= pd_q; b_state <= B_P1; end
-            B_P1: begin
-                {b_pan, b_stl, b_senv} <= pd_q[35:0];
-                b_state <= B_D0;
-            end
+            B_P0: begin b_pf <= pd_q[34:16]; b_state <= B_D0; end
             B_D0, B_D1, B_D2, B_D3: begin
                 logic [1:0] k;
                 logic [31:0] w;
                 k = (b_state == B_D0) ? 2'd0 : (b_state == B_D1) ? 2'd1 :
                     (b_state == B_D2) ? 2'd2 : 2'd3;
                 w = pd_q[31:0];
+                if (bp_need[k] && !pd_q[32]) b_miss <= 1'b1;
                 if (k == 2'd0)   b_a0 <= w[{bp_oa, 3'd0} +: 8];
                 if (k == bp_ka1) b_a1 <= w[{bp_oa + 2'd1, 3'd0} +: 8];
                 if (k == bp_kb0) b_b0 <= w[{bp_ob, 3'd0} +: 8];
@@ -1441,44 +1467,43 @@ always_ff @(posedge clk or negedge rst_n) begin
                 b_state <= (b_state == B_D0) ? B_D1 : (b_state == B_D1) ? B_D2 :
                            (b_state == B_D2) ? B_D3 : B_DEC;
             end
+            //  interpolation: sA + ((sB - sA) x stepPtr) >> 16 (plan0 is on pd_q again);
+            //  a late slot plays its previous sample, or 0 after a restart
             B_DEC: begin
-                b_sa   <= b_decode(bp_fmt, bp_pa, b_a0, b_a1);
-                b_sb   <= b_decode(bp_fmt, bp_pb, b_b0, b_b1);
-                b_late <= (bp_need & ~b_val) != 4'd0;
-                if ((bp_need & ~b_val) != 4'd0 && late_cnt != 16'hFFFF) late_cnt <= late_cnt + 16'd1;
-                b_state <= B_I0;
-            end
-            //  interpolation: sA + ((sB - sA) x stepPtr) >> 16
-            B_I0: begin
-                if (b_late) begin
+                logic signed [15:0] sa, sb;
+                sa = b_decode(bp_fmt, bp_pa, b_a0, b_a1);
+                sb = b_decode(bp_fmt, bp_pb, b_b0, b_b1);
+                if (b_miss) begin
                     b_smp   <= bp_zero ? 16'sd0 : $signed(prev_m[b_cur]);
+                    if (late_cnt != 16'hFFFF) late_cnt <= late_cnt + 16'd1;
                     b_state <= B_SAVE;
                 end else begin
-                    mul_a   <= 18'($signed({b_sb[15], b_sb}) - $signed({b_sa[15], b_sa}));
-                    mul_b   <= $signed({2'b00, bp_sp});
+                    b_smp   <= sa;
+                    mul_a   <= 18'($signed({sb[15], sb}) - $signed({sa[15], sa}));
+                    mul_b   <= $signed({2'b00, pd_q[15:0]});
                     b_state <= B_I1;
                 end
             end
             B_I1: b_state <= B_I2;
             B_I2: begin
-                b_smp   <= b_sa + 16'(mul_p >>> 16);
+                b_smp   <= b_smp + 16'(mul_p >>> 16);
                 b_state <= B_SAVE;
             end
             //  vol_factor(vol_factor(sample, env), TL << 2): (x * scale) >> 15 twice
             B_SAVE: begin
                 mul_a   <= 18'(b_smp);
-                mul_b   <= $signed({2'b00, b_senv});
+                mul_b   <= $signed({2'b00, pd_q[15:0]});      // w1: env gain
+                b_pan   <= pd_q[19:16];
                 b_state <= B_E1;
             end
             B_E1: b_state <= B_E2;
             B_E2: begin
                 mul_a   <= 18'(mul_p >>> 15);
-                mul_b   <= $signed({2'b00, b_stl});
+                mul_b   <= $signed({2'b00, pd_q[15:0]});      // w6: TL gain
                 b_state <= B_T1;
             end
             B_T1: b_state <= B_T2;
             B_T2: begin
-                b_v     <= 16'(mul_p >>> 15);
                 mul_a   <= 18'(mul_p >>> 15);
                 mul_b   <= $signed({12'd0, pan_att_left(b_pan)});
                 b_state <= B_L1;
@@ -1499,21 +1524,22 @@ always_ff @(posedge clk or negedge rst_n) begin
             default: b_state <= B_IDLE;
         endcase
 
-        // ── frame output: gain at sample_start, saturate the next clk ──
+        // ── frame output: the mix gain into the accumulators at sample_start,
+        //    saturate them out the next clk ──
         if (out_pend) begin
-            pcm_left  <= sat16(out_gl);
-            pcm_right <= sat16(out_gr);
+            pcm_left  <= sat16(acc_l);
+            pcm_right <= sat16(acc_r);
             pcm_valid <= 1'b1;
             out_pend  <= 1'b0;
+            acc_l     <= '0;
+            acc_r     <= '0;
         end
         if (sample_start) begin
             logic [1:0] sh;
             sh       = 2'd3 - pcm_vol;
-            out_gl   <= pcm_mix_gain(pcm_mix_l, acc_l >>> sh);
-            out_gr   <= pcm_mix_gain(pcm_mix_r, acc_r >>> sh);
+            acc_l    <= pcm_mix_gain(pcm_mix_l, acc_l >>> sh);
+            acc_r    <= pcm_mix_gain(pcm_mix_r, acc_r >>> sh);
             out_pend <= 1'b1;
-            acc_l    <= '0;
-            acc_r    <= '0;
             b_slot   <= '0;
             b_c      <= FRAME_W'(T_C0);
         end
