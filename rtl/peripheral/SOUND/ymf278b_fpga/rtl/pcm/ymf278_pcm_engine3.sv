@@ -1363,10 +1363,10 @@ logic [7:0]  b_a0, b_a1, b_b0, b_b1;
 logic        b_miss;               // a needed pair was not in by C_s
 logic signed [15:0] b_smp;
 logic [15:0] late_cnt;
-logic signed [17:0] mul_a, mul_b;
-logic signed [35:0] mul_p;
+logic signed [26:0] mul_a, mul_b;    // 27 x 27: the mix gain takes the whole accumulator
+logic signed [53:0] mul_p;
 logic signed [23:0] acc_l, acc_r;
-logic        out_pend;
+logic        out_pend;              // a frame end has passed (no pcm_valid before the first)
 
 logic [15:0] prev_m [0:31] /* synthesis ramstyle = "MLAB, no_rw_check" */;
 always_ff @(posedge clk) if (b_state == B_SAVE) prev_m[b_cur] <= b_smp;
@@ -1479,8 +1479,8 @@ always_ff @(posedge clk or negedge rst_n) begin
                     b_state <= B_SAVE;
                 end else begin
                     b_smp   <= sa;
-                    mul_a   <= 18'($signed({sb[15], sb}) - $signed({sa[15], sa}));
-                    mul_b   <= $signed({2'b00, pd_q[15:0]});
+                    mul_a   <= 27'($signed({sb[15], sb}) - $signed({sa[15], sa}));
+                    mul_b   <= $signed({11'd0, pd_q[15:0]});
                     b_state <= B_I1;
                 end
             end
@@ -1491,25 +1491,25 @@ always_ff @(posedge clk or negedge rst_n) begin
             end
             //  vol_factor(vol_factor(sample, env), TL << 2): (x * scale) >> 15 twice
             B_SAVE: begin
-                mul_a   <= 18'(b_smp);
-                mul_b   <= $signed({2'b00, pd_q[15:0]});      // w1: env gain
+                mul_a   <= 27'(b_smp);
+                mul_b   <= $signed({11'd0, pd_q[15:0]});      // w1: env gain
                 b_pan   <= pd_q[19:16];
                 b_state <= B_E1;
             end
             B_E1: b_state <= B_E2;
             B_E2: begin
-                mul_a   <= 18'(mul_p >>> 15);
-                mul_b   <= $signed({2'b00, pd_q[15:0]});      // w6: TL gain
+                mul_a   <= 27'($signed(18'(mul_p >>> 15)));
+                mul_b   <= $signed({11'd0, pd_q[15:0]});      // w6: TL gain
                 b_state <= B_T1;
             end
             B_T1: b_state <= B_T2;
             B_T2: begin
-                mul_a   <= 18'(mul_p >>> 15);
-                mul_b   <= $signed({12'd0, pan_att_left(b_pan)});
+                mul_a   <= 27'($signed(18'(mul_p >>> 15)));
+                mul_b   <= $signed({21'd0, pan_att_left(b_pan)});
                 b_state <= B_L1;
             end
             B_L1: begin
-                mul_b   <= $signed({12'd0, pan_att_right(b_pan)});
+                mul_b   <= $signed({21'd0, pan_att_right(b_pan)});
                 b_state <= B_L2;
             end
             B_L2: begin
@@ -1524,21 +1524,25 @@ always_ff @(posedge clk or negedge rst_n) begin
             default: b_state <= B_IDLE;
         endcase
 
-        // ── frame output: the mix gain into the accumulators at sample_start,
-        //    saturate them out the next clk ──
-        if (out_pend) begin
-            pcm_left  <= sat16(acc_l);
-            pcm_right <= sat16(acc_r);
+        // ── frame output on the multiplier (pass B is done by CPF - 3): the mix
+        //    gain {1, 3/4, 1/2, 3/8, 1/4, 3/16, 1/8, 0} is (x * g) >>> 4 with g =
+        //    {16, 12, 8, 6, 4, 3, 2, 0}, the floors of pcm_mix_gain exactly.  L at
+        //    CPF - 3, R at CPF - 2; pcm_valid at frame_cycle 1 as before ──
+        if (frame_cycle == FRAME_W'(CPF - 3) || frame_cycle == FRAME_W'(CPF - 2)) begin
+            logic r;
+            logic [1:0] sh;
+            r  = (frame_cycle == FRAME_W'(CPF - 2));
+            sh = 2'd3 - pcm_vol;
+            mul_a <= 27'((r ? acc_r : acc_l) >>> sh);
+            mul_b <= $signed({22'd0, mix_g(r ? pcm_mix_r : pcm_mix_l)});
+            if (r) begin acc_l <= '0; acc_r <= '0; end
+        end
+        if (frame_cycle == FRAME_W'(CPF - 1)) pcm_left <= sat16(24'(mul_p >>> 4));
+        if (frame_cycle == FRAME_W'(0) && out_pend) begin
+            pcm_right <= sat16(24'(mul_p >>> 4));
             pcm_valid <= 1'b1;
-            out_pend  <= 1'b0;
-            acc_l     <= '0;
-            acc_r     <= '0;
         end
         if (sample_start) begin
-            logic [1:0] sh;
-            sh       = 2'd3 - pcm_vol;
-            acc_l    <= pcm_mix_gain(pcm_mix_l, acc_l >>> sh);
-            acc_r    <= pcm_mix_gain(pcm_mix_r, acc_r >>> sh);
             out_pend <= 1'b1;
             b_slot   <= '0;
             b_c      <= FRAME_W'(T_C0);
@@ -1546,12 +1550,19 @@ always_ff @(posedge clk or negedge rst_n) begin
     end
 end
 
+function automatic logic [4:0] mix_g(input logic [2:0] i);
+    case (i)
+        3'd0: return 5'd16;  3'd1: return 5'd12;  3'd2: return 5'd8;  3'd3: return 5'd6;
+        3'd4: return 5'd4;   3'd5: return 5'd3;   3'd6: return 5'd2;  default: return 5'd0;
+    endcase
+endfunction
+
 function automatic signed [15:0] sat16(input signed [23:0] x);
     return (x > 24'sd32767) ? 16'sh7FFF : (x < -24'sd32768) ? 16'sh8000 : x[15:0];
 endfunction
 
 `ifndef SYNTHESIS
-always @(posedge clk) if (rst_n && sample_start && b_state != B_IDLE)
+always @(posedge clk) if (rst_n && frame_cycle == FRAME_W'(CPF - 3) && b_state != B_IDLE)
     $error("ymf278_pcm_engine3: pass B still busy at the frame end");
 `endif
 
