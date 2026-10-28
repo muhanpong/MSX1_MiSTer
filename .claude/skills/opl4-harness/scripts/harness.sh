@@ -462,6 +462,44 @@ do_busylat() {
     fi
 }
 
+do_flagrace() {
+    #  engine3 (c76854e): the event flags are one MLAB word per slot; pass A's clear waits for a
+    #  clk without a CPU flag write and keeps the bits that write sets.  tb_flagrace writes the
+    #  slot's event register so that it is sampled in A's read clk - 1, the clear clk itself, and
+    #  + 1 (slots 0, 7, 23; retrig and tl_load) and reads the flag at A's next visit.  PASS = the
+    #  tree passes with all 6 clear-clk collisions hit, and both mutants fail: the set-wins mask
+    #  dropped (nomask) and the clear taking the port over the CPU write (clearwins).
+    local d="$OUT/flagrace"; rm -rf "$d"; mkdir -p "$d/m"
+    if [ "$(engine_mod)" != ymf278_pcm_engine3 ]; then gate flagrace PASS "N/A ($(engine_mod) has no flag word)"; return; fi
+    local last; last=$(echo $ENGINE | awk '{print $NF}')
+    local others; others=$(echo $ENGINE | awk '{for(i=1;i<NF;i++) printf "%s ", $i}')
+    sed 's/a_take_m <= a_take_m & ~ev_cs;/a_take_m <= a_take_m;/' "$last" > "$d/m/nomask.sv"
+    sed "s/ev_cwe ? wr_snum : a_slot;/a_take ? a_slot : wr_snum;/; s/ev_cwe ? ev_cw : ev_rd & ~{1'b0, a_take_m};/a_take ? ev_rd \& ~{1'b0, a_take_m} : ev_cw;/" "$last" > "$d/m/clearwins.sv"
+    local m n; for m in nomask:1 clearwins:2; do
+        n=$(diff "$last" "$d/m/${m%%:*}.sv" | grep -c '^>')
+        [ "$n" = "${m#*:}" ] || { gate flagrace FAIL "mutant ${m%%:*} did not apply ($n lines changed)"; return; }
+    done
+    (cd "$G" && python3 gen_pcm_testdata.py > /dev/null) || { gate flagrace FAIL "testdata generation failed"; return; }
+    fr_run() {   # <engine files> <dir>
+        local o=$2; mkdir -p "$o"
+        verilator --binary --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT -Wno-TIMESCALEMOD -Wno-DECLFILENAME \
+           -Wno-UNUSEDSIGNAL -Wno-CASEINCOMPLETE -Wno-BLKANDNBLK -Wno-MULTIDRIVEN -Wno-PINMISSING -Wno-UNDRIVEN \
+           --top-module tb_flagrace -o vfr -Mdir "$o/v" $1 "$Y/tb/tb_flagrace.sv" > "$o/build.log" 2>&1 \
+           && "$o/v/vfr" +mem="$G/mem.hex" > "$o/run.log" 2>&1
+    }
+    fr_run "$ENGINE" "$d/tree" &
+    fr_run "$others $d/m/nomask.sv" "$d/nomask" &
+    fr_run "$others $d/m/clearwins.sv" "$d/clearwins" &
+    wait
+    local t c1 c2
+    t=$(grep -m1 '^FLAGRACE' "$d/tree/run.log"); c1=$(grep -m1 '^FLAGRACE' "$d/nomask/run.log"); c2=$(grep -m1 '^FLAGRACE' "$d/clearwins/run.log")
+    if [[ "$t" == "FLAGRACE PASS"* ]] && [[ "$c1" == "FLAGRACE FAIL"*"hit 6/6"* ]] && [[ "$c2" == "FLAGRACE FAIL"*"hit 6/6"* ]]; then
+        gate flagrace PASS "${t#FLAGRACE PASS: }; mutants nomask, clearwins caught (${c1#FLAGRACE FAIL: } / ${c2#FLAGRACE FAIL: })"
+    else
+        gate flagrace FAIL "tree: ${t:-no result}; nomask: ${c1:-no result}; clearwins: ${c2:-no result}"
+    fi
+}
+
 do_resource() {
     #  ALMs exist only after fit (the map report has ALUTs): run a fit, map-only is not enough
     local rd=${FIT_DIR:-$W/output_files}
@@ -515,9 +553,10 @@ case "${1:-all}" in
     cpuvis) do_cpuvis;;
     reset) do_reset;;
     busylat) do_busylat;;
+    flagrace) do_flagrace;;
     oracle) do_oracle;;
     load) do_load;;
-    all) do_oracle; do_golden; do_mutants; do_cpuvis; do_reset; do_busylat; do_load; do_resource; [ -n "${HEAVY:-}" ] && { do_stress; do_memwr; };;
+    all) do_oracle; do_golden; do_mutants; do_cpuvis; do_reset; do_busylat; do_flagrace; do_load; do_resource; [ -n "${HEAVY:-}" ] && { do_stress; do_memwr; };;
     p2) do_cpuvis; do_reset; do_busylat; [ -n "${HEAVY:-}" ] && do_memwr;;
     *) echo "usage: $0 oracle|golden|mutants|cpuvis|reset|busylat|load|stress|memwr|resource|p2|all"; exit 2;;
 esac

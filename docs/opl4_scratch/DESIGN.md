@@ -250,17 +250,19 @@ stress 게이트(engine2 lockstep)는 engine3에 못 쓴다. 대신 "K 직전·�
 | 커밋 | 바꾼 것 | 엔진 ALM | 대조 |
 |---|---|---|---|
 | efcc8ea | 믹스 이득을 B 곱셈기(27×27)로: (x·g)>>>4, g = {16,12,8,6,4,3,2,0} — floor까지 pcm_mix_gain과 같음. CPF−3/−2에 L/R, `pcm_valid`는 그대로 frame_cycle 1 | 1,514.5 | g[1] = 13 → sc_pan_mix FAIL(50) |
-| c76854e | keyon·key_retrig·pos_clr·tl_load를 슬롯당 4비트 워드로 MLAB 두 벌. CPU 쓰기가 포트 우선, A의 지우기는 빈 clk에, 그 clk에 CPU가 같은 슬롯에 세운 비트는 남김 | 1,441.5 | 지우기 없음 → FAIL. **세움 우선 마스크를 빼도 PASS** — 같은 clk 경합은 어떤 게이트도 안 봄 |
+| c76854e | keyon·key_retrig·pos_clr·tl_load를 슬롯당 4비트 워드로 MLAB 두 벌. CPU 쓰기가 포트 우선, A의 지우기는 빈 clk에, 그 clk에 CPU가 같은 슬롯에 세운 비트는 남김 | 1,441.5 | 지우기 없음 → FAIL. 세움 우선 마스크를 빼도 golden·cpuvis는 PASS였다 → `flagrace` 게이트로 닫음(아래) |
 | 79c878b | EDF: 시각 두 개(14비트) 대신 "늦음이면 헤더, 앞 프레임이면 헤더, 같은 프레임이면 s_h ≤ s_q + 1" | 1,407.5 | 옛 비교와 모든 rel·슬롯 쌍 전수 비교 0 불일치 |
 | 879e49a | 12비트 오프셋 3(p>>1)+(p&1) = p+(p>>1), 주소를 3입력 덧셈 하나로(A_ADR 없앰, A 끝 1,243 → 1,195); step 시프트 한 방향 | 1,391.0 | — |
 | 2b1e081 | golden에 sc_lfo_long(LFO 속도 7, 3,400프레임): 기존 시나리오는 lfo_cnt 37,500/262,144까지만 가서 vib 접기·부호, AM 접기를 한 번도 안 돌렸다(AM 접기를 뺀 뮤턴트가 22개 모두 PASS) | — | AM 접기 없음 FAIL(556), vib 접기 없음 FAIL(3,180); 879e49a·작업 트리 PASS |
 | 9182bd6 | A 곱셈기(13×16, 곱 레지스터, 상태별 enable): step = (t_x·2^sh)[26:3], AM, 감쇠 배율 = ((0x80 − att[5:0])·2^(9 − att[9:6]))>>1(0x280부터 0). compute_am의 9×9 DSP를 대신해 DSP 2 그대로 | **1,292.0** | vscale 지수 하나 어긋남 → FAIL |
 
 게이트(9182bd6, `/data/_claude/tmp/opl4-scratch/p3/h9182`): golden 23 × {1, 20} 비트 일치, A 끝 최대 1,195; load 지연 6·10·20 비트 일치, 늦음 0, A 끝 1,204; cpuvis 2,627/0, 뮤턴트 32/32; reset 240 PASS·239 FAIL; busylat PASS 2/2; memwr 0 errors. 대조: TB_W1_MUT 23/23 FAIL, K = 2,600 FAIL 2, 지연 120 FAIL(A 끝 2,761).
-SDC(128.86 MHz)를 넣은 단독 fit: 엔진 1,294.5 ALM, setup slack +0.935 ns(slow 100C) — A 곱셈기의 입력 mux 경로 포함.
+SDC(128.86 MHz)를 넣은 단독 fit: 엔진 1,294.5 ALM, setup slack +0.935 ns(slow 100C) — A 곱셈기의 입력 mux 경로 포함. 단독 값이라 전체 설계 배치에서는 P4에서만 의미가 있다.
+
+**`flagrace` 게이트 (handoff 검토 반영, 2026-10-29)**: `tb/tb_flagrace.sv` — 슬롯 0·7·23, retrig·tl_load, A가 플래그를 읽는 clk 기준 −1·0(지우기 clk)·+1에 CPU 쓰기, 다음 방문에서 플래그(0·+1은 남음, −1은 이번 프레임에 합쳐짐). 결과 18/18 PASS, 지우기 clk 충돌 6/6 실제로 일어남. 대조: 세움 우선 마스크 제거(nomask)와 같은 clk에 A 지우기가 포트를 이김(clearwins) 둘 다 0 오프셋 6건 FAIL. 판정은 엔진 플래그(`key_retrig_a`, `tl_load_a`)이고 소리 출력이 아니다. TB용으로 `a_flags_rd` wire를 엔진에 더했다(합성에서 사라짐, fit 1,292.0 그대로).
 
 - **측정 방법의 교훈**: map만 돌리는 ablation(블록을 상수·XOR로 바꿔 ALUT를 봄)은 fit과 맞지 않았다. VIBQ 표를 곱셈기로, TL 비교 하나로, 헤더 주소 3입력 덧셈, late 증가 한 곳 — map은 late −33 ALUT를 보였지만 fit에서는 넷 다 0 이상(합쳐서 +40 ALM)이라 되돌렸다. 비슬롯 레지스터를 RAM-R로 옮긴 것도 레지스터 −135인데 ALUT +29, ALM +15라 되돌렸다(reset 게이트 숫자도 그대로). fit은 같은 넷리스트에서 재현되지만, 덧셈을 XOR로 바꾼 ablation이 오히려 ALUT를 늘리는 등(next_pos +47) "블록 비용"으로 읽을 수 없다. 판단은 fit의 엔진 ALM과 ALUT 둘 다로 한다.
-- **남은 것**: 블록을 통째로 떼는 fit ablation에서 hf_pending −18.5, B 바이트 캡처 −27, a_def +9 ALM — 하나하나가 30 아래다. 전체 설계 환산 1,292 × 1.055 ≈ 1,363, 목표 1,200까지 약 160. 남은 면적은 A 상태기계의 레지스터마다 붙은 상태별 입력 mux에 퍼져 있다고 본다(측정 아님). 더 줄이려면 A를 공용 ALU + 레지스터 파일(마이크로코드) 구조로 다시 짜야 할 것으로 보인다.
+- **남은 것**: 블록을 통째로 떼는 fit ablation에서 hf_pending −18.5, B 바이트 캡처 −27, a_def +9 ALM — 하나하나가 30 아래다. 전체 설계 환산은 engine2 하나에서 나온 비율(×1.055)이라 engine3(M10K·MLAB 다수)에 맞는다는 근거가 없다 — 1,292 × 1.055 ≈ 1,363은 추정이고 P4 전체 fit 값으로 바꾼다. 남은 면적은 A 상태기계의 레지스터마다 붙은 상태별 입력 mux에 퍼져 있다고 본다(측정 아님). 더 줄이려면 A를 공용 ALU + 레지스터 파일(마이크로코드) 구조로 다시 짜야 할 것으로 보인다.
 - `dbg_late_cnt`는 전체 설계에서 어디에도 연결되지 않아 잘린다. 단독 wrapper는 이것을 살려 두므로 단독 값이 그만큼(카운터 16비트) 크다.
 
 ## 12. 열린 것

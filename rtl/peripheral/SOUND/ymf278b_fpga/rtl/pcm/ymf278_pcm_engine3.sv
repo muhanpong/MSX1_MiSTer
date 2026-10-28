@@ -328,6 +328,7 @@ wire        keyon_cur   = ev_cpu[3];
 wire        key_retrig_a = ev_rd[0];
 wire        pos_clr_a    = ev_rd[1];
 wire        tl_load_a    = ev_rd[2];
+wire        a_flags_rd;               // pass A reads a_slot's flags this clk (tb_flagrace)
 //  the CPU write's new word, and the flags it sets (ev_cs)
 logic [3:0] ev_cw;
 logic [2:0] ev_cs;
@@ -971,6 +972,8 @@ always_comb begin
     pd_waddr = pd_rv ? {q_slot, 1'b0, q_k} + 8'd2 : {a_slot, a_pd_w};
     pd_wd    = pd_rv ? {7'd0, 1'b1, mem_rd_data16b, mem_rd_data16} : a_pd_d;
 end
+
+assign a_flags_rd = (a_state == A_LD) && (a_lcnt == 5'd2);
 
 // FIFO push from A_ENQ: the lowest pair still to send
 wire [1:0]  a_qk   = t_left[0] ? 2'd0 : t_left[1] ? 2'd1 : t_left[2] ? 2'd2 : 2'd3;
