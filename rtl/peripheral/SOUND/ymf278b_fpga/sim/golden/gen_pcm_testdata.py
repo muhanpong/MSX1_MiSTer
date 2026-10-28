@@ -152,6 +152,19 @@ slotw(L, 1, 3, 5, (3 << 3) | 5)                   # lfo speed 3, vib depth 5
 slotw(L, 1, 3, 9, 4)                              # AM depth 4
 scripts['sc_lfo.txt'] = (L, 1500)
 
+# S5b: a whole LFO period.  sc_lfo's speed 3 reaches only lfo_cnt 37,500 of 262,144 in
+# 1,500 frames, so the vibrato fold (bit 16), its sign and the tremolo fold (bit 17)
+# never run there.  Speed 7 (42 per frame) passes bit 17 at frame 3,121; slot 8 at
+# speed 6 with other depths runs alongside.
+L = []
+keyon(L, 1, 3, wave=0, fn=0x100, oct_=-2, lfo_off=False)
+slotw(L, 1, 3, 5, (7 << 3) | 7)                   # lfo speed 7, vib depth 7
+slotw(L, 1, 3, 9, 7)                              # AM depth 7
+keyon(L, 1, 8, wave=1, fn=0x1C0, oct_=-1, tl=6, pan=12, lfo_off=False)
+slotw(L, 1, 8, 5, (6 << 3) | 4)
+slotw(L, 1, 8, 9, 5)
+scripts['sc_lfo_long.txt'] = (L, 3400)
+
 # S6: pitch-bend bombardment — vgmplay clock-compensation pattern: keyed slot
 # gets field-1 (FN low) writes every few frames.  Field 1 must NOT reload the
 # header (openMSX case 1); the old RTL reloaded+muted on every write.
