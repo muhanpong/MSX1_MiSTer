@@ -286,6 +286,23 @@ SDC(128.86 MHz)를 넣은 단독 fit: 엔진 1,294.5 ALM, setup slack +0.935 ns(
 
 **실행하지 않은 것**: 보드(실기) 시험, OPL4 감지·vgmplay fullsys, 기능 뮤턴트 생성기 engine3판, 커버리지 훑기(handoff 권고, 선택).
 
+**커버리지 훑기 (105dd00)**: 기존 23 시나리오(최장 3,400프레임)에서 EG 카운터 하위 12비트만 쓰는 뮤턴트와 LFO를 2^18에서 멈추는 뮤턴트가 PASS → golden `sc_eg_long`(9,000프레임; 슬롯 9 decay rate 6 = shift 11, 슬롯 2 LFO 속도 7이 6,242에서 wrap)으로 닫음: engine3 PASS, 두 뮤턴트 FAIL(9,589 / 5,262). TL 램프 목표 초과·12비트 쌍 걸침 제거 뮤턴트는 기존 집합이 이미 잡음.
+
+**시드 sweep과 보드 rbf (사용자 결정 B: 시드별 사본 병렬, 2026-10-29)**: sdram128 2a237cb(= 9b1cea1 소스)의 rsync 사본 6개 + 이식 패치, `PCM_ENGINE3=1 REV=MSX1_V9968 SEED=s ASM=1 tools/sdram128/compile.sh` (`/data/_claude/tmp/opl4-scratch/p4/seeds6`). 대조는 msx1-handoff의 같은 시드 engine2 sweep(9b1cea1).
+
+| 시드 | engine3 최소 setup slack | engine2 (본선) |
+|---|---|---|
+| 25 | **+0.061** (hdmi) PASS | +0.083 (clk_sdram) PASS — 본선 20261029a |
+| 23 | +0.022 (clk_vdp) PASS | +0.027 (clk_vdp) PASS |
+| 18 | −0.001 (clk_sdram) | −0.069 (clk_sdram) |
+| 22 | −0.078 (clk_sdram) | −0.072 (clk_vdp) |
+| 24 | −0.088 (clk_sdram) | −0.097 (clk_sdram) |
+| 26 | −0.412 (clk_vdp, TNS −8.24) | −0.709 (clk_vdp, TNS −6.06) |
+
+- 두 엔진이 같은 시드에서 통과·실패한다: 위반은 엔진과 무관한 배치 변동. 시드 25: engine3 1,290.7 ALM, 장치 32,429 ALM(77 %), RAM 326, DSP 62, hold 최소 0.215. 보드 rbf `MSX1_20261029b_engine3_105dd00.rbf`(md5 50199067285cf00945b330d7a5f0ba98) — 본선 rbf 20261029a와 시드·소스가 같고 PCM 엔진만 다르다.
+- 이식에 더 필요했던 것 둘(이 트리에도 넣음): `tools/sdram128/mk_v9968_qsf.sh`가 빌드마다 MSX1.qsf에서 qsf를 다시 만들어 qsf의 매크로가 사라짐 → `PCM_ENGINE3=1` 옵션(sdram128 판은 V9968_UPSTREAM 줄이 있어 그 판 기준 패치를 따로 둔다); `check_timing.sh map`이 engine2의 PIPE 상태·MLAB 이름을 요구해 engine3 빌드를 거부 → engine3이면 그 메모리 9개(MLAB dirty_a/b·ev_a/b·fq_m·prev_m, 블록 RAM u_regram·u_rams·u_rampd)와 10999 0을 이름으로 확인. 대조: map 보고서에서 ev_a 줄을 지우면 FAIL.
+- 이식 패치: `git diff b90a9d49 -- <PCM 8파일 + check_timing.sh>` + sdram128판 mk_v9968_qsf.sh 패치, sdram128 2a237cb 사본에 둘 다 apply --check 통과.
+
 ## 12. 열린 것
 
 1. A의 LOAD를 격 clk로 할지(CPU readback 1 clk 보장, A 50 clk)와 연속으로 할지(A 40 clk, readback 최대 10 clk 늦음 → cpuvis 규칙 변경 필요). 권장: 격 clk.

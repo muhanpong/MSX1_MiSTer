@@ -7,4 +7,9 @@ cd "$(dirname "$0")/../.."
 grep -q 'QIP_FILE rtl/video/video.qip' MSX1.qsf || { echo "MSX1.qsf has no video.qip line"; exit 1; }
 sed -e 's|QIP_FILE rtl/video/video.qip|QIP_FILE rtl/video/video_v9968.qip|' MSX1.qsf > MSX1_V9968.qsf
 printf '\n# the V9968 build\nset_global_assignment -name VERILOG_MACRO "MSX_V9968=1"\n' >> MSX1_V9968.qsf
+#  PCM_ENGINE3=1 tools/sdram128/mk_v9968_qsf.sh: the from-scratch PCM engine (opl4_scratch engine3)
+if [ "${PCM_ENGINE3:-0}" = 1 ]; then
+    printf 'set_global_assignment -name VERILOG_MACRO "PCM_ENGINE3=1"\n' >> MSX1_V9968.qsf
+    echo "PCM_ENGINE3=1: PCM engine3"
+fi
 echo "MSX1_V9968.qsf written ($(wc -l < MSX1_V9968.qsf) lines)"
