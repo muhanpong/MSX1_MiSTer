@@ -303,6 +303,8 @@ SDC(128.86 MHz)를 넣은 단독 fit: 엔진 1,294.5 ALM, setup slack +0.935 ns(
 - 이식에 더 필요했던 것 둘(이 트리에도 넣음): `tools/sdram128/mk_v9968_qsf.sh`가 빌드마다 MSX1.qsf에서 qsf를 다시 만들어 qsf의 매크로가 사라짐 → `PCM_ENGINE3=1` 옵션(sdram128 판은 V9968_UPSTREAM 줄이 있어 그 판 기준 패치를 따로 둔다); `check_timing.sh map`이 engine2의 PIPE 상태·MLAB 이름을 요구해 engine3 빌드를 거부 → engine3이면 그 메모리 9개(MLAB dirty_a/b·ev_a/b·fq_m·prev_m, 블록 RAM u_regram·u_rams·u_rampd)와 10999 0을 이름으로 확인. 대조: map 보고서에서 ev_a 줄을 지우면 FAIL.
 - 이식 패치: `git diff b90a9d49 -- <PCM 8파일 + check_timing.sh>` + sdram128판 mk_v9968_qsf.sh 패치, sdram128 2a237cb 사본에 둘 다 apply --check 통과.
 
+**보드 청음 (2026-10-29, 사용자)**: `MSX1_20261029b_engine3_105dd00.rbf` — "청음으로는 훌륭합니다." 사용자 판정이고 항목별 결과(A/B 목록: 감지, YRW801 음색, 재생 중 업로드, 짧은 루프, FM+PCM, warm reset)는 받지 않았다. 측정(녹음 비교, 업로드 시간)은 하지 않았다.
+
 ## 12. 열린 것
 
 1. A의 LOAD를 격 clk로 할지(CPU readback 1 clk 보장, A 50 clk)와 연속으로 할지(A 40 clk, readback 최대 10 clk 늦음 → cpuvis 규칙 변경 필요). 권장: 격 clk.
