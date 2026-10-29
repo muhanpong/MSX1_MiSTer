@@ -16,8 +16,12 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *A separate build (Quartus revision `MSX1_V9968`) with HRA!'s V9968 RTL as the internal VDP, on every machine type; 256KB VRAM in SDRAM; 31 kHz output.*
 - **Geo3D v2.0.0** — Alex Moncks의 3D 엔진, 포트 9Dh/9Fh, 42.95MHz
   *Alex Moncks' 3D engine on ports 9Dh/9Fh at 42.95 MHz.*
-- **SDRAM 128.86MHz** — 고정 12클럭 TDM 컨트롤러(`rtl/peripheral/sdram_tdm.sv`), V9968 VRAM은 bank 3 전용 슬롯. OPL4 PCM 엔진도 이 클럭에 맞춰 파이프라인화
-  *A fixed 12-clock TDM SDRAM controller; the V9968's VRAM has its own slot in bank 3. The OPL4 PCM engine is pipelined for this clock.*
+- **SDRAM 128.86MHz** — 고정 12클럭 TDM 컨트롤러(`rtl/peripheral/sdram_tdm.sv`), V9968 VRAM은 bank 3 전용 슬롯
+  *A fixed 12-clock TDM SDRAM controller; the V9968's VRAM has its own slot in bank 3.*
+- **OPL4 PCM engine3** — 새로 만든 PCM 엔진(20261029d부터 기본). 슬롯 제어를 프레임 경계에 몰아 돌리고 웨이브 데이터는 정해진 시각에 소비한다. openMSX(`YMF278.cc`) 기준 골든 23개 시나리오와 비트 단위 일치, ALM 2,815 → 1,291. 이전 엔진은 `PCM_ENGINE2=1 tools/sdram128/mk_v9968_qsf.sh`로 빌드
+  *A rebuilt PCM engine (default from 20261029d): slot control bunched at the frame edge, wave data consumed at fixed times; bit-exact with the openMSX-based golden model on 23 scenarios; 2,815 → 1,291 ALM. Build the previous engine with `PCM_ENGINE2=1 tools/sdram128/mk_v9968_qsf.sh`.*
+- **Geo3D 채우기 / fill** — OSD `Geo3D fill (SCREEN 8)`: LINE(기본) / HMMV. SCREEN 8에서 면의 가로줄을 HMMV로 칠해 Geo3D 그리기가 약 2배 빨라진다(이 코어 전용 옵션)
+  *OSD `Geo3D fill (SCREEN 8)`: LINE (default) / HMMV. In SCREEN 8 a face row goes out as one HMMV, about twice as fast (an option of this core only).*
 - **OSD** — `VDP command speed V9968/V9938`(V9938 속도에 맞춘 명령 대기), `Scandoubler Fx`의 CRT 25/50/75%가 V9968 자체 스캔라인으로 동작
   *`VDP command speed V9968/V9938` (V9938-paced command waits); the CRT 25/50/75% choices of `Scandoubler Fx` drive the V9968's own scanlines.*
 - **upstream V9968 수정 / fixes to upstream V9968** — 모두 `rtl/video/v9968/ORIGIN.md`에 재현 방법과 함께 기록. upstream 보고 초안은 `docs/upstream_issues_v9968_20261022.md`
@@ -26,6 +30,7 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   - R#9 LN을 프레임 중간에 바꾸면 화면 시작이 10줄 움직임(224라인 오버스캔) *(a mid-frame R#9 LN change moved the display start by 10 lines)*
   - status 읽기와 같은 클럭의 인터럽트 이벤트 유실, 그리고 한 클럭 늦은 status 래치로 인한 FH/F 유실 *(interrupt events lost on the clock of a status read, and FH/F lost through the one-clock-late status latch)*
   - 프레임 인터럽트 시점에 FH가 지워져 늦게 S#1을 읽는 라인 인터럽트 처리가 FH=0을 봄 — ASO 224(R800) 검은 화면의 원인, 실기 확인 *(FH was cleared at the frame interrupt, so a line-interrupt handler that reads S#1 late saw FH = 0 -- the cause of ASO 224's black screen; confirmed on hardware)*
+  - IE1이 꺼져 있어도 FH가 세워짐 — 위 수정 뒤 VBLANK까지 남아 Knightmare 224 v2가 시작되지 않던 원인(20261024b~20261027a), 20261029a부터 수정, 실기 확인 *(FH was set with IE1 off; after the fix above it survived into VBLANK and Knightmare 224 v2 did not start on 20261024b-20261027a; fixed from 20261029a, confirmed on hardware)*
 - **R800/터보 VDP 대기 / R800 and turbo VDP waits** — R800의 VDP 대기(8.66µs)는 실기 터보R처럼 98h–9Bh에만 걸린다. Geo3D 포트 9Dh/9Fh는 대기 없이 동작(R800에서 Geo3D가 빨라짐). V9968 빌드의 터보 Z80에는 VDP 간격 대기가 없다(V9968 버스가 요청을 잃지 않음). OSD `R800 VDP access wait`: 8.66µs(실기, 기본), None, 1.0–7.5µs
   *The R800 VDP wait (8.66 µs) covers 98h–9Bh only, as on a turbo R; Geo3D's 9Dh/9Fh run unpaced (Geo3D is faster on the R800). A turbo Z80 gets no VDP spacing in the V9968 build (the V9968 bus cannot drop a request). OSD `R800 VDP access wait`: 8.66 µs (real, default), None, 1.0–7.5 µs.*
 - **화면 폭 / Width** — upstream 8a37b33의 가로 표시 폭(1600→1440 클럭)을 반영
@@ -34,6 +39,9 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *Quartus 17.0; `SEED=N` picks the fitter seed. The plain V9958 build is `tools/sdram128/compile.sh`.*
 - **Geo3D 데모 / demos** — 내장 98h 판을 쓴다. ASCII16 롬은 자동 판별이 틀리므로 OSD 매퍼를 `ASCII16X`로 고르거나 파일 오프셋 10h에 `ASCII16X` 헤더를 넣는다
   *Use the internal 98h builds. Auto-detect gets these ASCII16 ROMs wrong: pick `ASCII16X` in the OSD mapper menu, or put an `ASCII16X` header at file offset 10h.*
+- **릴리스 / Releases** (`releases/`) — `MSX1_20261029d_sdram128v9968_923140c.rbf`: 현재판(engine3, V9968 FH 수정, Geo3D HMMV 옵션). `MSX1_20261029c_sdram128v9968_9b1cea1.rbf`: 같은 V9968 수정에 이전 PCM 엔진(engine2), 비교용
+  *`20261029d`: current (engine3, the V9968 FH fix, the Geo3D HMMV option). `20261029c`: the same V9968 fixes with the previous PCM engine (engine2), for comparison.*
+  이전 rbf(20261025b, 20261027a, 20261029a)도 그대로 둔다 *(the earlier rbfs stay in `releases/`)*
 - **라이선스 / Licence** — V9968 RTL 파일 헤더는 HRA!의 3조항 조건(**허가 없는 상업적 이용 금지** 포함), Geo3D는 MIT
   *The V9968 RTL file headers carry HRA!'s 3-clause terms (including **no commercial use without written permission**); Geo3D is MIT.*
 
