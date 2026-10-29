@@ -305,6 +305,8 @@ SDC(128.86 MHz)를 넣은 단독 fit: 엔진 1,294.5 ALM, setup slack +0.935 ns(
 
 **보드 청음 (2026-10-29, 사용자)**: `MSX1_20261029b_engine3_105dd00.rbf` — "청음으로는 훌륭합니다." 사용자 판정이고 항목별 결과(A/B 목록: 감지, YRW801 음색, 재생 중 업로드, 짧은 루프, FM+PCM, warm reset)는 받지 않았다. 측정(녹음 비교, 업로드 시간)은 하지 않았다.
 
+**본선 반영 (2026-10-29, 사용자 결정, msx1-handoff가 sdram128에 커밋)**: sdram128 923140c "engine3 becomes the mainline engine" — `port/pcm_engine3_port.patch` 그대로 + MSX1.qsf에 `PCM_ENGINE3=1`(모든 리비전 기본), engine2 A/B는 `PCM_ENGINE2=1 tools/sdram128/mk_v9968_qsf.sh`(이 트리의 `PCM_ENGINE3=1` 옵션과 반대 방향). sdram128의 engine3 파일은 이 트리와 바이트 단위로 같다(확인 2026-10-29). 릴리스 rbf 20261029d = 5c92c84, SEED 27(+0.097 ns clk_vdp). 본선에는 opl4 하네스(golden 등)가 없으므로 engine3를 고칠 일은 이 트리에서 고치고 게이트를 돈 뒤 port 패치로 옮긴다.
+
 ## 12. 열린 것
 
 1. A의 LOAD를 격 clk로 할지(CPU readback 1 clk 보장, A 50 clk)와 연속으로 할지(A 40 clk, readback 최대 10 clk 늦음 → cpuvis 규칙 변경 필요). 권장: 격 clk.
