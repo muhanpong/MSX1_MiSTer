@@ -1,0 +1,14 @@
+diff --git a/tools/sdram128/mk_v9968_qsf.sh b/tools/sdram128/mk_v9968_qsf.sh
+index a5ad9d4..df4859c 100755
+--- a/tools/sdram128/mk_v9968_qsf.sh
++++ b/tools/sdram128/mk_v9968_qsf.sh
+@@ -15,4 +15,9 @@ if [ "${V9968_UPSTREAM:-0}" = 1 ]; then
+     printf 'set_global_assignment -name VERILOG_MACRO "V9968_UPSTREAM=1"\n' >> MSX1_V9968.qsf
+     echo "V9968_UPSTREAM=1: upstream V9968/Geo3D behaviour"
+ fi
++#  PCM_ENGINE3=1 tools/sdram128/mk_v9968_qsf.sh: the from-scratch PCM engine (opl4_scratch engine3)
++if [ "${PCM_ENGINE3:-0}" = 1 ]; then
++    printf 'set_global_assignment -name VERILOG_MACRO "PCM_ENGINE3=1"\n' >> MSX1_V9968.qsf
++    echo "PCM_ENGINE3=1: PCM engine3"
++fi
+ echo "MSX1_V9968.qsf written ($(wc -l < MSX1_V9968.qsf) lines)"
