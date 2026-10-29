@@ -22,6 +22,9 @@ set_global_assignment -name LAST_QUARTUS_VERSION "17.1.0 Lite Edition"
 # (2026-10-22: renamed from MOONSOUND_DIAG, which did not cover the two rings).
 # The overlay's pause / save icons and SCC_DIAG (per-channel mutes) are not DEBUG.
 set_global_assignment -name VERILOG_MACRO "DEBUG=1"
+# OPL4 PCM engine: engine3 (the from-scratch engine, opl4_scratch; 2026-10-29). Remove this
+# line (or build with PCM_ENGINE2=1 tools/sdram128/mk_v9968_qsf.sh) for engine2.
+set_global_assignment -name VERILOG_MACRO "PCM_ENGINE3=1"
 # ---- SCC diagnostics -------------------------------------------------------
 # Two switches, cheap and expensive.
 #

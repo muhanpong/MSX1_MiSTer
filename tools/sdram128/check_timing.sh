@@ -40,6 +40,20 @@ else
         || fail "PLL output 0 ($PLLV) is not 128.863620 MHz"
 fi
 
+if grep -q "ymf278_pcm_engine3:u_pcm" $MAP; then
+#  engine3 (opl4_scratch, PCM_ENGINE3): no PIPE states; its memories by name -- six MLABs
+#  and three block RAMs (RAM-R, RAM-S, RAM-PD) -- and no 10999 inside it
+echo "PCM engine: engine3"
+ram=$(awk '/; Analysis & Synthesis RAM Summary/,/^$/' $MAP | grep "ymf278_pcm_engine3:u_pcm")
+have=$(grep " MLAB " <<< "$ram" | awk -F';' '{print $2}' | sed 's/.*u_pcm|altdpram://; s/_rtl_0.*//' | sort -u)
+miss=""; for w in dirty_a dirty_b ev_a ev_b fq_m prev_m; do grep -qxF "$w" <<< "$have" || miss="$miss $w"; done
+for w in u_regram u_rams u_rampd; do grep -q "|pcm_[a-z]*:$w|altsyncram" <<< "$ram" || miss="$miss $w"; done
+echo "PCM engine3 memories: $(wc -l <<< "$ram") in the RAM summary, 9 required"
+[ -z "$miss" ] || fail "PCM engine3 memories missing:$miss"
+noinf=$(grep "(10999)" $MAP | grep -c "ymf278_pcm_engine3")
+echo "PCM arrays Quartus could not infer as memory (10999): $noinf"
+[ "$noinf" -eq 0 ] || fail "PCM array built as flops"
+else
 pipe=$(grep -o "sl_state\.SL_\(ADV0\|CHIT0\|INTERP2\|INTERP3\|EGPRE\|EGPRE2\|GAIN2\|MUL1B\|MUL2B\|PANB\)\b" $MAP | sort -u | wc -l)
 echo "PCM pipeline states synthesised: $pipe / 10"
 [ "$pipe" -eq 10 ] || fail "PIPE is off in this build (check CLK_HZ passed to ymf278b_top)"
@@ -62,9 +76,11 @@ noinf=$(grep "(10999)" $MAP | grep -c "ymf278_pcm_engine2")
 echo "PCM arrays Quartus could not infer as memory (10999): $noinf"
 [ "$noinf" -eq 0 ] || { grep "(10999)" $MAP | grep "ymf278_pcm_engine2" | sed 's/^/    /' | cut -c1-160; fail "PCM array built as flops"; }
 
+fi
+
 if [ "$MODE" = map ]; then
     echo "════════════════════════════════"
-    [ "$FAIL" -eq 0 ] && echo "RESULT PASS: map stage is the 128.86 MHz PIPE study (fit may go on)" \
+    [ "$FAIL" -eq 0 ] && echo "RESULT PASS: map stage is the 128.86 MHz build it claims to be (fit may go on)" \
                      || echo "RESULT FAIL: see above -- do not fit this"
     exit "$FAIL"
 fi

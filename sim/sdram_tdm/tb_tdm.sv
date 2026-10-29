@@ -37,6 +37,8 @@ module tb;
     int switch_n = 0;
     bit stock_now = 0;
     int ven = 1, vbusy = 60, vrun = 12, vrun_n = 0;
+    int ch4ser = 0;
+    int ch4_hist [0:1023];
     int e0_vcnt; bit e0_urg, e0_early; bit [2:0] e0_cmask;      // diagnosis of a LATE read                          // +ven=0: no VRAM port (MSX1.sv today: v_en = 0)
     initial begin
         void'($value$plusargs("m128=%d", m128));
@@ -51,7 +53,8 @@ module tb;
         void'($value$plusargs("r800wr=%d", r800wr));
         void'($value$plusargs("ven=%d", ven));
         void'($value$plusargs("vbusy=%d", vbusy));
-        void'($value$plusargs("vrun=%d", vrun));   // at most this many V-request frames in a row (0 = no cap)
+        void'($value$plusargs("vrun=%d", vrun));
+        void'($value$plusargs("ch4ser=%d", ch4ser));   // 1: ch4 back to back (the PCM engine's serial reads), latency histogram   // at most this many V-request frames in a row (0 = no cap)
         void'($urandom(seed));
     end
 
@@ -68,7 +71,7 @@ module tb;
     wire   [7:0] c_dout [4];
     wire         c_ready[4];
     wire         ch2_hit, ch2_rdtog, ch3_done, ch2_busy;
-    wire  [15:0] ch4_dout16;
+    wire  [15:0] ch4_dout16, ch4_dout16b;
 
     logic        v_req = 0, v_we = 0;
     logic [15:0] v_addr = 0;
@@ -87,7 +90,7 @@ module tb;
         .ch2_rdtog(ch2_rdtog), .ch2_hit(ch2_hit), .ch2_busy(ch2_busy),
         .ch3_addr(c_addr[2]), .ch3_dout(c_dout[2]), .ch3_din(c_din[2]), .ch3_req(c_req[2]), .ch3_rnw(c_rnw[2]), .ch3_ready(c_ready[2]),
         .ch3_done(ch3_done),
-        .ch4_addr(c_addr[3]), .ch4_dout(c_dout[3]), .ch4_dout16(ch4_dout16), .ch4_din(c_din[3]), .ch4_req(c_req[3]), .ch4_rnw(c_rnw[3]), .ch4_ready(c_ready[3]),
+        .ch4_addr(c_addr[3]), .ch4_dout(c_dout[3]), .ch4_dout16(ch4_dout16), .ch4_dout16b(ch4_dout16b), .ch4_din(c_din[3]), .ch4_req(c_req[3]), .ch4_rnw(c_rnw[3]), .ch4_ready(c_ready[3]),
         .v_req(v_req), .v_we(v_we), .v_addr(v_addr), .v_wdata(v_wdata), .v_be(v_be),
         .v_grant(v_grant), .v_rdata(v_rdata), .v_rvalid(v_rvalid)
     );
@@ -128,15 +131,23 @@ module tb;
 
     byte ref_mem [int];
     int  done [4], lat_max [4], issued [4], nread [4], nhit = 0;
+    int  nw1 = 0;                // ch4 word1 (ch4_dout16b) checks: both bytes of the other word known
     int  nlate = 0, stock_lat_max = 0;
     int  gclk = 0;                       // clocks since start, for the T-state grid
     int  gph;                            // the grid's phase against the TDM frame: per seed
     initial begin #1; gph = $urandom % 36; void'($value$plusargs("gph=%d", gph)); end
     always @(posedge clk) gclk++;
+    int nurg = 0;
+    always @(posedge clk) if (dut.urg_blk && (dut.ps[2] || dut.ps[6])) nurg++;
 
     task automatic agent(int ag);
         int r = 0;
         logic [26:0] last = 0;
+        //  ch4 fills whole 4-byte blocks and reads them back, so a read's other word
+        //  (ch4_dout16b) is known
+        int fill_n = 0;
+        logic [24:0] fill_blk = 0;
+        logic [24:0] blks [$];
 
         wait (dut.run); repeat (30) @(posedge clk);
         forever begin
@@ -147,13 +158,23 @@ module tb;
             bit  started;
             byte expect_v;
             bit  have_expect;
-            if (($urandom % 100) >= busy) begin @(posedge clk); continue; end
+            if (!(ag == 3 && ch4ser) && ($urandom % 100) >= busy) begin @(posedge clk); continue; end
             ad  = region_addr(ag, r++);
             //  ch2 reads back what it just touched half the time: the read cache's hits
             if (ag == 1 && last != 0 && ($urandom % 2 == 0)) ad = last;
             rnw = ($urandom % 3) != 0;
             d   = $urandom;
             last = ad;
+            if (ag == 3) begin
+                if (fill_n > 0 && fill_n < 4) begin
+                    ad = {fill_blk, 2'(fill_n)}; rnw = 0; fill_n++;
+                    if (fill_n == 4) blks.push_back(fill_blk);
+                end else if (blks.size() > 0 && $urandom % 2 == 0) begin
+                    ad = {blks[$urandom % blks.size()], 2'($urandom)}; rnw = 1;
+                end else if (!rnw) begin
+                    fill_blk = ad[26:2]; ad = {fill_blk, 2'd0}; fill_n = 1;
+                end
+            end
             have_expect = ref_mem.exists(int'(ad));
             expect_v = have_expect ? ref_mem[int'(ad)] : 0;
             // a read of a never-written byte proves nothing; write it first
@@ -247,12 +268,22 @@ module tb;
             end
             c_req[ag] = 0;
             if (t0 > lat_max[ag]) lat_max[ag] = t0;
+            if (ag == 3) ch4_hist[t0 > 1023 ? 1023 : t0]++;
             done[ag]++;
             if (rnw) begin
                 nread[ag]++;
                 #1;
                 if (c_dout[ag] !== expect_v)
                     fail($sformatf("ch%0d read %h = %h, expected %h", ag + 1, ad, c_dout[ag], expect_v));
+                //  ch4 word1: the other word of the aligned pair, [7:0] = its even byte
+                if (ag == 3) begin
+                    automatic int ob = int'({ad[26:1] ^ 26'd1, 1'b0});
+                    if (ref_mem.exists(ob) && ref_mem.exists(ob + 1)) begin
+                        nw1++;
+                        if (ch4_dout16b !== {ref_mem[ob + 1], ref_mem[ob]})
+                            fail($sformatf("ch4 word1 of %h = %h, expected %02h%02h", ad, ch4_dout16b, ref_mem[ob + 1], ref_mem[ob]));
+                    end
+                end
             end else ref_mem[int'(ad)] = d;
             @(posedge clk);
         end
@@ -364,13 +395,27 @@ module tb;
         $display("TDM m128=%0d busy=%0d seed=%0d cycles=%0d", m128, busy, seed, ncyc);
         for (int i = 0; i < 4; i++)
             $display("  ch%0d: done=%0d reads=%0d max latency=%0d clk", i + 1, done[i], nread[i], lat_max[i]);
+        $display("  ch4 word1 checked=%0d", nw1);
+        begin
+            int tot = 0, c = 0, med = 0, p99 = 0, p999 = 0, mx = 0;
+            for (int i = 0; i < 1024; i++) tot += ch4_hist[i];
+            for (int i = 0; i < 1024; i++) if (ch4_hist[i] != 0) begin
+                mx = i;
+                if (c < (tot + 1) / 2 && c + ch4_hist[i] >= (tot + 1) / 2) med = i;
+                if (c < (tot * 99 + 99) / 100 && c + ch4_hist[i] >= (tot * 99 + 99) / 100) p99 = i;
+                if (c < (tot * 999 + 999) / 1000 && c + ch4_hist[i] >= (tot * 999 + 999) / 1000) p999 = i;
+                c += ch4_hist[i];
+            end
+            $display("  ch4 latency (req -> done, clk): n %0d median %0d p99 %0d p99.9 %0d max %0d | urgent VRAM-chip refresh G decisions %0d",
+                     tot, med, p99, p999, mx, nurg);
+        end
         $display("  ch2 cache hits=%0d  V: granted=%0d reads checked=%0d refused=%0d", nhit, vdone, vreads, vden);
         if (stock) $display("  ch2 stock: grid phase %0d: LATE=%0d  completion max E0+%0d (deadline E0+%0d)", gph, nlate, stock_lat_max, dl);
         $display("  chip: ACT=%0d READ=%0d WRITE=%0d REFRESH=%0d ras_lockout=%0d errors=%0d",
                  chip2.nact, chip2.nrd, chip2.nwr, chip2.nref, chip2.ras_lockout, chip2.errs);
         if (dut.ch2_ovf) $display("  ch2 queue overflow: a write was lost");
         if (bad == 0 && !dut.ch2_ovf && chip2.errs == 0 && done[0] > 0 && done[1] > 0 && done[2] > 0 && done[3] > 0
-            && (vreads > 0 || ven == 0) && chip2.nref > 0 && nread[1] > 0)
+            && (vreads > 0 || ven == 0) && chip2.nref > 0 && nread[1] > 0 && nw1 > 0)
             $display("TDM RESULT PASS");
         else
             $display("TDM RESULT FAIL (tb errors %0d, chip errors %0d)", bad, chip2.errs);

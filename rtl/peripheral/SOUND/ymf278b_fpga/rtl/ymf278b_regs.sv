@@ -4,7 +4,9 @@
 `default_nettype none
 
 module ymf278b_regs #(
-    parameter int CLK_HZ = 33868800
+    parameter int CLK_HZ = 33868800,
+    //  reg 6 write BUSY / WAIT floor in clk cycles (see the note at the localparams)
+    parameter int MEM_WRITE_DELAY = 1024
 ) (
     input  wire        clk,
     input  wire        rst_n,
@@ -79,7 +81,9 @@ localparam int MEM_READ_DELAY         = 38;
 // exception occurred." while streaming from its mapper buffer on ch2).  With
 // the watchdog gone, long DI-held otir stretches are harmless, so the gentle
 // pacing is the safe choice again.
-localparam int MEM_WRITE_DELAY        = 1024;
+// (MEM_WRITE_DELAY is now a parameter: 1024 with engine2, which releases its BUSY
+// when the write is issued; engine3 holds BUSY until the write has landed and runs
+// at openMSX's 28 master clocks -- ymf278b_top.sv.)
 localparam int LOAD_DELAY             = 10000;
 
 localparam int DELAY_W = $clog2(LOAD_DELAY + 1);

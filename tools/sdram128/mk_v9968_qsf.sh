@@ -15,4 +15,10 @@ if [ "${V9968_UPSTREAM:-0}" = 1 ]; then
     printf 'set_global_assignment -name VERILOG_MACRO "V9968_UPSTREAM=1"\n' >> MSX1_V9968.qsf
     echo "V9968_UPSTREAM=1: upstream V9968/Geo3D behaviour"
 fi
+#  PCM_ENGINE2=1 tools/sdram128/mk_v9968_qsf.sh: the previous PCM engine (engine2) instead of
+#  engine3, which MSX1.qsf selects by default (VERILOG_MACRO PCM_ENGINE3) -- the A/B control.
+if [ "${PCM_ENGINE2:-0}" = 1 ]; then
+    sed -i '/VERILOG_MACRO "PCM_ENGINE3=1"/d' MSX1_V9968.qsf
+    echo "PCM_ENGINE2=1: PCM engine2"
+fi
 echo "MSX1_V9968.qsf written ($(wc -l < MSX1_V9968.qsf) lines)"

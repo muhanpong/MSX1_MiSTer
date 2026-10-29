@@ -1327,6 +1327,7 @@ msx MSX
    .pcm_sdram_din(pcm_sdram_din),
    .pcm_sdram_dout(pcm_sdram_dout),
    .pcm_sdram_dout16(pcm_sdram_dout16),
+   .pcm_sdram_dout16b(pcm_sdram_dout16b),
    .pcm_sdram_ready(pcm_sdram_ready),
    .pcm_rom_base(pcm_rom_base),
    // MoonSound mute / debug
@@ -1712,6 +1713,7 @@ wire        pcm_sdram_rnw;
 wire  [7:0] pcm_sdram_din;
 wire  [7:0] pcm_sdram_dout;
 wire [15:0] pcm_sdram_dout16;
+wire [15:0] pcm_sdram_dout16b;   // the read's other word in its aligned pair (BL2 word1)
 wire        pcm_sdram_ready;
 
 // PCM ROM base address in SDRAM — driven by memory_upload when loading yrw801.rom
@@ -1763,6 +1765,7 @@ sdram_tdm sdram
    .ch4_addr(pcm_sdram_addr),
    .ch4_dout(pcm_sdram_dout),
    .ch4_dout16(pcm_sdram_dout16),
+   .ch4_dout16b(pcm_sdram_dout16b),
    .ch4_din(pcm_sdram_din),
    .ch4_req(pcm_sdram_req),
    .ch4_rnw(pcm_sdram_rnw),

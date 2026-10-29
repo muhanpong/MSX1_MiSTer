@@ -91,6 +91,9 @@ module sdram_tdm
     input      [26:0] ch4_addr,
     output      [7:0] ch4_dout,
     output     [15:0] ch4_dout16,
+    output     [15:0] ch4_dout16b,  // the read's other word in its aligned pair (word addr ^ 1): BL2's word1.
+                                    // Valid from the clock AFTER ch4_ready rises (msx.sv's valid), one
+                                    // clock after ch4_dout16: on the ready edge itself it is still old
     input       [7:0] ch4_din,
     input             ch4_req,
     input             ch4_rnw,
@@ -254,6 +257,11 @@ reg [26:0] ch1_addr_1, ch2_addr_1, ch3_addr_1, ch4_addr_1;
 reg  [7:0] ch1_din_1, ch2_din_1, ch3_din_1, ch4_din_1;
 reg [15:0] ch1_saved_data, ch2_saved_data, ch3_saved_data, ch4_saved_data;
 reg        ch1_saved_a0, ch2_saved_a0, ch3_saved_a0, ch4_saved_a0;
+//  ch4 word1: a read's burst brings both words of the aligned pair; word1 is on
+//  dq_p one clock after word0.  g1/g2 is the next access by then (decided on the
+//  word0 edge), so the word0 capture leaves a flag for the next clock.
+reg [15:0] ch4_saved_data1;
+reg        ch4_w1 = 1'b0;
 initial begin
     {ch1_rq, ch2_rq, ch3_rq, ch4_rq} = '0;
     {ch1_ready, ch2_ready, ch3_ready, ch4_ready, ch3_done, ch2_rdtog} = '0;
@@ -265,6 +273,7 @@ assign ch2_dout   = ch2_saved_a0 ? ch2_saved_data[15:8] : ch2_saved_data[7:0];
 assign ch3_dout   = ch3_saved_a0 ? ch3_saved_data[15:8] : ch3_saved_data[7:0];
 assign ch4_dout   = ch4_saved_a0 ? ch4_saved_data[15:8] : ch4_saved_data[7:0];
 assign ch4_dout16 = ch4_saved_data;
+assign ch4_dout16b = ch4_saved_data1;
 
 //  The cache is sdram.sv's (see the long note there): direct mapped, one word a
 //  line, index registered (ch2_caddr) so the clk21m hop stays inside MSX1.sdc's
@@ -874,9 +883,14 @@ always @(posedge clk) begin
                     c_we <= 1; c_waddr <= g.word[CW-1:0]; c_wdata <= {1'b1, g.word[25:CW], dq_p};
                 end
                 2'd2: begin ch3_saved_data <= dq_p; ch3_saved_a0 <= g.a0; ch3_ready <= 1; end
-                2'd3: begin ch4_saved_data <= dq_p; ch4_saved_a0 <= g.a0; ch4_ready <= 1; end
+                2'd3: begin ch4_saved_data <= dq_p; ch4_saved_a0 <= g.a0; ch4_ready <= 1; ch4_w1 <= 1'b1; end
             endcase
         end
+`ifdef TDM_MUT_W1           // negative control: word1 taken from the word0 edge
+        if (ch4_w1) begin ch4_saved_data1 <= ch4_saved_data; ch4_w1 <= 1'b0; end
+`else
+        if (ch4_w1) begin ch4_saved_data1 <= dq_p; ch4_w1 <= 1'b0; end
+`endif
 
         if (rf_cxl) begin                // see rf_cxl: back to due, not done
             rf_due  <= rf_due | rf_now;
