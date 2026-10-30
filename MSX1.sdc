@@ -235,9 +235,13 @@ set_max_delay -from [get_ports {SDRAM_DQ[*]}] \
 #  The first build without this missed hold by 0.397 ns on d_line -> m_rdata
 #  (the two PLL outputs' skew), on a path whose capture is never enabled then.
 set_multicycle_path -setup -end 2 -from [get_registers {*u_v9990|d_line[*]}] -to [get_registers {*u_v9990|m_rdata[*]}]
-set_multicycle_path -hold  -end 1 -from [get_registers {*u_v9990|d_line[*]}] -to [get_registers {*u_v9990|m_rdata[*]}]
+#  Hold: m_rdata loads d_line only on the clk_v99 edge after d_tog_q has seen
+#  the toggle, at least two clk_v99 edges after d_line changed, never on the edge
+#  where it changes -- so there is no hold relationship to check.  (`-hold -end 1`
+#  only restores the default same-edge check; 3dfbec7's build missed it by 0.386 ns.)
+set_false_path -hold -from [get_registers {*u_v9990|d_line[*]}] -to [get_registers {*u_v9990|m_rdata[*]}]
 #  v9990_msx's queue: an entry is written with wp on clk_v99 and read on clk_sdram
 #  only after wp has been registered there (wp_q), so it has been stable for a
-#  clk_sdram period -- same 2 / 1 relaxation.
+#  clk_sdram period and is never read on the edge it changes -- same treatment.
 set_multicycle_path -setup -end 2 -from [get_registers {*u_v9990|f_*}] -to [get_registers {*u_v9990|ch5_*}]
-set_multicycle_path -hold  -end 1 -from [get_registers {*u_v9990|f_*}] -to [get_registers {*u_v9990|ch5_*}]
+set_false_path -hold -from [get_registers {*u_v9990|f_*}] -to [get_registers {*u_v9990|ch5_*}]
