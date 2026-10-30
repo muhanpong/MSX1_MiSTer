@@ -340,7 +340,7 @@ set_global_assignment -name SYSTEMVERILOG_FILE MSX1.sv
 # and needs its own review (handoff 20260920 §2).
 # 2026-09-23: SEED 7 gave -0.100 ns setup on the TURBOR_FDC build, all ten worst paths
 # ascal o_div[0][20] -> o_div[1][20] in the pll_hdmi domain again, none of ours; moved to 8.
-set_global_assignment -name SEED 8
+set_global_assignment -name SEED 15
 
 
 
