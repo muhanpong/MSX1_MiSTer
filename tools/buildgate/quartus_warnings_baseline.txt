@@ -14,7 +14,6 @@ PORT emu:emu|dpram:systemRAM :: cs_a
 PORT emu:emu|dpram:systemRAM :: cs_b
 PORT emu:emu|dpram:systemRAM :: enable_a
 PORT emu:emu|dpram:systemRAM :: enable_b
-PORT emu:emu|hps_io:hps_io :: TIMESTAMP
 PORT emu:emu|hps_io:hps_io :: direct_video
 PORT emu:emu|hps_io:hps_io :: ioctl_din
 PORT emu:emu|hps_io:hps_io :: ioctl_file_ext
@@ -72,21 +71,19 @@ PORT emu:emu|hps_io:hps_io :: spinner_4
 PORT emu:emu|hps_io:hps_io :: spinner_5
 PORT emu:emu|hps_io:hps_io :: status_in
 PORT emu:emu|hps_io:hps_io :: status_set
+PORT emu:emu|hps_io:hps_io :: TIMESTAMP
 PORT emu:emu|hps_io:hps_io :: uart_mode
 PORT emu:emu|hps_io:hps_io :: uart_speed
 PORT emu:emu|hps_io:hps_io :: video_rotated
 PORT emu:emu|ltc2308_tape:tape :: adc_data
 PORT emu:emu|ltc2308_tape:tape :: adc_sync
 PORT emu:emu|ltc2308_tape:tape :: reset
-PORT emu:emu|msx:MSX|T80s:T80 :: out0
-PORT emu:emu|msx:MSX|VDP:vdp_vdp :: offset_y
-PORT emu:emu|msx:MSX|VDP:vdp_vdp|VDP_SSG:U_SSG :: reg_r19_hsync_int_line
 PORT emu:emu|msx:MSX|jt49_bus:PSG :: sample
 PORT emu:emu|msx:MSX|keyboard:msx_key|spram:kbd_ram :: cs
 PORT emu:emu|msx:MSX|keyboard:msx_key|spram:kbd_ram :: enable
 PORT emu:emu|msx:MSX|msx_slots:msx_slots :: clk_sdram
-PORT emu:emu|msx:MSX|msx_slots:msx_slots :: debug_FDC_req
 PORT emu:emu|msx:MSX|msx_slots:msx_slots :: debug_erase
+PORT emu:emu|msx:MSX|msx_slots:msx_slots :: debug_FDC_req
 PORT emu:emu|msx:MSX|msx_slots:msx_slots :: debug_scc_wr
 PORT emu:emu|msx:MSX|msx_slots:msx_slots|fdc:fdc|wd1793:fdc1 :: buff_addr
 PORT emu:emu|msx:MSX|msx_slots:msx_slots|fdc:fdc|wd1793:fdc1 :: buff_read
@@ -96,12 +93,20 @@ PORT emu:emu|msx:MSX|spram:vram_hi :: cs
 PORT emu:emu|msx:MSX|spram:vram_hi :: enable
 PORT emu:emu|msx:MSX|spram:vram_lo :: cs
 PORT emu:emu|msx:MSX|spram:vram_lo :: enable
+PORT emu:emu|msx:MSX|T80s:T80 :: out0
 PORT emu:emu|msx:MSX|vdp18_core:vdp_vdp18 :: col_o
 PORT emu:emu|msx:MSX|vdp18_core:vdp_vdp18 :: comp_sync_n_o
+PORT emu:emu|msx:MSX|VDP:vdp_vdp :: offset_y
+PORT emu:emu|msx:MSX|VDP:vdp_vdp|VDP_SSG:U_SSG :: reg_r19_hsync_int_line
 PORT emu:emu|msx:MSX|ymf278b_top:u_moonsound|ymf278_pcm_engine2:u_pcm :: dbg_slot0_dyn_stepPtr
 PORT emu:emu|msx:MSX|ymf278b_top:u_moonsound|ymf278_pcm_engine2:u_pcm :: dbg_stage_advance
 PORT emu:emu|msx:MSX|ymf278b_top:u_moonsound|ymf278_pcm_engine2:u_pcm :: dbg_stage_b_bytes_done
 PORT emu:emu|msx:MSX|ymf278b_top:u_moonsound|ymf278_pcm_engine2:u_pcm :: dbg_stage_b_valid
+PORT emu:emu|msx:MSX|ymf278b_top:u_moonsound|ymf278_pcm_engine3:u_pcm :: dbg_late_cnt
+PORT emu:emu|msx:MSX|ymf278b_top:u_moonsound|ymf278_pcm_engine3:u_pcm :: dbg_slot0_dyn_stepPtr
+PORT emu:emu|msx:MSX|ymf278b_top:u_moonsound|ymf278_pcm_engine3:u_pcm :: dbg_stage_advance
+PORT emu:emu|msx:MSX|ymf278b_top:u_moonsound|ymf278_pcm_engine3:u_pcm :: dbg_stage_b_bytes_done
+PORT emu:emu|msx:MSX|ymf278b_top:u_moonsound|ymf278_pcm_engine3:u_pcm :: dbg_stage_b_valid
 PORT emu:emu|video_freak:video_freak|video_scale_int:scale|sys_udiv:div :: remainder
 PORT emu:emu|video_mixer:video_mixer|scandoubler:sd|Hq2x:Hq2x :: mono
 PORT emu:emu|video_mixer:video_mixer|video_freezer:freezer|sync_lock:hs_lock :: valid
@@ -114,7 +119,7 @@ PORT pll_cfg_hdmi:pll_cfg_hdmi|generic_lcell_comb:lcell_fpll_0_1 :: datac
 PORT pll_cfg_hdmi:pll_cfg_hdmi|generic_lcell_comb:lcell_fpll_0_1 :: datad
 PORT pll_cfg_hdmi:pll_cfg_hdmi|generic_lcell_comb:lcell_fpll_0_1 :: datae
 PORT pll_cfg_hdmi:pll_cfg_hdmi|generic_lcell_comb:lcell_fpll_0_1 :: dataf
-PORT sys_umuldiv:ar_muldiv :: remainder
 PORT sysmem_lite:sysmem :: reset_hps_warm_req
+PORT sys_umuldiv:ar_muldiv :: remainder
 W10030 Net "flash_total_sectors" at nvram_backup.sv has no driver or initial value, using a default initial value '0'
 W10034 Output port "dbg_pcm_base_set" at ymf278b_top.sv has no driver
