@@ -211,3 +211,19 @@ set_multicycle_path -hold  -end 1 \
 #  timing it only produces placement-luck hold misses (20260920e: -0.102 ns on
 #  u_pcm ram_regs[6].keyon -> u_overlay keyon_s1[6], general[0] -> general[1]).
 set_false_path -to [get_registers {*u_overlay|*_s1[*]}]
+
+# ─── SDRAM_DQ read capture (2026-10-30) ──────────────────────────────────────
+#  sdram.sv captures SDRAM_DQ into five separate registers (c_wdata, ch1..ch4
+#  _saved_data).  Only c_wdata gets the IOE fast input register; the four
+#  *_saved_data copies are ordinary fabric flops, and with no input constraint
+#  the fitter may put them anywhere.  Release 20261030a (SEED 15) placed
+#  ch4_saved_data[13] 12.0 ns of routing from the pin (13.6 ns pin->D slow
+#  model, more than one 85.9 MHz period): PCM samples and wave headers came
+#  back with bit 13 from the wrong cycle -- Neon Horizon timbre wrong, clicks
+#  at loop points -- while the CPU (ch2, 10.1 ns) was fine.  Every build known
+#  to work on hardware keeps all captures <= 10.6 ns slow; 3.5 here makes
+#  TimeQuest require ~10.5 ns (it adds the latch clock arrival), so the fitter
+#  must keep each capture flop near its pin.  Hold side is unconstrained: the
+#  shortest fabric capture seen is 3.6 ns, the IOE register itself 1.8 ns.
+set_max_delay -from [get_ports {SDRAM_DQ[*]}] \
+    -to [get_registers {*sdram|ch1_saved_data[*] *sdram|ch2_saved_data[*] *sdram|ch3_saved_data[*] *sdram|ch4_saved_data[*]}] 3.5
