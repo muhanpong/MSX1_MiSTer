@@ -88,7 +88,21 @@ module sdram
     input       [7:0] ch4_din,
     input             ch4_req,
     input             ch4_rnw,     // 1 - read, 0 - write
-    output reg        ch4_ready
+    output reg        ch4_ready,
+    // ch5: V9990 VRAM (nextz80_v9990).  A read returns the line of 4 words at
+    // ch5_addr (byte address, bits 2:0 = 0) in one access: ACTIVE, then four READs
+    // to consecutive columns of the open row (auto-precharge on the last), word 0
+    // in ch5_dout[15:0].  A write is one word with byte enables ch5_be {hi, lo}.
+    // Edge-triggered like ch1-ch4; priority right after ch2 (the V9990 display has
+    // a fixed deadline, PCM tolerates waiting).  ch5_req held at 0 never selects
+    // the channel, so the controller then behaves exactly as without it.
+    input      [26:0] ch5_addr,
+    input      [15:0] ch5_din,
+    input       [1:0] ch5_be,
+    input             ch5_req,
+    input             ch5_rnw,     // 1 - read (4 words), 0 - write (1 word)
+    output reg [63:0] ch5_dout,
+    output reg        ch5_ready
 );
 
 assign SDRAM_nCS  = chip;
@@ -200,6 +214,9 @@ localparam STATE_IDLE_3  = 7;
 localparam STATE_IDLE_4  = 8;
 localparam STATE_IDLE_5  = 9;
 localparam STATE_RFSH    = 10;
+localparam STATE_RB1     = 11;   // ch5 line read: 2nd READ
+localparam STATE_RB2     = 12;   //                3rd READ
+localparam STATE_RB3     = 13;   //                4th READ (auto-precharge)
 
 // (CH4_HOLD burst-priority RETIRED 2026-06-12.  It served the v2 engine's
 // fixed 64-cycle slot windows; with priority held, a ch2 (CPU) read could
@@ -219,16 +236,21 @@ assign ch4_dout = ch4_saved_a0 ? ch4_saved_data[15:8] : ch4_saved_data[7:0];
 assign ch4_dout16 = ch4_saved_data;
 
 always @(posedge clk) begin
-    reg [CAS_LATENCY+BURST_LENGTH+1:0] data_ready_delay1, data_ready_delay2, data_ready_delay3, data_ready_delay4;
+    reg [CAS_LATENCY+BURST_LENGTH+1:0] data_ready_delay1, data_ready_delay2, data_ready_delay3, data_ready_delay4, data_ready_delay5;
+    reg  [1:0] ch5_w;                 // next word of the ch5 line to capture
 
     reg        saved_wr;
     reg [12:0] cas_addr;
     reg [15:0] saved_data;
     reg  [3:0] state = STATE_STARTUP;
 
-    reg       ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1;
-    reg       ch1_rq, ch2_rq, ch3_rq, ch4_rq;
-    reg [1:0] ch;
+    reg       ch1_req_1, ch2_req_1, ch3_req_1, ch4_req_1, ch5_req_1;
+    reg       ch1_rq, ch2_rq, ch3_rq, ch4_rq, ch5_rq;
+    reg [2:0] ch;
+    reg        ch5_rnw_1;
+    reg [26:0] ch5_addr_1;
+    reg [15:0] ch5_din_1;
+    reg  [1:0] ch5_be_1;
 
     reg        ch1_rnw_1,ch2_rnw_1,ch3_rnw_1,ch4_rnw_1;
     reg [26:0] ch1_addr_1,ch2_addr_1,ch3_addr_1,ch4_addr_1;
@@ -240,6 +262,7 @@ always @(posedge clk) begin
     ch2_req_1 <= ch2_req;
     ch3_req_1 <= ch3_req;
     ch4_req_1 <= ch4_req;
+    ch5_req_1 <= ch5_req;
       
     doRefresh_1 <= doRefresh;
 
@@ -286,6 +309,13 @@ always @(posedge clk) begin
         ch3_addr_1 <= ch3_addr;
         ch3_din_1  <= ch3_din;
     end
+    if (ch5_req & ~ch5_req_1) begin
+        ch5_rq     <= 1;
+        ch5_addr_1 <= ch5_addr;
+        ch5_rnw_1  <= ch5_rnw;
+        ch5_din_1  <= ch5_din;
+        ch5_be_1   <= ch5_be;
+    end
     if (ch4_req & ~ch4_req_1) begin
         ch4_rq     <= 1;
         ch4_addr_1 <= ch4_addr;
@@ -300,6 +330,7 @@ always @(posedge clk) begin
     data_ready_delay2 <= data_ready_delay2>>1;
     data_ready_delay3 <= data_ready_delay3>>1;
     data_ready_delay4 <= data_ready_delay4>>1;
+    data_ready_delay5 <= data_ready_delay5>>1;
 
 
     if(data_ready_delay1[CAS_LATENCY+BURST_LENGTH-1]) ch1_saved_data <= SDRAM_DQ;
@@ -320,6 +351,14 @@ always @(posedge clk) begin
 
 	if(data_ready_delay4[CAS_LATENCY+BURST_LENGTH-1]) ch4_saved_data <= SDRAM_DQ;
 	if(data_ready_delay4[CAS_LATENCY+BURST_LENGTH-1]) ch4_ready <= 1;
+
+	// ch5 line: the four READs went out on consecutive clocks, so their words come
+	// back on consecutive clocks; word ch5_w goes to its lane, ready after the 4th.
+	if(data_ready_delay5[CAS_LATENCY+BURST_LENGTH-1]) begin
+		ch5_dout[{ch5_w, 4'd0} +: 16] <= SDRAM_DQ;
+		ch5_w <= ch5_w + 2'd1;
+		if (ch5_w == 2'd3) ch5_ready <= 1;
+	end
 
     SDRAM_DQ <= 16'bz;
 
@@ -360,6 +399,7 @@ always @(posedge clk) begin
 				ch2_ready <= 1;
 				ch3_ready <= 1;
 				ch4_ready <= 1;
+				ch5_ready <= 1;
             end
         end
 
@@ -402,6 +442,24 @@ always @(posedge clk) begin
                 command    <= CMD_ACTIVE;
                 state      <= STATE_WAIT;
 				ch2_ready  <= 0;
+            end
+            else if(ch5_rq) begin
+                // V9990: right after the CPU.  Reads take the whole line (columns
+                // addr[2:1] = 0..3 of one row), so no auto-precharge on the first
+                // READ (A10 = 0); STATE_RB3 issues the last one with A10 = 1.
+                if (ch5_rnw_1)
+                    {cas_addr[12:9],SDRAM_BA,SDRAM_A,cas_addr[8:0]} <= {2'b00, 1'b0, ch5_addr_1[25:3], 2'b00};
+                else
+                    {cas_addr[12:9],SDRAM_BA,SDRAM_A,cas_addr[8:0]} <= {~ch5_be_1[1], ~ch5_be_1[0], 1'b1, ch5_addr_1[25:1]};
+                chip       <= ch5_addr_1[26];
+                saved_data <= ch5_din_1;
+                saved_wr   <= ~ch5_rnw_1;
+                ch         <= 4;
+                ch5_rq     <= 0;
+                ch5_w      <= 2'd0;
+                command    <= CMD_ACTIVE;
+                state      <= STATE_WAIT;
+                ch5_ready  <= 0;
             end
             else if(ch1_rq) begin
                 if (ch1_rnw_1)
@@ -475,16 +533,31 @@ always @(posedge clk) begin
                 if(ch == 1) ch2_ready  <= 1;
                 if(ch == 2) begin ch3_ready  <= 1; ch3_done   <= 1; end
                 if(ch == 3) ch4_ready  <= 1;
+                if(ch == 4) ch5_ready  <= 1;
                 state <= STATE_IDLE_2;
             end
             else begin
                 command <= CMD_READ;
-                state   <= STATE_IDLE_3;
+                state   <= (ch == 4) ? STATE_RB1 : STATE_IDLE_3;
                      if(ch == 0) data_ready_delay1[CAS_LATENCY+BURST_LENGTH+1] <= 1;
                 else if(ch == 1) data_ready_delay2[CAS_LATENCY+BURST_LENGTH+1] <= 1;
                 else if(ch == 2) data_ready_delay3[CAS_LATENCY+BURST_LENGTH+1] <= 1;
-                else             data_ready_delay4[CAS_LATENCY+BURST_LENGTH+1] <= 1;
+                else if(ch == 3) data_ready_delay4[CAS_LATENCY+BURST_LENGTH+1] <= 1;
+                else             data_ready_delay5[CAS_LATENCY+BURST_LENGTH+1] <= 1;
             end
+        end
+        // ch5 line read: three more READs in the open row, one per clock.
+        STATE_RB1: begin
+            SDRAM_A[1:0] <= 2'd1; command <= CMD_READ; state <= STATE_RB2;
+            data_ready_delay5[CAS_LATENCY+BURST_LENGTH+1] <= 1;
+        end
+        STATE_RB2: begin
+            SDRAM_A[1:0] <= 2'd2; command <= CMD_READ; state <= STATE_RB3;
+            data_ready_delay5[CAS_LATENCY+BURST_LENGTH+1] <= 1;
+        end
+        STATE_RB3: begin
+            SDRAM_A[1:0] <= 2'd3; SDRAM_A[10] <= 1'b1; command <= CMD_READ; state <= STATE_IDLE_3;
+            data_ready_delay5[CAS_LATENCY+BURST_LENGTH+1] <= 1;
         end
       
     endcase
