@@ -41,7 +41,9 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *Spare pad buttons press Space, Return or F1, or pause the machine.*
 - **Reset on ROM change** — 롬을 바꿀 때 리셋 대신 기계를 멈춰 두는 선택
   *Hold the machine instead of resetting it while a ROM is swapped.*
-- **OPL4 PCM 엔진 경량화 / Lighter OPL4 PCM engine** — 슬롯 상태를 MLAB으로, 당시 전체 설계 31,934 → 29,637 ALM. 플롭 기준 엔진과 lockstep 검증, 실기 확인
+- **OPL4 PCM engine3** — 새로 만든 PCM 엔진(20261030a부터 기본, V9968_Geo3D 브랜치와 같은 엔진). openMSX(`YMF278.cc`) 기준 골든 모델과 비트 단위 일치, PCM 2,815 → 1,291 ALM(128.86 MHz 빌드 기준). 이전 엔진은 `MSX1.qsf`의 `PCM_ENGINE3` 줄을 지우고 빌드
+  *A rebuilt PCM engine (default from 20261030a, the same engine as on V9968_Geo3D): bit-exact with the openMSX-based golden model, 2,815 → 1,291 ALM for the PCM (128.86 MHz build). Remove the `PCM_ENGINE3` line in `MSX1.qsf` for the previous engine.*
+- **OPL4 PCM 엔진 경량화 / Lighter OPL4 PCM engine** (engine2) — 슬롯 상태를 MLAB으로, 당시 전체 설계 31,934 → 29,637 ALM. 플롭 기준 엔진과 lockstep 검증, 실기 확인
   *Slot state in MLAB: the whole design went from 31,934 to 29,637 ALM at the time, verified in lockstep against the flop engine and confirmed on the board.*
 
 **곁들여 고친 것 / Also fixed**
@@ -66,6 +68,9 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *One OPLL per machine: built-in, slot A and slot B all share 7C/7D and used to play twice.*
 - OSD 로드 중 OPL4 홀드가 플래시 카트 접근 뒤 풀리던 문제 (소스 수정, 실기 미확인)
   *The OPL4 hold during an OSD load dropped once a flash cart had been touched (fixed in source, not yet confirmed on the board).*
+
+**릴리스 / Releases** — `releases/MSX1_20261030a_nextz80_engine3_a902843.rbf` (OPL4 PCM engine3, 실기 확인 전), GitHub 릴리스 `nextz80-20261030a`. 이전 rbf는 `releases/`에 그대로 있다
+*`releases/MSX1_20261030a_nextz80_engine3_a902843.rbf` (OPL4 PCM engine3, not yet confirmed on the board); GitHub release `nextz80-20261030a`. The earlier rbfs stay in `releases/`.*
 
 아래는 항목별 상세 / Details below.
 
@@ -95,6 +100,25 @@ Full OPL4 emulation — OPL3-compatible FM plus the PCM wavetable engine.
 
 The PCM engine is validated against a bit-exact golden harness derived from the openMSX
 `YMF278.cc` model, and the FM side against Nuked-OPL3.
+
+### OPL4 PCM engine3 (default from rbf 20261030a)
+A from-scratch PCM engine (built in the `opl4_scratch` work, the same file as on the
+V9968_Geo3D branch). Per 44.1 kHz frame a control pass reads the registers and computes
+pitch, position, envelope, LFO and the sample addresses for all 24 slots at the frame edge,
+and a data pass consumes the wave data at fixed slot times; memory requests go out as soon
+as the control pass has them, so the SDRAM latency is hidden behind the lead.
+
+- Bit-exact with the openMSX-based golden model (at 85.909 MHz: 23 of 24 scenarios; the
+  last only overlaps the bench's next-frame register writes, a one-sample shift on hardware).
+- A sample pair is an aligned 4-byte read; `sdram.sv` returns one word a request, so
+  `rtl/msx.sv`'s ch4 bridge reads the pair as two words. Measured on this controller: no late
+  fetch at the guaranteed load, and a Neon Horizon replay (wave upload included) identical to
+  an ideal-memory run.
+- A fetch that misses its time keeps the slot's previous sample and is counted (one sample
+  of one voice); pitch and envelope keep running.
+- The reg 6 write WAIT is openMSX's 28 master clocks.
+- Previous engine (engine2, the MLAB engine below): remove the `PCM_ENGINE3` line in `MSX1.qsf`.
+- Not yet confirmed on the board (MoonSound PCM playback, 2 MB wave RAM reads).
 
 ### Z80 turbo
 `Z80 Speed` on the OSD's `CPU` page: `3.58MHz` (stock), `5.37MHz (Panasonic)`, `7.16MHz`,
@@ -299,7 +323,7 @@ A per-source mixer in the OSD, all on one 2 dB ladder (`0` .. `±8 dB`). It is o
 - Volume, mute and (for SCC) per-channel mute for PSG, MSX-MUSIC, SCC, and MoonSound PCM/FM
 - Labels are dB versus unity, so `+8dB` is a real +8 dB
 
-### OPL4 PCM engine on MLAB
+### OPL4 PCM engine on MLAB (engine2)
 The PCM slot state (header/dyn arrays, the per-slot register file by register byte) lives
 in MLAB instead of flops. At the time of the change the whole design went from 31,934 to
 29,637 ALM and u_pcm from 4,971 to 2,681. Validated in lockstep against the previous flop
