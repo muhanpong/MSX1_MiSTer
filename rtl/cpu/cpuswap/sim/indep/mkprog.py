@@ -1,7 +1,9 @@
 # indeptest: the Wonder Boy in Monster World CPU switch (OTIR to S1990 reg 6, SP across
 # the switch, the frozen CPU finishes its own OTIR later), N round trips Z80 -> R800 -> Z80.
 # OUT 01h <cpu>: 5Ah 'Z' / 52h 'R' at each check point; OUT 02h <count>; OUT FFh ends.
+import sys
 N=5
+WB=len(sys.argv)>1 and sys.argv[1]=='wb'   # Wonder Boy start: CHGCPU (BIOS stub) to R800 first
 mem=bytearray(65536); pc=0; labels={}; fix=[]
 def org(a):
     global pc; pc=a
@@ -24,6 +26,10 @@ lab('r800_first')             # the R800's first instruction ever is at 0000h: l
 b(0xC3); w('tail')            # finish the switch the Z80 started (its SP is in SPSAVE)
 org(0x100); lab('main')
 b(0x3E,N, 0x32,CNT&0xFF,CNT>>8)        # ld a,N / ld (CNT),a
+if WB:
+    b(0x3E,0x82, 0xCD,0x80,0x01)        # ld a,82h / call 0180h (CHGCPU stub: R800 DRAM)
+    b(0xCD); w('logcpu')                # 'R'
+    b(0x3E,0, 0xCD); w('switch')        # the game's own switch, back to the Z80
 lab('loop')
 b(0xCD); w('logcpu')
 b(0x3E,4, 0xCD); w('switch')           # to R800 (DRAM mode): table[4..5] = 00 60
@@ -52,5 +58,5 @@ b(0xED,0x7B,SPSAVE&0xFF,SPSAVE>>8)        # ld sp,(SPSAVE)
 b(0xC1, 0xE1, 0xC9)                       # pop bc / pop hl / ret
 lab('table'); b(0x60,0x60,0x40,0x60,0x00,0x60)
 for a,n in fix: mem[a]=labels[n]&0xFF; mem[a+1]=labels[n]>>8
-open('indeptest.hex','w').write('\n'.join('%02x'%x for x in mem)+'\n')
+open('wbtest.hex' if WB else 'indeptest.hex','w').write('\n'.join('%02x'%x for x in mem)+'\n')
 print({k:hex(v) for k,v in labels.items()})

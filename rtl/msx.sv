@@ -395,27 +395,38 @@ nz_bus NZB
    .rfsh_n(nzb_rfsh_n)
 );
 
-//  Real turbo R contexts: on a turbo R pack (turbor_en, the pack's own BIOS) each core
-//  keeps its registers across hand-overs (cpuswap_ctl `indep`).  NextZ80's first entry
-//  after reset gets an R800 reset image instead of the Z80's state -- a turbo R's R800
-//  starts at 0000h the first time the S1990 selects it, and the BIOS is written for
-//  that.  The OSD's forced switch keeps the old copy (`nz_copy`): it lands at an
-//  arbitrary point of the program, where only a continuation of the same context is
-//  safe.
+//  Turbo R CPU contexts, mixed (on turbo R packs, turbor_en):
+//  * a core frozen by a BARE S1990 register 6 write keeps its context (`*_ctx_ok`), and
+//    the next hand-over back to it resumes that context -- the turbo R behaviour software
+//    that switches by itself relies on (Wonder Boy in Monster World: OTIR to E5h);
+//  * a core frozen by the CHGCPU stub or the OSD gets the other's state copied in when it
+//    is selected again -- the behaviour up to 20261031a, which the stub, Illusion City and
+//    the MFRSD boot work with.  (ed6e878 ran the pack's own CHGCPU on two contexts for
+//    everything; Illusion City failed after loading and the MFRSD boot stopped -- that
+//    CHGCPU relies on the S1990's DRAM mode, which this core does not model.)
+//  * NextZ80's first entry after reset by a bare write gets an R800 reset image (PC 0000h):
+//    a turbo R's R800 starts there the first time the S1990 selects it, and the GT BIOS
+//    boot does exactly that.
 //  Reset image, REG layout (T80.vhd): A=FF F=FF SP=FFFF PC=0000, IFF1/IFF2/IM/I/R = 0.
 localparam logic [211:0] R800_RESET = {148'd0, 16'h0000, 16'hFFFF, 16'h0000, 16'h0000, 8'hFF, 8'hFF};
-logic nz_fresh = 1'b1, nz_copy = 1'b0;
+logic nz_fresh = 1'b1, t80_ctx_ok = 1'b0, nz_ctx_ok = 1'b0, use_nz_q = 1'b0;
+wire  tr_sel_direct;
 always_ff @(posedge clk21m) begin
+   use_nz_q <= use_nz;
    if (reset) begin
-      nz_fresh <= 1'b1;
-      nz_copy  <= 1'b0;
+      nz_fresh   <= 1'b1;
+      t80_ctx_ok <= 1'b0;
+      nz_ctx_ok  <= 1'b0;
    end else begin
       if (nz_load) nz_fresh <= 1'b0;
-      if (r800_set_stb)                nz_copy <= 1'b1;
-      else if (~swap_busy & (tr_r800 == use_nz)) nz_copy <= 1'b0;   // that hand-over is done
+      //  the core that just lost the bus: is its frozen context one to resume?
+      if (use_nz & ~use_nz_q) t80_ctx_ok <= tr_sel_direct;
+      if (~use_nz & use_nz_q) nz_ctx_ok  <= tr_sel_direct;
    end
 end
-wire [211:0] nz_ldir = (turbor_en & nz_fresh & ~nz_copy) ? R800_RESET : t80_reg_t80;
+//  During XFER use_nz still names the outgoing core; the target is the other one.
+wire swap_copy = use_nz ? ~t80_ctx_ok : (~nz_ctx_ok & ~(nz_fresh & tr_sel_direct));
+wire [211:0] nz_ldir = (turbor_en & nz_fresh & tr_sel_direct) ? R800_RESET : t80_reg_t80;
 
 cpuswap_ctl CPUSWAP
 (
@@ -433,7 +444,7 @@ cpuswap_ctl CPUSWAP
    .rate_ok(cpu_rate_ok),
    .indep(turbor_en),
    .nz_fresh(nz_fresh),
-   .copy(nz_copy)
+   .copy(swap_copy)
 );
 
 //  The owner's strobes, forced idle while a hand-over is in progress: the frozen
@@ -1602,7 +1613,8 @@ turbor turbor
    .mem_ov(tr_mem_ov),
    .io_sel(tr_io_sel),
    .dout(tr_dout),
-   .real_chgcpu(1'b1),        // turbor_en is only set for a turbo R pack: its own CHGCPU
+   .real_chgcpu(1'b0),        // the stub: the pack's CHGCPU needs DRAM mode (see above)
+   .sel_direct(tr_sel_direct),
    .set_stb(r800_set_stb),
    .set_r800(r800_set),
    .r800(tr_r800),
