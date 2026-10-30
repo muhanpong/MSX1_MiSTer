@@ -49,7 +49,19 @@ module cpuswap_ctl
    output logic t80_dirset,     // load T80s from NextZ80 XREG
    output logic nz_load,        // load NextZ80 from T80s REG
    output logic busy,
-   input  logic rate_ok         // the CE rate has been latched for the NEW owner
+   input  logic rate_ok,        // the CE rate has been latched for the NEW owner
+   //  Real turbo R contexts (2026-10-31).  With `indep` the two cores keep their own
+   //  register files, as a turbo R's Z80 and R800 do: a hand-over freezes the owner at
+   //  its swap point and the other core resumes from where IT stopped -- no XFER copy.
+   //  Software relies on it: Wonder Boy in Monster World switches with an OTIR to the
+   //  S1990 and expects the frozen Z80 to finish its own OTIR later; with the copy the
+   //  R800 inherited that OTIR, wrote the Z80 value right back and the game ran on the
+   //  Z80 (openMSX: 86 % of play time on the R800).  `nz_fresh`: NextZ80 has not run
+   //  since reset; its first entry still loads (the R800 reset image from the caller).
+   //  `copy` forces the old copy for one hand-over (the OSD's forced switch).
+   input  logic indep,
+   input  logic nz_fresh,
+   input  logic copy
 );
 
 typedef enum logic [1:0] { RUN, XFER, FLIP, SETTLE } st_t;
@@ -63,8 +75,8 @@ wire freeze  = (st != RUN) | (pending & at_pt);
 
 assign t80_hold   = use_nz  | freeze;
 assign nz_hold    = ~use_nz | freeze;
-assign t80_dirset = (st == XFER) &  use_nz;
-assign nz_load    = (st == XFER) & ~use_nz;
+assign t80_dirset = (st == XFER) &  use_nz & (~indep | copy);
+assign nz_load    = (st == XFER) & ~use_nz & (~indep | copy | nz_fresh);
 assign busy       = freeze;
 
 always_ff @(posedge clk) begin
