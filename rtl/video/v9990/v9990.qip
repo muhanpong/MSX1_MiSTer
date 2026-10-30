@@ -7,3 +7,4 @@ set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) v9990_spri
 set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) v9990_cmd.vhd ]
 set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) v9990_vram_cache.vhd ]
 set_global_assignment -name VHDL_FILE [file join $::quartus(qip_path) v9990_core.vhd ]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) v9990_msx.sv ]

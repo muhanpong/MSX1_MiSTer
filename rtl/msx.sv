@@ -38,6 +38,8 @@ module msx
    output            [23:0] probe_r19,
    output            [15:0] probe_frame,
    input                    clk_sdram,
+   input                    clk_v99,             // 42.955 MHz, V9990 core (same PLL, 2 x clk21m)
+   input                    v9990_en,            // OSD: V9990 (GFX9000) present
    input                    dma_active,
    //Video
    output             [7:0] R,
@@ -137,6 +139,15 @@ module msx
    input                     pcm_sdram_ready,
    // PCM ROM base address in SDRAM (set by memory_upload)
    input              [26:0] pcm_rom_base,
+   // V9990 VRAM, SDRAM ch5 (clk_sdram)
+   output             [26:0] v99_ch5_addr,
+   output             [15:0] v99_ch5_din,
+   output              [1:0] v99_ch5_be,
+   output                    v99_ch5_req,
+   output                    v99_ch5_rnw,
+   input              [63:0] v99_ch5_dout,
+   input                     v99_ch5_ready,
+
 
    // MoonSound audio mute (debug)
    input                     pcm_mute,
@@ -274,6 +285,10 @@ wire [7:0] d_to_cpu, d_from_cpu;
 wire [7:0] tr_dout;                                  // turbo R block (declared here: used by the read mux)
 wire       tr_mem_ov, tr_io_sel, tr_main_rom0;
 wire mreq_n, wr_n, m1_n, iorq_n, rd_n, rfrsh_n;
+wire       v99_cs, v99_pending, v99_int_n;   // V9990, see u_v9990
+wire [7:0] v99_dout;
+wire [7:0] v99_R, v99_G, v99_B;                 // V9990 video (clk21m)
+wire       v99_hsync_n, v99_vsync_n, v99_hblank, v99_vblank, v99_ce_pix, v99_disp;
 //  Two CPUs on one bus, handed over at run time without a reset (rtl/cpu/cpuswap):
 //  T80s on clk21m/ce_cpu at every speed 3.58-21.5, and NextZ80 on clk21m through
 //  nz_bus, standing in for the turbo R's R800.  The owner follows the S1990 CPU
@@ -295,7 +310,7 @@ T80s #(.Mode(0), .T2Write(1), .IOWait(1)) T80
    .CLK(clk21m),
    .CEN(ce_cpu & ~t80_hold),
    .WAIT_n(wait_n),
-   .INT_n(vdp_int_n & ms_int_n & midi_int_n),
+   .INT_n(vdp_int_n & ms_int_n & midi_int_n & v99_int_n),
    .NMI_n(1),
    .BUSRQ_n(1),
    .M1_n(t_m1_n),
@@ -338,7 +353,7 @@ NextZ80 NZ
    .M1(nz_m1),
    .CLK(clk21m),
    .RESET(1'b0),
-   .INT(~(vdp_int_n & ms_int_n & midi_int_n)),
+   .INT(~(vdp_int_n & ms_int_n & midi_int_n & v99_int_n)),
    .NMI(1'b0),
    .WAIT(nz_wait),
    .LOAD(nz_load),
@@ -450,7 +465,7 @@ wire [211:0] t80_reg = use_nz ? nz_xreg : t80_reg_t80;
 // the VGM driver's rapid back-to-back writes can't outrun the CDC/chip and drop.
 // Only asserts during 0x7E/0x7F/0xC4-0xC7 access when moonsound_en; bounded by a
 // safety timeout (ms_wait_cnt) so a lost ack cannot hang the CPU.
-wire exwait_n = ~ms_io_pending;
+wire exwait_n = ~(ms_io_pending | v99_pending);
 
 // The MSX2 M1 wait pair (74LS74 equivalent).  It is clocked from ce_cpu, not
 // ce_3m58_p: it is CPU-cycle logic, so it must scale WITH the CPU.  Left on
@@ -941,6 +956,46 @@ wire rtc_en =   (a[7:1] == 7'b1011010) & ~iorq_n & m1_n & bios_config.MSX_typ ==
 //  with no printer on the cable does anyway.
 wire prn_en =   (a[7:0] == 8'h90)      & ~iorq_n & m1_n;
 
+//  -----------------------------------------------------------------------------
+//  -- V9990 (GFX9000), ports 60h-6Fh; VRAM in SDRAM ch5 at the top 512 KB of the
+//  -- first 32 MB.  v9990_en = 0 keeps it in reset: no decode, no VRAM traffic.
+//  -----------------------------------------------------------------------------
+v9990_msx u_v9990
+(
+   .clk21m     (clk21m),
+   .clk_v99    (clk_v99),
+   .clk_sdram  (clk_sdram),
+   .reset      (reset),
+   .en         (v9990_en),
+   .iorq_n     (iorq_n),
+   .m1_n       (m1_n),
+   .rd_n       (rd_n),
+   .wr_n       (wr_n),
+   .a          (a[7:0]),
+   .d_from_cpu (d_from_cpu),
+   .cs         (v99_cs),
+   .d_out      (v99_dout),
+   .pending    (v99_pending),
+   .int_n      (v99_int_n),
+   .vram_base  (27'h1F80000),
+   .ch5_addr   (v99_ch5_addr),
+   .ch5_din    (v99_ch5_din),
+   .ch5_be     (v99_ch5_be),
+   .ch5_req    (v99_ch5_req),
+   .ch5_rnw    (v99_ch5_rnw),
+   .ch5_dout   (v99_ch5_dout),
+   .ch5_ready  (v99_ch5_ready),
+   .R          (v99_R),
+   .G          (v99_G),
+   .B          (v99_B),
+   .hsync_n    (v99_hsync_n),
+   .vsync_n    (v99_vsync_n),
+   .hblank     (v99_hblank),
+   .vblank     (v99_vblank),
+   .ce_pix     (v99_ce_pix),
+   .disp_en    (v99_disp)
+);
+
 // MoonSound: WAVE 0x7E/7F, FM 0xC4-0xC7
 wire ms_wave_cs = msxConfig.moonsound_en & ~iorq_n & m1_n &
                   (a[7:0] == 8'h7E | a[7:0] == 8'h7F);
@@ -1061,6 +1116,7 @@ assign d_to_cpu = rd_n              ? 8'hFF           :
                   ~psg_n            ? d_from_psg      :
                   ~ppi_n            ? d_from_8255     :
                   (ms_wave_cs | ms_fm_cs) ? ms_dout   :
+                  v99_cs            ? v99_dout        :   // V9990 ports 60h-6Fh (off unless v9990_en)
                   cheat_act         ? cheat_value     :   // standard .gg cheat override (memory reads)
                                     d_from_slots    ;
 //  -----------------------------------------------------------------------------
@@ -1215,15 +1271,37 @@ assign d_to_cpu_vdp   = vdp18 ? d_from_vdp18                : d_from_vdp;
 assign vdp_int_n      = vdp18 ? int_n_vdp18                 : int_n_vdp;
 
 //Video access
-assign R              = vdp18 ? R_vdp18                     : {R_vdp,R_vdp[5:4]};
-assign G              = vdp18 ? G_vdp18                     : {G_vdp,G_vdp[5:4]};
-assign B              = vdp18 ? B_vdp18                     : {B_vdp,B_vdp[5:4]};
-assign HS             = vdp18 ? ~HS_n_vdp18                 : ~HS_n_vdp;
-assign VS             = vdp18 ? ~VS_n_vdp18                 : ~VS_n_vdp;
-assign DE             = vdp18 ? DE_vdp18                    : DE_vdp;
-assign hblank         = vdp18 ? hblank_vdp18                : hblank_vdp_cor;
-assign vblank         = vdp18 ? vblank_vdp18                : vblank_vdp;
-assign ce_pix         = vdp18 ? ce_5m39_n                   : ~DHClk_vdp;
+wire [7:0] R_m, G_m, B_m;
+wire       HS_m, VS_m, DE_m, hblank_m, vblank_m, ce_pix_m;
+assign R_m             = vdp18 ? R_vdp18                     : {R_vdp,R_vdp[5:4]};
+assign G_m             = vdp18 ? G_vdp18                     : {G_vdp,G_vdp[5:4]};
+assign B_m             = vdp18 ? B_vdp18                     : {B_vdp,B_vdp[5:4]};
+assign HS_m            = vdp18 ? ~HS_n_vdp18                 : ~HS_n_vdp;
+assign VS_m            = vdp18 ? ~VS_n_vdp18                 : ~VS_n_vdp;
+assign DE_m            = vdp18 ? DE_vdp18                    : DE_vdp;
+assign hblank_m        = vdp18 ? hblank_vdp18                : hblank_vdp_cor;
+assign vblank_m        = vdp18 ? vblank_vdp18                : vblank_vdp;
+assign ce_pix_m        = vdp18 ? ce_5m39_n                   : ~DHClk_vdp;
+
+// V9990 or the MSX VDP on the one video output: Auto -- the V9990's picture while
+// its display is on (R#8 DISP).  The choice changes only at the V9990's vertical
+// blank, so a frame is never split between the two sources.  Same CLK_VIDEO and
+// the same 10.74 MHz ce_pix rate on both sides.
+logic v99_sel = 1'b0, v99_vb_d = 1'b0;
+always @(posedge clk21m) begin
+   v99_vb_d <= v99_vblank;
+   if (~v9990_en)                    v99_sel <= 1'b0;
+   else if (v99_vblank & ~v99_vb_d)  v99_sel <= v99_disp;
+end
+assign R      = v99_sel ? v99_R          : R_m;
+assign G      = v99_sel ? v99_G          : G_m;
+assign B      = v99_sel ? v99_B          : B_m;
+assign HS     = v99_sel ? ~v99_hsync_n   : HS_m;
+assign VS     = v99_sel ? ~v99_vsync_n   : VS_m;
+assign DE     = v99_sel ? ~(v99_hblank | v99_vblank) : DE_m;
+assign hblank = v99_sel ? v99_hblank     : hblank_m;
+assign vblank = v99_sel ? v99_vblank     : vblank_m;
+assign ce_pix = v99_sel ? v99_ce_pix     : ce_pix_m;
 
 logic hblank_vdp_cor;
 always @(posedge clk21m) begin

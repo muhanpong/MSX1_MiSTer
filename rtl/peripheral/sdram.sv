@@ -251,6 +251,7 @@ always @(posedge clk) begin
     reg [26:0] ch5_addr_1;
     reg [15:0] ch5_din_1;
     reg  [1:0] ch5_be_1;
+    reg        ch5_last;              // the last of ch4 / ch5 served was ch5
 
     reg        ch1_rnw_1,ch2_rnw_1,ch3_rnw_1,ch4_rnw_1;
     reg [26:0] ch1_addr_1,ch2_addr_1,ch3_addr_1,ch4_addr_1;
@@ -443,8 +444,10 @@ always @(posedge clk) begin
                 state      <= STATE_WAIT;
 				ch2_ready  <= 0;
             end
-            else if(ch5_rq) begin
-                // V9990: right after the CPU.  Reads take the whole line (columns
+            else if(ch5_rq && !(ch4_rq && ch5_last)) begin
+                // V9990: right after the CPU, but taking turns with PCM (ch4) when
+                // both wait: a command-engine fill queues writes back to back and
+                // would otherwise hold ch4 off for milliseconds.  Reads take the whole line (columns
                 // addr[2:1] = 0..3 of one row), so no auto-precharge on the first
                 // READ (A10 = 0); STATE_RB3 issues the last one with A10 = 1.
                 if (ch5_rnw_1)
@@ -456,6 +459,7 @@ always @(posedge clk) begin
                 saved_wr   <= ~ch5_rnw_1;
                 ch         <= 4;
                 ch5_rq     <= 0;
+                ch5_last   <= 1;
                 ch5_w      <= 2'd0;
                 command    <= CMD_ACTIVE;
                 state      <= STATE_WAIT;
@@ -506,6 +510,7 @@ always @(posedge clk) begin
                     c_we <= 1; c_waddr <= ch4_addr_1[CW:1]; c_wdata <= '0;
                 end
                 ch         <= 3;
+                ch5_last   <= 0;
                 ch4_rq     <= 0;
                 if (ch4_rnw_1)
                     {cas_addr[12:9],SDRAM_BA,SDRAM_A,cas_addr[8:0]} <= {2'b00, 1'b1, ch4_addr_1[25:1]};

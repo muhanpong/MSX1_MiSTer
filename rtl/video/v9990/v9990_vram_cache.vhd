@@ -79,7 +79,13 @@ entity v9990_vram_cache is
       m_addr   : out unsigned(17 downto 0);
       m_wdata  : out std_logic_vector(15 downto 0);
       m_ack    : in  std_logic;
-      m_rdata  : in  std_logic_vector(63 downto 0)
+      m_rdata  : in  std_logic_vector(63 downto 0);
+      -- LOCAL (nextz80_v9990): posted writes.  With w_room = '1' a write is
+      -- acked the next clock, as v9990_vram_bram, and handed over with the
+      -- one-clock pulse w_post (we / be / addr / wdata valid with it) instead
+      -- of m_req; with w_room = '0' (or tied low) it goes through m_req / m_ack.
+      w_room   : in  std_logic := '0';
+      w_post   : out std_logic
    );
 end v9990_vram_cache;
 
@@ -144,8 +150,12 @@ begin
                         data(hit_l)(k)(15 downto 8) <= wdata(15 downto 8);
                      end if;
                   end if;
-                  mreq_r <= '1';
-                  state  <= S_WRITE;
+                  if w_room = '1' then
+                     ack_r <= '1';
+                  else
+                     mreq_r <= '1';
+                     state  <= S_WRITE;
+                  end if;
                elsif hit = '1' then
                   rdata_r <= data(hit_l)(k);
                   ack_r   <= '1';
@@ -191,6 +201,8 @@ begin
    end process;
 
    ack     <= ack_r;
+   w_post  <= '1' when state = S_IDLE and req = '1' and ack_r = '0' and we = '1' and w_room = '1'
+                       and reset_n = '1' else '0';
    rdata   <= rdata_r;
 
    m_req   <= mreq_r;

@@ -226,4 +226,18 @@ set_false_path -to [get_registers {*u_overlay|*_s1[*]}]
 #  must keep each capture flop near its pin.  Hold side is unconstrained: the
 #  shortest fabric capture seen is 3.6 ns, the IOE register itself 1.8 ns.
 set_max_delay -from [get_ports {SDRAM_DQ[*]}] \
-    -to [get_registers {*sdram|ch1_saved_data[*] *sdram|ch2_saved_data[*] *sdram|ch3_saved_data[*] *sdram|ch4_saved_data[*]}] 3.5
+    -to [get_registers {*sdram|ch1_saved_data[*] *sdram|ch2_saved_data[*] *sdram|ch3_saved_data[*] *sdram|ch4_saved_data[*] *sdram|ch5_dout[*]}] 3.5
+
+# ─── V9990 VRAM line, clk_sdram -> clk_v99 (2026-10-31) ─────────────────────
+#  v9990_msx: d_line is loaded together with the completion toggle d_tog; the
+#  clk_v99 side registers d_tog once (d_tog_q) and only then loads m_rdata from
+#  d_line, so d_line is stable for a whole clk_v99 period before it is taken.
+#  The first build without this missed hold by 0.397 ns on d_line -> m_rdata
+#  (the two PLL outputs' skew), on a path whose capture is never enabled then.
+set_multicycle_path -setup -end 2 -from [get_registers {*u_v9990|d_line[*]}] -to [get_registers {*u_v9990|m_rdata[*]}]
+set_multicycle_path -hold  -end 1 -from [get_registers {*u_v9990|d_line[*]}] -to [get_registers {*u_v9990|m_rdata[*]}]
+#  v9990_msx's queue: an entry is written with wp on clk_v99 and read on clk_sdram
+#  only after wp has been registered there (wp_q), so it has been stable for a
+#  clk_sdram period -- same 2 / 1 relaxation.
+set_multicycle_path -setup -end 2 -from [get_registers {*u_v9990|f_*}] -to [get_registers {*u_v9990|ch5_*}]
+set_multicycle_path -hold  -end 1 -from [get_registers {*u_v9990|f_*}] -to [get_registers {*u_v9990|ch5_*}]

@@ -19,3 +19,4 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) v
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) evt_trace.sv]
 
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) peripheral/slots/yamanooto.sv]
+set_global_assignment -name QIP_FILE           [file join $::quartus(qip_path) video/v9990/v9990.qip                ]

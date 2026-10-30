@@ -570,6 +570,9 @@ localparam CONF_STR = {
    "P1O[116:113], OPL4 FM Volume,+4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB;",
    "-;",
    "O[64],Reset on ROM change,Yes,No;",
+   //  [127] is the one status bit no earlier build ever used, so a saved .CFG
+   //  cannot turn the V9990 on by accident.
+   "O[127],V9990 (GFX9000),Off,On;",
    "O[48],Debug Overlay,Off,On;",
    "-;",
    "T[0],Reset;",
@@ -714,6 +717,7 @@ msx_config msx_config
 
 /////////////////   CLOCKS   /////////////////
 wire clk21m, clk_sdram, locked_sdram;
+wire clk_v99;                       // 42.955 MHz, V9990 core (2 x clk21m, same PLL)
 wire ce_10m7_p, ce_10m7_n, ce_5m39_p, ce_5m39_n, ce_3m58_p, ce_3m58_n, ce_10hz;
 // CPU turbo (the old status[37:36] dial is gone: 58:56 since bef9f91, and 38:36
 // is the R800 VDP wait since 2026-10-05).
@@ -769,6 +773,7 @@ pll pll
    .rst(0),
    .outclk_0(clk_sdram), //85.909090
    .outclk_1(clk21m),    //21.477270
+   .outclk_2(clk_v99),   //42.954540
    .locked(locked_sdram)
 );
 
@@ -1615,6 +1620,14 @@ reg         upload_active_q;
 always @(posedge clk21m) upload_active_q <= upload_active;
 assign      log_clear = upload_active & ~upload_active_q;
 
+// V9990: OSD switch and SDRAM ch5 wires (msx.sv ports, connected by .*)
+wire        v9990_en = status[127];
+wire [26:0] v99_ch5_addr;
+wire [15:0] v99_ch5_din;
+wire  [1:0] v99_ch5_be;
+wire        v99_ch5_req, v99_ch5_rnw, v99_ch5_ready;
+wire [63:0] v99_ch5_dout;
+
 // MoonSound PCM SDRAM ch4 wires
 wire [26:0] pcm_sdram_addr;
 wire        pcm_sdram_req;
@@ -1665,6 +1678,14 @@ sdram sdram
    .ch4_req(pcm_sdram_req),
    .ch4_rnw(pcm_sdram_rnw),
    .ch4_ready(pcm_sdram_ready),
+   // ch5: V9990 VRAM
+   .ch5_addr (v99_ch5_addr),
+   .ch5_din  (v99_ch5_din),
+   .ch5_be   (v99_ch5_be),
+   .ch5_req  (v99_ch5_req),
+   .ch5_rnw  (v99_ch5_rnw),
+   .ch5_dout (v99_ch5_dout),
+   .ch5_ready(v99_ch5_ready),
    .*
 );
 
