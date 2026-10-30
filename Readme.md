@@ -41,8 +41,8 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *Spare pad buttons press Space, Return or F1, or pause the machine.*
 - **Reset on ROM change** — 롬을 바꿀 때 리셋 대신 기계를 멈춰 두는 선택
   *Hold the machine instead of resetting it while a ROM is swapped.*
-- **OPL4 PCM engine3** — 새로 만든 PCM 엔진(20261030a부터 기본, V9968_Geo3D 브랜치와 같은 엔진). openMSX(`YMF278.cc`) 기준 골든 모델과 비트 단위 일치, PCM 2,815 → 1,291 ALM(128.86 MHz 빌드 기준). 이전 엔진은 `MSX1.qsf`의 `PCM_ENGINE3` 줄을 지우고 빌드
-  *A rebuilt PCM engine (default from 20261030a, the same engine as on V9968_Geo3D): bit-exact with the openMSX-based golden model, 2,815 → 1,291 ALM for the PCM (128.86 MHz build). Remove the `PCM_ENGINE3` line in `MSX1.qsf` for the previous engine.*
+- **OPL4 PCM engine3** — 새로 만든 PCM 엔진(20261030c부터 기본, V9968_Geo3D 브랜치와 같은 엔진). openMSX(`YMF278.cc`) 기준 골든 모델과 비트 단위 일치, PCM 2,815 → 1,291 ALM(128.86 MHz 빌드 기준). 이전 엔진은 `MSX1.qsf`의 `PCM_ENGINE3` 줄을 지우고 빌드
+  *A rebuilt PCM engine (default from 20261030c, the same engine as on V9968_Geo3D): bit-exact with the openMSX-based golden model, 2,815 → 1,291 ALM for the PCM (128.86 MHz build). Remove the `PCM_ENGINE3` line in `MSX1.qsf` for the previous engine.*
 - **OPL4 PCM 엔진 경량화 / Lighter OPL4 PCM engine** (engine2) — 슬롯 상태를 MLAB으로, 당시 전체 설계 31,934 → 29,637 ALM. 플롭 기준 엔진과 lockstep 검증, 실기 확인
   *Slot state in MLAB: the whole design went from 31,934 to 29,637 ALM at the time, verified in lockstep against the flop engine and confirmed on the board.*
 
@@ -69,8 +69,8 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
 - OSD 로드 중 OPL4 홀드가 플래시 카트 접근 뒤 풀리던 문제 (소스 수정, 실기 미확인)
   *The OPL4 hold during an OSD load dropped once a flash cart had been touched (fixed in source, not yet confirmed on the board).*
 
-**릴리스 / Releases** — `releases/MSX1_20261030a_nextz80_engine3_a902843.rbf` (OPL4 PCM engine3, 실기 확인 전), GitHub 릴리스 `nextz80-20261030a`. 이전 rbf는 `releases/`에 그대로 있다
-*`releases/MSX1_20261030a_nextz80_engine3_a902843.rbf` (OPL4 PCM engine3, not yet confirmed on the board); GitHub release `nextz80-20261030a`. The earlier rbfs stay in `releases/`.*
+**릴리스 / Releases** — `releases/MSX1_20261030c_nextz80_dqcap_03894c0.rbf` (OPL4 PCM engine3, 실기 확인). 20261030a는 SDRAM 읽기 캡처 배치 결함(아래)으로 폐기. 이전 rbf는 `releases/`에 그대로 있다
+*`releases/MSX1_20261030c_nextz80_dqcap_03894c0.rbf` (OPL4 PCM engine3, confirmed on the board). 20261030a is withdrawn (SDRAM read-capture placement fault, below). The earlier rbfs stay in `releases/`.*
 
 아래는 항목별 상세 / Details below.
 
@@ -101,7 +101,7 @@ Full OPL4 emulation — OPL3-compatible FM plus the PCM wavetable engine.
 The PCM engine is validated against a bit-exact golden harness derived from the openMSX
 `YMF278.cc` model, and the FM side against Nuked-OPL3.
 
-### OPL4 PCM engine3 (default from rbf 20261030a)
+### OPL4 PCM engine3 (default from rbf 20261030c)
 A from-scratch PCM engine (built in the `opl4_scratch` work, the same file as on the
 V9968_Geo3D branch). Per 44.1 kHz frame a control pass reads the registers and computes
 pitch, position, envelope, LFO and the sample addresses for all 24 slots at the frame edge,
@@ -118,7 +118,15 @@ as the control pass has them, so the SDRAM latency is hidden behind the lead.
   of one voice); pitch and envelope keep running.
 - The reg 6 write WAIT is openMSX's 28 master clocks.
 - Previous engine (engine2, the MLAB engine below): remove the `PCM_ENGINE3` line in `MSX1.qsf`.
-- Not yet confirmed on the board (MoonSound PCM playback, 2 MB wave RAM reads).
+- Confirmed on the board 2026-10-30 (Neon Horizon: ROM and uploaded waves, loops).
+- The withdrawn 20261030a had the right RTL and a wrong placement: `sdram.sv` captures
+  `SDRAM_DQ` into five separate flops and only one of them sits in the IOE input register;
+  with no input constraint the fitter put `ch4_saved_data[13]` 12 ns from its pin (13.6 ns,
+  more than one 85.9 MHz period), so PCM samples and wave headers came back with bit 13 from
+  the wrong cycle (wrong timbre, clicks at loop points) while the CPU channel was fine.
+  `MSX1.sdc` now bounds the four capture flops (`set_max_delay`, ~10.5 ns required; this
+  build 7.9 ns worst). Every nextz80 build should be checked the same way (TimeQuest
+  `get_path -from SDRAM_DQ* -to *sdram|ch*_saved_data*`, slow model, all <= 10.5 ns).
 
 ### Z80 turbo
 `Z80 Speed` on the OSD's `CPU` page: `3.58MHz` (stock), `5.37MHz (Panasonic)`, `7.16MHz`,
