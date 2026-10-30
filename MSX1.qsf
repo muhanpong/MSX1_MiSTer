@@ -19,6 +19,9 @@ set_global_assignment -name LAST_QUARTUS_VERSION "17.1.0 Lite Edition"
 # rows + IM2-table watchpoint).  Uncomment to re-enable; see rtl/msx.sv and
 # rtl/debug_overlay.sv `ifdef MOONSOUND_DIAG sections.
 set_global_assignment -name VERILOG_MACRO "MOONSOUND_DIAG=1"
+# OPL4 PCM engine: engine3 (the from-scratch engine, opl4_scratch; 2026-10-30).  Comment this
+# line out for the previous engine (engine2).  rtl/msx.sv reads a pair as two ch4 reads.
+set_global_assignment -name VERILOG_MACRO "PCM_ENGINE3=1"
 # ---- SCC diagnostics -------------------------------------------------------
 # Two switches, cheap and expensive.
 #
