@@ -357,7 +357,7 @@ NextZ80 NZ
    .NMI(1'b0),
    .WAIT(nz_wait),
    .LOAD(nz_load),
-   .LDIR(nz_ldir),
+   .LDIR(t80_reg_t80),
    .XREG(nz_xreg),
    .SWAPPT(nz_swappt)
 );
@@ -395,28 +395,6 @@ nz_bus NZB
    .rfsh_n(nzb_rfsh_n)
 );
 
-//  Real turbo R contexts: on a turbo R pack (turbor_en, the pack's own BIOS) each core
-//  keeps its registers across hand-overs (cpuswap_ctl `indep`).  NextZ80's first entry
-//  after reset gets an R800 reset image instead of the Z80's state -- a turbo R's R800
-//  starts at 0000h the first time the S1990 selects it, and the BIOS is written for
-//  that.  The OSD's forced switch keeps the old copy (`nz_copy`): it lands at an
-//  arbitrary point of the program, where only a continuation of the same context is
-//  safe.
-//  Reset image, REG layout (T80.vhd): A=FF F=FF SP=FFFF PC=0000, IFF1/IFF2/IM/I/R = 0.
-localparam logic [211:0] R800_RESET = {148'd0, 16'h0000, 16'hFFFF, 16'h0000, 16'h0000, 8'hFF, 8'hFF};
-logic nz_fresh = 1'b1, nz_copy = 1'b0;
-always_ff @(posedge clk21m) begin
-   if (reset) begin
-      nz_fresh <= 1'b1;
-      nz_copy  <= 1'b0;
-   end else begin
-      if (nz_load) nz_fresh <= 1'b0;
-      if (r800_set_stb)                nz_copy <= 1'b1;
-      else if (~swap_busy & (tr_r800 == use_nz)) nz_copy <= 1'b0;   // that hand-over is done
-   end
-end
-wire [211:0] nz_ldir = (turbor_en & nz_fresh & ~nz_copy) ? R800_RESET : t80_reg_t80;
-
 cpuswap_ctl CPUSWAP
 (
    .clk(clk21m),
@@ -430,10 +408,7 @@ cpuswap_ctl CPUSWAP
    .t80_dirset(t80_dirset),
    .nz_load(nz_load),
    .busy(swap_busy),
-   .rate_ok(cpu_rate_ok),
-   .indep(turbor_en),
-   .nz_fresh(nz_fresh),
-   .copy(nz_copy)
+   .rate_ok(cpu_rate_ok)
 );
 
 //  The owner's strobes, forced idle while a hand-over is in progress: the frozen
@@ -1602,7 +1577,6 @@ turbor turbor
    .mem_ov(tr_mem_ov),
    .io_sel(tr_io_sel),
    .dout(tr_dout),
-   .real_chgcpu(1'b1),        // turbor_en is only set for a turbo R pack: its own CHGCPU
    .set_stb(r800_set_stb),
    .set_r800(r800_set),
    .r800(tr_r800),
