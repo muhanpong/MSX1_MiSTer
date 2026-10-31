@@ -46,6 +46,7 @@ module turbor
    input  logic        m1_n,
    input  logic        iowr_stb,      // one clock per I/O write cycle
    input  logic        main_rom0,     // the current memory access is slot 0-0 page 0
+   input  logic        real_chgcpu,   // the pack's own CHGCPU / GETCPU (real CPU contexts): no stub
    output logic        mem_ov,        // drive `dout` for this memory read
    output logic        io_sel,        // drive `dout` for this I/O read
    output logic  [7:0] dout,
@@ -133,7 +134,11 @@ always_comb begin
       default: ;
    endcase
 end
-wire ov_addr = (a == 16'h002D) | (a >= 16'h0180 & a <= 16'h018B);
+//  With real_chgcpu the BIOS's own CHGCPU / GETCPU run (they are written for two
+//  CPUs that each keep their context, which cpuswap now provides); the stubs below
+//  assumed a hand-over that copies the state.
+wire ov_addr = (a == 16'h002D) | (a >= 16'h0186 & a <= 16'h018B)
+             | (~real_chgcpu & (a >= 16'h0180 & a <= 16'h0185));
 assign mem_ov = en & main_rom0 & ~mreq_n & ~rd_n & ov_addr;
 
 //  One-shots: evaluated on every clock of an opcode fetch (NextZ80 can fetch back to
@@ -145,8 +150,8 @@ always_ff @(posedge clk) begin
       chg_arm <= 1'b0;
       get_arm <= 1'b0;
    end else if (fetch) begin
-      chg_arm <= main_rom0 & (a == 16'h0180);
-      get_arm <= main_rom0 & (a == 16'h0183);
+      chg_arm <= ~real_chgcpu & main_rom0 & (a == 16'h0180);
+      get_arm <= ~real_chgcpu & main_rom0 & (a == 16'h0183);
    end else if (wr & p_s19) begin
       chg_arm <= 1'b0;
    end

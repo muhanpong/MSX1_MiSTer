@@ -29,6 +29,8 @@
 //    +norg=1         mutation: no resume guard
 //    +pcmstop=<n>    press CTRL+STOP once the PCMPLY player has put out n samples (0 = never)
 //    +maxclk=<n>     timeout
+//    +indep=1        real turbo R contexts (cpuswap_ctl `indep`): no state copy; NextZ80's first
+//                    entry after reset gets the R800 reset image (PC 0000h), as msx.sv does
 module tb (input logic clk);
 
 logic [7:0] mem [0:65535];
@@ -176,18 +178,24 @@ nz_bus NZB (
 );
 
 //  ---------------------------------------------------------------- controller
+logic indep = 1'b0, nz_fresh = 1'b1;
+initial indep = $test$plusargs("indep") != 0;
+always_ff @(posedge clk) if (reset) nz_fresh <= 1'b1; else if (nz_load) nz_fresh <= 1'b0;
+localparam logic [211:0] R800_RESET = {148'd0, 16'h0000, 16'hFFFF, 16'h0000, 16'h0000, 8'hFF, 8'hFF};
+
 cpuswap_ctl CTL (
    .clk(clk), .reset(reset), .want_nz(want_nz),
    .t80_swappt(t_swappt), .nz_swappt(n_swappt),
    .use_nz(use_nz), .t80_hold(t80_hold), .nz_hold(nz_hold),
    .t80_dirset(t80_dirset), .nz_load(nz_load), .busy(busy),
-   .rate_ok(rate_ok)
+   .rate_ok(rate_ok),
+   .indep(indep), .nz_fresh(nz_fresh), .copy(1'b0)
 );
 
 int unsigned xfers = 0;
 wire corrupt_now = (corrupt != 0) && (xfers + 1 == corrupt);
 assign t_dir  = n_xreg ^ (corrupt_now ? 212'd1 << 112 : 212'd0);
-assign n_ldir = t_reg  ^ (corrupt_now ? 212'd1 << 112 : 212'd0);
+assign n_ldir = (indep & nz_fresh) ? R800_RESET : (t_reg ^ (corrupt_now ? 212'd1 << 112 : 212'd0));
 
 //  ---------------------------------------------------------------- the bus (msx.sv mux)
 //  The owner's strobes, forced idle while the controller is busy so that `req`
@@ -280,7 +288,7 @@ turbor TR (
    .clk(clk), .reset(reset), .en(1'b1), .ce_3m58(ce_3m58),
    .a(a), .din(d_from_cpu), .mreq_n(mreq_n), .iorq_n(iorq_n), .rd_n(rd_n), .m1_n(m1_n),
    .iowr_stb(iowr_stb), .main_rom0(a[15:14] == 2'b00), .mem_ov(tr_ov), .io_sel(s_sel), .dout(s_dout),
-   .set_stb(1'b0), .set_r800(1'b0), .r800(s1990_r800), .dram(s_dram),
+   .real_chgcpu(1'b1), .set_stb(1'b0), .set_r800(1'b0), .r800(s1990_r800), .dram(s_dram),
    .cpu_reg(use_nz ? n_xreg : t_reg), .ctrl_stop(ctrl_stop),
    .pace_n(wait_core_n), .d_to_cpu(d_to_cpu),
    .pcm_busy(pcm_busy), .pcm_bus_own(pcm_bus),
