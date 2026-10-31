@@ -55,7 +55,6 @@ module turbor
    input  logic        set_r800,
    output logic        r800,
    output logic        dram,
-   output logic        sel_direct,    // the CPU was last chosen by a bare register 6 write (not CHGCPU / OSD)
    //  PCM
    output logic  [7:0] pcm_dac,       // unsigned, 80h = silence
    output logic        mute_all,
@@ -202,24 +201,15 @@ end
 logic [7:0] pau_st = 8'h00;
 always_ff @(posedge clk) begin
    if (reset) begin
-      regsel     <= 8'h00;
-      cpust      <= 2'b11;
-      sel_direct <= 1'b0;
+      regsel <= 8'h00;
+      cpust  <= 2'b11;
    end else begin
       if (wr & p_s19 & ~a[0]) regsel <= din;
       if (wr & p_s19 &  a[0]) begin
-         if (chg_arm) begin
-            cpust      <= (din[1:0] == 2'd0) ? 2'b11 : (din[1:0] == 2'd1) ? 2'b10 : 2'b00;
-            sel_direct <= 1'b0;
-         end else if (regsel == 8'd6) begin
-            cpust      <= din[6:5];
-            sel_direct <= 1'b1;
-         end
+         if (chg_arm)             cpust <= (din[1:0] == 2'd0) ? 2'b11 : (din[1:0] == 2'd1) ? 2'b10 : 2'b00;
+         else if (regsel == 8'd6) cpust <= din[6:5];
       end
-      if (set_stb) begin
-         cpust[0]   <= ~set_r800;
-         sel_direct <= 1'b0;
-      end
+      if (set_stb) cpust[0] <= ~set_r800;
    end
 end
 
