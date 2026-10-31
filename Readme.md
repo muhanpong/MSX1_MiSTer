@@ -13,6 +13,8 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
 
 - **MoonSound (OPL4)** — YMF278B FM + PCM 웨이브테이블 엔진, 2MB 샘플 RAM
   *YMF278B FM plus the PCM wavetable engine, with 2MB of sample RAM.*
+- **V9990 (GFX9000)** — rampa069의 V9990 코어를 nextz80에 통합, VRAM 512 KB는 SDRAM, OSD로 On/Off (`nextz80_v9990` 브랜치)
+  *rampa069's V9990 core on nextz80, 512 KB VRAM in SDRAM, OSD On/Off (branch `nextz80_v9990`).*
 - **turbo R** — FS-A1GT / FS-A1ST 기계 팩, R800과 Z80 실행 중 전환(소프트웨어 또는 OSD), R800 7.16 / 21.5 MHz
   *FS-A1GT / FS-A1ST machine packs; the R800 and the Z80 switch at run time (by software or the OSD); R800 at 7.16 / 21.5 MHz.*
 - **Z80 터보 / Z80 turbo** — 3.58 기본에 5.37 / 7.16 / 10.7 / 21.5 MHz 추가. 파나소닉 MSX2+ 방식 포트 토글도 지원
@@ -69,8 +71,8 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
 - OSD 로드 중 OPL4 홀드가 플래시 카트 접근 뒤 풀리던 문제 (소스 수정, 실기 미확인)
   *The OPL4 hold during an OSD load dropped once a flash cart had been touched (fixed in source, not yet confirmed on the board).*
 
-**릴리스 / Releases** — `releases/MSX1_20261030c_nextz80_dqcap_03894c0.rbf` (OPL4 PCM engine3, 실기 확인). 20261030a는 SDRAM 읽기 캡처 배치 결함(아래)으로 폐기. 이전 rbf는 `releases/`에 그대로 있다
-*`releases/MSX1_20261030c_nextz80_dqcap_03894c0.rbf` (OPL4 PCM engine3, confirmed on the board). 20261030a is withdrawn (SDRAM read-capture placement fault, below). The earlier rbfs stay in `releases/`.*
+**릴리스 / Releases** — `releases/MSX1_20261031a_nextz80_v9990_8d19b51.rbf` (V9990, turbo R 실기식 CPU 컨텍스트, V9958 FH 레벨 읽기; 실기 확인). nextz80 본선의 마지막은 `MSX1_20261030c_nextz80_dqcap_03894c0.rbf`. 이전 rbf는 `releases/`에 그대로 있다
+*`releases/MSX1_20261031a_nextz80_v9990_8d19b51.rbf` (V9990, real turbo R CPU contexts, V9958 FH level read; confirmed on the board). The last nextz80 mainline rbf is `MSX1_20261030c_nextz80_dqcap_03894c0.rbf`. The earlier rbfs stay in `releases/`.*
 
 아래는 항목별 상세 / Details below.
 
@@ -128,6 +130,23 @@ as the control pass has them, so the SDRAM latency is hidden behind the lead.
   build 7.9 ns worst). Every nextz80 build should be checked the same way (TimeQuest
   `get_path -from SDRAM_DQ* -to *sdram|ch*_saved_data*`, slow model, all <= 10.5 ns).
 
+### V9990 (GFX9000) — branch `nextz80_v9990`
+rampa069's V9990 (E-VDP-III) core (`rtl/video/v9990/`, BSD-3, upstream 36170c5) on the nextz80
+machine. OSD `V9990 (GFX9000)` Off/On (default Off: the core stays in reset, no port decode, no
+SDRAM traffic). Ports `60h`-`6Fh`, the interrupt, and a WAIT handshake like MoonSound's.
+
+- **VRAM** 512 KB in SDRAM (top 512 KB of the first 32 MB, `0x1F80000`) behind the core's
+  4-line cache and `sdram.sv` ch5 (one 4-word line per read; posted writes). Priority after the
+  CPU; the CPU's open-loop read deadline keeps 4 clocks of margin with the V9990 at full load.
+- **Video**: the picture switches to the V9990 while its `R#8 DISP` is on, at the V9990's
+  vertical blank; otherwise the MSX VDP. Same `CLK_VIDEO`, pixel clock 10.74 MHz: B0-B3, P1, P2
+  at full resolution, B4/B7 (1024 wide) at half, B5/B6 (25/31 kHz) not supported. No
+  superimpose, no manual source select.
+- **Verified**: the V9990 3D demo and *Monkey Island 2* (NEO-16) on the board; the core's VRAM
+  image equals the openMSX-checked model over a replayed demo trace in simulation.
+- **Not yet**: an upload guard for the VRAM area (a pack + carts above 31.5 MB would overlap
+  it on a 32 MB board); moving the VRAM above 32 MB on 64/128 MB boards.
+
 ### Z80 turbo
 `Z80 Speed` on the OSD's `CPU` page: `3.58MHz` (stock), `5.37MHz (Panasonic)`, `7.16MHz`,
 `10.7MHz`, `21.5MHz`. The Z80 is T80s on a single clock enable, so `21.5MHz` is one T-state
@@ -147,6 +166,13 @@ Any other pack gets none of it, whatever the OSD says.
   run time, the way the S1990 does it: by software (`OUT E5h`, the BIOS `CHGCPU`) or from
   the OSD's `CPU (turbo R)`: `Auto` (software decides), `Force Z80`, `Force R800`. The OSD
   choice is applied when the menu closes. A popup says which CPU the machine has settled on.
+- **Two CPU contexts (20261031a).** As on a real turbo R, each CPU keeps its own registers:
+  a hand-over freezes the one deselected and the other resumes where *it* stopped; the first
+  time the R800 is selected it starts at `0000h`, and the pack's own `CHGCPU`/`GETCPU` run
+  (no BIOS stub). Software that switches with an `OTIR` to the S1990 and lets the frozen CPU
+  finish it later (the GT BIOS itself, *Wonder Boy in Monster World*) now runs on the R800;
+  before 20261031a the hand-over copied the state and such a program fell straight back to
+  the Z80. The OSD's forced switch still copies the state (it lands at an arbitrary point).
 - `R800 Speed`: `7.16MHz` or `21.5MHz`. `R800 VDP access wait` spaces R800 writes to the VDP
   the way a real turbo R does (`8.66us`, the default) -- without it R800 software that writes
   the VDP back to back drops data.
@@ -356,7 +382,10 @@ Several timing and behaviour fixes measured against real hardware and openMSX:
 - Sprite pipeline restricted to display-area lines — removes ghost `S#0` collisions that
   made `ON SPRITE` traps fire continuously (sprites parked at Y=209 by `CLRSPR`)
 - Real-chip vblank IRQ position, per-scanline VDP command throttling, positional `VR` flag
-- `FH` flag armed only while `IE1` is enabled
+- `FH` (S#1 bit 0): the latch arms only while `IE1` is on; with `IE1` off the bit reads the
+  R#19-line *level* (right border of the matched line to the next left border, as openMSX),
+  and only for a match on a display line — software polls it that way for splits (*Unknown
+  Reality*), and software parks R#19 on a vblank line expecting nothing from it (*Zanac-EX*)
 - Overscan frames — when an R#9 LN switch past the end line keeps the display from ending
   (*km224*, *ASO*), the next frame's top-border lines and the lines after an LN 1→0 switch
   show their sprites, matched line by line against an openMSX table
