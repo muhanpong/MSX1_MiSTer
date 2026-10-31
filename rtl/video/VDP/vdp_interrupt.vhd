@@ -86,6 +86,7 @@ ARCHITECTURE RTL OF VDP_INTERRUPT IS
     SIGNAL FF_VSYNC_INT_N           : STD_LOGIC;
     SIGNAL FF_HSYNC_INT_N           : STD_LOGIC;
     SIGNAL FF_FH_LEVEL              : STD_LOGIC;
+    CONSTANT FH_LEVEL_START         : INTEGER := LEFT_BORDER + 56 + 1024;   -- 1315
     SIGNAL W_VSYNC_INTR_TIMING      : STD_LOGIC;
 BEGIN
 
@@ -184,7 +185,15 @@ BEGIN
         IF (RESET = '1') THEN
             FF_FH_LEVEL <= '0';
         ELSIF (CLK21M'EVENT AND CLK21M = '1') THEN
-            IF( ACTIVE_LINE = '1' AND Y_CNT = REG_R19_HSYNC_INT_LINE )THEN
+            -- The window is placed in OUTPUT time, like the VBLANK interrupt (H_CNT =
+            -- LEFT_BORDER): right border start = left border (56) + 1024 dots after it,
+            -- as openMSX's getRightBorder().  NOT ACTIVE_LINE: the pre-dot counter
+            -- reaches X = 255 about 76 clocks before the pixel leaves, and that
+            -- earlier window caught Zanac-EX's VBLANK handler (it parks R#19 on the
+            -- vblank line, R#19 = R#23 - 44, and reads S#1 with IE1 off) -- rbf
+            -- 20261031e.  Text modes (960 dots) are 64 clocks later than this;
+            -- nothing known polls FH with IE1 off in a text mode.
+            IF( H_CNT = FH_LEVEL_START AND Y_CNT = REG_R19_HSYNC_INT_LINE )THEN
                 FF_FH_LEVEL <= '1';
             ELSIF( H_CNT = LEFT_BORDER )THEN
                 FF_FH_LEVEL <= '0';
