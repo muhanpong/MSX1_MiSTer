@@ -71,8 +71,8 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
 - OSD 로드 중 OPL4 홀드가 플래시 카트 접근 뒤 풀리던 문제 (소스 수정, 실기 미확인)
   *The OPL4 hold during an OSD load dropped once a flash cart had been touched (fixed in source, not yet confirmed on the board).*
 
-**릴리스 / Releases** — `releases/MSX1_20261031a_nextz80_v9990_8d19b51.rbf` (V9990, turbo R 실기식 CPU 컨텍스트, V9958 FH 레벨 읽기; 실기 확인). nextz80 본선의 마지막은 `MSX1_20261030c_nextz80_dqcap_03894c0.rbf`. 이전 rbf는 `releases/`에 그대로 있다
-*`releases/MSX1_20261031a_nextz80_v9990_8d19b51.rbf` (V9990, real turbo R CPU contexts, V9958 FH level read; confirmed on the board). The last nextz80 mainline rbf is `MSX1_20261030c_nextz80_dqcap_03894c0.rbf`. The earlier rbfs stay in `releases/`.*
+**릴리스 / Releases** — `releases/MSX1_20261031b_nextz80_v9990_a62bef2.rbf` (V9990, turbo R 실기식 CPU 컨텍스트, V9958 FH 레벨 읽기 + 현재 R#23 비교; 실기 확인). 직전은 `MSX1_20261031a_nextz80_v9990_8d19b51.rbf`. nextz80 본선의 마지막은 `MSX1_20261030c_nextz80_dqcap_03894c0.rbf`. 이전 rbf는 `releases/`에 그대로 있다
+*`releases/MSX1_20261031b_nextz80_v9990_a62bef2.rbf` (V9990, real turbo R CPU contexts, V9958 FH level read compared with the current R#23; confirmed on the board). The previous one is `MSX1_20261031a_nextz80_v9990_8d19b51.rbf`. The last nextz80 mainline rbf is `MSX1_20261030c_nextz80_dqcap_03894c0.rbf`. The earlier rbfs stay in `releases/`.*
 
 아래는 항목별 상세 / Details below.
 
@@ -385,7 +385,10 @@ Several timing and behaviour fixes measured against real hardware and openMSX:
 - `FH` (S#1 bit 0): the latch arms only while `IE1` is on; with `IE1` off the bit reads the
   R#19-line *level* (right border of the matched line to the next left border, as openMSX),
   and only for a match on a display line — software polls it that way for splits (*Unknown
-  Reality*), and software parks R#19 on a vblank line expecting nothing from it (*Zanac-EX*)
+  Reality*), and software parks R#19 on a vblank line expecting nothing from it (*Zanac-EX*).
+  The level compares R#19 with the line plus the *current* R#23 (20261031b): *Unknown Reality*'s
+  mirror scroller rewrites R#23/R#19 after each FH to aim at the next line, too late for the
+  per-line R#23 latch the display uses (that latch stays, for *GoFigure*'s mid-line writes)
 - Overscan frames — when an R#9 LN switch past the end line keeps the display from ending
   (*km224*, *ASO*), the next frame's top-border lines and the lines after an LN 1→0 switch
   show their sprites, matched line by line against an openMSX table
