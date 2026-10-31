@@ -357,6 +357,7 @@ ARCHITECTURE RTL OF VDP IS
 
             H_CNT                   : IN    STD_LOGIC_VECTOR( 10 DOWNTO 0 );
             Y_CNT                   : IN    STD_LOGIC_VECTOR(  7 DOWNTO 0 );
+            Y_CNT_LIVE              : IN    STD_LOGIC_VECTOR(  7 DOWNTO 0 );
             ACTIVE_LINE             : IN    STD_LOGIC;
             V_BLANKING_START        : IN    STD_LOGIC;
             CLR_VSYNC_INT           : IN    STD_LOGIC;
@@ -921,6 +922,7 @@ ARCHITECTURE RTL OF VDP IS
     SIGNAL REG_R18_ADJ                  : STD_LOGIC_VECTOR(  7 DOWNTO 0 );
     SIGNAL REG_R19_HSYNC_INT_LINE       : STD_LOGIC_VECTOR(  7 DOWNTO 0 );
     SIGNAL REG_R23_VSTART_LINE          : STD_LOGIC_VECTOR(  7 DOWNTO 0 );
+    SIGNAL FH_Y_CNT_LIVE                : STD_LOGIC_VECTOR(  7 DOWNTO 0 );
     SIGNAL REG_R25_CMD                  : STD_LOGIC;
     SIGNAL REG_R25_YAE                  : STD_LOGIC;
     SIGNAL REG_R25_YJK                  : STD_LOGIC;
@@ -1162,6 +1164,11 @@ BEGIN
                     REQ_HSYNC_INT_N;
 
     REQ_HSYNC_S1_N <= REQ_HSYNC_INT_N WHEN( REG_R0_HSYNC_INT_EN = '1' )ELSE NOT FH_LEVEL;
+    -- FH level line compare with the CURRENT R#23 (the display keeps the per-line
+    -- latch in vdp_ssg).  Unknown Reality's split loops rewrite R#23 and R#19 right
+    -- after each FH to aim at the next line; the writes land after that line's
+    -- HSYNC, so the latched R#23 missed every following line (one line per frame).
+    FH_Y_CNT_LIVE <= PREDOTCOUNTER_YP( 7 DOWNTO 0 ) + REG_R23_VSTART_LINE;
 
     INT_N       <=  '0' WHEN( VSYNCINT_N = '0' OR HSYNCINT_N = '0' )ELSE
 --                  'Z';    -- OCM original setting
@@ -1174,6 +1181,7 @@ BEGIN
 
         H_CNT                   => H_CNT                            ,
         Y_CNT                   => PREDOTCOUNTER_Y(  7 DOWNTO 0 )   ,
+        Y_CNT_LIVE              => FH_Y_CNT_LIVE                    ,
         ACTIVE_LINE             => ACTIVE_LINE                      ,
         V_BLANKING_START        => V_BLANKING_START                 ,
         CLR_VSYNC_INT           => CLR_VSYNC_INT                    ,

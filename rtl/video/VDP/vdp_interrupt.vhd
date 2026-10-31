@@ -69,6 +69,7 @@ ENTITY VDP_INTERRUPT IS
 
         H_CNT                   : IN    STD_LOGIC_VECTOR( 10 DOWNTO 0 );
         Y_CNT                   : IN    STD_LOGIC_VECTOR(  7 DOWNTO 0 );
+        Y_CNT_LIVE              : IN    STD_LOGIC_VECTOR(  7 DOWNTO 0 );    -- monitor line + current R#23 (FH level only)
         ACTIVE_LINE             : IN    STD_LOGIC;
         V_BLANKING_START        : IN    STD_LOGIC;
         CLR_VSYNC_INT           : IN    STD_LOGIC;
@@ -202,7 +203,11 @@ BEGIN
             -- this core (rbf 20261031e/g).  The polling uses (Unknown Reality)
             -- are splits on display lines.  (openMSX models the level on every
             -- matched line; what the chip does on a vblank line is not measured.)
-            IF( H_CNT = FH_LEVEL_START AND Y_CNT = REG_R19_HSYNC_INT_LINE AND DISP_Y = '1' )THEN
+            -- Y_CNT_LIVE, not Y_CNT: the compare uses R#23 as it is now, like openMSX
+            -- (match line = R#19 - R#23 with the current registers).  Y_CNT carries the
+            -- R#23 latched at HSYNC for the display; Unknown Reality's mirror-scroller
+            -- loops write R#23/R#19 after the next line's HSYNC and never matched again.
+            IF( H_CNT = FH_LEVEL_START AND Y_CNT_LIVE = REG_R19_HSYNC_INT_LINE AND DISP_Y = '1' )THEN
                 FF_FH_LEVEL <= '1';
             ELSIF( H_CNT = LEFT_BORDER )THEN
                 FF_FH_LEVEL <= '0';
