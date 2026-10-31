@@ -364,6 +364,7 @@ ARCHITECTURE RTL OF VDP IS
             REQ_VSYNC_INT_N         : OUT   STD_LOGIC;
             REQ_HSYNC_INT_N         : OUT   STD_LOGIC;
             FH_LEVEL                : OUT   STD_LOGIC;
+            DISP_Y                  : IN    STD_LOGIC;
             REG_R19_HSYNC_INT_LINE  : IN    STD_LOGIC_VECTOR(  7 DOWNTO 0 );
             REG_R0_HSYNC_INT_EN     : IN    STD_LOGIC
         );
@@ -1180,6 +1181,7 @@ BEGIN
         REQ_VSYNC_INT_N         => REQ_VSYNC_INT_N                  ,
         REQ_HSYNC_INT_N         => REQ_HSYNC_INT_N                  ,
         FH_LEVEL                => FH_LEVEL                         ,
+        DISP_Y                  => PREWINDOW_Y                      ,
         REG_R19_HSYNC_INT_LINE  => REG_R19_HSYNC_INT_LINE      ,
         REG_R0_HSYNC_INT_EN     => REG_R0_HSYNC_INT_EN
     );

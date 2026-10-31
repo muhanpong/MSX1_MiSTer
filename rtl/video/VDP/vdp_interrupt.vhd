@@ -76,6 +76,7 @@ ENTITY VDP_INTERRUPT IS
         REQ_VSYNC_INT_N         : OUT   STD_LOGIC;
         REQ_HSYNC_INT_N         : OUT   STD_LOGIC;
         FH_LEVEL                : OUT   STD_LOGIC;
+        DISP_Y                  : IN    STD_LOGIC;    -- the raster is inside the vertical display window (vdp_ssg PREWINDOW_Y)
         REG_R19_HSYNC_INT_LINE  : IN    STD_LOGIC_VECTOR(  7 DOWNTO 0 );
         REG_R0_HSYNC_INT_EN     : IN    STD_LOGIC
     );
@@ -193,7 +194,15 @@ BEGIN
             -- vblank line, R#19 = R#23 - 44, and reads S#1 with IE1 off) -- rbf
             -- 20261031e.  Text modes (960 dots) are 64 clocks later than this;
             -- nothing known polls FH with IE1 off in a text mode.
-            IF( H_CNT = FH_LEVEL_START AND Y_CNT = REG_R19_HSYNC_INT_LINE )THEN
+            -- Only for a match on a DISPLAY line.  Software parks R#19 on a vblank
+            -- line to make the match harmless (Zanac-EX in game: R#19 = R#23 - 44 ->
+            -- line 212; its game-over R#23 roll sweeps the match line through 212
+            -- too) and reads S#1 once per frame from the VBLANK handler with IE1
+            -- off; a level there, at any window position, reaches that read on
+            -- this core (rbf 20261031e/g).  The polling uses (Unknown Reality)
+            -- are splits on display lines.  (openMSX models the level on every
+            -- matched line; what the chip does on a vblank line is not measured.)
+            IF( H_CNT = FH_LEVEL_START AND Y_CNT = REG_R19_HSYNC_INT_LINE AND DISP_Y = '1' )THEN
                 FF_FH_LEVEL <= '1';
             ELSIF( H_CNT = LEFT_BORDER )THEN
                 FF_FH_LEVEL <= '0';
