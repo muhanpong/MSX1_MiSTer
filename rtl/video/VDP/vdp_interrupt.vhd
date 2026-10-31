@@ -75,6 +75,7 @@ ENTITY VDP_INTERRUPT IS
         CLR_HSYNC_INT           : IN    STD_LOGIC;
         REQ_VSYNC_INT_N         : OUT   STD_LOGIC;
         REQ_HSYNC_INT_N         : OUT   STD_LOGIC;
+        FH_LEVEL                : OUT   STD_LOGIC;
         REG_R19_HSYNC_INT_LINE  : IN    STD_LOGIC_VECTOR(  7 DOWNTO 0 );
         REG_R0_HSYNC_INT_EN     : IN    STD_LOGIC
     );
@@ -84,11 +85,13 @@ ARCHITECTURE RTL OF VDP_INTERRUPT IS
 
     SIGNAL FF_VSYNC_INT_N           : STD_LOGIC;
     SIGNAL FF_HSYNC_INT_N           : STD_LOGIC;
+    SIGNAL FF_FH_LEVEL              : STD_LOGIC;
     SIGNAL W_VSYNC_INTR_TIMING      : STD_LOGIC;
 BEGIN
 
     REQ_VSYNC_INT_N <= FF_VSYNC_INT_N;
     REQ_HSYNC_INT_N <= FF_HSYNC_INT_N;
+    FH_LEVEL        <= FF_FH_LEVEL;
 
     -----------------------------------------------------------------------------
     -- VSYNC INTERRUPT REQUEST
@@ -161,6 +164,30 @@ BEGIN
                    AND REG_R0_HSYNC_INT_EN = '1' )THEN
                 -- H-BLANKING INTERRUPT REQUEST
                 FF_HSYNC_INT_N <= '0';
+            END IF;
+        END IF;
+    END PROCESS;
+
+    --------------------------------------------------------------------------
+    --  FH AS READ WHILE IE1 IS OFF (2026-10-31)
+    --------------------------------------------------------------------------
+    -- With IE1 off the chip latches nothing, but S#1 bit0 still reads 1 while
+    -- the raster is on the R#19 line: from the start of that line's right
+    -- border to the start of the next line's left border (openMSX
+    -- VDP::peekStatusReg, case 1, "line int disabled").  Unknown Reality (NOP)
+    -- polls exactly that with IE1 off to time its title-screen splits; the
+    -- IE1-only latch above left it reading 0 forever (stuck at the title on
+    -- every V9958 build; the V9968 core shows the level).  Not latched, never
+    -- an interrupt: Zanac-EX's VBLANK handler reads 0 here, as before.
+    PROCESS( RESET, CLK21M )
+    BEGIN
+        IF (RESET = '1') THEN
+            FF_FH_LEVEL <= '0';
+        ELSIF (CLK21M'EVENT AND CLK21M = '1') THEN
+            IF( ACTIVE_LINE = '1' AND Y_CNT = REG_R19_HSYNC_INT_LINE )THEN
+                FF_FH_LEVEL <= '1';
+            ELSIF( H_CNT = LEFT_BORDER )THEN
+                FF_FH_LEVEL <= '0';
             END IF;
         END IF;
     END PROCESS;

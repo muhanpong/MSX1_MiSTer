@@ -363,6 +363,7 @@ ARCHITECTURE RTL OF VDP IS
             CLR_HSYNC_INT           : IN    STD_LOGIC;
             REQ_VSYNC_INT_N         : OUT   STD_LOGIC;
             REQ_HSYNC_INT_N         : OUT   STD_LOGIC;
+            FH_LEVEL                : OUT   STD_LOGIC;
             REG_R19_HSYNC_INT_LINE  : IN    STD_LOGIC_VECTOR(  7 DOWNTO 0 );
             REG_R0_HSYNC_INT_EN     : IN    STD_LOGIC
         );
@@ -851,6 +852,8 @@ ARCHITECTURE RTL OF VDP IS
     SIGNAL HSYNCINT_N                   : STD_LOGIC;
     SIGNAL CLR_HSYNC_INT                : STD_LOGIC;
     SIGNAL REQ_HSYNC_INT_N              : STD_LOGIC;
+    SIGNAL FH_LEVEL                     : STD_LOGIC;
+    SIGNAL REQ_HSYNC_S1_N               : STD_LOGIC;    -- S#1 FH as read: the latch with IE1 on, the line level with it off
 
     SIGNAL DVIDEOHS_N                   : STD_LOGIC;
 
@@ -1157,6 +1160,8 @@ BEGIN
     HSYNCINT_N  <=  '1' WHEN( REG_R0_HSYNC_INT_EN = '0' OR ENAHSYNC = '0' )ELSE
                     REQ_HSYNC_INT_N;
 
+    REQ_HSYNC_S1_N <= REQ_HSYNC_INT_N WHEN( REG_R0_HSYNC_INT_EN = '1' )ELSE NOT FH_LEVEL;
+
     INT_N       <=  '0' WHEN( VSYNCINT_N = '0' OR HSYNCINT_N = '0' )ELSE
 --                  'Z';    -- OCM original setting
                     '1';    -- MIST board ( http://github.com/robinsonb5/OneChipMSX )
@@ -1174,6 +1179,7 @@ BEGIN
         CLR_HSYNC_INT           => CLR_HSYNC_INT                    ,
         REQ_VSYNC_INT_N         => REQ_VSYNC_INT_N                  ,
         REQ_HSYNC_INT_N         => REQ_HSYNC_INT_N                  ,
+        FH_LEVEL                => FH_LEVEL                         ,
         REG_R19_HSYNC_INT_LINE  => REG_R19_HSYNC_INT_LINE      ,
         REG_R0_HSYNC_INT_EN     => REG_R0_HSYNC_INT_EN
     );
@@ -1887,7 +1893,7 @@ BEGIN
         CLR_VSYNC_INT               => CLR_VSYNC_INT                ,
         CLR_HSYNC_INT               => CLR_HSYNC_INT                ,
         REQ_VSYNC_INT_N             => REQ_VSYNC_INT_N              ,
-        REQ_HSYNC_INT_N             => REQ_HSYNC_INT_N              ,
+        REQ_HSYNC_INT_N             => REQ_HSYNC_S1_N               ,
 
         REG_R0_HSYNC_INT_EN         => REG_R0_HSYNC_INT_EN          ,
         REG_R1_SP_SIZE              => REG_R1_SP_SIZE               ,
