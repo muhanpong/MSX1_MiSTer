@@ -125,12 +125,12 @@ module tb #(parameter int RELEASE_PH = 0);
                  1.0 - scan / 4.0);
     //  command waits (vdp_command.v): +w=a,b,...(12, order hmmc ymmm hmmm hmmv lmmc lmcm lmmm
     //  lmmv line srch pset point) or +v9938=1 for rtl/video/v9968_cmdwait.sv's table; default 40s
-    logic [95:0] cmdw; int v9938 = 0; int cmp = 0, cmpdisp = 1, mskt = 0, mskv = 0, r27v = 0, spx = -1, sp3x = -1, r26v = 0, stt = 0, sttline = 10; string sttregs = "", sttvram = ""; wire [95:0] cmdw_tab;
+    logic [95:0] cmdw; int v9938 = 0; int cmp = 0, cmpdisp = 1, mskt = 0, mskv = 0, r27v = 0, spx = -1, sp3x = -1, r26v = 0, g5 = 0, stt = 0, sttline = 10; string sttregs = "", sttvram = ""; wire [95:0] cmdw_tab;
     v9968_cmdwait u_cw (.v9938(1'b1), .cmd_wait(cmdw_tab));
     initial begin
         string ws; int vals [12]; int n = 0, v = 0; bit any = 0;
         cmdw = {12{8'd40}};
-        void'($value$plusargs("v9938=%d", v9938)); void'($value$plusargs("cmp=%d", cmp)); void'($value$plusargs("mskt=%d", mskt)); void'($value$plusargs("mskv=%d", mskv)); void'($value$plusargs("r27v=%d", r27v)); void'($value$plusargs("spx=%d", spx)); void'($value$plusargs("sp3x=%d", sp3x)); void'($value$plusargs("stt=%d", stt)); void'($value$plusargs("sttline=%d", sttline)); void'($value$plusargs("sttregs=%s", sttregs)); void'($value$plusargs("sttvram=%s", sttvram)); void'($value$plusargs("r26v=%d", r26v)); void'($value$plusargs("cmpdisp=%d", cmpdisp));
+        void'($value$plusargs("v9938=%d", v9938)); void'($value$plusargs("cmp=%d", cmp)); void'($value$plusargs("mskt=%d", mskt)); void'($value$plusargs("mskv=%d", mskv)); void'($value$plusargs("r27v=%d", r27v)); void'($value$plusargs("spx=%d", spx)); void'($value$plusargs("sp3x=%d", sp3x)); void'($value$plusargs("g5=%d", g5)); void'($value$plusargs("stt=%d", stt)); void'($value$plusargs("sttline=%d", sttline)); void'($value$plusargs("sttregs=%s", sttregs)); void'($value$plusargs("sttvram=%s", sttvram)); void'($value$plusargs("r26v=%d", r26v)); void'($value$plusargs("cmpdisp=%d", cmpdisp));
         if (v9938) cmdw = cmdw_tab;
         if ($value$plusargs("w=%s", ws)) begin
             foreach (ws[i]) begin
@@ -158,6 +158,32 @@ module tb #(parameter int RELEASE_PH = 0);
         .pulse0(), .pulse1(), .pulse2(), .pulse3(), .pulse4(), .pulse5(), .pulse6(), .pulse7());
 
     `define SSG vdp9968.u_timing_control.u_ssg
+    //  +ppm=<prefix> +ppmt0=<ms> +ppmn=<frames>: palette output (before upscan) of whole frames as PPM,
+    //  x = screen dot -16..255 at two samples per dot (phases 4 and 12), lines 0..211.
+    string ppmpre = ""; int ppmt0 = 0, ppmn = 0; bit pcap = 0; int pframe = -1;
+    logic [23:0] pbuf [212][544];
+    always @(posedge clk_vdp) if (pcap) begin
+        automatic int y = $signed(vdp9968.w_screen_pos_y); automatic int x = $signed(vdp9968.w_screen_pos_x[13:4]);
+        automatic logic [3:0] ph = vdp9968.w_screen_pos_x[3:0];
+        if (y >= 0 && y < 212 && x >= -16 && x < 256 && (ph == 4 || ph == 12))
+            pbuf[y][(x + 16) * 2 + (ph == 12)] = {vdp9968.w_vdp_r, vdp9968.w_vdp_g, vdp9968.w_vdp_b};
+    end
+    initial begin
+        void'($value$plusargs("ppm=%s", ppmpre)); void'($value$plusargs("ppmt0=%d", ppmt0)); void'($value$plusargs("ppmn=%d", ppmn));
+        if (ppmpre != "") begin
+            wait ($time >= 64'(ppmt0) * 64'd1_000_000_000);
+            for (int f = 0; f < ppmn; f++) begin
+                int fd;
+                wait (vdp9968.w_screen_pos_y == 10'h3FF); wait (vdp9968.w_screen_pos_y == 10'd0);
+                pframe = f; pcap = 1; wait (vdp9968.w_screen_pos_y == 10'd212); pcap = 0;
+                fd = $fopen($sformatf("%s_%03d.ppm", ppmpre, f), "wb");
+                $fwrite(fd, "P6\n544 212\n255\n");
+                for (int y = 0; y < 212; y++) for (int x = 0; x < 544; x++) $fwrite(fd, "%c%c%c", pbuf[y][x][23:16], pbuf[y][x][15:8], pbuf[y][x][7:0]);
+                $fclose(fd);
+                $display("PPM frame %0d at %0.1f ms", f, real'($time) / 1e9);
+            end
+        end
+    end
     int aso_f = 0; logic f_q = 0;
     //  every line-match pulse and every FH clear while +aso runs (why a wait missed its FH)
     logic lh_q = 0;
@@ -572,6 +598,40 @@ module tb #(parameter int RELEASE_PH = 0);
         //  +mskt=1: left-edge test. SCREEN 8, line 50 dots 0..15 distinct colours (dot n = (n&7)<<5 | (n>>3)<<2 | 1),
         //  dots 16.. = FFh, border 0.  R#25 MSK = +mskv, R#27 = +r27v.  Prints the palette output (before
         //  upscan) per screen dot on line 50, runs collapsed.
+        //  +mskt=1 +g5=1: GT boot logo case. SCREEN 6 (G5, 512 dots), MSK=1, line 50 bitmap all colour 1
+        //  (55h), a 16x16 mode-2 sprite at X=0 in colour 2 over it, border 0.  The sprite must cover
+        //  the bitmap right up to the mask: no colour-1 run before the sprite's run.
+        if (mskt > 0 && g5 > 0) begin
+            wreg(0, 8'h08); wreg(2, 8'h1F); wreg(7, 8'h00); wreg(8, 8'h08); wreg(9, 8'h80);
+            wreg(25, 8'h02); wreg(26, 8'h00); wreg(27, 8'h00); wreg(23, 8'h00);
+            wreg(14, 8'h00); io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h59, q);        // 01900h = line 50
+            for (int i = 0; i < 128; i++) io(1, 3'd0, 8'h55, q);
+            wreg(5, 8'hF7); wreg(11, 8'h01); wreg(6, 8'h1E);
+            wreg(14, 8'h03); io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h70, q);        // F000h: pattern 0..3 = FFh
+            for (int i = 0; i < 32; i++) io(1, 3'd0, 8'hFF, q);
+            io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h78, q);                          // F800h: colours = 2
+            for (int i = 0; i < 16; i++) io(1, 3'd0, 8'h02, q);
+            io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h7A, q);                          // FA00h: sprite 0 at (0, 49)
+            io(1, 3'd0, 8'd49, q); io(1, 3'd0, 8'h00, q); io(1, 3'd0, 8'h00, q); io(1, 3'd0, 8'h00, q);
+            io(1, 3'd0, 8'd216, q);
+            wreg(1, 8'h42);                                                        // display on, 16x16
+            wait (vdp9968.w_screen_pos_y == 10'd49); wait (vdp9968.w_screen_pos_y == 10'd50);
+            begin
+                logic [23:0] last, cbg, csp; int run, nr; bit seen_sp; last = 24'hFFFFFE; run = 0; nr = 0; seen_sp = 0;
+                while (vdp9968.w_screen_pos_y == 10'd50 && nr < 12) begin
+                    @(posedge clk_vdp);
+                    if (vdp9968.w_screen_pos_x[3:0] == 4'd4 || vdp9968.w_screen_pos_x[3:0] == 4'd12) begin
+                        logic [23:0] c; c = {vdp9968.w_vdp_r, vdp9968.w_vdp_g, vdp9968.w_vdp_b};
+                        if (c == last) run++;
+                        else begin
+                            if (run > 0) begin $display("G5MSK run %06h x%0d at dot %0d", last, run, $signed(vdp9968.w_screen_pos_x[13:4])); nr++; end
+                            last = c; run = 1;
+                        end
+                    end
+                end
+            end
+            $finish;
+        end
         if (mskt > 0) begin
             wreg(0, 8'h0E); wreg(2, 8'h1F); wreg(7, 8'h00); wreg(8, 8'h0A); wreg(9, 8'h80);
             wreg(25, 8'(mskv ? 8'h02 : 8'h00)); wreg(26, 8'(r26v)); wreg(27, 8'(r27v)); wreg(23, 8'h00);

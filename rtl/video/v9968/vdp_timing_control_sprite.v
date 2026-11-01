@@ -339,7 +339,16 @@ module vdp_timing_control_sprite (
 `ifndef SPRITE_MASK_POS
 `define SPRITE_MASK_POS 10'd15
 `endif
-	assign display_color_en		= w_display_color_en_raw & (!reg_left_mask || (screen_pos_x[13:4] >= `SPRITE_MASK_POS));
+	//	256-dot modes only.  In G5/G6 (512 dots) this core's bitmap mask ends half a dot
+	//	before column 15, and the GT boot logo covers that gap with sprites (blue sprites over
+	//	a black bitmap at the left edge); a mask at 15 opened a one-pixel black column there
+	//	(rbf 20261101a).  Those modes keep upstream's behaviour.
+`ifdef SPRITE_MASK_ALLMODES
+	wire				w_sprite_mask_hires	= 1'b0;		//	bench mutant: rbf 20261101a's rule
+`else
+	wire				w_sprite_mask_hires	= (reg_screen_mode == c_mode_g5) || (reg_screen_mode == c_mode_g6);
+`endif
+	assign display_color_en		= w_display_color_en_raw & (!reg_left_mask || w_sprite_mask_hires || (screen_pos_x[13:4] >= `SPRITE_MASK_POS));
 `endif
 
 	// --------------------------------------------------------------------

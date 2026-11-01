@@ -139,3 +139,10 @@ and ignores the HMMV switch; custom build: run_gates.sh GATES PASS.
   knightmare-v2's WBML V9968 port (dashboard sprites at X=0 one dot left of the bitmap bands), its
   openMSX register/VRAM dump replayed in sim/v9968_vram (+stt). Gate: sim/v9968_vram/run_spmask.sh
   (one-dot sprites X=7 hidden / X=8 shown, modes 2 and 3; mutant mask at 14 must fail).
+  256-dot modes only (2026-11-02): in G5/G6 this core's bitmap mask ends half a dot before column 15,
+  and the GT boot logo covers that gap with blue sprites over a black bitmap; the first version
+  (rbf 20261101a) masked sprites there too and opened a one-pixel black column in the logo animation
+  (board). Found by replaying an openMSX GT boot trace (sim/v9968_vram +rpl, +ppm frame dump) on the
+  old and new RTL. G5/G6 keep upstream's behaviour; run_spmask.sh adds the G5 case (mutant
+  SPRITE_MASK_ALLMODES = the 20261101a rule must show the bitmap gap). GT logo replay: 28 frames
+  identical to the 20261029d RTL.
