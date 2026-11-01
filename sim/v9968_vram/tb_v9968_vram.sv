@@ -125,12 +125,12 @@ module tb #(parameter int RELEASE_PH = 0);
                  1.0 - scan / 4.0);
     //  command waits (vdp_command.v): +w=a,b,...(12, order hmmc ymmm hmmm hmmv lmmc lmcm lmmm
     //  lmmv line srch pset point) or +v9938=1 for rtl/video/v9968_cmdwait.sv's table; default 40s
-    logic [95:0] cmdw; int v9938 = 0; wire [95:0] cmdw_tab;
+    logic [95:0] cmdw; int v9938 = 0; int cmp = 0, cmpdisp = 1, mskt = 0, mskv = 0, r27v = 0, spx = -1, sp3x = -1, r26v = 0, stt = 0, sttline = 10; string sttregs = "", sttvram = ""; wire [95:0] cmdw_tab;
     v9968_cmdwait u_cw (.v9938(1'b1), .cmd_wait(cmdw_tab));
     initial begin
         string ws; int vals [12]; int n = 0, v = 0; bit any = 0;
         cmdw = {12{8'd40}};
-        void'($value$plusargs("v9938=%d", v9938));
+        void'($value$plusargs("v9938=%d", v9938)); void'($value$plusargs("cmp=%d", cmp)); void'($value$plusargs("mskt=%d", mskt)); void'($value$plusargs("mskv=%d", mskv)); void'($value$plusargs("r27v=%d", r27v)); void'($value$plusargs("spx=%d", spx)); void'($value$plusargs("sp3x=%d", sp3x)); void'($value$plusargs("stt=%d", stt)); void'($value$plusargs("sttline=%d", sttline)); void'($value$plusargs("sttregs=%s", sttregs)); void'($value$plusargs("sttvram=%s", sttvram)); void'($value$plusargs("r26v=%d", r26v)); void'($value$plusargs("cmpdisp=%d", cmpdisp));
         if (v9938) cmdw = cmdw_tab;
         if ($value$plusargs("w=%s", ws)) begin
             foreach (ws[i]) begin
@@ -532,6 +532,119 @@ module tb #(parameter int RELEASE_PH = 0);
             end
             $display("LRMM sx=%0d sy=%0d vx=%0d vy=%0d: dest bytes inside(33h) %0d, outside(FFh) %0d, other/unwritten %0d of %0d",
                      lr_sx, lr_sy, lr_vx, lr_vy, n33, nff, noth, 212 * 128);
+        end
+        //  +stt=1: load an openMSX VDP state (+sttregs = 128 hex chars R#0-R#63, +sttvram = 256 KB logical
+        //  VRAM file) and print, per screen dot of line +sttline, the palette inputs (bitmap en/colour,
+        //  sprite en/colour) and the palette output, runs collapsed.
+        if (stt > 0) begin
+            logic [7:0] rv [64]; logic [7:0] vb [262144]; int fd, n;
+            for (int i = 0; i < 64; i++) void'($sscanf(sttregs.substr(2*i, 2*i+1), "%h", rv[i]));
+            fd = $fopen(sttvram, "rb"); n = $fread(vb, fd); $fclose(fd);
+            $display("STT regs R0=%02h R1=%02h R2=%02h R20=%02h R25=%02h R26=%02h R27=%02h; vram bytes %0d", rv[0], rv[1], rv[2], rv[20], rv[25], rv[26], rv[27], n);
+            io(1, 3'd4, 8'h00, q); wreg(21, rv[21]); wreg(20, rv[20]);
+            for (int r = 0; r < 28; r++) if (r != 14 && r != 15 && r != 16 && r != 17) wreg(r, r == 1 ? 8'h00 : rv[r]);
+            for (int b = 0; b < 16; b++) begin
+                wreg(14, 8'(b)); io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h40, q);
+                for (int i = 0; i < 16384; i++) io(1, 3'd0, vb[b * 16384 + i], q);
+            end
+            wreg(14, rv[14]); wreg(1, rv[1]);
+            repeat (2) begin wait (vdp9968.w_screen_pos_y == 10'h3FF); wait (vdp9968.w_screen_pos_y == 10'd0); end
+            wait (vdp9968.w_screen_pos_y == 10'(sttline));
+            begin
+                logic [47:0] last; int run, nr; last = '1; run = 0; nr = 0;
+                while (vdp9968.w_screen_pos_y == 10'(sttline) && nr < 24) begin
+                    @(posedge clk_vdp);
+                    if (vdp9968.w_screen_pos_x[3:0] == 4'd8) begin
+                        logic [47:0] c;
+                        c = {6'd0, vdp9968.w_screen_mode_display_color_en, vdp9968.w_screen_mode_display_color,
+                             vdp9968.w_sprite_display_color_en, vdp9968.w_sprite_display_color,
+                             vdp9968.w_vdp_r, vdp9968.w_vdp_g, vdp9968.w_vdp_b} ;
+                        if (c == last) run++;
+                        else begin
+                            if (run > 0) begin $display("STT line %0d dot %0d x%0d: bg_en %0d bg %02h sp_en %0d sp %02h rgb %06h", sttline, $signed(vdp9968.w_screen_pos_x[13:4]) - run, run, last[41], last[40:33], last[32], last[31:24], last[23:0]); nr++; end
+                            last = c; run = 1;
+                        end
+                    end
+                end
+            end
+            $finish;
+        end
+        //  +mskt=1: left-edge test. SCREEN 8, line 50 dots 0..15 distinct colours (dot n = (n&7)<<5 | (n>>3)<<2 | 1),
+        //  dots 16.. = FFh, border 0.  R#25 MSK = +mskv, R#27 = +r27v.  Prints the palette output (before
+        //  upscan) per screen dot on line 50, runs collapsed.
+        if (mskt > 0) begin
+            wreg(0, 8'h0E); wreg(2, 8'h1F); wreg(7, 8'h00); wreg(8, 8'h0A); wreg(9, 8'h80);
+            wreg(25, 8'(mskv ? 8'h02 : 8'h00)); wreg(26, 8'(r26v)); wreg(27, 8'(r27v)); wreg(23, 8'h00);
+            wreg(14, 8'h00); io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h72, q);        // VRAM 03200h = line 50
+            for (int i = 0; i < 256; i++) io(1, 3'd0, i < 16 ? 8'(((i & 7) << 5) | ((i >> 3) << 2) | 1) : 8'hFF, q);
+            if (spx >= 0) begin
+                //  sprite mode 2: SAT FA00h (R#5 F7h, R#11 01h), colours F800h, patterns F000h (R#6 1Eh)
+                wreg(5, 8'hF7); wreg(11, 8'h01); wreg(6, 8'h1E); wreg(8, 8'h08);
+                wreg(14, 8'h03); io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h70, q);       // F000h: pattern 0 row 0 = 80h
+                io(1, 3'd0, 8'h80, q); for (int i = 1; i < 8; i++) io(1, 3'd0, 8'h00, q);
+                io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h78, q);                         // F800h: colour rows of sprite 0
+                for (int i = 0; i < 16; i++) io(1, 3'd0, 8'h0A, q);
+                io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h7A, q);                         // FA00h: sprite 0, then end mark
+                io(1, 3'd0, 8'd49, q); io(1, 3'd0, 8'(spx), q); io(1, 3'd0, 8'h00, q); io(1, 3'd0, 8'h00, q);
+                io(1, 3'd0, 8'd216, q);
+            end
+            if (sp3x >= 0) begin
+                //  sprite mode 3 (R#20 SP3): SAT FA00h, 8 bytes/plane; patterns F000h (R#6 1Eh), row r at F000h + 128*r
+                io(1, 3'd4, 8'h00, q); wreg(20, 8'h08); wreg(21, 8'h00);
+                wreg(5, 8'hF7); wreg(11, 8'h01); wreg(6, 8'h1E); wreg(8, 8'h08);
+                for (int r = 0; r < 16; r++) begin
+                    automatic logic [15:0] a = 16'hF000 + 16'(128 * r);
+                    wreg(14, 8'h03); io(1, 3'd1, a[7:0], q); io(1, 3'd1, 8'h40 | a[13:8], q);
+                    io(1, 3'd0, 8'h20, q); for (int i = 1; i < 8; i++) io(1, 3'd0, 8'h00, q);   // dot 0 = colour 2
+                end
+                wreg(14, 8'h03); io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h7A, q);                   // FA00h
+                io(1, 3'd0, 8'd49, q); io(1, 3'd0, 8'h00, q); io(1, 3'd0, 8'd16, q); io(1, 3'd0, 8'h00, q);
+                io(1, 3'd0, 8'(sp3x & 255), q); io(1, 3'd0, 8'(sp3x >> 8), q); io(1, 3'd0, 8'd16, q); io(1, 3'd0, 8'h00, q);
+                io(1, 3'd0, 8'd216, q); io(1, 3'd0, 8'h00, q);
+            end
+            wreg(1, 8'h40);
+            wait (vdp9968.w_screen_pos_y == 10'd49); wait (vdp9968.w_screen_pos_y == 10'd50);
+            begin
+                logic [23:0] last; int run, nr; last = 24'hFFFFFE; run = 0; nr = 0;
+                while (vdp9968.w_screen_pos_y == 10'd50 && nr < 40) begin
+                    @(posedge clk_vdp);
+                    if (vdp9968.w_screen_pos_x[3:0] == 4'd8) begin
+                        logic [23:0] c; c = {vdp9968.w_vdp_r, vdp9968.w_vdp_g, vdp9968.w_vdp_b};
+                        if (c == last) run++;
+                        else begin
+                            if (run > 0) begin $display("MSKT msk=%0d r27=%0d r26=%0d run %06h x%0d at dot %0d", mskv, r27v, r26v, last, run, $signed(vdp9968.w_screen_pos_x[13:4]) - run); nr++; end
+                            last = c; run = 1;
+                        end
+                    end
+                end
+                $display("MSKT msk=%0d r27=%0d r26=%0d run %06h x%0d at dot END", mskv, r27v, r26v, last, run);
+            end
+            $finish;
+        end
+        //  +cmp=1: V9968 vs V9990 comparison set. SCREEN 8 256x212 (54272 bytes), sprites off,
+        //  display on (+cmpdisp=1) or off (0); HS from +hs.  Time = R#46 write -> S#2 CE = 0.
+        if (cmp > 0) begin
+            int blk [5][15] = '{
+                '{0,0, 0,0, 0,0, 0,0, 0,1, 212,0, 8'h5A,0, 8'hC0},      // HMMV fill
+                '{0,0, 0,0, 0,0, 0,0, 0,1, 212,0, 8'h5A,0, 8'h80},      // LMMV fill IMP
+                '{0,0, 0,1, 0,0, 0,0, 0,1, 212,0, 0,0, 8'hD0},          // HMMM copy SY256->DY0
+                '{0,0, 0,1, 0,0, 0,0, 0,1, 212,0, 0,0, 8'h90},          // LMMM copy IMP
+                '{0,0, 0,1, 0,0, 0,0, 0,1, 212,0, 0,0, 8'h93}};         // LMMM copy XOR
+            string nm [5] = '{"HMMV_fill", "LMMV_fill", "HMMM_copy", "LMMM_copy", "LMMM_xor"};
+            logic [7:0] st;
+            io(1, 3'd4, 8'h00, q);                                   // unlock R#20/R#21
+            wreg(20, 8'(hs ? 8'h01 : 8'h00)); wreg(21, 8'h00);
+            wreg(0, 8'h0E); wreg(2, 8'h1F); wreg(8, 8'h0A); wreg(9, 8'h80); wreg(23, 8'h00);
+            wreg(1, cmpdisp ? 8'h40 : 8'h00);
+            for (int k = 0; k < 5; k++) begin
+                longint t0;
+                for (int i = 0; i < 14; i++) wreg(32 + i, 8'(blk[k][i]));
+                t0 = $time; wreg(46, 8'(blk[k][14]));
+                wreg(15, 8'h02);
+                do io(0, 3'd1, 8'h00, st); while (st[0]);
+                wreg(15, 8'h00);
+                $display("CMP %s hs=%0d disp=%0d: %0.3f ms", nm[k], hs, cmpdisp, real'($time - t0) / 1e9);
+            end
         end
         //  +wl=K: tb_vdpcmd7's workloads (SCREEN5, display + sprites on, 192 lines), timed in
         //  scanlines (63.556 us) against openMSX 21.0-245: HMMV 722.18, HMMM 1466.82, LMMV 1476.01,

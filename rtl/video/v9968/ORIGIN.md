@@ -127,3 +127,15 @@ fill_hmmv) stay in both builds, unused in the upstream one, and the OSD hides th
 Checked 2026-10-27 with `verilator -E`: custom == the previous custom files; upstream == pristine except
 those port lines. Behaviour: upstream build reproduces the double write (run_mix bench 1567/74 errors)
 and ignores the HMMV switch; custom build: run_gates.sh GATES PASS.
+
+## Local change (2026-11-01, bug): R#25 MSK hides sprites at screen X 0-7 (WBML V9968 dashboard)
+
+- `vdp_timing_control_sprite.v`: the sprite colour enable is cleared while R#25 MSK is on and the
+  palette's latch position (`screen_pos_x[13:4]`) is below 15 -- the same screen column where the
+  bitmap's mask ends (bitmap dot 8 and a sprite at X=8 both land there). Upstream (still in v0.93,
+  bee8f7e) takes `reg_left_mask` but never uses it; the palette's gate with the background enable
+  ends one dot early in sprite mode 3 and not at all in modes 1/2, so sprites at X 0-7 showed in the
+  masked strip. openMSX draws the strip as border (VDP::getLeftBorder): no sprites. Found from
+  knightmare-v2's WBML V9968 port (dashboard sprites at X=0 one dot left of the bitmap bands), its
+  openMSX register/VRAM dump replayed in sim/v9968_vram (+stt). Gate: sim/v9968_vram/run_spmask.sh
+  (one-dot sprites X=7 hidden / X=8 shown, modes 2 and 3; mutant mask at 14 must fail).

@@ -284,6 +284,9 @@ module vdp_timing_control_sprite (
 	// --------------------------------------------------------------------
 	//	Makeup pixels
 	// --------------------------------------------------------------------
+`ifndef V9968_UPSTREAM
+	wire				w_display_color_en_raw;		//	before the left mask (R#25 MSK), see below
+`endif
 	vdp_sprite_makeup_pixel u_makeup_pixel (
 		.reset_n									( reset_n									),
 		.clk										( clk										),
@@ -317,8 +320,27 @@ module vdp_timing_control_sprite (
 		.sample_x									( w_sample_x								),
 		.display_color								( display_color								),
 		.display_color_transparent					( display_color_transparent					),
+`ifndef V9968_UPSTREAM
+		.display_color_en							( w_display_color_en_raw					)
+`else
 		.display_color_en							( display_color_en							)
+`endif
 	);
+
+`ifndef V9968_UPSTREAM
+	// --------------------------------------------------------------------
+	//	Left mask (R#25 MSK) for sprites (MSX1 core, 2026-11-01): see ORIGIN.md
+	//	Upstream took reg_left_mask but never used it; the palette's gate with the
+	//	background enable ends one dot early (mode 3) or not at all (mode 1/2), so
+	//	sprites at screen X 0-7 showed through the masked strip.  openMSX draws the
+	//	strip as border: no sprites there.  screen_pos_x here is the position at
+	//	which the palette latches this enable (screen_pos_x[3:0] == 0).
+	// --------------------------------------------------------------------
+`ifndef SPRITE_MASK_POS
+`define SPRITE_MASK_POS 10'd15
+`endif
+	assign display_color_en		= w_display_color_en_raw & (!reg_left_mask || (screen_pos_x[13:4] >= `SPRITE_MASK_POS));
+`endif
 
 	// --------------------------------------------------------------------
 	//	Divider
