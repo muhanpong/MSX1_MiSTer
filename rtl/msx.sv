@@ -40,6 +40,7 @@ module msx
    input                    clk_sdram,
    input                    clk_v99,             // 42.955 MHz, V9990 core (same PLL, 2 x clk21m)
    input                    v9990_en,            // OSD: V9990 (GFX9000) present
+   input              [1:0] v99_vout,            // OSD: video out 0/3 Auto, 1 V9958, 2 V9990
    input                    dma_active,
    //Video
    output             [7:0] R,
@@ -1308,7 +1309,7 @@ assign hblank_m        = vdp18 ? hblank_vdp18                : hblank_vdp_cor;
 assign vblank_m        = vdp18 ? vblank_vdp18                : vblank_vdp;
 assign ce_pix_m        = vdp18 ? ce_5m39_n                   : ~DHClk_vdp;
 
-// V9990 or the MSX VDP on the one video output: Auto -- the V9990's picture while
+// V9990 or the MSX VDP on the one video output (OSD "V9990 Video Out"): Auto -- the V9990's picture while
 // its display is on (R#8 DISP).  The choice changes only at the V9990's vertical
 // blank, so a frame is never split between the two sources.  Same CLK_VIDEO and
 // the same 10.74 MHz ce_pix rate on both sides.
@@ -1316,7 +1317,9 @@ logic v99_sel = 1'b0, v99_vb_d = 1'b0;
 always @(posedge clk21m) begin
    v99_vb_d <= v99_vblank;
    if (~v9990_en)                    v99_sel <= 1'b0;
-   else if (v99_vblank & ~v99_vb_d)  v99_sel <= v99_disp;
+   else if (v99_vblank & ~v99_vb_d)  v99_sel <= (v99_vout == 2'd1) ? 1'b0 :      // OSD: V9958 only
+                                                (v99_vout == 2'd2) ? 1'b1 :      // OSD: V9990 only
+                                                v99_disp;                         // Auto
 end
 assign R      = v99_sel ? v99_R          : R_m;
 assign G      = v99_sel ? v99_G          : G_m;

@@ -311,8 +311,9 @@ wire      [64:0] rtc;
 //[37:36] CPU SPEED (turbo)
 //[38]    BORDER
 //[48]    DEBUG OVERLAY
-//[50:49] free (was OPL4 PCM VOLUME, 2-bit -- DO NOT REUSE: saved .CFG files
-//        still carry values here, so a new meaning boots with stale state)
+//[50:49] V9990 video output: 0 Auto, 1 V9958, 2 V9990 (3 = Auto).  Was OPL4 PCM VOLUME,
+//        so old .CFG files may carry 1-3 here; harmless: it acts only with V9990 On
+//        ([127], never used before = Off) and the row sits right under that switch.
 //[51]    CHEATS
 //[53:52] free (was OPL4 FM VOLUME, 2-bit)
 //[56:54] OPL4 PCM VOLUME (5 steps, first entry = default)
@@ -573,6 +574,7 @@ localparam CONF_STR = {
    //  [127] is the one status bit no earlier build ever used, so a saved .CFG
    //  cannot turn the V9990 on by accident.
    "O[127],V9990 (GFX9000),Off,On;",
+   "O[50:49],V9990 Video Out,Auto,V9958,V9990;",
    "O[48],Debug Overlay,Off,On;",
    "-;",
    "T[0],Reset;",
@@ -1622,6 +1624,7 @@ assign      log_clear = upload_active & ~upload_active_q;
 
 // V9990: OSD switch and SDRAM ch5 wires (msx.sv ports, connected by .*)
 wire        v9990_en = status[127];
+wire  [1:0] v99_vout = status[50:49];   // 0/3 Auto (R#8 DISP), 1 V9958, 2 V9990
 wire [26:0] v99_ch5_addr;
 wire [15:0] v99_ch5_din;
 wire  [1:0] v99_ch5_be;
