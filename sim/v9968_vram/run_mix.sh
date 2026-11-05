@@ -5,8 +5,10 @@
 #  saw bus_ready: the byte written twice, every later address +1.  Board: LRMM 468, HMMM 2806
 #  bad bytes per 22528 at R800 "None"; SUPER CAT / PRISM FLIGHT sprite and strip glitches.
 #    sim/v9968_vram/run_mix.sh   OUT=<dir>
+#  Upstream fixed it itself in 2026-11 (419d1ff: the request is held in ff_bus_valid until
+#  ff_busy falls, bus_ready = ~ff_bus_valid); our own fix (a85c175) was retired in that merge.
 #  PASS needs: the current RTL 0 errors (during and after the command) at iogap 40 and 0, AND
-#  the mutant with upstream's latch condition restored has errors (the test can fail).
+#  the mutant, which lets a held request go while ff_busy is still up, has errors.
 set -u
 export PATH=/home/linuxbrew/.linuxbrew/bin:$PATH
 HERE=$(cd "$(dirname "$0")" && pwd); R=$HERE/../..
@@ -15,9 +17,15 @@ cp $R/rtl/video/v9968/*.v "$O/mut/"
 python3 - "$O/mut/vdp_cpu_interface.v" <<'E'
 import sys
 p = sys.argv[1]; s = open(p).read()
-old = "else if( bus_valid && ff_bus_ready && !ff_busy ) begin"
-if old not in s: sys.exit("mutant: anchor not found in vdp_cpu_interface.v (the fix moved?)")
-open(p, 'w').write(s.replace(old, "else if( bus_valid && ff_bus_ready ) begin"))
+old = """		else if( ff_bus_valid ) begin
+			if( !ff_busy ) begin
+				ff_bus_valid <= 1'b0;
+			end
+		end"""
+if old not in s: sys.exit("mutant: anchor not found in vdp_cpu_interface.v (the latch moved?)")
+open(p, 'w').write(s.replace(old, """		else if( ff_bus_valid ) begin
+			ff_bus_valid <= 1'b0;
+		end"""))
 E
 [ $? -eq 0 ] || { echo "RESULT FAIL: mutant"; exit 1; }
 build() {  # name v9968-dir
@@ -31,7 +39,15 @@ build() {  # name v9968-dir
 build cur $R/rtl/video/v9968 & build mutb "$O/mut" & wait
 ok=1
 for b in cur mutb; do for g in 40 0; do
-    "$O/$b/tb" +m128=1 +cmd=3 +demo=1 +mix=88 +mixrep=20 +iogap=$g > "$O/$b.g$g.log" 2>&1
+    #  a 15-minute limit: the 419d1ff-era mutant can deadlock the host bus at iogap 0 (it
+    #  never finishes); for the mutant that counts as caught, for the current RTL as a FAIL
+    timeout 900 "$O/$b/tb" +m128=1 +cmd=3 +demo=1 +mix=88 +mixrep=20 +iogap=$g > "$O/$b.g$g.log" 2>&1
+    rc=$?
+    if [ $rc -eq 124 ]; then
+        echo "  $b iogap $g: no result in 15 min (host bus deadlock)"
+        [ $b = cur ] && ok=0
+        continue
+    fi
     e1=$(grep -m1 '^MIX 88' "$O/$b.g$g.log" | sed -E 's/.*errors ([0-9]+).*/\1/')
     e2=$(grep -m1 '^MIX after' "$O/$b.g$g.log" | sed -E 's/.*errors ([0-9]+).*/\1/')
     echo "  $b iogap $g: errors during $e1, after $e2"

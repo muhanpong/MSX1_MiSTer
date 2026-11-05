@@ -52,6 +52,7 @@ module tb;
 `else
  `define MEMW 24
 `endif
+   wire [15:0] pcm_sdram_dout16b = 16'd0;   // msx input: ch4 BL2 word1 (PCM engine3); the PCM is not checked here
 `ifdef TDMCLK
  `define TDM_CLOCK
 `endif
@@ -66,6 +67,7 @@ module tb;
    int   g194 = 0;
    initial v99_scanline = 2'd0;              // msx input (OSD scanlines); video is not checked here
    initial v99_cmd_v9938 = 1'b0;             // msx input (OSD command speed): upstream waits
+   logic v99_geo_hmmv = 1'b0;                // msx input (OSD Geo3D fill): LINE, the default
    initial begin
       clk_sdram = 1'b0; clk_vdp = 1'b0; clk_geo = 1'b0; c21 = 1'b0;
       forever begin

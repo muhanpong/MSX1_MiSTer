@@ -1461,7 +1461,16 @@ wire        v99_busy;
 wire  [2:0] v99_bus_address;
 wire        v99_bus_ioreq, v99_bus_write, v99_bus_valid, v99_bus_ready, v99_bus_rdata_en;
 wire  [7:0] v99_bus_wdata, v99_bus_rdata;
-wire        v99_io_cyc = vdp_en & (~rd_n | ~wr_n);
+//  The spacing pacer must gate the START of the transaction, not only the end of the CPU's
+//  cycle (2026-11-05).  The adapter starts on the strobe's first edge, and the pacer only
+//  held the CPU by WAIT after that, so the write was already in the V9968 while the CPU
+//  waited out the gap: an R800 OTIR delivered its first two bytes ~1 us apart and the
+//  rest 8.66 us apart.  WBML's lf_draw sends the 8 LFMC mask bytes that way without a TR
+//  wait; the V9968 overwrote the second with the third... and the command never ended
+//  (board: S#2 = 8Dh, lf_draw.ce spinning at 01EBh).  The V9938 path takes its request at
+//  the grant, so it never had this.  Spaced ports (98h-9Bh) start once vdp_grant is up;
+//  with no gap (stock T80) the grant comes one clk21m after the strobe.
+wire        v99_io_cyc = vdp_en & (~rd_n | ~wr_n) & (~vdp_bus | vdp_grant);
 v9968_bus v99_bus (
    .clk21m(clk21m), .clk_vdp(clk_vdp), .reset_n(v99_reset_n),
    .io_cyc(v99_io_cyc), .io_wr(~wr_n), .io_a(a[2:0]), .io_d(d_from_cpu),
@@ -1519,9 +1528,9 @@ vdp v9968 (
    .force_highspeed(1'b0),
    .screen_mode(v99_screen_mode),
 `ifndef V99_MUT_NOGEO_CMD
-   .ext_cmd_wr(geo_cmd_wr), .ext_cmd_num(geo_cmd_num), .ext_cmd_data(geo_cmd_data), .ext_cmd_ce(vdp_ext_ce),
+   .ext_cmd_wr(geo_cmd_wr), .ext_cmd_num(geo_cmd_num), .ext_cmd_data(geo_cmd_data), .ext_cmd_fill_span(1'b0), .ext_cmd_ce(vdp_ext_ce),
 `else   // negative control (sim/fullsys/vprobe phase 6): the engine's command writes never arrive
-   .ext_cmd_wr(1'b0), .ext_cmd_num(6'd0), .ext_cmd_data(8'd0), .ext_cmd_ce(vdp_ext_ce),
+   .ext_cmd_wr(1'b0), .ext_cmd_num(6'd0), .ext_cmd_data(8'd0), .ext_cmd_fill_span(1'b0), .ext_cmd_ce(vdp_ext_ce),
 `endif
    .scanline_level(v99_scanline_v), .cmd_wait(v99_cmd_wait),
    .button(2'b00),
@@ -2105,6 +2114,13 @@ logic  [7:0] a8r_val;                // d_to_cpu captured while the A8 read is A
 logic [15:0] fadr_p1;                // BUS-based fetch address pipeline (not t80_reg --
 logic        boot0_hit = 1'b0;       //  the reg PC lags at M1 start; the bus does not)
 logic        iow_ab_d;               // AB mode-set write edge detect
+`ifdef MSX_V9968
+logic        vd_io_d = 1'b0, vd_go = 1'b0, vd_wr_q = 1'b0, vd_phase = 1'b0, vd_rw = 1'b0;
+logic [7:0]  vd_port_q = 8'h00, vd_data_q = 8'h00, vd_rdval = 8'h00, vd_first = 8'h00, vd_rv = 8'h00;
+logic [5:0]  vd_rn = 6'd0, vd_ind = 6'd0;
+logic [7:0]  vd_r15 = 8'h00, vd_r17 = 8'h00, vd_r46 = 8'h00, vd_c44 = 8'h00, vd_s2 = 8'h00, vd_s2cnt = 8'h00, vd_fc = 8'h00, vd_fd = 8'h00;
+logic [15:0] vd_pc46 = 16'h0000;
+`endif
 logic  [7:0] ab_cnt = 8'd0;
 logic [15:0] pc_f1, pc_f2;
 // ── Freeze detectors (clk21m) — latch (sticky) when a signal is stuck
@@ -2462,6 +2478,54 @@ always_ff @(posedge clk21m) begin
         else if (ms_irq_n_sync | ~t80_reg[210]) refuse_cnt <= 0;
         else if (~&refuse_cnt)             refuse_cnt <= refuse_cnt + 1'b1;
         if (&refuse_cnt)                   dbg_int_refused <= 1'b1;
+`ifdef MSX_V9968
+        //  V9968 command diagnostics (WBML title hang, 2026-11-05).  Rows 22/23/24/27/28 of
+        //  the DEBUG overlay are repurposed in this build (later assignments win):
+        //    row 22 {FCh, FDh}  last mapper writes for pages 0 and 1
+        //    row 23 {last S#2 read, S#2 reads since the last R#46 write (sat 255)}
+        //    row 24 {last R#46 value, R#44 writes since that R#46 (sat 255)}
+        //    row 27 {R#15, R#17}  as the CPU last set them (99h pairs and 9Bh)
+        //    row 28 PC of the last R#46 write
+        //  Bus snoop only: 99h pairs (a 99h read resets the pairing), 9Bh through R#17
+        //  (auto-increment unless bit 7).
+        vd_io_d <= ~iorq_n & m1_n & (~wr_n | ~rd_n);
+        if (~iorq_n & m1_n & ~rd_n & (a[7:0] == 8'h99)) vd_rdval <= d_to_cpu;
+        if ((~iorq_n & m1_n & (~wr_n | ~rd_n)) & ~vd_io_d) begin
+            vd_wr_q <= ~wr_n; vd_port_q <= a[7:0]; vd_data_q <= d_from_cpu; vd_go <= 1'b1;
+        end else vd_go <= 1'b0;
+        if (vd_io_d & ~(~iorq_n & m1_n & (~wr_n | ~rd_n)) & ~vd_wr_q & (vd_port_q == 8'h99)) begin
+            vd_phase <= 1'b0;
+            if (vd_r15[3:0] == 4'd2) begin
+                vd_s2 <= vd_rdval;
+                if (~&vd_s2cnt) vd_s2cnt <= vd_s2cnt + 8'd1;
+            end
+        end
+        if (vd_go & vd_wr_q) begin
+            case (vd_port_q)
+            8'h99: if (!vd_phase) begin vd_first <= vd_data_q; vd_phase <= 1'b1; end
+                   else begin
+                       vd_phase <= 1'b0;
+                       if (vd_data_q[7]) begin vd_rw <= 1'b1; vd_rn <= vd_data_q[5:0]; vd_rv <= vd_first; end
+                   end
+            8'h9B: begin vd_rw <= 1'b1; vd_rn <= vd_ind; vd_rv <= vd_data_q;
+                         if (!vd_r17[7]) vd_ind <= vd_ind + 6'd1; end
+            8'hFC: vd_fc <= vd_data_q;
+            8'hFD: vd_fd <= vd_data_q;
+            default: ;
+            endcase
+        end else vd_rw <= 1'b0;
+        if (vd_rw) begin
+            if (vd_rn == 6'd15) vd_r15 <= vd_rv;
+            if (vd_rn == 6'd17) begin vd_r17 <= vd_rv; vd_ind <= vd_rv[5:0]; end
+            if (vd_rn == 6'd46) begin vd_r46 <= vd_rv; vd_c44 <= 8'd0; vd_s2cnt <= 8'd0; vd_pc46 <= use_nz ? nzf_last : t80_reg[79:64]; end
+            if (vd_rn == 6'd44 && ~&vd_c44) vd_c44 <= vd_c44 + 8'd1;
+        end
+        dbg_a8_pc  <= {vd_fc, vd_fd};
+        dbg_a8_vc  <= {vd_s2, vd_s2cnt};
+        dbg_a8r_vc <= {vd_r46, vd_c44};
+        dbg_ab_vc  <= {vd_r15, vd_r17};
+        dbg_ab_pc  <= vd_pc46;
+`endif
     end
 end
 `else

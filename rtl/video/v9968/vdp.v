@@ -68,6 +68,7 @@ module vdp (
 	input		[7:0]	bus_wdata,
 	output		[7:0]	bus_rdata,
 	output				bus_rdata_en,
+	output				bus_write_done,
 
 	output				int_n,
 
@@ -94,6 +95,7 @@ module vdp (
 	input				ext_cmd_wr,			//	geo3d: external command register write
 	input		[5:0]	ext_cmd_num,
 	input		[7:0]	ext_cmd_data,
+	input				ext_cmd_fill_span,
 	output				ext_cmd_ce,			//	geo3d: S#2 CE
 	output		[4:0]	screen_mode,		//	MSX1 core: {M5,M4,M3,M2,M1} for geo3d's HMMV fill (local change)
 
@@ -261,6 +263,7 @@ module vdp (
 		.bus_wdata									( bus_wdata									),
 		.bus_rdata									( bus_rdata									),
 		.bus_rdata_en								( bus_rdata_en								),
+		.bus_write_done								( bus_write_done							),
 		.vram_address								( w_cpu_vram_address						),
 		.vram_write									( w_cpu_vram_write							),
 		.vram_valid									( w_cpu_vram_valid							),
@@ -444,6 +447,7 @@ module vdp (
 		.register_write								( w_register_write | ext_cmd_wr				),
 		.register_num								( ext_cmd_wr ? ext_cmd_num  : w_register_num  ),
 		.register_data								( ext_cmd_wr ? ext_cmd_data : w_register_data ),
+		.register_fill_span							( ext_cmd_wr & ext_cmd_fill_span			),
 		.clear_border_detect						( w_clear_border_detect						),
 		.read_color									( w_read_color								),
 		.status_command_execute						( w_status_command_execute					),
@@ -452,6 +456,7 @@ module vdp (
 		.status_color								( w_status_color							),
 		.status_border_position						( w_status_border_position					),
 		.screen_mode								( w_screen_mode								),
+		.reg_yjk_mode								( reg_yjk_mode								),
 		.vram_interleave							( w_vram_interleave							),
 		.reg_text_back_color						( reg_text_back_color						),
 		.reg_command_enable							( reg_command_enable						),

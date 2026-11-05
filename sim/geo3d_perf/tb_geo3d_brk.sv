@@ -118,7 +118,7 @@ module tb #(parameter int RELEASE_PH = 5);
         .vram_rdata(vram_rdata), .vram_rdata_en(vram_rdata_en), .vram_refresh(),
         .display_hs(), .display_vs(), .display_en(), .display_r(), .display_g(), .display_b(),
         .force_highspeed(1'b0),
-        .ext_cmd_wr(geo_cmd_wr), .ext_cmd_num(geo_cmd_num), .ext_cmd_data(geo_cmd_data), .ext_cmd_ce(vdp_ext_ce),
+        .ext_cmd_wr(geo_cmd_wr), .ext_cmd_num(geo_cmd_num), .ext_cmd_data(geo_cmd_data), .ext_cmd_fill_span(1'b0), .ext_cmd_ce(vdp_ext_ce),
         .scanline_level(2'd0), .cmd_wait(cmdw),
         .button(2'b00),
         .pulse0(), .pulse1(), .pulse2(), .pulse3(), .pulse4(), .pulse5(), .pulse6(), .pulse7());

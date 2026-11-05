@@ -71,6 +71,7 @@ module vdp_command (
 	input				register_write,
 	input		[5:0]	register_num,
 	input		[7:0]	register_data,
+	input				register_fill_span,
 	input				clear_border_detect,
 	input				read_color,
 	output				status_command_execute,			//	S#2 bit0
@@ -80,6 +81,7 @@ module vdp_command (
 	output		[8:0]	status_border_position,			//	S#8, S#9
 	//	Screen mode
 	input		[9:0]	screen_mode,
+	input				reg_yjk_mode,
 	input				vram_interleave,
 	input		[7:0]	reg_text_back_color,
 	input				reg_command_enable,
@@ -224,6 +226,7 @@ module vdp_command (
 	reg			[3:0]	ff_command;
 	reg			[2:0]	ff_pixel_step;
 	reg					ff_start;
+	reg					ff_geo_hmmv;
 
 	reg			[17:0]	ff_cache_vram_address;
 	reg					ff_cache_vram_valid;
@@ -320,6 +323,9 @@ module vdp_command (
 	reg			[5:0]	ff_wait_count;
 `endif
 	reg					ff_command_end;
+	wire				w_geo_screen8;
+	wire				w_geo_hmmv_start;
+	wire				w_geo_hmmv_fallback;
 
 	// --------------------------------------------------------------------
 	//	Mode select
@@ -334,8 +340,28 @@ module vdp_command (
 	            				  (ff_screen_mode[c_g5]) ? c_bpp_2bit: c_bpp_8bit;
 	assign w_next				= { 7'd0, ff_pixel_step };
 	assign w_512pixel			= (ff_screen_mode_clone[c_g5] || ff_screen_mode_clone[c_g6]);
+	// G7 also covers the YJK modes; only SCREEN 8 uses the optimization.
+	assign w_geo_screen8		= ff_screen_mode[c_g7] && !reg_yjk_mode;
+	assign w_geo_hmmv_start		= register_write && register_num == 6'd46 &&
+								  register_fill_span && register_data == { c_line, c_imp } &&
+								  w_geo_screen8 && !reg_dx[8] && !ff_fg4 &&
+								  !ff_maj && !ff_dix && !ff_diy && reg_ny == 11'd0;
+	assign w_geo_hmmv_fallback	= ff_geo_hmmv && !w_geo_screen8 &&
+								  ff_state == c_state_hmmv && !ff_cache_vram_valid;
 
 	assign vram_access_mask		= ff_mxc;
+
+	always @( posedge clk ) begin
+		if( !reset_n ) begin
+			ff_geo_hmmv <= 1'b0;
+		end
+		else if( register_write && register_num == 6'd46 ) begin
+			ff_geo_hmmv <= w_geo_hmmv_start;
+		end
+		else if( w_geo_hmmv_fallback || w_cache_flush_end ) begin
+			ff_geo_hmmv <= 1'b0;
+		end
+	end
 
 	// --------------------------------------------------------------------
 	//	Address
@@ -652,6 +678,9 @@ module vdp_command (
 				ff_dy[10:8]	<= { 1'b0, register_data[1:0] };
 			end
 		end
+		else if( ff_geo_hmmv ) begin
+			// A one-row HMMV must leave DY as the original horizontal LINE did.
+		end
 		else if( !ff_command_execute || ff_cache_vram_valid ) begin
 			//	hold
 		end
@@ -750,6 +779,14 @@ module vdp_command (
 		else if( register_write && register_num == 6'd41 ) begin
 			reg_nx[10:8]	<= register_data[2:0];
 		end
+		else if( w_geo_hmmv_start ) begin
+			// LINE includes its endpoint; HMMV counts pixels.
+			reg_nx <= reg_nx + 11'd1;
+		end
+		else if( w_geo_hmmv_fallback || (ff_geo_hmmv && w_cache_flush_end) ) begin
+			// LINE masks NX to nine bits when it starts.
+			reg_nx <= { 2'd0, w_reg_nx[8:0] };
+		end
 		else if( ff_start ) begin
 			if( ff_command == c_lrmm ) begin
 				// hold
@@ -778,6 +815,10 @@ module vdp_command (
 			else begin
 				ff_nx <= { 2'd0, w_next };
 			end
+		end
+		else if( w_geo_hmmv_fallback ) begin
+			// HMMV's X counter starts at one, LINE's at zero.
+			ff_nx <= ff_nx - 11'd1;
 		end
 		else if( !ff_command_execute || ff_cache_vram_valid ) begin
 			//	hold
@@ -822,6 +863,12 @@ module vdp_command (
 				reg_ny[10:8]	<= { 1'b0, register_data[1:0] };
 			end
 		end
+		else if( w_geo_hmmv_start ) begin
+			reg_ny <= 11'd1;
+		end
+		else if( w_geo_hmmv_fallback ) begin
+			reg_ny <= 11'd0;
+		end
 		else if( ff_start ) begin
 			if( ff_command == c_lrmm ) begin
 				// hold
@@ -831,7 +878,7 @@ module vdp_command (
 			end
 		end
 		else if( w_cache_flush_end ) begin
-			reg_ny <= ff_ny;
+			reg_ny <= ff_geo_hmmv ? 11'd0 : ff_ny;
 		end
 	end
 
@@ -846,6 +893,9 @@ module vdp_command (
 			else begin
 				ff_ny <= 11'd1;
 			end
+		end
+		else if( w_geo_hmmv_fallback ) begin
+			ff_ny <= 11'd0;
 		end
 		else if( !ff_command_execute || ff_cache_vram_valid ) begin
 			//	hold
@@ -886,6 +936,10 @@ module vdp_command (
 		else if( ff_start ) begin
 			//	線分を構成する水平又は垂直の直線の最初と最後を均等サイズにするために分母の半分の値を事前に足しておく
 			ff_nyb	<= { 1'd0, w_reg_nx[10:1] };
+		end
+		else if( w_geo_hmmv_fallback ) begin
+			// The horizontal LINE has NY=0, so its Y accumulator need not advance.
+			ff_nyb <= 12'd0;
 		end
 		else if( !ff_command_execute || ff_cache_vram_valid ) begin
 			//	hold
@@ -1015,11 +1069,14 @@ module vdp_command (
 		end
 		else if( register_write && (register_num == 6'd46) ) begin
 			ff_logical_opration	<= register_data[3:0];
-			ff_command			<= register_data[7:4];
+			ff_command			<= w_geo_hmmv_start ? c_hmmv : register_data[7:4];
 			ff_start			<= 1'b1;
 		end
 		else begin
 			ff_start			<= 1'b0;
+			if( ff_geo_hmmv && (w_geo_hmmv_fallback || w_cache_flush_end) ) begin
+				ff_command <= c_line;
+			end
 		end
 	end
 
@@ -1493,19 +1550,14 @@ module vdp_command (
 			//	LMCM command --------------------------------------------------
 			c_state_lmcm: begin
 				ff_count_valid			<= 1'b0;
-				if( (w_nx_end || w_sx_overflow || w_dx_overflow) && w_ny_end ) begin
-					ff_state				<= c_state_pre_finish;
-				end
-				else begin
-					//	Read the location of (DX, DY)
-					ff_cache_vram_address	<= w_address_d;
-					ff_cache_vram_valid		<= 1'b1;
-					ff_cache_vram_write		<= 1'b0;
-					ff_state				<= c_state_wait_rdata_en;
-					ff_next_state			<= c_state_lmcm_make;
-					ff_wait_count			<= c_wait_lmcm;
-					ff_xsel					<= ff_dx[1:0];
-				end
+				//	Read the location of (SX, SY)
+				ff_cache_vram_address	<= w_address_s;
+				ff_cache_vram_valid		<= 1'b1;
+				ff_cache_vram_write		<= 1'b0;
+				ff_state				<= c_state_wait_rdata_en;
+				ff_next_state			<= c_state_lmcm_make;
+				ff_wait_count			<= c_wait_lmcm;
+				ff_xsel					<= ff_sx[9:8];
 			end
 			c_state_lmcm_make: begin
 				ff_state				<= c_state_lmcm_next;
@@ -1515,9 +1567,18 @@ module vdp_command (
 					if( (w_nx_end || w_sx_overflow || w_dx_overflow) && (w_ny_end || w_dy_overflow) ) begin
 						ff_state				<= c_state_pre_finish;
 					end
+					else if( reg_command_high_speed_mode ) begin
+						ff_count_valid			<= 1'b1;
+						//	SX のカウントアップが終わるまでの 1clk を待機する
+						ff_wait_counter			<= 8'd1;
+						ff_next_state			<= c_state_lmcm;
+						ff_state				<= c_state_wait_counter;
+					end
 					else begin
 						ff_count_valid			<= 1'b1;
-						ff_state				<= c_state_lmcm;
+						ff_wait_counter			<= { c_wait_lmcm, 2'b11 };
+						ff_next_state			<= c_state_lmcm;
+						ff_state				<= c_state_wait_counter;
 					end
 				end
 				else begin
@@ -1575,29 +1636,35 @@ module vdp_command (
 
 			//	HMMV command --------------------------------------------------
 			c_state_hmmv: begin
-				//	Write the location of (DX, DY)
-				ff_cache_vram_address	<= w_address_d;
-				ff_cache_vram_valid		<= 1'b1;
-				ff_cache_vram_write		<= 1'b1;
-				ff_cache_vram_wdata		<= ff_color;
-				ff_count_valid			<= 1'b1;
-				if( (w_nx_end || w_sx_overflow || w_dx_overflow) && (w_ny_end || w_dy_overflow) ) begin
-					ff_state				<= c_state_pre_finish;
-				end
-				else if( reg_command_high_speed_mode ) begin
-					//	SX, DX のカウントアップが終わるまでの 1clk を待機する
-`ifndef V9968_UPSTREAM
-					ff_wait_counter			<= 10'd1;
-`else
-					ff_wait_counter			<= 8'd1;
-`endif
-					ff_next_state			<= c_state_hmmv;
-					ff_state				<= c_state_wait_counter;
+				if( w_geo_hmmv_fallback ) begin
+					ff_count_valid			<= 1'b0;
+					ff_state				<= c_state_line;
 				end
 				else begin
-					ff_wait_counter			<= { c_wait_hmmv, 2'b11 };
-					ff_next_state			<= c_state_hmmv;
-					ff_state				<= c_state_wait_counter;
+					//	Write the location of (DX, DY)
+					ff_cache_vram_address	<= w_address_d;
+					ff_cache_vram_valid		<= 1'b1;
+					ff_cache_vram_write		<= 1'b1;
+					ff_cache_vram_wdata		<= ff_color;
+					ff_count_valid			<= 1'b1;
+					if( (w_nx_end || w_sx_overflow || w_dx_overflow) && (w_ny_end || w_dy_overflow) ) begin
+						ff_state				<= c_state_pre_finish;
+					end
+					else if( reg_command_high_speed_mode ) begin
+						//	SX, DX のカウントアップが終わるまでの 1clk を待機する
+`ifndef V9968_UPSTREAM
+						ff_wait_counter			<= 10'd1;
+`else
+						ff_wait_counter			<= 8'd1;
+`endif
+						ff_next_state			<= c_state_hmmv;
+						ff_state				<= c_state_wait_counter;
+					end
+					else begin
+						ff_wait_counter			<= { c_wait_hmmv, 2'b11 };
+						ff_next_state			<= c_state_hmmv;
+						ff_state				<= c_state_wait_counter;
+					end
 				end
 			end
 

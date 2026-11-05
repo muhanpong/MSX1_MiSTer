@@ -152,7 +152,7 @@ module tb #(parameter int RELEASE_PH = 0);
         .vram_rdata(vram_rdata), .vram_rdata_en(vram_rdata_en), .vram_refresh(),
         .display_hs(d_hs), .display_vs(), .display_en(d_en), .display_r(d_r), .display_g(d_g), .display_b(d_b),
         .force_highspeed(hs != 0),
-        .ext_cmd_wr(1'b0), .ext_cmd_num(6'd0), .ext_cmd_data(8'd0), .ext_cmd_ce(),
+        .ext_cmd_wr(1'b0), .ext_cmd_num(6'd0), .ext_cmd_data(8'd0), .ext_cmd_fill_span(1'b0), .ext_cmd_ce(),
         .scanline_level(2'(scan)), .cmd_wait(cmdw),
         .button(2'b00),
         .pulse0(), .pulse1(), .pulse2(), .pulse3(), .pulse4(), .pulse5(), .pulse6(), .pulse7());

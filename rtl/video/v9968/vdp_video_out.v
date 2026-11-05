@@ -90,7 +90,9 @@ module vdp_video_out (
 	localparam		active_area_start	= 12'd747;
 	localparam		active_area_end		= active_area_start + 12'd1440;
 	localparam		clocks_per_line		= 12'd2736;
-	localparam		h_en_start			= 12'd748;
+	//	Odd: DE changes on the same clk edges as RGB (h_count[0] == 1), so
+	//	hdmi_converter captures identical pixels in either clk42m phase.
+	localparam		h_en_start			= 12'd749;
 	localparam		h_en_end			= h_en_start + 12'd1440;
 	localparam		hs_start			= clocks_per_line - 1;
 	localparam		hs_end				= 12'd567;

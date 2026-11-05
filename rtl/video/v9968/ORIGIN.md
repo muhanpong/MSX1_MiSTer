@@ -1,6 +1,6 @@
 # V9968 VDP -- upstream sources, unmodified
 
-- Source: https://github.com/hra1129/V9968_Cartridge , commit 7820668b9f200ee745c6b01289f048e6a9981418 (2026-10-19),
+- Source: https://github.com/hra1129/V9968_Cartridge , commit 419d1ffd (2026-11-04; first copied at 7820668b9f200ee745c6b01289f048e6a9981418, 2026-10-19),
   path `fpga/V9968_Cartridge_TangNano20K/src/v9968/*.v` (the 21 RTL files; test benches, docs and demos not copied).
 - Author: Takayuki Hara (HRA!).  Licence: the header of every file (Japanese text is the formal one): redistribution
   of source keeps the notice; binary redistribution carries the notice in its documentation; no sale or commercial
@@ -146,3 +146,18 @@ and ignores the HMMV switch; custom build: run_gates.sh GATES PASS.
   old and new RTL. G5/G6 keep upstream's behaviour; run_spmask.sh adds the G5 case (mutant
   SPRITE_MASK_ALLMODES = the 20261101a rule must show the bitmap gap). GT logo replay: 28 frames
   identical to the 20261029d RTL.
+
+## Upstream merge (2026-11-05, user request): 7820668 / 8a37b33 -> 419d1ff
+
+Three-way merge of the five RTL files upstream changed (vdp.v, vdp_color_palette.v, vdp_command.v,
+vdp_cpu_interface.v, vdp_video_out.v; base 7820668, or 8a37b33 for the two files hand-applied on
+2026-10-24). Checked both ways: resolving V9968_UPSTREAM gives 419d1ff exactly (apart from the ports
+the core added, kept in both builds); the custom build equals a separate merge of the custom sources.
+- Upstream now holds a host request in ff_bus_valid until ff_busy falls (bus_ready = ~ff_bus_valid),
+  its own fix of the double write; our a85c175 latch condition is retired. run_mix.sh's mutant now
+  releases the held request while ff_busy is up.
+- New upstream ports: bus_write_done (left open) and ext_cmd_fill_span (tied 0 in msx.sv and the
+  benches: our Geo3D engine does not drive it; the core's own OSD HMMV path stays).
+- Also in: LMCM reads (SX, SY) and its HS wait, YJK/YAE palette fixes, the Geo3D fill-span HMMV
+  conversion in vdp_command.v, h_en_start 748 -> 749.
+- ORIGIN.md5 now holds 419d1ff's sums.
