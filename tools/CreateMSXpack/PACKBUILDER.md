@@ -21,6 +21,13 @@ the `I18N` table right after `DATA`: static markup carries `data-i18n*` attribut
 script text goes through `t(key, ...)`. Add a key to all three languages; a key
 missing from one falls back to English.
 
+## First run
+
+Until the first file is read the page shows a large drop zone, three steps and the
+supported-machine list with what each machine needs; the ROM store rail, the bulk
+buttons and the per-row downloads appear once anything has been read (the
+`first` class on `.wrap`, toggled in `render()`).
+
 ## Why it can be one file
 
 The XML machine definitions are the only input the tool needs besides the ROMs, and
