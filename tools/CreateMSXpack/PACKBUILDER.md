@@ -7,10 +7,19 @@ so it works with the network off. Type is set in system fonts for that reason.
 
 > **SRAM.NVR is not in the pack zip.** It is the save file for FM-PAC, GameMaster2,
 > Halnote, Panasonic firmware SRAM and the RTC settings (2 MB, `docs/sram_images.md`).
-> Get it with the separate **빈 SRAM.NVR 받기** button, copy it to the board **once**,
+> Get it with the separate **Get blank SRAM.NVR** (빈 SRAM.NVR 받기) button, copy it to the board **once**,
 > and pick it in the OSD under `SRAM(PAC/Turbo-R/...)`. It is kept out of the zip on purpose:
 > unpacking the zip over the board's folder would otherwise replace an SRAM.NVR that
 > holds saves with a blank one.
+
+## Languages
+
+The page speaks Korean, English and Japanese. The 한국어 / English / 日本語 buttons next
+to the theme button switch it; the choice is kept in `localStorage`, and the first visit follows the
+browser language (`ko`, `ja`, otherwise English). Every user-visible string lives in
+the `I18N` table right after `DATA`: static markup carries `data-i18n*` attributes,
+script text goes through `t(key, ...)`. Add a key to all three languages; a key
+missing from one falls back to English.
 
 ## Why it can be one file
 
