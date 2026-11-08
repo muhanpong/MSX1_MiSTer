@@ -130,6 +130,40 @@ header.top .spacer{flex:1}
 .toast.bad{background:var(--bad-soft);color:var(--bad);border-color:transparent}
 .saveinfo{font-size:12px;color:var(--ink-3);margin-left:auto}
 .hidden-input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+/* ---- first run: nothing read yet ---- */
+.intro{display:none;flex-wrap:wrap;gap:20px;margin-bottom:22px}
+.first .intro{display:flex}
+.intro .hero{flex:3 1 420px;min-width:0;border:2px dashed var(--accent);border-radius:16px;background:var(--accent-soft);
+  padding:40px 24px;display:flex;flex-direction:column;gap:12px;align-items:center;justify-content:center;text-align:center}
+.intro .hero.hot{border-style:solid}
+.intro .hero h2{font-size:22px;font-weight:650;margin:0;letter-spacing:-.01em;color:var(--ink);text-transform:none}
+.intro .hero p{margin:0;color:var(--ink-2);font-size:14px;max-width:520px}
+.intro .hero .btns{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.intro .hero .btn{font-size:14px;padding:11px 20px;border-radius:10px}
+.intro .hero details{font-size:12.5px;color:var(--ink-2);max-width:520px}
+.intro .hero summary{cursor:pointer;color:var(--accent)}
+.intro .hero details .note{margin-top:6px;text-align:left;color:var(--ink-2)}
+.steps{flex:2 1 280px;min-width:0;list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:14px;justify-content:center}
+.steps li{display:flex;gap:12px;align-items:flex-start}
+.steps .n{width:30px;height:30px;border-radius:50%;background:var(--panel-2);color:var(--ink);font-weight:700;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.steps li:first-child .n{background:var(--accent);color:var(--accent-ink)}
+.steps b{display:block}
+.steps span.d{color:var(--ink-2);font-size:13px}
+.suphd,.firstfoot{display:none}
+.first .suphd{display:block;margin-bottom:10px}
+.first .firstfoot{display:block}
+.suphd h2{font-size:15px;font-weight:650;margin:0}
+.suphd h2 span{font-weight:400;color:var(--ink-2);margin-left:6px}
+.suphd p{margin:2px 0 0;font-size:13px;color:var(--ink-2)}
+.first .grid{grid-template-columns:1fr}
+.first .rail,.first #buildAll,.first #buildSram,.first #toolbarSeg,.first .saveinfo,.first .row .btn,.first .det .pin{display:none}
+.first #list .rows{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+@media (max-width:700px){ .first #list .rows{grid-template-columns:1fr} }
+.first .row{grid-template-columns:1fr auto}
+.first .row.blocked{opacity:1}
+.first .pill.bad{background:var(--panel-2);color:var(--ink-2);font-weight:500}
+
 </style>
 
 <div class="wrap">
@@ -146,6 +180,24 @@ header.top .spacer{flex:1}
       <button class="theme-btn" id="theme" data-i18n="theme"></button>
     </div>
   </header>
+
+  <section class="intro" aria-labelledby="heroHd">
+    <div class="hero" id="hero">
+      <svg aria-hidden="true" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color:var(--accent)"><path d="M12 15V4M7 9l5-5 5 5"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/></svg>
+      <h2 id="heroHd" data-i18n="heroHd"></h2>
+      <p data-i18n="heroSub"></p>
+      <div class="btns">
+        <button class="btn btn-primary" id="heroFiles" data-i18n="pickFiles"></button>
+        <button class="btn btn-ghost" id="heroDir" data-i18n="pickDir"></button>
+      </div>
+      <details><summary data-i18n="howHd"></summary><p class="note" data-i18n="romNote"></p></details>
+    </div>
+    <ol class="steps">
+      <li><span class="n">1</span><span><b data-i18n="s1t"></b><span class="d" data-i18n="s1d"></span></span></li>
+      <li><span class="n">2</span><span><b data-i18n="s2t"></b><span class="d" data-i18n="s2d"></span></span></li>
+      <li><span class="n">3</span><span><b data-i18n="s3t"></b><span class="d" data-i18n="s3d"></span></span></li>
+    </ol>
+  </section>
 
   <div class="grid">
     <aside class="rail">
@@ -181,9 +233,10 @@ header.top .spacer{flex:1}
 
     <main>
       <div id="toast" class="toast" hidden></div>
+      <div class="suphd"><h2><span data-i18n="supHd" style="margin:0;color:inherit;font-weight:650"></span><span id="supCount"></span></h2><p data-i18n="supSub"></p></div>
       <div class="toolbar">
         <input type="search" id="q" data-i18n-ph="qPh" data-i18n-aria="qAria">
-        <div class="seg" role="group" data-i18n-aria="segAria">
+        <div class="seg" id="toolbarSeg" role="group" data-i18n-aria="segAria">
           <button id="fAll" aria-pressed="true" data-i18n="fAll"></button>
           <button id="fReady" aria-pressed="false" data-i18n="fReady"></button>
         </div>
@@ -191,6 +244,7 @@ header.top .spacer{flex:1}
         <button class="btn btn-ghost btn-sm" id="buildSram" data-i18n="buildSram" data-i18n-title="buildSramTitle"></button>
       </div>
       <div id="list"></div>
+      <p class="note firstfoot" data-i18n="firstFoot"></p>
     </main>
   </div>
 </div>
@@ -204,6 +258,14 @@ const DATA = {"layouts":["/yX/cWdlZv//ZP//cHMh////YP9hRgH///9XUCZUAv//MFUxMgQD//
    고른 언어는 localStorage 에 남기고, 처음에는 브라우저 언어를 따릅니다 (없으면 영어).  */
 const I18N={
 ko:{
+  heroHd:"ROM을 여기에 놓으세요",
+  heroSub:"파일, 폴더 통째로, 콜렉션 ZIP 모두 됩니다. .rom·.zip·.gz를 이 페이지 안에서 읽습니다.",
+  howHd:"ROM은 어떻게 찾나요?",
+  s1t:"ROM 넣기", s1d:"넣고 나면 쓴 파일, 버린 파일, 못 읽은 파일이 기록에 남습니다.",
+  s2t:"기종 확인", s2d:"기종마다 아직 필요한 ROM을 보여 줍니다. 빠진 ROM은 막고 있는 기종이 많은 순입니다.",
+  s3t:"받아서 풀기", s3d:"팩 zip을 SD 카드의 games/MSX1/MSX/ 에 풉니다.",
+  supHd:"지원 기종", supSub:"ROM을 모으기 전에 기종마다 무엇이 필요한지 볼 수 있습니다.",
+  firstFoot:"기종에 필요한 ROM이 모두 모이면 받기 버튼이 나타납니다.",
   sub:'ROM을 넣으면 MiSTer용 <code style="font-family:var(--mono);font-size:12px">.MSX</code> 팩을 만듭니다. 서버 없이 브라우저 안에서만 동작합니다.',
   theme:"테마", store:"ROM 보관소", dropHint:"ROM 파일·폴더·ZIP을 끌어다 놓으세요",
   pickFiles:"파일 선택", pickDir:"폴더 선택",
@@ -257,6 +319,14 @@ ko:{
   saveNone:"저장 기능 없음 — 파일로 내려받아 사용하세요",
 },
 en:{
+  heroHd:"Drop your ROMs here",
+  heroSub:"Files, a whole folder or a collection ZIP. .rom, .zip and .gz are read inside this page.",
+  howHd:"How are ROMs matched?",
+  s1t:"Add your ROMs", s1d:"Afterwards the log shows what was used, ignored or unreadable.",
+  s2t:"Check the machines", s2d:"Each machine shows what it still needs. Missing ROMs are sorted by how many machines they block.",
+  s3t:"Download and unpack", s3d:"Unpack the pack ZIP into games/MSX1/MSX/ on the SD card.",
+  supHd:"Supported machines", supSub:"See what each machine needs before you collect ROMs.",
+  firstFoot:"A download button appears once a machine has every ROM it needs.",
   sub:'Drop in your ROMs and get <code style="font-family:var(--mono);font-size:12px">.MSX</code> packs for MiSTer. Everything runs in your browser; nothing is uploaded.',
   theme:"Theme", store:"ROM store", dropHint:"Drag ROM files, folders or ZIPs here",
   pickFiles:"Choose files", pickDir:"Choose folder",
@@ -310,6 +380,14 @@ en:{
   saveNone:"Saving unavailable. Download this page and use it locally.",
 },
 ja:{
+  heroHd:"ROMをここにドロップ",
+  heroSub:"ファイル、フォルダごと、コレクションのZIPのどれでも。.rom・.zip・.gzをこのページの中で読みます。",
+  howHd:"ROMはどう見分けますか？",
+  s1t:"ROMを入れる", s1d:"入れた後、使ったファイル・捨てたファイル・読めなかったファイルが記録に残ります。",
+  s2t:"機種を確認", s2d:"機種ごとにまだ必要なROMを表示します。足りないROMは、止めている機種が多い順です。",
+  s3t:"ダウンロードして展開", s3d:"パックのzipをSDカードの games/MSX1/MSX/ に展開します。",
+  supHd:"対応機種", supSub:"ROMを集める前に、機種ごとに必要なものを確認できます。",
+  firstFoot:"必要なROMがそろうと、ダウンロードボタンが表示されます。",
   sub:'ROMを入れると、MiSTer用の<code style="font-family:var(--mono);font-size:12px">.MSX</code>パックを作ります。サーバーを使わず、ブラウザの中だけで動作します。',
   theme:"テーマ", store:"ROM保管庫", dropHint:"ROMファイル・フォルダ・ZIPをここにドロップしてください",
   pickFiles:"ファイルを選択", pickDir:"フォルダを選択",
@@ -981,6 +1059,9 @@ function slotSummary(m){
   return [m.type, ram&&("RAM "+ram), ...bits].filter(Boolean).join(" · ");
 }
 function render(){
+  //  아직 아무것도 읽지 않았으면 첫 실행 화면 (큰 드롭 영역 + 지원 기종 목록).
+  document.querySelector(".wrap").classList.toggle("first", filesRead===0 && store.size===0);
+  $("supCount").textContent=DATA.machines.length;
   const total=store.size, needed=allNeeded.size;
   const have=[...allNeeded.values()].filter(g=>pickHash(g)).length;
   $("mFiles").textContent=filesRead; $("mHashes").textContent=total;
@@ -1136,10 +1217,13 @@ fileInput.addEventListener("change",()=>{ addFiles([...fileInput.files]); fileIn
 dirInput.addEventListener("change",()=>{ addFiles([...dirInput.files]); dirInput.value=""; });
 $("pickFiles").addEventListener("click",()=>fileInput.click());
 $("pickDir").addEventListener("click",()=>dirInput.click());
-const drop=$("drop");
-["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("hot");}));
-["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("hot");}));
-drop.addEventListener("drop",async e=>{ e.preventDefault(); log(t("reading")); addFiles(await entriesFrom(e.dataTransfer)); });
+for(const drop of [$("drop"),$("hero")]){
+  ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("hot");}));
+  ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("hot");}));
+  drop.addEventListener("drop",async e=>{ e.preventDefault(); log(t("reading")); addFiles(await entriesFrom(e.dataTransfer)); });
+}
+$("heroFiles").addEventListener("click",()=>fileInput.click());
+$("heroDir").addEventListener("click",()=>dirInput.click());
 document.addEventListener("dragover",e=>e.preventDefault());
 document.addEventListener("drop",e=>e.preventDefault());
 $("q").addEventListener("input",e=>{ query=e.target.value.trim().toLowerCase(); render(); });
