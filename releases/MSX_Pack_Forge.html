@@ -1,4 +1,7 @@
+<!doctype html>
+<html lang="ko">
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>MSX Pack Forge</title>
 <style>
 :root{
@@ -34,6 +37,8 @@ header.top .spacer{flex:1}
 .theme-btn{font:inherit;font-size:12px;color:var(--ink-2);background:var(--panel);border:1px solid var(--line);
   border-radius:7px;padding:5px 10px;cursor:pointer}
 .theme-btn:hover{color:var(--ink);border-color:var(--ink-3)}
+.top-tools{display:flex;gap:8px;align-items:center}
+.seg.lang button{padding:5px 10px}
 .grid{display:grid;grid-template-columns:320px 1fr;gap:16px;align-items:start}
 @media (max-width:860px){ .grid{grid-template-columns:1fr} }
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow)}
@@ -131,66 +136,59 @@ header.top .spacer{flex:1}
   <header class="top">
     <div>
       <h1>MSX Pack Forge</h1>
-      <p class="sub">ROM을 넣으면 MiSTer용 <code style="font-family:var(--mono);font-size:12px">.MSX</code> 팩을 만듭니다. 서버 없이 브라우저 안에서만 동작합니다.</p>
+      <p class="sub" data-i18n="sub"></p>
     </div>
     <div class="spacer"></div>
-    <button class="theme-btn" id="theme">테마</button>
+    <div class="top-tools">
+      <div class="seg lang" id="lang" role="group" aria-label="Language / 언어 / 言語">
+        <button data-lang="ko" lang="ko" aria-pressed="false">한국어</button><button data-lang="en" lang="en" aria-pressed="false">English</button><button data-lang="ja" lang="ja" aria-pressed="false">日本語</button>
+      </div>
+      <button class="theme-btn" id="theme" data-i18n="theme"></button>
+    </div>
   </header>
 
   <div class="grid">
     <aside class="rail">
       <div class="panel">
-        <div class="hd"><h2>ROM 보관소</h2></div>
+        <div class="hd"><h2 data-i18n="store"></h2></div>
         <div class="bd">
           <div class="drop" id="drop">
-            <p>ROM 파일·폴더·ZIP을 끌어다 놓으세요</p>
-            <button class="btn btn-primary btn-sm" id="pickFiles">파일 선택</button>
-            <button class="btn btn-ghost btn-sm" id="pickDir">폴더 선택</button>
+            <p data-i18n="dropHint"></p>
+            <button class="btn btn-primary btn-sm" id="pickFiles" data-i18n="pickFiles"></button>
+            <button class="btn btn-ghost btn-sm" id="pickDir" data-i18n="pickDir"></button>
           </div>
           <div class="bar"><i id="bar"></i></div>
           <dl class="meter">
-            <dt>읽은 파일</dt><dd id="mFiles">0</dd>
-            <dt>쓸모 있는 ROM</dt><dd id="mHashes">0</dd>
-            <dt>필요한 ROM</dt><dd id="mNeeded">0</dd>
-            <dt>빌드 가능</dt><dd id="mReady">0</dd>
+            <dt data-i18n="mFiles"></dt><dd id="mFiles">0</dd>
+            <dt data-i18n="mHashes"></dt><dd id="mHashes">0</dd>
+            <dt data-i18n="mNeeded"></dt><dd id="mNeeded">0</dd>
+            <dt data-i18n="mReady"></dt><dd id="mReady">0</dd>
           </dl>
           <div class="missing" id="synthWrap" hidden>
-            <h3>합성한 turbo R 디스크 ROM</h3>
+            <h3 data-i18n="synthHd"></h3>
             <ul id="synthList"></ul>
           </div>
           <div class="missing" id="missingWrap" hidden>
-            <h3>빠진 ROM <span id="missCount" style="font-weight:400;color:var(--ink-3)"></span></h3>
+            <h3><span data-i18n="missHd"></span> <span id="missCount" style="font-weight:400;color:var(--ink-3)"></span></h3>
             <ul id="missingList"></ul>
           </div>
           <div class="log" id="log"></div>
         </div>
       </div>
-      <p class="note" style="border-left:3px solid currentColor;padding-left:8px">
-        <b>SRAM.NVR은 팩 zip에 들어 있지 않습니다 — 직접 한 번 복사하세요.</b>
-        FM-PAC·GameMaster2·Halnote·Panasonic SRAM·RTC 설정의 세이브 파일입니다.
-        <b>「빈 SRAM.NVR 받기」</b>로 받아 보드의 <code>games/MSX1/</code>(어디든 됨)에 넣고,
-        OSD의 <b>SRAM(PAC/Turbo-R/...)</b>에서 고르면 코어가 기억합니다.
-        <b>이미 쓰던 SRAM.NVR 위에 덮어쓰지 마세요 — 세이브가 지워집니다.</b>
-      </p>
-      <p class="note">
-        ROM은 파일명이 아니라 <b>SHA-1</b>로 찾습니다. 이름이 달라도 내용이 맞으면 인식합니다.
-        <b>ZIP</b>과 <b>.gz</b>는 그대로 넣어도 됩니다. 안에서 풀어 읽고, 어느 팩에도 쓰이지 않는 파일은 버립니다.
-        한자 폰트처럼 <code>device</code>로 붙는 ROM은 없어도 팩이 만들어지고, 그 장치만 비어 있게 됩니다.
-        FS-A1ST·FS-A1GT 펌웨어와 Sony HB-F1XD 디스크 ROM이 함께 들어오면 turbo R용
-        <b>WD2793 디스크 ROM</b>을 그 자리에서 합성해서 DOS2 팩까지 만들 수 있게 합니다.
-      </p>
+      <p class="note" style="border-left:3px solid currentColor;padding-left:8px" data-i18n="sramNote"></p>
+      <p class="note" data-i18n="romNote"></p>
     </aside>
 
     <main>
       <div id="toast" class="toast" hidden></div>
       <div class="toolbar">
-        <input type="search" id="q" placeholder="기종 이름으로 거르기 (예: A1ST, HB-F1)" aria-label="기종 검색">
-        <div class="seg" role="group" aria-label="보기">
-          <button id="fAll" aria-pressed="true">전체</button>
-          <button id="fReady" aria-pressed="false">빌드 가능만</button>
+        <input type="search" id="q" data-i18n-ph="qPh" data-i18n-aria="qAria">
+        <div class="seg" role="group" data-i18n-aria="segAria">
+          <button id="fAll" aria-pressed="true" data-i18n="fAll"></button>
+          <button id="fReady" aria-pressed="false" data-i18n="fReady"></button>
         </div>
-        <button class="btn btn-primary btn-sm" id="buildAll" disabled>가능한 팩 전부 받기</button>
-        <button class="btn btn-ghost btn-sm" id="buildSram" title="FM-PAC·GM2·Halnote·Panasonic SRAM·RTC 설정 세이브 파일 (2 MB, 비어 있음)">빈 SRAM.NVR 받기</button>
+        <button class="btn btn-primary btn-sm" id="buildAll" disabled></button>
+        <button class="btn btn-ghost btn-sm" id="buildSram" data-i18n="buildSram" data-i18n-title="buildSramTitle"></button>
       </div>
       <div id="list"></div>
     </main>
@@ -200,6 +198,187 @@ header.top .spacer{flex:1}
 <script>
 const DATA = {"layouts":["/yX/cWdlZv//ZP//cHMh////YP9hRgH///9XUCZUAv//MFUxMgQD//+AUzNRRwX//0MnNTRWBv///0I3UgcQ//8iQDZEABH//yMkQRdFEv///yD/FRP//2Ngdxb/FP//////////df///////////////////3L/dv//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////Yv//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////hIH///+Cg4b/h4X///////90//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////8="],"machines":[{"name":"Al_Alamiah_AX170","vendor":"Al_Alamiah","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"ax170_basic-bios1.rom","h":"5e094fca95ab8e91873ee372a3f1239b9a48a48d"}]},{"ps":1,"ss":0,"b":[{"start":1,"t":"ROM","n":2,"f":"ax170_arabic.rom","h":"0287b2ec897b9196788cd9f10c99e1487d7adbbb"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM","n":4}]},{"ps":3,"ss":3,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"MSX - C-BIOS","vendor":"C-BIOS","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"cbios_main_msx1.rom","h":"2f997e8a57528518c82ab3693fdae243dbbcc508"},{"start":2,"t":"ROM","n":1,"f":"cbios_logo_msx1.rom","h":"9fbbe400dbaf186aeba42e170d9424b032412c42"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM","n":4}]}]},{"name":"MSX2 - C-BIOS","vendor":"C-BIOS","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"cbios_main_msx2.rom","h":"f929bd1d720b0ef7092c9add8accd0d56fc9c8a3"},{"start":2,"t":"ROM","n":1,"f":"cbios_logo_msx2.rom","h":"d4e5b98ce23573669fb44447582d656e390791c0"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"cbios_sub.rom","h":"2fcb40413e7d373f0f2dbdc815ce18746ddf3684"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM MAPPER","n":8}]}]},{"name":"Canon V-20","vendor":"Canon","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"v20bios.rom","h":"302afb5d8be26c758309ca3df611ae69cced2821"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM","n":4}]}]},{"name":"Canon V-20E","vendor":"Canon","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"v20ebios.u20","h":"8963fc041975f31dc2ab1019cfdd4967999de53e"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM","n":4}]}]},{"name":"Canon V-20F","vendor":"Canon","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"v20fbios.rom","h":"d99eebded5db5fce1e072d08e642c0909bc7efdd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM","n":4}]}]},{"name":"Canon V-20G","vendor":"Canon","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"v20gbios.rom","h":"d67be6d7d56d7229418f4e122f2ec27990db7d19"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM","n":4}]}]},{"name":"Canon V-20S","vendor":"Canon","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"v20sbios.rom","h":"9fb289ea5c11d497ee00703f64e82575d1c59923"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM","n":4}]}]},{"name":"Daewoo_CPC-300","vendor":"Daewoo","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"cpc-300_basic-bios2.rom","h":"affa3c5cd8db79a1450ad8a7f405a425b251653d"}]},{"ps":0,"ss":1,"b":[{"start":1,"t":"ROM","n":2,"f":"cpc-300_hangul.rom","h":"47a9d9a24e4fc6f9467c6e7d61a02d45f5a753ef"}]},{"ps":0,"ss":2,"b":[{"start":0,"t":"RAM MAPPER","n":8}]},{"ps":0,"ss":3,"b":[{"start":0,"t":"ROM","n":2,"f":"cpc-300_msx2sub.rom","h":"fb51c505adfbc174df94289fa894ef969f5357bc"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Daewoo_CPC-300E_no_tutor","vendor":"Daewoo","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"cpc-300_basic-bios2.rom","h":"affa3c5cd8db79a1450ad8a7f405a425b251653d"}]},{"ps":0,"ss":1,"b":[{"start":1,"t":"ROM","n":2,"f":"cpc-300_hangul_notutor.rom","h":"0c3dace2e3748486973b1d037147601fd49ce78a"}]},{"ps":0,"ss":2,"b":[{"start":0,"t":"RAM MAPPER","n":4}]},{"ps":0,"ss":3,"b":[{"start":0,"t":"ROM","n":2,"f":"cpc-300e_msx2sub.rom","h":"09f7d788698a23aa7eec140237e907d4c37cbfe0"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Daewoo_CPC-300_no_tutor","vendor":"Daewoo","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"cpc-300_basic-bios2.rom","h":"affa3c5cd8db79a1450ad8a7f405a425b251653d"}]},{"ps":0,"ss":1,"b":[{"start":1,"t":"ROM","n":2,"f":"cpc-300_hangul_notutor.rom","h":"0c3dace2e3748486973b1d037147601fd49ce78a"}]},{"ps":0,"ss":2,"b":[{"start":0,"t":"RAM MAPPER","n":8}]},{"ps":0,"ss":3,"b":[{"start":0,"t":"ROM","n":2,"f":"cpc-300_msx2sub.rom","h":"fb51c505adfbc174df94289fa894ef969f5357bc"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Daewoo_CPC-400S","vendor":"Daewoo","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"cps-400s_main.rom","h":"affa3c5cd8db79a1450ad8a7f405a425b251653d"}]},{"ps":0,"ss":1,"b":[{"start":1,"t":"ROM","n":1,"f":"cps-400s_hangul1.rom","h":"d2b058989a700ca772b9591f42c01ed0f45f74d6"},{"start":2,"t":"ROM","n":1,"f":"cps-400s_kanji.rom","h":"45e8a3a3f977683541ac1829d310a3f9e6e1b3cf"}]},{"ps":0,"ss":2,"b":[{"start":0,"t":"RAM MAPPER","n":8}]},{"ps":0,"ss":3,"b":[{"start":0,"t":"ROM","n":1,"f":"cps-400s_sub.rom","h":"794fb246c9b78187a2ef3f5d3346bbf2da13c855"},{"start":1,"t":"ROM","n":1,"f":"cps-400s_hangul2.rom","h":"5c69c17886a375df4cbd88f6c3c5e6e7becd28cd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":1,"t":"FDC","n":1,"f":"cps-400s_disk.rom","h":"914f6ccb25d78621186001f2f5e2aaa2d628cd0c"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Daewoo_DPC-100","vendor":"Daewoo","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"dpc-100_basic-bios1.rom","h":"171b587bd5a947a13f3114120b6e7baca3b57d78"},{"start":2,"t":"ROM","n":1,"f":"dpc-100_hangul.rom","h":"4421fa2504cbce18f7c84b5ea97f04e017007f07"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":3,"t":"RAM","n":1}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Daewoo_DPC-180","vendor":"Daewoo","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"dpc-180_basic-bios1.rom","h":"171b587bd5a947a13f3114120b6e7baca3b57d78"},{"start":2,"t":"ROM","n":1,"f":"dpc-180_hangul.rom","h":"4421fa2504cbce18f7c84b5ea97f04e017007f07"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"RAM","n":4}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Daewoo_DPC-200","vendor":"Daewoo","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"dpc-200_basic-bios1.rom","h":"171b587bd5a947a13f3114120b6e7baca3b57d78"},{"start":2,"t":"ROM","n":1,"f":"dpc-200_hangul.rom","h":"4421fa2504cbce18f7c84b5ea97f04e017007f07"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"RAM","n":4}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Daewoo_DPC-200E(FR)","vendor":"Daewoo","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"dpc200ebios.rom","h":"d3af963e2529662eae63f04a2530454685a1989f"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"RAM","n":4}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Goldstar_FC-200","vendor":"Goldstar","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fc-200_basic-bios1.rom","h":"829c00c3114f25b3dae5157c0a238b52a3ac37db"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"RAM","n":4}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Goldstar_FC-80","vendor":"Goldstar","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fc80bios.rom","h":"171b587bd5a947a13f3114120b6e7baca3b57d78"},{"start":2,"t":"ROM","n":1,"f":"fc80han.rom","h":"8e28899175aadf3bbd8c9ba63d3b82c2caa74709"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"RAM","n":4}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Goldstar_FC-80U","vendor":"Goldstar","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fc80ubios.rom","h":"171b587bd5a947a13f3114120b6e7baca3b57d78"},{"start":2,"t":"ROM","n":1,"f":"fc80uhan.rom","h":"58dbe73ae80c2c409e766c3ace730ecd7bec89d0"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"RAM","n":4}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Goldstar_GFC-1080","vendor":"Goldstar","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"gfc1080bios.rom","h":"6b0be712b9c95c1e912252ab5703e1c0bc457d9e"},{"start":2,"t":"ROM","n":1,"f":"gfc1080han.rom","h":"141b44212ba28e7d03e0b54126fedd9e0807dc42"},{"start":3,"t":"ROM","n":1,"f":"gfc1080pasocalc.rom","h":"a5581fa3ce10f90f15ba3dc53d57b02d6e4af172"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"RAM","n":4}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Goldstar_GFC-1080A","vendor":"Goldstar","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fc80ubios.rom","h":"171b587bd5a947a13f3114120b6e7baca3b57d78"},{"start":2,"t":"ROM","n":1,"f":"fc80uhan.rom","h":"58dbe73ae80c2c409e766c3ace730ecd7bec89d0"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"RAM","n":4}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Hitachi MB-H2","vendor":"Hitachi","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"mbh2bios.rom","h":"302afb5d8be26c758309ca3df611ae69cced2821"}]},{"ps":0,"ss":0,"b":[{"start":2,"t":"ROM","n":1,"f":"mbh2firm.rom","h":"e2140fa2e8e59090ecccf55b62323ea9dcc66d0b"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM","n":4}]}]},{"name":"Panasonic FS-A1 basic 1MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":64}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"}]}]},{"name":"Panasonic FS-A1 basic 2MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":128}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"}]}]},{"name":"Panasonic FS-A1 basic 4MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":256}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"}]}]},{"name":"Panasonic FS-A1 basic","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"}]}]},{"name":"Panasonic FS-A1 desk 1MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":64}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"ROM","n":2,"f":"fs-a1_deskpac1.rom","h":"63098f27beac9eca6b39d837d2a552395df33fe1"}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"ROM","n":2,"f":"fs-a1_deskpac2.rom","h":"7f5b76605e3d898cc4b5aacf1d7682b82fe84353"}]}]},{"name":"Panasonic FS-A1 desk 2MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":128}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"ROM","n":2,"f":"fs-a1_deskpac1.rom","h":"63098f27beac9eca6b39d837d2a552395df33fe1"}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"ROM","n":2,"f":"fs-a1_deskpac2.rom","h":"7f5b76605e3d898cc4b5aacf1d7682b82fe84353"}]}]},{"name":"Panasonic FS-A1 desk 4MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":256}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"ROM","n":2,"f":"fs-a1_deskpac1.rom","h":"63098f27beac9eca6b39d837d2a552395df33fe1"}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"ROM","n":2,"f":"fs-a1_deskpac2.rom","h":"7f5b76605e3d898cc4b5aacf1d7682b82fe84353"}]}]},{"name":"Panasonic FS-A1 desk","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"ROM","n":2,"f":"fs-a1_deskpac1.rom","h":"63098f27beac9eca6b39d837d2a552395df33fe1"}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"ROM","n":2,"f":"fs-a1_deskpac2.rom","h":"7f5b76605e3d898cc4b5aacf1d7682b82fe84353"}]}]},{"name":"Panasonic FS-A1F 1MB FM","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1f_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1wx_fmbasic.rom","h":"aad42ba4289b33d8eed225d42cea930b7fc5c228"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":64,"p":5}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1f_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"ROM","n":2,"f":"fs-a1f_kanjibasic.rom","h":"ea35cc2cad9cfdf56cae224d8ee41579de37f000"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1f_kanjifont.rom","h":"5e872d5853698731a0ed22fb72dbcdfd59cd19c3"}]},{"name":"Panasonic FS-A1F 2MB FM","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1f_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1wx_fmbasic.rom","h":"aad42ba4289b33d8eed225d42cea930b7fc5c228"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":128,"p":5}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1f_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"ROM","n":2,"f":"fs-a1f_kanjibasic.rom","h":"ea35cc2cad9cfdf56cae224d8ee41579de37f000"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1f_kanjifont.rom","h":"5e872d5853698731a0ed22fb72dbcdfd59cd19c3"}]},{"name":"Panasonic FS-A1F 4MB FM","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1f_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1wx_fmbasic.rom","h":"aad42ba4289b33d8eed225d42cea930b7fc5c228"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":256,"p":5}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1f_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"ROM","n":2,"f":"fs-a1f_kanjibasic.rom","h":"ea35cc2cad9cfdf56cae224d8ee41579de37f000"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1f_kanjifont.rom","h":"5e872d5853698731a0ed22fb72dbcdfd59cd19c3"}]},{"name":"Panasonic FS-A1F basic","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1f_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":4,"p":5}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1f_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"ROM","n":2,"f":"fs-a1f_kanjibasic.rom","h":"ea35cc2cad9cfdf56cae224d8ee41579de37f000"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1f_kanjifont.rom","h":"5e872d5853698731a0ed22fb72dbcdfd59cd19c3"}]},{"name":"Panasonic FS-A1F cockpit","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1f_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":4,"p":5}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1f_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"ROM","n":2,"f":"fs-a1f_kanjibasic.rom","h":"ea35cc2cad9cfdf56cae224d8ee41579de37f000"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"ROM","n":2,"f":"fs-a1f_cockpit.rom","h":"4a99f2444f29c2b642efd6f084081d6fd96bfa9b"}]}],"devices":[{"typ":"KANJI","f":"fs-a1f_kanjifont.rom","h":"5e872d5853698731a0ed22fb72dbcdfd59cd19c3"}]},{"name":"Panasonic FS-A1FX 1MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1fx_basic-bios2p.rom","h":"e90f80a61d94c617850c415e12ad70ac41e66bb7"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1wx_fmbasic.rom","h":"aad42ba4289b33d8eed225d42cea930b7fc5c228"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":64,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1fx_msx2psub.rom","h":"fe0254cbfc11405b79e7c86c7769bd6322b04995"},{"start":1,"t":"ROM","n":2,"f":"fs-a1fx_kanjibasic.rom","h":"1ef3956f7f918873fb9b031339bba45d1e5e5878"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1fx_kanjifont.rom","h":"e0e99cd91e88ce2676445663f832c835d74d6fd4"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1FX 2MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1fx_basic-bios2p.rom","h":"e90f80a61d94c617850c415e12ad70ac41e66bb7"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1wx_fmbasic.rom","h":"aad42ba4289b33d8eed225d42cea930b7fc5c228"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":128,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1fx_msx2psub.rom","h":"fe0254cbfc11405b79e7c86c7769bd6322b04995"},{"start":1,"t":"ROM","n":2,"f":"fs-a1fx_kanjibasic.rom","h":"1ef3956f7f918873fb9b031339bba45d1e5e5878"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1fx_kanjifont.rom","h":"e0e99cd91e88ce2676445663f832c835d74d6fd4"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1FX 4MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1fx_basic-bios2p.rom","h":"e90f80a61d94c617850c415e12ad70ac41e66bb7"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1wx_fmbasic.rom","h":"aad42ba4289b33d8eed225d42cea930b7fc5c228"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":256,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1fx_msx2psub.rom","h":"fe0254cbfc11405b79e7c86c7769bd6322b04995"},{"start":1,"t":"ROM","n":2,"f":"fs-a1fx_kanjibasic.rom","h":"1ef3956f7f918873fb9b031339bba45d1e5e5878"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1fx_kanjifont.rom","h":"e0e99cd91e88ce2676445663f832c835d74d6fd4"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1FX","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1fx_basic-bios2p.rom","h":"e90f80a61d94c617850c415e12ad70ac41e66bb7"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1wx_fmbasic.rom","h":"aad42ba4289b33d8eed225d42cea930b7fc5c228"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":4,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1fx_msx2psub.rom","h":"fe0254cbfc11405b79e7c86c7769bd6322b04995"},{"start":1,"t":"ROM","n":2,"f":"fs-a1fx_kanjibasic.rom","h":"1ef3956f7f918873fb9b031339bba45d1e5e5878"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"ROM","n":2,"f":"fs-a1fx_cockpit.rom","h":"9d67fab55b85f4ac4f5924323a70020eb8589057"}]}],"devices":[{"typ":"KANJI","f":"fs-a1fx_kanjifont.rom","h":"e0e99cd91e88ce2676445663f832c835d74d6fd4"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1GT 1MB DOS2","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":327680,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1gt_firmware.rom","s":507904,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":294912,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":64,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":458752,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"},{"start":1,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":475136,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"TURBOR_FDC","n":4,"f":"fs-a1gt_diskrom_wd2793.rom","h":"86f81c71c858d98e2d4031566efd3b5a3843e279"}]}],"devices":[{"typ":"KANJI","f":"fs-a1gt_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"},{"typ":"MIDI"}]},{"name":"Panasonic FS-A1GT 1MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":327680,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1gt_firmware.rom","s":507904,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":294912,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":64,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":458752,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"},{"start":1,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":475136,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1gt_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"},{"typ":"MIDI"}]},{"name":"Panasonic FS-A1GT 2MB DOS2","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":327680,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1gt_firmware.rom","s":507904,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":294912,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":128,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":458752,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"},{"start":1,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":475136,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"TURBOR_FDC","n":4,"f":"fs-a1gt_diskrom_wd2793.rom","h":"86f81c71c858d98e2d4031566efd3b5a3843e279"}]}],"devices":[{"typ":"KANJI","f":"fs-a1gt_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"},{"typ":"MIDI"}]},{"name":"Panasonic FS-A1GT 2MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":327680,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1gt_firmware.rom","s":507904,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":294912,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":128,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":458752,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"},{"start":1,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":475136,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1gt_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"},{"typ":"MIDI"}]},{"name":"Panasonic FS-A1GT 4MB DOS2","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":327680,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1gt_firmware.rom","s":507904,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":294912,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":256,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":458752,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"},{"start":1,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":475136,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"TURBOR_FDC","n":4,"f":"fs-a1gt_diskrom_wd2793.rom","h":"86f81c71c858d98e2d4031566efd3b5a3843e279"}]}],"devices":[{"typ":"KANJI","f":"fs-a1gt_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"},{"typ":"MIDI"}]},{"name":"Panasonic FS-A1GT 4MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":327680,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1gt_firmware.rom","s":507904,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":294912,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":256,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":458752,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"},{"start":1,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":475136,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1gt_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"},{"typ":"MIDI"}]},{"name":"Panasonic FS-A1GT DOS2-ILLUK","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":327680,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1gt_firmware.rom","s":507904,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":294912,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":32,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":458752,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"},{"start":1,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":475136,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"TURBOR_FDC","n":4,"f":"fs-a1gt_diskrom_wd2793.rom","h":"86f81c71c858d98e2d4031566efd3b5a3843e279"}]}],"devices":[{"typ":"KANJI","f":"illucity_k_kanjifont.rom","h":"d913f35b6855be93961627e6c26d57ff26da51a4"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"},{"typ":"MIDI"}]},{"name":"Panasonic FS-A1GT DOS2","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":327680,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1gt_firmware.rom","s":507904,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":294912,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":32,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":458752,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"},{"start":1,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":475136,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"TURBOR_FDC","n":4,"f":"fs-a1gt_diskrom_wd2793.rom","h":"86f81c71c858d98e2d4031566efd3b5a3843e279"}]}],"devices":[{"typ":"KANJI","f":"fs-a1gt_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"},{"typ":"MIDI"}]},{"name":"Panasonic FS-A1GT","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":327680,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1gt_firmware.rom","s":507904,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":294912,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":32,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1gt_firmware.rom","s":458752,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"},{"start":1,"t":"ROM","n":2,"f":"fs-a1gt_firmware.rom","s":475136,"h":"e779c338eb91a7dea3ff75f3fde76b8af22c4a3a"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1gt_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"},{"typ":"MIDI"}]},{"name":"Panasonic FS-A1ST 1MB DOS2","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":327680,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1st_firmware.rom","s":507904,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":294912,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":64,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":458752,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"},{"start":1,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":475136,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"TURBOR_FDC","n":4,"f":"fs-a1st_diskrom_wd2793.rom","h":"94f4587db749af02f82837b3dbad7fc6e55f15e9"}]}],"devices":[{"typ":"KANJI","f":"fs-a1st_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1ST 1MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":327680,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1st_firmware.rom","s":507904,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":294912,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":64,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":458752,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"},{"start":1,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":475136,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1st_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1ST 2MB DOS2","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":327680,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1st_firmware.rom","s":507904,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":294912,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":128,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":458752,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"},{"start":1,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":475136,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"TURBOR_FDC","n":4,"f":"fs-a1st_diskrom_wd2793.rom","h":"94f4587db749af02f82837b3dbad7fc6e55f15e9"}]}],"devices":[{"typ":"KANJI","f":"fs-a1st_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1ST 2MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":327680,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1st_firmware.rom","s":507904,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":294912,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":128,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":458752,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"},{"start":1,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":475136,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1st_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1ST 4MB DOS2","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":327680,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1st_firmware.rom","s":507904,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":294912,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":256,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":458752,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"},{"start":1,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":475136,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"TURBOR_FDC","n":4,"f":"fs-a1st_diskrom_wd2793.rom","h":"94f4587db749af02f82837b3dbad7fc6e55f15e9"}]}],"devices":[{"typ":"KANJI","f":"fs-a1st_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1ST 4MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":327680,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1st_firmware.rom","s":507904,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":294912,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":256,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":458752,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"},{"start":1,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":475136,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1st_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1ST 512KB DOS2","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":327680,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1st_firmware.rom","s":507904,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":294912,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":32,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":458752,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"},{"start":1,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":475136,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"TURBOR_FDC","n":4,"f":"fs-a1st_diskrom_wd2793.rom","h":"94f4587db749af02f82837b3dbad7fc6e55f15e9"}]}],"devices":[{"typ":"KANJI","f":"fs-a1st_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1ST 512KB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":327680,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1st_firmware.rom","s":507904,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":294912,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":32,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":458752,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"},{"start":1,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":475136,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1st_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1ST DOS2","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":327680,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1st_firmware.rom","s":507904,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":294912,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":16,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":458752,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"},{"start":1,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":475136,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"TURBOR_FDC","n":4,"f":"fs-a1st_diskrom_wd2793.rom","h":"94f4587db749af02f82837b3dbad7fc6e55f15e9"}]}],"devices":[{"typ":"KANJI","f":"fs-a1st_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1ST","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":327680,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1st_firmware.rom","s":507904,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":0,"ss":3,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":294912,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":16,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1st_firmware.rom","s":458752,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"},{"start":1,"t":"ROM","n":2,"f":"fs-a1st_firmware.rom","s":475136,"h":"c212b11fda13f83dafed688c54d098e7e47ab225"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1st_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1WX 1MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1wx_basic-bios2p.rom","h":"e90f80a61d94c617850c415e12ad70ac41e66bb7"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1wx_fmbasic.rom","h":"aad42ba4289b33d8eed225d42cea930b7fc5c228"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":64,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1wx_msx2psub.rom","h":"fe0254cbfc11405b79e7c86c7769bd6322b04995"},{"start":1,"t":"ROM","n":2,"f":"fs-a1wx_kanjibasic.rom","h":"1ef3956f7f918873fb9b031339bba45d1e5e5878"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1wx_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1WX 2MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1wx_basic-bios2p.rom","h":"e90f80a61d94c617850c415e12ad70ac41e66bb7"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1wx_fmbasic.rom","h":"aad42ba4289b33d8eed225d42cea930b7fc5c228"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":128,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1wx_msx2psub.rom","h":"fe0254cbfc11405b79e7c86c7769bd6322b04995"},{"start":1,"t":"ROM","n":2,"f":"fs-a1wx_kanjibasic.rom","h":"1ef3956f7f918873fb9b031339bba45d1e5e5878"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1wx_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1WX 4MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1wx_basic-bios2p.rom","h":"e90f80a61d94c617850c415e12ad70ac41e66bb7"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1wx_fmbasic.rom","h":"aad42ba4289b33d8eed225d42cea930b7fc5c228"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":256,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1wx_msx2psub.rom","h":"fe0254cbfc11405b79e7c86c7769bd6322b04995"},{"start":1,"t":"ROM","n":2,"f":"fs-a1wx_kanjibasic.rom","h":"1ef3956f7f918873fb9b031339bba45d1e5e5878"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1wx_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1WX","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1wx_basic-bios2p.rom","h":"e90f80a61d94c617850c415e12ad70ac41e66bb7"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1wx_fmbasic.rom","h":"aad42ba4289b33d8eed225d42cea930b7fc5c228"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":4,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1wx_msx2psub.rom","h":"fe0254cbfc11405b79e7c86c7769bd6322b04995"},{"start":1,"t":"ROM","n":2,"f":"fs-a1wx_kanjibasic.rom","h":"1ef3956f7f918873fb9b031339bba45d1e5e5878"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"hb-f1xd_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]}],"devices":[{"typ":"KANJI","f":"fs-a1wx_kanjifont.rom","h":"5aff2d9b6efc723bc395b0f96f0adfa83cc54a49"},{"typ":"RESET_STATUS"},{"typ":"MATSUSHITA"},{"typ":"MOONSOUND"}]},{"name":"Panasonic FS-A1mk2 basic 1MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1mk2_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":64,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1mk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"}]}]},{"name":"Panasonic FS-A1mk2 basic 2MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1mk2_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":128,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1mk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"}]}]},{"name":"Panasonic FS-A1mk2 basic 4MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1mk2_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":256,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1mk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"}]}]},{"name":"Panasonic FS-A1mk2 basic","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1mk2_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":4,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1mk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"}]}]},{"name":"Panasonic FS-A1mk2 cockpit 1MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1mk2_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":64,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1mk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"ROM","n":2,"f":"fs-a1mk2_cockpit1.rom","h":"2752cd89754c05abdf7c23cba132d38e3ef0f27d"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1mk2_cockpit2.rom","h":"e194d290ebfa4595ce0349ea2fc15442508485b0"}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"ROM","n":2,"f":"fs-a1mk2_cockpit3.rom","h":"a3f4e2e4934074925d775afe30ac72f150ede543"}]}]},{"name":"Panasonic FS-A1mk2 cockpit 2MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1mk2_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":128,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1mk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"ROM","n":2,"f":"fs-a1mk2_cockpit1.rom","h":"2752cd89754c05abdf7c23cba132d38e3ef0f27d"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1mk2_cockpit2.rom","h":"e194d290ebfa4595ce0349ea2fc15442508485b0"}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"ROM","n":2,"f":"fs-a1mk2_cockpit3.rom","h":"a3f4e2e4934074925d775afe30ac72f150ede543"}]}]},{"name":"Panasonic FS-A1mk2 cockpit 4MB","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1mk2_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":256,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1mk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"ROM","n":2,"f":"fs-a1mk2_cockpit1.rom","h":"2752cd89754c05abdf7c23cba132d38e3ef0f27d"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1mk2_cockpit2.rom","h":"e194d290ebfa4595ce0349ea2fc15442508485b0"}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"ROM","n":2,"f":"fs-a1mk2_cockpit3.rom","h":"a3f4e2e4934074925d775afe30ac72f150ede543"}]}]},{"name":"Panasonic FS-A1mk2 cockpit","vendor":"Panasonic","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"fs-a1mk2_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":4,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"fs-a1mk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"ROM","n":2,"f":"fs-a1mk2_cockpit1.rom","h":"2752cd89754c05abdf7c23cba132d38e3ef0f27d"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"ROM","n":1,"f":"fs-a1mk2_cockpit2.rom","h":"e194d290ebfa4595ce0349ea2fc15442508485b0"}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"ROM","n":2,"f":"fs-a1mk2_cockpit3.rom","h":"a3f4e2e4934074925d775afe30ac72f150ede543"}]}]},{"name":"Philips_NMS_8245","vendor":"Philips","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"nms8245_basic-bios2.rom","h":"6103b39f1e38d1aa2d84b1c3219c44f1abb5436e"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"nms8245_msx2sub.rom","h":"e7905d16d2ccd57a013c122dc432106cd59ef52c"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM MAPPER","n":8,"p":4}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"FDC","n":1,"f":"nms8245_disk.rom","h":"c3f3ca454d66a0bc791f1d4b60e6857b44eb8755"},{"start":2,"t":"IO_MIRROR","n":1,"r":"1"}]}]},{"name":"Philips_NMS_8250","vendor":"Philips","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"nms8250_basic-bios2.rom","h":"6103b39f1e38d1aa2d84b1c3219c44f1abb5436e"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"nms8250_msx2sub.rom","h":"5c1f9c7fb655e43d38e5dd1fcc6b942b2ff68b02"},{"start":1,"t":"ROM_MIRROR","n":1,"r":"0"},{"start":2,"t":"ROM_MIRROR","n":1,"r":"0"},{"start":3,"t":"ROM_MIRROR","n":1,"r":"0"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM MAPPER","n":8}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"FDC","n":1,"f":"nms8250_1.08_disk.rom","h":"dab3e6f36843392665b71b04178aadd8762c6589"},{"start":0,"t":"IO_MIRROR","n":1,"r":"1"},{"start":2,"t":"IO_MIRROR","n":2,"r":"1"}]}]},{"name":"Philips_VG_8020-00","vendor":"Philips","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"vg8020_basic-bios1.rom","h":"829c00c3114f25b3dae5157c0a238b52a3ac37db"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM","n":4}]}]},{"name":"Philips_VG_8020-20","vendor":"Philips","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"vg8020-20_basic-bios1.rom","h":"e998f0c441f4f1800ef44e42cd1659150206cf79"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM","n":4}]}]},{"name":"Philips_VG_8230","vendor":"Philips","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"vg8230_basic-bios2.rom","h":"0de3c802057560560a03d7965fcc4cff69f8575c"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"vg8230_msx2sub.rom","h":"3288894e1be6af705871499b23c85732dbc40993"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM MAPPER","n":4}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"FDC","n":1,"f":"vg8230_disk.rom","h":"0f5798850d11b316a4254b222ca08cc4ad6d4da2"}]}]},{"name":"Philips_VG_8235-00","vendor":"Philips","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"vg8235_basic-bios2.rom","h":"5e1a4bd6826b29302a1eb88c340477e7cbd0b50a"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"VG8235-ROM2 - Basic2.0.bin","h":"c289dad246364e2dd716c457ca5eecf98e76c9ab"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM MAPPER","n":8}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"FDC","n":1,"f":"vg8235-00_disk.rom","h":"7ce255ab63ba79f81d8b83d66f1108062d0b61f1"},{"start":2,"t":"IO_MIRROR","n":1,"r":"1"}]}]},{"name":"Philips_VG_8235-20","vendor":"Philips","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"nms8220_basic-bios2.rom","h":"6103b39f1e38d1aa2d84b1c3219c44f1abb5436e"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"nms8250_msx2sub.rom","h":"5c1f9c7fb655e43d38e5dd1fcc6b942b2ff68b02"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM MAPPER","n":8}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"FDC","n":1,"f":"vg8235_disk_nms2.2_DE.rom","h":"1ee2abc68a81ae7e39548985021b6532f31171b2"},{"start":2,"t":"IO_MIRROR","n":1,"r":"1"}]}]},{"name":"Philips_VG_8235-39","vendor":"Philips","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"8280fbios.rom","h":"b034764e6a8978db60b1d652917f5e24a66a7925"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"nms8250-19_msx2sub.rom","h":"fd4bcc81a8160a1dea06036c5f79d200f948f4d6"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM MAPPER","n":8}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"FDC","n":1,"f":"vg8235-39_disk.rom","h":"959060445e92eb980ddd9df3ef9cfefcae2de1d0"},{"start":2,"t":"IO_MIRROR","n":1,"r":"1"}]}]},{"name":"Philips_VG_8240","vendor":"Philips","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"vg8240_basic-bios2.rom","h":"421ac0dbfdf35b35fe5adba5d528efba28edcecb"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"vg8240_msx2sub.rom","h":"b003a5a12920facb30aa3e526a71fb557c669309"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM MAPPER","n":4}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"FDC","n":1,"f":"vg8240_disk.rom","h":"24f3bea9f47a4d9f89be1ae1040facbfd0dba1bd"},{"start":2,"t":"IO_MIRROR","n":1,"r":"1"}]}]},{"name":"Samsung_SPC-800","vendor":"Samsung","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"800bios.rom","h":"171b587bd5a947a13f3114120b6e7baca3b57d78"},{"start":2,"t":"ROM","n":1,"f":"800han.rom","h":"abd6a1574cc533ed0165f1351c1a3b560bd2dc6b"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"RAM","n":4}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Sony_HB-201","vendor":"Sony","kind":"msx","type":"MSX1","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"sony_hb201_basic-bios1.rom","h":"302afb5d8be26c758309ca3df611ae69cced2821"}]},{"ps":0,"ss":0,"b":[{"start":2,"t":"ROM","n":1,"f":"sony_hb201_note.rom","h":"0f4f09f1a6ef7535b243afabfb44a3a0eb0498d9"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM","n":4}]}]},{"name":"Sony_HB-F1","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"hb-f1_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"hb-f1_msx2sub.rom","h":"b8e30d604d319d511cbfbc61e5d8c38fbb9c5a33"},{"start":1,"t":"ROM","n":1,"f":"hb-f1_firmware1.rom","h":"9db72bb78792595a12499c821048504dc96ef848"}]},{"ps":3,"ss":1,"b":[{"start":1,"t":"ROM","n":2,"f":"hb-f1_firmware2.rom","h":"aa78fc9bcd2343f84cf790310a768ee47f90c841"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"ROM","n":2,"f":"hb-f1_firmware3.rom","h":"58accf41a90693874b86ce98d8d43c27beb8b6dc"}]},{"ps":3,"ss":3,"b":[{"start":0,"t":"RAM MAPPER","n":4}]}]},{"name":"Sony_HB-F1XDmk2","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"hb-f1xdmk2_basic-bios2.rom","h":"4ce41fcc1a603411ec4e99556409c442078f0ecf"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"hb-f1xdmk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"FDC","n":1,"f":"hb-f1xdmk2_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]},{"ps":3,"ss":3,"b":[{"start":0,"t":"RAM MAPPER","n":4}]}]},{"name":"Sony_HB-F1XDmk2_1MB","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"hb-f1xdmk2_basic-bios2.rom","h":"4ce41fcc1a603411ec4e99556409c442078f0ecf"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"hb-f1xdmk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"FDC","n":1,"f":"hb-f1xdmk2_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]},{"ps":3,"ss":3,"b":[{"start":0,"t":"RAM MAPPER","n":64}]}]},{"name":"Sony_HB-F1XDmk2_1MB_FM","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"hb-f1xdmk2_basic-bios2.rom","h":"4ce41fcc1a603411ec4e99556409c442078f0ecf"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1wx_fmbasic.rom","h":"aad42ba4289b33d8eed225d42cea930b7fc5c228"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"hb-f1xdmk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"FDC","n":1,"f":"hb-f1xdmk2_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]},{"ps":3,"ss":3,"b":[{"start":0,"t":"RAM MAPPER","n":64}]}]},{"name":"Sony_HB-F1XDmk2_2MB","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"hb-f1xdmk2_basic-bios2.rom","h":"4ce41fcc1a603411ec4e99556409c442078f0ecf"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"hb-f1xdmk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"FDC","n":1,"f":"hb-f1xdmk2_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]},{"ps":3,"ss":3,"b":[{"start":0,"t":"RAM MAPPER","n":128}]}]},{"name":"Sony_HB-F1XDmk2_2MB_FM","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"hb-f1xdmk2_basic-bios2.rom","h":"4ce41fcc1a603411ec4e99556409c442078f0ecf"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1wx_fmbasic.rom","h":"aad42ba4289b33d8eed225d42cea930b7fc5c228"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"hb-f1xdmk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"FDC","n":1,"f":"hb-f1xdmk2_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]},{"ps":3,"ss":3,"b":[{"start":0,"t":"RAM MAPPER","n":128}]}]},{"name":"Sony_HB-F1XDmk2_4MB","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"hb-f1xdmk2_basic-bios2.rom","h":"4ce41fcc1a603411ec4e99556409c442078f0ecf"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"hb-f1xdmk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"FDC","n":1,"f":"hb-f1xdmk2_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]},{"ps":3,"ss":3,"b":[{"start":0,"t":"RAM MAPPER","n":256}]}]},{"name":"Sony_HB-F1XDmk2_4MB_FM","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"hb-f1xdmk2_basic-bios2.rom","h":"4ce41fcc1a603411ec4e99556409c442078f0ecf"}]},{"ps":0,"ss":2,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"fs-a1wx_fmbasic.rom","h":"aad42ba4289b33d8eed225d42cea930b7fc5c228"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"hb-f1xdmk2_msx2sub.rom","h":"0fbd45ef3dd7bb82d4c31f1947884f411f1ca344"},{"start":1,"t":"FDC","n":1,"f":"hb-f1xdmk2_disk.rom","h":"12f2cc79b3d09723840bae774be48c0d721ec1c6"}]},{"ps":3,"ss":3,"b":[{"start":0,"t":"RAM MAPPER","n":256}]}]},{"name":"Sony_HB-F1XV","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"Sony_HB-F1XV.rom","h":"f2a1d326d72d4c70ea214d7883838de8847a82b7"}]},{"ps":0,"ss":3,"b":[{"start":0,"t":"HALNOTE","n":64,"f":"hb-f1xv.rom","h":"ade0c5ba5574f8114d7079050317099b4519e88f"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":4,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"Sony_HB-F1XV.rom","s":32768,"h":"f2a1d326d72d4c70ea214d7883838de8847a82b7"},{"start":1,"t":"ROM","n":2,"f":"Sony_HB-F1XV.rom","s":65536,"h":"f2a1d326d72d4c70ea214d7883838de8847a82b7"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"Sony_HB-F1XV.rom","s":49152,"h":"f2a1d326d72d4c70ea214d7883838de8847a82b7"}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"Sony_HB-F1XV.rom","s":98304,"h":"f2a1d326d72d4c70ea214d7883838de8847a82b7"}]}],"devices":[{"typ":"KANJI","f":"hb-f1xv_kanjifont.rom","h":"218d91eb6df2823c924d3774a9f455492a10aecb"},{"typ":"RESET_STATUS"},{"typ":"MOONSOUND"}]},{"name":"Sony_HB-F1XV1MB","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"Sony_HB-F1XV.rom","h":"f2a1d326d72d4c70ea214d7883838de8847a82b7"}]}],"devices":[{"typ":"KANJI","f":"hb-f1xv_kanjifont.rom","h":"218d91eb6df2823c924d3774a9f455492a10aecb"},{"typ":"RESET_STATUS"},{"typ":"MOONSOUND"}]},{"name":"Sony_HB-F1XV1MB_nologo","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"f1xv_full_nologo.rom","h":"3fc2ba5d0a96b73d61107a9224775deabdd0e5ee"}]}],"devices":[{"typ":"KANJI","f":"hb-f1xv_kanjifont.rom","h":"218d91eb6df2823c924d3774a9f455492a10aecb"},{"typ":"RESET_STATUS"},{"typ":"MOONSOUND"}]},{"name":"Sony_HB-F1XV2MB","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"Sony_HB-F1XV.rom","h":"f2a1d326d72d4c70ea214d7883838de8847a82b7"}]}],"devices":[{"typ":"KANJI","f":"hb-f1xv_kanjifont.rom","h":"218d91eb6df2823c924d3774a9f455492a10aecb"},{"typ":"RESET_STATUS"},{"typ":"MOONSOUND"}]},{"name":"Sony_HB-F1XV2MB_nologo","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"f1xv_full_nologo.rom","h":"3fc2ba5d0a96b73d61107a9224775deabdd0e5ee"}]}],"devices":[{"typ":"KANJI","f":"hb-f1xv_kanjifont.rom","h":"218d91eb6df2823c924d3774a9f455492a10aecb"},{"typ":"RESET_STATUS"},{"typ":"MOONSOUND"}]},{"name":"Sony_HB-F1XV4MB","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"Sony_HB-F1XV.rom","h":"f2a1d326d72d4c70ea214d7883838de8847a82b7"}]}],"devices":[{"typ":"KANJI","f":"hb-f1xv_kanjifont.rom","h":"218d91eb6df2823c924d3774a9f455492a10aecb"},{"typ":"RESET_STATUS"},{"typ":"MOONSOUND"}]},{"name":"Sony_HB-F1XV4MB_nologo","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"f1xv_full_nologo.rom","h":"3fc2ba5d0a96b73d61107a9224775deabdd0e5ee"}]}],"devices":[{"typ":"KANJI","f":"hb-f1xv_kanjifont.rom","h":"218d91eb6df2823c924d3774a9f455492a10aecb"},{"typ":"RESET_STATUS"},{"typ":"MOONSOUND"}]},{"name":"Sony_HB-F1XV_nologo","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"f1xv_full_nologo.rom","h":"3fc2ba5d0a96b73d61107a9224775deabdd0e5ee"}]},{"ps":0,"ss":3,"b":[{"start":0,"t":"HALNOTE","n":64,"f":"hb-f1xv.rom","h":"ade0c5ba5574f8114d7079050317099b4519e88f"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"RAM MAPPER","n":4,"p":4}]},{"ps":3,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"f1xv_full_nologo.rom","s":32768,"h":"3fc2ba5d0a96b73d61107a9224775deabdd0e5ee"},{"start":1,"t":"ROM","n":2,"f":"f1xv_full_nologo.rom","s":65536,"h":"3fc2ba5d0a96b73d61107a9224775deabdd0e5ee"}]},{"ps":3,"ss":2,"b":[{"start":1,"t":"FDC","n":1,"f":"f1xv_full_nologo.rom","s":49152,"h":"3fc2ba5d0a96b73d61107a9224775deabdd0e5ee"}]},{"ps":3,"ss":3,"b":[{"start":1,"t":"MSX-MUSIC","n":1,"f":"f1xv_full_nologo.rom","s":98304,"h":"3fc2ba5d0a96b73d61107a9224775deabdd0e5ee"}]}],"devices":[{"typ":"KANJI","f":"hb-f1xv_kanjifont.rom","h":"218d91eb6df2823c924d3774a9f455492a10aecb"},{"typ":"RESET_STATUS"},{"typ":"MOONSOUND"}]},{"name":"Sony_HB-F5","vendor":"Sony","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"hb-f5_basic-bios2.rom","h":"0081ea0d25bc5cd8d70b60ad8cfdc7307812c0fd"}]},{"ps":0,"ss":1,"b":[{"start":0,"t":"ROM","n":1,"f":"f5_msx2sub.rom","h":"b8e30d604d319d511cbfbc61e5d8c38fbb9c5a33"}]},{"ps":0,"ss":1,"b":[{"start":1,"t":"ROM","n":1,"f":"hb-f5_firmware.rom","h":"06ba91d6732ee8a2ecd5dcc38b0ce42403d86708"}]},{"ps":0,"ss":2,"b":[{"start":0,"t":"RAM","n":4,"p":1}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]}]},{"name":"Yamaha_YIS-503IIIR","vendor":"Yamaha","kind":"msx","type":"MSX2","kbd":0,"slots":[{"ps":0,"ss":0,"b":[{"start":0,"t":"ROM","n":2,"f":"yis503iii_basic-bios2.rom","h":"0f851ee7a1cf79819f61cc89e9948ee72a413802"}]},{"ps":1,"ss":0,"b":[{"start":0,"t":"SLOT A"}]},{"ps":2,"ss":0,"b":[{"start":0,"t":"SLOT B"}]},{"ps":3,"ss":0,"b":[{"start":0,"t":"ROM","n":1,"f":"yis503iii_msx2sub.rom","h":"03bf6d2ac86f5c9ab618e155442787c700f99fed"},{"start":1,"t":"ROM","n":1,"f":"yis503iii_cpm.rom","h":"f4f7a54cdf5a9dd6c59f7cb219c2c5eb0a00fa8a"}]},{"ps":3,"ss":2,"b":[{"start":0,"t":"RAM MAPPER","n":8}]}]},{"name":"CART_FW_EN","vendor":"Extension","kind":"fw","fw":[{"name":"FM_PAC","f":"FM_PAC_EN.ROM","h":"6996489fcec52934b8beed87643cc33d02ecc301"},{"name":"GM2","f":"GM2.ROM","h":"5c00f9e3a48411e08fac89b1dfdd2a6e95853919"},{"name":"FDC","f":"VY010.ROM","h":"8924e3e11eb1c8c1edcb7efa63c26d2bdc142473"},{"name":"MEGA_FLASH_ROM","f":"mfrsd_nextor214.rom","h":"411c6d8cb5c9085f4ab405d0f16f16706f30d77f","hs":["411c6d8cb5c9085f4ab405d0f16f16706f30d77f","1621f623b834dc57cb2983f30b36bcc3ac56cafd"]},{"name":"MOONSOUND","f":"yrw801.rom","h":"32760893ce06dbe3930627755ba065cc3d8ec6ca"},{"name":"MU_PACK","f":"mu-pack.rom","h":"e88ca790ab58e7709cd99cbbb23ff7d33631b71f"}]},{"name":"CART_FW_EN_2slot","vendor":"Extension","kind":"fw","fw":[{"name":"FM_PAC","f":"FM_PAC_EN.ROM","h":"6996489fcec52934b8beed87643cc33d02ecc301"},{"name":"GM2","f":"GM2.ROM","h":"5c00f9e3a48411e08fac89b1dfdd2a6e95853919"},{"name":"FDC","f":"VY010.ROM","h":"8924e3e11eb1c8c1edcb7efa63c26d2bdc142473"},{"name":"MEGA_FLASH_ROM","f":"mfrsd_2slot_nextor214.rom","h":"95cfb1886ea62a938fa4c9537e763490816ba266"},{"name":"MOONSOUND","f":"yrw801.rom","h":"32760893ce06dbe3930627755ba065cc3d8ec6ca"},{"name":"MU_PACK","f":"mu-pack.rom","h":"e88ca790ab58e7709cd99cbbb23ff7d33631b71f"}]},{"name":"CART_FW_JP","vendor":"Extension","kind":"fw","fw":[{"name":"FM_PAC","f":"FM_PAC.ROM","h":"9d789166e3caf28e4742fe933d962e99618c633d"},{"name":"GM2","f":"GM2.ROM","h":"5c00f9e3a48411e08fac89b1dfdd2a6e95853919"},{"name":"FDC","f":"VY010.ROM","h":"8924e3e11eb1c8c1edcb7efa63c26d2bdc142473"},{"name":"MEGA_FLASH_ROM","f":"mfrsd_nextor214.rom","h":"411c6d8cb5c9085f4ab405d0f16f16706f30d77f","hs":["411c6d8cb5c9085f4ab405d0f16f16706f30d77f","1621f623b834dc57cb2983f30b36bcc3ac56cafd"]},{"name":"MOONSOUND","f":"yrw801.rom","h":"32760893ce06dbe3930627755ba065cc3d8ec6ca"},{"name":"MU_PACK","f":"mu-pack.rom","h":"e88ca790ab58e7709cd99cbbb23ff7d33631b71f"}]},{"name":"CART_FW_JP_2slot","vendor":"Extension","kind":"fw","fw":[{"name":"FM_PAC","f":"FM_PAC.ROM","h":"9d789166e3caf28e4742fe933d962e99618c633d"},{"name":"GM2","f":"GM2.ROM","h":"5c00f9e3a48411e08fac89b1dfdd2a6e95853919"},{"name":"FDC","f":"VY010.ROM","h":"8924e3e11eb1c8c1edcb7efa63c26d2bdc142473"},{"name":"MEGA_FLASH_ROM","f":"mfrsd_2slot_nextor214.rom","h":"95cfb1886ea62a938fa4c9537e763490816ba266"},{"name":"MOONSOUND","f":"yrw801.rom","h":"32760893ce06dbe3930627755ba065cc3d8ec6ca"},{"name":"MU_PACK","f":"mu-pack.rom","h":"e88ca790ab58e7709cd99cbbb23ff7d33631b71f"}]}]}
 ;
+
+/* ---------- 언어 (한국어 / English / 日本語) ----------
+   글자는 모두 여기 있습니다.  값이 함수이면 인자를 받아 문장을 만듭니다.
+   고른 언어는 localStorage 에 남기고, 처음에는 브라우저 언어를 따릅니다 (없으면 영어).  */
+const I18N={
+ko:{
+  sub:'ROM을 넣으면 MiSTer용 <code style="font-family:var(--mono);font-size:12px">.MSX</code> 팩을 만듭니다. 서버 없이 브라우저 안에서만 동작합니다.',
+  theme:"테마", store:"ROM 보관소", dropHint:"ROM 파일·폴더·ZIP을 끌어다 놓으세요",
+  pickFiles:"파일 선택", pickDir:"폴더 선택",
+  mFiles:"읽은 파일", mHashes:"쓸모 있는 ROM", mNeeded:"필요한 ROM", mReady:"빌드 가능",
+  synthHd:"합성한 turbo R 디스크 ROM", missHd:"빠진 ROM",
+  sramNote:`<b>SRAM.NVR은 팩 zip에 들어 있지 않습니다 — 직접 한 번 복사하세요.</b>
+        FM-PAC·GameMaster2·Halnote·Panasonic SRAM·RTC 설정의 세이브 파일입니다.
+        <b>「빈 SRAM.NVR 받기」</b>로 받아 보드의 <code>games/MSX1/</code>(어디든 됨)에 넣고,
+        OSD의 <b>SRAM(PAC/Turbo-R/...)</b>에서 고르면 코어가 기억합니다.
+        <b>이미 쓰던 SRAM.NVR 위에 덮어쓰지 마세요 — 세이브가 지워집니다.</b>`,
+  romNote:`ROM은 파일명이 아니라 <b>SHA-1</b>로 찾습니다. 이름이 달라도 내용이 맞으면 인식합니다.
+        <b>ZIP</b>과 <b>.gz</b>는 그대로 넣어도 됩니다. 안에서 풀어 읽고, 어느 팩에도 쓰이지 않는 파일은 버립니다.
+        한자 폰트처럼 <code>device</code>로 붙는 ROM은 없어도 팩이 만들어지고, 그 장치만 비어 있게 됩니다.
+        FS-A1ST·FS-A1GT 펌웨어와 Sony HB-F1XD 디스크 ROM이 함께 들어오면 turbo R용
+        <b>WD2793 디스크 ROM</b>을 그 자리에서 합성해서 DOS2 팩까지 만들 수 있게 합니다.`,
+  qPh:"기종 이름으로 거르기 (예: A1ST, HB-F1)", qAria:"기종 검색", segAria:"보기",
+  fAll:"전체", fReady:"빌드 가능만", buildAll:"가능한 팩 전부 받기", building:"만드는 중…",
+  buildSram:"빈 SRAM.NVR 받기", buildSramTitle:"FM-PAC·GM2·Halnote·Panasonic SRAM·RTC 설정 세이브 파일 (2 MB, 비어 있음)",
+  romMissing:(f,h)=>`ROM 없음: ${f} (${h})`,
+  zipNoEnd:"ZIP 끝 레코드 없음", encrypted:"암호가 걸려 있음", badMethod:n=>"지원하지 않는 압축 방식 "+n,
+  noDeflate:"이 브라우저가 deflate를 풀지 못함", badLocal:"지역 헤더가 어긋남",
+  noGzip:"이 브라우저가 gzip을 풀지 못함", gzFail:"gzip 해제 실패", zipRead:"ZIP을 읽지 못함", inflateFail:"압축 해제 실패",
+  diskLen:n=>`디스크 ROM 길이 ${n}`, hbLen:n=>`HB-F1XD ROM 길이 ${n}`,
+  mysize:"MYSIZE 자리가 다릅니다", hbTail:"HB-F1XD 끝 64바이트가 비어 있지 않습니다",
+  device:"장치", unforced:k=>`강제 지정 해제 · ${k}`,
+  synthBad:(l,h)=>`${l} 디스크 ROM: 결과 SHA-1 ${h} 가 기대값과 달라 버립니다`,
+  synthOk:(l,o)=>`${l} 디스크 ROM 합성 · ${o}`, synthFail:(l,e)=>`${l} 디스크 ROM 합성 실패: ${e}`,
+  realFile:h=>`진짜 파일이 들어와 강제 지정을 대체 · ${h}`, opening:n=>`${n} 여는 중…`, readFail:n=>`읽기 실패: ${n}`,
+  added:(a,t,i)=>`${a}개 추가 (전체 ${t})`+(i?` · 쓰지 않는 파일 ${i}개 무시`:""),
+  noUsable:n=>`쓸 수 있는 ROM이 없습니다 (${n}개 확인)`,
+  skipped:(n,l,more)=>`건너뜀 ${n}개: ${l}${more?" 외":""}`,
+  saved:f=>`저장: ${f}`, savedToast:f=>`저장됨 · ${f}`, cancelLog:"저장 취소됨", cancelToast:"저장을 취소했습니다",
+  extLog:f=>`확장자 거부: ${f}`, extToast:"이 확장자는 저장할 수 없습니다", saveFail:c=>`저장 실패: ${c}`,
+  noSaveLog:"저장 기능을 사용할 수 없습니다 (아티팩트)",
+  noSaveToast:"저장 기능을 준비하지 못했습니다. 잠시 뒤 다시 누르거나, 파일을 내려받아 로컬에서 여세요.",
+  dlToast:f=>`내려받기 · ${f}`,
+  forcedIn:(m,n)=>`${m}: 강제 지정한 ROM ${n}개가 들어갑니다 — 동작 보장 없음`,
+  sramLog:"빈 SRAM.NVR -- 보드에 한 번만 복사하고 OSD의 SRAM(PAC/Turbo-R/...)에서 고르세요. 세이브가 든 SRAM.NVR 위에 덮어쓰지 마세요.",
+  bundled:n=>`${n}개 묶음 생성`, getRom:"ROM 받기",
+  missReq:n=>`${n}종`, missOpt:n=>`장치 ${n}종`,
+  optional:"없어도 됨", forcedTag:"강제 지정", hashes:n=>`해시 ${n}종 허용`,
+  unpin:"해제", pin:"지정", unpinTitle:"강제 지정을 되돌립니다", pinTitle:"아무 파일이나 이 자리에 밀어 넣습니다 (해시 확인 없음)",
+  tipBlocked:n=>`빨간 줄이 이 팩을 막고 있는 ROM ${n}개입니다. 눌러 보면 왼쪽 "빠진 ROM" 목록에서 같은 항목을 짚어 줍니다.`,
+  tipOpt:n=>`필요한 ROM은 다 있습니다. 주황 줄 ${n}개는 없어도 팩이 만들어지고, 그 장치만 비게 됩니다.`,
+  tipAll:"필요한 ROM이 모두 있습니다.",
+  tipForced:n=>` 강제 지정한 자리가 ${n}개 있습니다 — 해시를 확인하지 않았으므로 동작은 보장되지 않습니다.`,
+  noMatch:"조건에 맞는 기종이 없습니다.", vendorCnt:n=>`${n}종`,
+  ready:"준비됨", readyForced:"준비됨 · 강제 지정 포함", partial:n=>`장치 ROM ${n}개 없음`, blocked:n=>`ROM ${n}개 필요`,
+  get:"받기", forcedLog:(f,k)=>`강제 지정 · ${f} → ${k} (해시를 확인하지 않았습니다)`, reading:"읽는 중…",
+  saveBrowser:"저장: 브라우저 다운로드 (.MSX)", savePrep:"저장 경로 준비 중…", saveArtifact:"저장: 아티팩트 (.zip)",
+  saveNone:"저장 기능 없음 — 파일로 내려받아 사용하세요",
+},
+en:{
+  sub:'Drop in your ROMs and get <code style="font-family:var(--mono);font-size:12px">.MSX</code> packs for MiSTer. Everything runs in your browser; nothing is uploaded.',
+  theme:"Theme", store:"ROM store", dropHint:"Drag ROM files, folders or ZIPs here",
+  pickFiles:"Choose files", pickDir:"Choose folder",
+  mFiles:"Files read", mHashes:"Usable ROMs", mNeeded:"Required ROMs", mReady:"Buildable",
+  synthHd:"Synthesized turbo R disk ROMs", missHd:"Missing ROMs",
+  sramNote:`<b>SRAM.NVR is not in the pack zip. Copy it yourself, once.</b>
+        It is the save file for FM-PAC, GameMaster2, Halnote, Panasonic SRAM and the RTC settings.
+        Get it with <b>“Get blank SRAM.NVR”</b>, put it on the board under <code>games/MSX1/</code> (any folder works),
+        and select it under <b>SRAM(PAC/Turbo-R/...)</b> in the OSD. The core remembers the choice.
+        <b>Never copy it over an SRAM.NVR you already use. That erases your saves.</b>`,
+  romNote:`ROMs are matched by <b>SHA-1</b>, not by file name. A file with a different name is still found if its content matches.
+        You can drop <b>ZIP</b> and <b>.gz</b> files as they are. They are unpacked in the page, and files no pack uses are dropped.
+        ROMs attached as a <code>device</code>, such as kanji fonts, are optional: the pack is still built and only that device stays empty.
+        When the FS-A1ST or FS-A1GT firmware and the Sony HB-F1XD disk ROM are both present, the page synthesizes
+        a <b>WD2793 disk ROM</b> for turbo R on the spot, so the DOS2 packs can be built too.`,
+  qPh:"Filter machines (e.g. A1ST, HB-F1)", qAria:"Machine search", segAria:"View",
+  fAll:"All", fReady:"Buildable only", buildAll:"Download all buildable packs", building:"Building…",
+  buildSram:"Get blank SRAM.NVR", buildSramTitle:"Save file for FM-PAC, GM2, Halnote, Panasonic SRAM and RTC settings (2 MB, blank)",
+  romMissing:(f,h)=>`ROM not found: ${f} (${h})`,
+  zipNoEnd:"ZIP end record not found", encrypted:"encrypted", badMethod:n=>"unsupported compression method "+n,
+  noDeflate:"this browser cannot inflate deflate data", badLocal:"local header mismatch",
+  noGzip:"this browser cannot decompress gzip", gzFail:"gzip decompression failed", zipRead:"could not read the ZIP", inflateFail:"decompression failed",
+  diskLen:n=>`disk ROM length ${n}`, hbLen:n=>`HB-F1XD ROM length ${n}`,
+  mysize:"the MYSIZE location differs", hbTail:"the last 64 bytes of the HB-F1XD ROM are not empty",
+  device:"device", unforced:k=>`Forced slot cleared · ${k}`,
+  synthBad:(l,h)=>`${l} disk ROM: result SHA-1 ${h} does not match the expected value; discarded`,
+  synthOk:(l,o)=>`${l} disk ROM synthesized · ${o}`, synthFail:(l,e)=>`${l} disk ROM synthesis failed: ${e}`,
+  realFile:h=>`The real file arrived and replaced the forced one · ${h}`, opening:n=>`Opening ${n}…`, readFail:n=>`Could not read ${n}`,
+  added:(a,t,i)=>`${a} added (${t} in total)`+(i?` · ${i} unused files ignored`:""),
+  noUsable:n=>`No usable ROMs (${n} checked)`,
+  skipped:(n,l,more)=>`Skipped ${n}: ${l}${more?" and more":""}`,
+  saved:f=>`Saved: ${f}`, savedToast:f=>`Saved · ${f}`, cancelLog:"Save cancelled", cancelToast:"You cancelled the save",
+  extLog:f=>`Extension refused: ${f}`, extToast:"Files with this extension cannot be saved", saveFail:c=>`Save failed: ${c}`,
+  noSaveLog:"Saving is not available (artifact)",
+  noSaveToast:"Saving could not be set up. Press again in a moment, or download this page and open it locally.",
+  dlToast:f=>`Downloading · ${f}`,
+  forcedIn:(m,n)=>`${m}: contains ${n} forced ROM(s). It is not guaranteed to work.`,
+  sramLog:"Blank SRAM.NVR -- copy it to the board once and select it under SRAM(PAC/Turbo-R/...) in the OSD. Never copy it over an SRAM.NVR that holds saves.",
+  bundled:n=>`Bundled ${n} packs`, getRom:"Get ROM",
+  missReq:n=>`${n} machine${n>1?"s":""}`, missOpt:n=>`device in ${n}`,
+  optional:"optional", forcedTag:"forced", hashes:n=>`${n} hashes accepted`,
+  unpin:"Undo", pin:"Force", unpinTitle:"Undo the forced file", pinTitle:"Put any file in this slot (no hash check)",
+  tipBlocked:n=>`The red lines are the ${n} ROM(s) blocking this pack. Click one to highlight it in the "Missing ROMs" list on the left.`,
+  tipOpt:n=>`All required ROMs are present. The ${n} orange line(s) are optional: the pack is still built and only that device stays empty.`,
+  tipAll:"All required ROMs are present.",
+  tipForced:n=>` ${n} slot(s) hold a forced file. Their hashes were not checked, so the pack is not guaranteed to work.`,
+  noMatch:"No machines match.", vendorCnt:n=>`${n}`,
+  ready:"Ready", readyForced:"Ready · includes forced", partial:n=>`${n} device ROM(s) missing`, blocked:n=>`Needs ${n} ROM(s)`,
+  get:"Download", forcedLog:(f,k)=>`Forced · ${f} → ${k} (hash not checked)`, reading:"Reading…",
+  saveBrowser:"Saves as: browser download (.MSX)", savePrep:"Preparing the save path…", saveArtifact:"Saves as: artifact (.zip)",
+  saveNone:"Saving unavailable. Download this page and use it locally.",
+},
+ja:{
+  sub:'ROMを入れると、MiSTer用の<code style="font-family:var(--mono);font-size:12px">.MSX</code>パックを作ります。サーバーを使わず、ブラウザの中だけで動作します。',
+  theme:"テーマ", store:"ROM保管庫", dropHint:"ROMファイル・フォルダ・ZIPをここにドロップしてください",
+  pickFiles:"ファイルを選択", pickDir:"フォルダを選択",
+  mFiles:"読み込んだファイル", mHashes:"使えるROM", mNeeded:"必要なROM", mReady:"ビルド可能",
+  synthHd:"合成したturbo RディスクROM", missHd:"足りないROM",
+  sramNote:`<b>SRAM.NVRはパックのzipに入っていません。一度だけ自分でコピーしてください。</b>
+        FM-PAC・GameMaster2・Halnote・Panasonic SRAM・RTC設定のセーブファイルです。
+        <b>「空のSRAM.NVRを取得」</b>で取得してボードの<code>games/MSX1/</code>（どこでも可）に置き、
+        OSDの<b>SRAM(PAC/Turbo-R/...)</b>で選ぶとコアが記憶します。
+        <b>使用中のSRAM.NVRに上書きしないでください。セーブが消えます。</b>`,
+  romNote:`ROMはファイル名ではなく<b>SHA-1</b>で探します。名前が違っても中身が合っていれば認識します。
+        <b>ZIP</b>と<b>.gz</b>はそのまま入れてかまいません。ページ内で展開して読み、どのパックにも使わないファイルは捨てます。
+        漢字フォントのように<code>device</code>として付くROMは、なくてもパックが作られ、そのデバイスだけが空になります。
+        FS-A1ST・FS-A1GTのファームウェアとSony HB-F1XDのディスクROMがそろうと、turbo R用の
+        <b>WD2793ディスクROM</b>をその場で合成し、DOS2パックも作れるようにします。`,
+  qPh:"機種名で絞り込み（例: A1ST, HB-F1）", qAria:"機種検索", segAria:"表示",
+  fAll:"すべて", fReady:"ビルド可能のみ", buildAll:"ビルド可能なパックを一括取得", building:"作成中…",
+  buildSram:"空のSRAM.NVRを取得", buildSramTitle:"FM-PAC・GM2・Halnote・Panasonic SRAM・RTC設定のセーブファイル（2 MB、空）",
+  romMissing:(f,h)=>`ROMがありません: ${f} (${h})`,
+  zipNoEnd:"ZIPの終端レコードがありません", encrypted:"暗号化されています", badMethod:n=>"未対応の圧縮方式 "+n,
+  noDeflate:"このブラウザはdeflateを展開できません", badLocal:"ローカルヘッダが一致しません",
+  noGzip:"このブラウザはgzipを展開できません", gzFail:"gzipの展開に失敗", zipRead:"ZIPを読めません", inflateFail:"展開に失敗",
+  diskLen:n=>`ディスクROMの長さ ${n}`, hbLen:n=>`HB-F1XD ROMの長さ ${n}`,
+  mysize:"MYSIZEの位置が異なります", hbTail:"HB-F1XD ROMの末尾64バイトが空ではありません",
+  device:"デバイス", unforced:k=>`強制指定を解除 · ${k}`,
+  synthBad:(l,h)=>`${l} ディスクROM: 結果のSHA-1 ${h} が期待値と違うため破棄します`,
+  synthOk:(l,o)=>`${l} ディスクROMを合成 · ${o}`, synthFail:(l,e)=>`${l} ディスクROMの合成に失敗: ${e}`,
+  realFile:h=>`本物のファイルが入ったので強制指定を置き換えました · ${h}`, opening:n=>`${n} を開いています…`, readFail:n=>`読み込み失敗: ${n}`,
+  added:(a,t,i)=>`${a}個追加（合計 ${t}）`+(i?` · 使わないファイル ${i}個を無視`:""),
+  noUsable:n=>`使えるROMがありません（${n}個を確認）`,
+  skipped:(n,l,more)=>`スキップ ${n}個: ${l}${more?" ほか":""}`,
+  saved:f=>`保存: ${f}`, savedToast:f=>`保存しました · ${f}`, cancelLog:"保存をキャンセル", cancelToast:"保存をキャンセルしました",
+  extLog:f=>`拡張子が拒否されました: ${f}`, extToast:"この拡張子は保存できません", saveFail:c=>`保存失敗: ${c}`,
+  noSaveLog:"保存機能を使えません（アーティファクト）",
+  noSaveToast:"保存機能を準備できませんでした。少し待ってからもう一度押すか、このページをダウンロードしてローカルで開いてください。",
+  dlToast:f=>`ダウンロード · ${f}`,
+  forcedIn:(m,n)=>`${m}: 強制指定したROMを${n}個含みます。動作は保証されません。`,
+  sramLog:"空のSRAM.NVR -- ボードに一度だけコピーし、OSDのSRAM(PAC/Turbo-R/...)で選んでください。セーブが入ったSRAM.NVRに上書きしないでください。",
+  bundled:n=>`${n}個をまとめました`, getRom:"ROMを取得",
+  missReq:n=>`${n}機種`, missOpt:n=>`デバイス ${n}機種`,
+  optional:"なくても可", forcedTag:"強制指定", hashes:n=>`ハッシュ${n}種を許容`,
+  unpin:"解除", pin:"指定", unpinTitle:"強制指定を元に戻します", pinTitle:"任意のファイルをこの位置に入れます（ハッシュ確認なし）",
+  tipBlocked:n=>`赤い行が、このパックを止めているROM ${n}個です。クリックすると左の「足りないROM」一覧で同じ項目を示します。`,
+  tipOpt:n=>`必要なROMはすべてそろっています。オレンジの行 ${n}個はなくてもパックが作られ、そのデバイスだけが空になります。`,
+  tipAll:"必要なROMはすべてそろっています。",
+  tipForced:n=>` 強制指定した位置が${n}個あります。ハッシュを確認していないため、動作は保証されません。`,
+  noMatch:"条件に合う機種がありません。", vendorCnt:n=>`${n}機種`,
+  ready:"準備完了", readyForced:"準備完了 · 強制指定あり", partial:n=>`デバイスROM ${n}個なし`, blocked:n=>`ROMが${n}個必要`,
+  get:"取得", forcedLog:(f,k)=>`強制指定 · ${f} → ${k}（ハッシュ未確認）`, reading:"読み込み中…",
+  saveBrowser:"保存先: ブラウザのダウンロード (.MSX)", savePrep:"保存経路を準備中…", saveArtifact:"保存先: アーティファクト (.zip)",
+  saveNone:"保存機能なし。このページをダウンロードしてローカルで使ってください。",
+}};
+const LANGS=Object.keys(I18N);
+let lang=(()=>{
+  try{ const v=localStorage.getItem("msxPackForge.lang"); if(LANGS.includes(v)) return v; }catch(e){}
+  for(const l of (navigator.languages||[navigator.language||""])){
+    const p=String(l).toLowerCase().slice(0,2); if(LANGS.includes(p)) return p; }
+  return "en";
+})();
+function t(key,...a){ const v=(I18N[lang]&&I18N[lang][key]!==undefined)?I18N[lang][key]:I18N.en[key];
+  return typeof v==="function"?v(...a):v; }
+function applyLang(){
+  document.documentElement.lang=lang;
+  for(const el of document.querySelectorAll("[data-i18n]")) el.innerHTML=t(el.dataset.i18n);
+  for(const el of document.querySelectorAll("[data-i18n-ph]")) el.placeholder=t(el.dataset.i18nPh);
+  for(const el of document.querySelectorAll("[data-i18n-title]")) el.title=t(el.dataset.i18nTitle);
+  for(const el of document.querySelectorAll("[data-i18n-aria]")) el.setAttribute("aria-label",t(el.dataset.i18nAria));
+  for(const b of document.querySelectorAll("#lang button")) b.setAttribute("aria-pressed",String(b.dataset.lang===lang));
+}
 
 /* ---------- createMSXpack.py 포팅: 표와 바이트 배치가 원본과 같습니다 ---------- */
 const EXTENSIONS=["NONE","ROM","RAM","FDC","FM_PAC","MEGA_FLASH_ROM","GM2","EMPTY","MOONSOUND","MU_PACK"];
@@ -278,7 +457,7 @@ async function buildMSX(m,getRom){
         out.push(h);
         if(hashesOf(v).length){
           const got=await firstRom(v,getRom);
-          if(!got) throw new Error(`ROM 없음: ${v.f||""} (${hashesOf(v).join(" / ")})`);
+          if(!got) throw new Error(t("romMissing",v.f||"",hashesOf(v).join(" / ")));
           const rom=got.rom;
           const want=(v.n|0)*16*1024, from=v.s||0;
           const slice=rom.subarray(Math.min(from,rom.length),Math.min(from+want,rom.length));
@@ -317,7 +496,7 @@ async function buildFW(m,getRom){
     const typ=EXTENSIONS.indexOf(fw.name);
     if(typ<0||!hashesOf(fw).length) continue;
     const got=await firstRom(fw,getRom);
-    if(!got) throw new Error(`ROM 없음: ${fw.f||""} (${hashesOf(fw).join(" / ")})`);
+    if(!got) throw new Error(t("romMissing",fw.f||"",hashesOf(fw).join(" / ")));
     const rom=got.rom;
     const fileSize=rom.length, size=(fw.sz!==undefined)?fw.sz:fileSize;
     out.push(mkFwBlock(typ,size>>14));
@@ -416,7 +595,7 @@ async function readZip(bytes, onSkip){
   let eo = -1;
   for(let i=bytes.length-22; i>=Math.max(0,bytes.length-22-65535); i--)
     if(zu32(dv,i)===0x06054b50){ eo=i; break; }
-  if(eo<0) throw new Error("ZIP 끝 레코드 없음");
+  if(eo<0) throw new Error(t("zipNoEnd"));
   let count = zu16(dv,eo+10), cdOff = zu32(dv,eo+16);
   if(count===0xFFFF || cdOff===0xFFFFFFFF){            // ZIP64
     const lo = eo-20;
@@ -450,10 +629,10 @@ async function readZip(bytes, onSkip){
     }
     p += 46+nlen+elen+clen;
     if(name.endsWith("/")) continue;                                    // 디렉터리
-    if(flag & 0x0001){ onSkip(name,"암호가 걸려 있음"); continue; }
-    if(method!==0 && method!==8){ onSkip(name,"지원하지 않는 압축 방식 "+method); continue; }
-    if(method===8 && !canInflate){ onSkip(name,"이 브라우저가 deflate를 풀지 못함"); continue; }
-    if(lho+30>bytes.length || zu32(dv,lho)!==0x04034b50){ onSkip(name,"지역 헤더가 어긋남"); continue; }
+    if(flag & 0x0001){ onSkip(name,t("encrypted")); continue; }
+    if(method!==0 && method!==8){ onSkip(name,t("badMethod",method)); continue; }
+    if(method===8 && !canInflate){ onSkip(name,t("noDeflate")); continue; }
+    if(lho+30>bytes.length || zu32(dv,lho)!==0x04034b50){ onSkip(name,t("badLocal")); continue; }
     const ds = lho+30+zu16(dv,lho+26)+zu16(dv,lho+28);                  // 지역 헤더의 확장 필드가 다를 수 있음
     out.push({name, method, data: bytes.subarray(ds, ds+csize)});
   }
@@ -467,19 +646,19 @@ const looksGz  = b => b.length>=2 && b[0]===0x1F && b[1]===0x8B;
 async function expandArchive(name, bytes, depth, sink, onSkip){
   if(depth>2){ await sink(name,bytes); return; }
   if(looksGz(bytes)){
-    if(!canInflate){ onSkip(name,"이 브라우저가 gzip을 풀지 못함"); return; }
+    if(!canInflate){ onSkip(name,t("noGzip")); return; }
     try{ await expandArchive(name.replace(/\.gz$/i,""), await unstream(bytes,"gzip"), depth+1, sink, onSkip); }
-    catch(e){ onSkip(name,"gzip 해제 실패"); }
+    catch(e){ onSkip(name,t("gzFail")); }
     return;
   }
   if(!looksZip(bytes)){ await sink(name,bytes); return; }
   let members;
   try{ members = await readZip(bytes,onSkip); }
-  catch(e){ onSkip(name,"ZIP을 읽지 못함"); return; }
+  catch(e){ onSkip(name,t("zipRead")); return; }
   for(const m of members){
     let data;
     try{ data = m.method===8 ? await unstream(m.data,"deflate-raw") : m.data; }
-    catch(e){ onSkip(m.name,"압축 해제 실패"); continue; }
+    catch(e){ onSkip(m.name,t("inflateFail")); continue; }
     await expandArchive(m.name, data, depth+1, sink, onSkip);
   }
 }
@@ -521,8 +700,8 @@ const trSame=(a,b)=>a.length===b.length&&[...a].every((x,i)=>x===b[i]);
 //  disk = 64 kB 디스크 ROM, hb = 16 kB HB-F1XD 디스크 ROM.  원본 바이트가 예상과
 //  다르면 바로 던집니다 (파이썬 쪽 assert 와 같은 자리).
 function trSynth(disk, hb, m){
-  if(disk.length!==TR_LEN) throw new Error(`디스크 ROM 길이 ${disk.length}`);
-  if(hb.length!==0x4000)   throw new Error(`HB-F1XD ROM 길이 ${hb.length}`);
+  if(disk.length!==TR_LEN) throw new Error(t("diskLen",disk.length));
+  if(hb.length!==0x4000)   throw new Error(t("hbLen",hb.length));
   const banks=[0,1,2,3].map(i=>disk.slice(i*0x4000,(i+1)*0x4000));
   const put=(bk,a,nw,old,why)=>{
     const o=a-0x4000, got=banks[bk].subarray(o,o+nw.length);
@@ -542,13 +721,13 @@ function trSynth(disk, hb, m){
   dp(0x78B4,[0xC3,...trW(km.SETINT)],[0xC3,...trW(0x5FF6)],'SETINT');
   dp(0x776C,[0xCD,...trW(km.PROMPT)],[0xCD,...trW(0x625A)],'PROMPT');
   dp(0x76CD,[0xCD,...trW(km.DIV)],  [0xCD,...trW(0x492F)],'DIV');
-  dp(0x78B1,[0x21,...trW(0x7FD4)],  [0x21,...trW(0x78B7)],'INIENV 핸들러 → 트램펄린 7FD4');
-  dp(0x78B7,[0xC3,...trW(km.TIMER)],[0xC3,...trW(0x6027)],'타이머 핸들러 → DOS2 공용');
+  dp(0x78B1,[0x21,...trW(0x7FD4)],  [0x21,...trW(0x78B7)],'INIENV handler -> trampoline 7FD4');
+  dp(0x78B7,[0xC3,...trW(km.TIMER)],[0xC3,...trW(0x6027)],'timer handler -> DOS2 common');
 
   const NAMES=['DSKIO','DSKCHG','GETDPB','CHOICE','DSKFMT','MTOFF'];
   for(const bk of [0,1]){
     banks[bk].set(drv,TR_LO-0x4000);
-    NAMES.forEach((nm,i)=>put(bk,0x4010+3*i,[0xC3,...trW(TR_HBSYM[nm])],[0xC3,...trW(m.jt[nm])],'점프 테이블 '+nm));
+    NAMES.forEach((nm,i)=>put(bk,0x4010+3*i,[0xC3,...trW(TR_HBSYM[nm])],[0xC3,...trW(m.jt[nm])],'jump table '+nm));
   }
   for(const nm of Object.keys(m.k)){
     const [site,old]=m.k[nm];
@@ -556,11 +735,11 @@ function trSynth(disk, hb, m){
     put(0,site,[op,...trW(TR_HBSYM[nm])],[op,...trW(old)],nm);
   }
   const ms=m.mysize[0], mv=m.mysize[1];               // MYSIZE 자리는 그대로 두고 확인만
-  if(!trSame(banks[0].subarray(ms-0x4000,ms-0x4000+3),[0x21,...trW(mv)])) throw new Error('MYSIZE 자리가 다릅니다');
-  for(const bk of [0,1,2]) put(bk,0x7FDE,[0xCD,...trW(0x78B7)],[0xCD,...trW(m.handler)],'트램펄린 CALL');
+  if(!trSame(banks[0].subarray(ms-0x4000,ms-0x4000+3),[0x21,...trW(mv)])) throw new Error(t("mysize"));
+  for(const bk of [0,1,2]) put(bk,0x7FDE,[0xCD,...trW(0x78B7)],[0xCD,...trW(m.handler)],'trampoline CALL');
 
   const b3=hb.slice();                                // bank 3 = HB-F1XD 커널 + 뱅크 전환 스텁
-  for(let i=0x3FC0;i<b3.length;i++) if(b3[i]!==0) throw new Error('HB-F1XD 끝 64바이트가 비어 있지 않습니다');
+  for(let i=0x3FC0;i<b3.length;i++) if(b3[i]!==0) throw new Error(t("hbTail"));
   b3.set(TR_STUB,0x3FD0);
   banks[3]=b3;
 
@@ -590,7 +769,7 @@ function romNeeds(m){
   if(m.kind==="fw") for(const f of m.fw) add(f, f.name, false);
   else{
     for(const sl of m.slots) for(const b of sl.b) add(b, `${sl.ps}-${sl.ss} ${b.t||"ROM"}`, false);
-    for(const d of (m.devices||[])) add(d, d.typ||"장치", true);
+    for(const d of (m.devices||[])) add(d, d.typ||t("device"), true);
   }
   return out;
 }
@@ -605,7 +784,7 @@ const pickHash=o=>hashesOf(o).find(h=>store.has(h))||null;
 const forced=new Set();
 let forceTarget=null;
 function unforce(key){ store.delete(key); forced.delete(key); cache.delete(key);
-  log(`강제 지정 해제 · ${key.slice(0,8)}`); render(); }
+  log(t("unforced",key.slice(0,8))); render(); }
 const $=id=>document.getElementById(id);
 const allNeeded=(()=>{const mm=new Map();      // 대표 해시 -> 그 자리(그룹)
   for(const m of DATA.machines) for(const g of romNeeds(m)) if(!g.opt && !mm.has(g.h)) mm.set(g.h,g);
@@ -635,11 +814,11 @@ async function synthTurboR(){
     try{
       const out=trSynth(disk,hb,m);
       const h=await sha1(out);
-      if(h!==m.outSha){ log(`${m.label} 디스크 ROM: 결과 SHA-1 ${h.slice(0,8)} 가 기대값과 달라 버립니다`,true); continue; }
+      if(h!==m.outSha){ log(t("synthBad",m.label,h.slice(0,8)),true); continue; }
       store.set(m.outSha,new File([out],m.out));
       synthed.set(m.outSha,{label:m.label,name:m.out,bytes:out});
-      log(`${m.label} 디스크 ROM 합성 · ${m.out}`);
-    }catch(e){ log(`${m.label} 디스크 ROM 합성 실패: ${e.message}`,true); }
+      log(t("synthOk",m.label,m.out));
+    }catch(e){ log(t("synthFail",m.label,e.message),true); }
   }
 }
 
@@ -674,7 +853,7 @@ async function addFiles(list){
     if(!allWanted.has(h)){ ignored++; return; }
     if(store.has(h)){
       if(forced.has(h)){ store.set(h,mkFile()); forced.delete(h); cache.delete(h); added++;
-        log(`진짜 파일이 들어와 강제 지정을 대체 · ${h.slice(0,8)}`); }
+        log(t("realFile",h.slice(0,8))); }
       return;
     }
     store.set(h,mkFile()); added++;
@@ -683,20 +862,20 @@ async function addFiles(list){
     try{
       const head=new Uint8Array(await f.slice(0,4).arrayBuffer());
       if(looksZip(head)||looksGz(head)){
-        log(`${f.name} 여는 중…`);
+        log(t("opening",f.name));
         const bytes=new Uint8Array(await f.arrayBuffer());
         await expandArchive(f.name, bytes, 0,
           (n,b)=>keep(b,()=>new File([b], n.split("/").pop())), onSkip);
       }else{
         await keep(new Uint8Array(await f.arrayBuffer()), ()=>f);
       }
-    }catch(e){ log(`읽기 실패: ${f.name}`,true); }
+    }catch(e){ log(t("readFail",f.name),true); }
   }
   filesRead+=seen;
   if(added) await synthTurboR();
-  if(added||ignored) log(`${added}개 추가 (전체 ${store.size})` + (ignored?` · 쓰지 않는 파일 ${ignored}개 무시`:""));
-  else if(seen) log(`쓸 수 있는 ROM이 없습니다 (${seen}개 확인)`,true);
-  if(skipped) log(`건너뜀 ${skipped}개: ${notes.join(", ")}${skipped>notes.length?" 외":""}`,true);
+  if(added||ignored) log(t("added",added,store.size,ignored));
+  else if(seen) log(t("noUsable",seen),true);
+  if(skipped) log(t("skipped",skipped,notes.join(", "),skipped>notes.length),true);
   render();
 }
 async function entriesFrom(dt){
@@ -732,32 +911,32 @@ function toast(msg,bad){
 async function offer(filename,bytes){
   const d=await downloader();
   if(d){
-    try{ await d.save({filename,data:new Blob([bytes])}); log(`저장: ${filename}`); toast(`저장됨 · ${filename}`); }
+    try{ await d.save({filename,data:new Blob([bytes])}); log(t("saved",filename)); toast(t("savedToast",filename)); }
     catch(e){
       const c=e&&e.code;
-      if(c==="declined") { log("저장 취소됨"); toast("저장을 취소했습니다"); }
-      else if(c==="rejected_extension"){ log(`확장자 거부: ${filename}`,true); toast("이 확장자는 저장할 수 없습니다",1); }
-      else { log(`저장 실패: ${c||e}`,true); toast(`저장 실패: ${c||e}`,1); }
+      if(c==="declined") { log(t("cancelLog")); toast(t("cancelToast")); }
+      else if(c==="rejected_extension"){ log(t("extLog",filename),true); toast(t("extToast"),1); }
+      else { log(t("saveFail",c||e),true); toast(t("saveFail",c||e),1); }
     }
     return;
   }
   if(inArtifact()){
     // 기능이 아직/끝내 해석되지 않음. 여기서 <a download> 로 내려가면 조용히 실패합니다.
-    log("저장 기능을 사용할 수 없습니다 (아티팩트)",true);
-    toast("저장 기능을 준비하지 못했습니다. 잠시 뒤 다시 누르거나, 파일을 내려받아 로컬에서 여세요.",1);
+    log(t("noSaveLog"),true);
+    toast(t("noSaveToast"),1);
     return;
   }
   const a=document.createElement("a"), url=URL.createObjectURL(new Blob([bytes]));
   a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(url),4000);
-  log(`저장: ${filename}`); toast(`내려받기 · ${filename}`);
+  log(t("saved",filename)); toast(t("dlToast",filename));
 }
 const packOf=m=>m.kind==="fw"?buildFW(m,getRom):buildMSX(m,getRom);
 
 async function buildOne(m){
   try{
     const fk=romNeeds(m).filter(n=>{const h=pickHash(n); return h&&forced.has(h);});
-    if(fk.length) log(`${m.name}: 강제 지정한 ROM ${fk.length}개가 들어갑니다 — 동작 보장 없음`,true);
+    if(fk.length) log(t("forcedIn",m.name,fk.length),true);
     const bytes=await packOf(m);
     const d=await downloader();
     // 아티팩트 뷰어는 .MSX 확장자를 받지 않으므로 zip으로 감쌉니다.
@@ -774,19 +953,20 @@ async function buildSram(){
   const bytes=new Uint8Array(32*64*1024);
   if(d) await offer("SRAM.NVR.zip", zip([{name:"SRAM.NVR",data:bytes}]));
   else  await offer("SRAM.NVR", bytes);
-  log("빈 SRAM.NVR -- 보드에 한 번만 복사하고 OSD의 SRAM(PAC/Turbo-R/...)에서 고르세요. 세이브가 든 SRAM.NVR 위에 덮어쓰지 마세요.", true);
+  log(t("sramLog"), true);
 }
+let building=false;
 async function buildAll(){
   const ready=DATA.machines.filter(m=>state(m).k!=="blocked");
   if(!ready.length) return;
-  $("buildAll").disabled=true; $("buildAll").textContent="만드는 중…";
+  building=true; $("buildAll").disabled=true; $("buildAll").textContent=t("building");
   const files=[];
   for(const m of ready){
     try{ files.push({name:(m.kind==="fw"?"Extension/":m.vendor+"/")+m.name+".MSX", data:await packOf(m)}); }
     catch(e){ log(`${m.name}: ${e.message}`,true); }
   }
-  if(files.length){ await offer(`msx-packs-${files.length}.zip`, zip(files)); log(`${files.length}개 묶음 생성`); }
-  $("buildAll").disabled=false; $("buildAll").textContent="가능한 팩 전부 받기";
+  if(files.length){ await offer(`msx-packs-${files.length}.zip`, zip(files)); log(t("bundled",files.length)); }
+  building=false; $("buildAll").disabled=false; $("buildAll").textContent=t("buildAll");
 }
 
 /* ---------- 렌더 ---------- */
@@ -808,7 +988,7 @@ function render(){
   const ready=DATA.machines.filter(m=>state(m).k!=="blocked").length;
   $("mReady").textContent=`${ready} / ${DATA.machines.length}`;
   $("bar").style.width=(needed?100*have/needed:0)+"%";
-  $("buildAll").disabled=!ready;
+  if(!building){ $("buildAll").disabled=!ready; $("buildAll").textContent=t("buildAll"); }
 
   //  빠진 ROM 을 그걸 기다리는 기종 수와 함께 모읍니다.  많이 막고 있는 것이 위로 옵니다.
   const miss=new Map();
@@ -825,7 +1005,7 @@ function render(){
     const li=document.createElement("li"); li.title=h;
     const t=document.createElement("span"); t.textContent=`${o.label} · ${(o.bytes.length>>10)}KB`;
     const b=document.createElement("button");
-    b.className="btn btn-ghost btn-sm"; b.textContent="ROM 받기";
+    b.className="btn btn-ghost btn-sm"; b.textContent=t("getRom");
     b.addEventListener("click",()=>offer(o.name,o.bytes));
     li.append(t,b); $("synthList").appendChild(li);
   }
@@ -838,7 +1018,7 @@ function render(){
     if(focusHash===h) li.classList.add("hit");
     const n=document.createElement("span"); n.className="n"; n.textContent=e.f;
     const c=document.createElement("span"); c.className="c";
-    c.textContent=(e.req?`${e.req}종`:"") + (e.opt?(e.req?" + ":"")+`장치 ${e.opt}종`:"");
+    c.textContent=(e.req?t("missReq",e.req):"") + (e.opt?(e.req?" + ":"")+t("missOpt",e.opt):"");
     li.append(n,c);
     li.addEventListener("click",()=>{ focusHash = focusHash===h ? null : h; render(); scrollToRow(); });
     $("missingList").appendChild(li);
@@ -862,16 +1042,16 @@ function detail(m,needs){
     const f=document.createElement("span"); f.className="f";
     f.textContent=n.f;
     const w=document.createElement("em"); w.className="where";
-    w.textContent=" · "+n.where.join(", ")+(n.opt?" · 없어도 됨":"")+(isF?" · 강제 지정":"");
+    w.textContent=" · "+n.where.join(", ")+(n.opt?" · "+t("optional"):"")+(isF?" · "+t("forcedTag"):"");
     f.appendChild(w);
     if(n.hs.length>1){ const a=document.createElement("em"); a.className="alt";
-      a.textContent=` · 해시 ${n.hs.length}종 허용`; f.appendChild(a); }
+      a.textContent=" · "+t("hashes",n.hs.length); f.appendChild(a); }
     const sha=document.createElement("span"); sha.className="sha";
     sha.textContent=(hit||n.h).slice(0,8);
     const pin=document.createElement("button"); pin.className="pin";
-    pin.textContent=isF?"해제":"지정";
+    pin.textContent=isF?t("unpin"):t("pin");
     pin.hidden=have&&!isF;
-    pin.title=isF?"강제 지정을 되돌립니다":"아무 파일이나 이 자리에 밀어 넣습니다 (해시 확인 없음)";
+    pin.title=isF?t("unpinTitle"):t("pinTitle");
     pin.addEventListener("click",e=>{ e.stopPropagation();
       if(isF) unforce(n.h); else { forceTarget=n.h; forceInput.click(); } });
     r.append(dot,f,sha,pin); r.title=n.hs.join("\n");
@@ -883,11 +1063,8 @@ function detail(m,needs){
     d.appendChild(r);
   }
   const tip=document.createElement("div"); tip.className="tip";
-  tip.textContent = noReq
-    ? `빨간 줄이 이 팩을 막고 있는 ROM ${noReq}개입니다. 눌러 보면 왼쪽 "빠진 ROM" 목록에서 같은 항목을 짚어 줍니다.`
-    : (noOpt ? `필요한 ROM은 다 있습니다. 주황 줄 ${noOpt}개는 없어도 팩이 만들어지고, 그 장치만 비게 됩니다.`
-             : "필요한 ROM이 모두 있습니다.");
-  if(nForced) tip.textContent += ` 강제 지정한 자리가 ${nForced}개 있습니다 — 해시를 확인하지 않았으므로 동작은 보장되지 않습니다.`;
+  tip.textContent = noReq ? t("tipBlocked",noReq) : (noOpt ? t("tipOpt",noOpt) : t("tipAll"));
+  if(nForced) tip.textContent += t("tipForced",nForced);
   d.appendChild(tip);
   return d;
 }
@@ -904,11 +1081,11 @@ function renderList(){
     byVendor.get(m.vendor).push([m,st]);
   }
   const host=$("list"); host.innerHTML="";
-  if(!byVendor.size){ host.innerHTML='<div class="panel"><div class="empty">조건에 맞는 기종이 없습니다.</div></div>'; return; }
+  if(!byVendor.size){ host.innerHTML='<div class="panel"><div class="empty"></div></div>'; host.querySelector(".empty").textContent=t("noMatch"); return; }
   for(const [vendor,items] of [...byVendor].sort((a,b)=>a[0].localeCompare(b[0]))){
     const sec=document.createElement("section"); sec.className="vendor";
     const h3=document.createElement("h3"); h3.textContent=vendor;
-    const cnt=document.createElement("span"); cnt.textContent=`${items.length}종`; h3.appendChild(cnt);
+    const cnt=document.createElement("span"); cnt.textContent=t("vendorCnt",items.length); h3.appendChild(cnt);
     sec.appendChild(h3);
     const rows=document.createElement("div"); rows.className="rows";
     for(const [m,st] of items){
@@ -919,11 +1096,11 @@ function renderList(){
       nm.append(b,small);
       const pill=document.createElement("span");
       if(st.k==="ready"){ pill.className=st.usesForced?"pill warn":"pill ok";
-        pill.textContent=st.usesForced?"준비됨 · 강제 지정 포함":"준비됨"; }
-      else if(st.k==="partial"){ pill.className="pill warn"; pill.textContent=`장치 ROM ${st.optMissing.length}개 없음`; }
-      else { pill.className="pill bad"; pill.textContent=`ROM ${st.missing.length}개 필요`; }
+        pill.textContent=st.usesForced?t("readyForced"):t("ready"); }
+      else if(st.k==="partial"){ pill.className="pill warn"; pill.textContent=t("partial",st.optMissing.length); }
+      else { pill.className="pill bad"; pill.textContent=t("blocked",st.missing.length); }
       const btn=document.createElement("button");
-      btn.className="btn btn-primary btn-sm"; btn.textContent="받기"; btn.disabled=st.k==="blocked";
+      btn.className="btn btn-primary btn-sm"; btn.textContent=t("get"); btn.disabled=st.k==="blocked";
       btn.addEventListener("click",e=>{ e.stopPropagation(); buildOne(m); });
       row.append(nm,pill,btn);
       const needs=romNeeds(m);
@@ -952,7 +1129,7 @@ forceInput.addEventListener("change",()=>{
   forceInput.value=""; forceTarget=null;
   if(!f||!key) return;
   store.set(key,f); forced.add(key); cache.delete(key);
-  log(`강제 지정 · ${f.name} → ${key.slice(0,8)} (해시를 확인하지 않았습니다)`,true);
+  log(t("forcedLog",f.name,key.slice(0,8)),true);
   render();
 });
 fileInput.addEventListener("change",()=>{ addFiles([...fileInput.files]); fileInput.value=""; });
@@ -962,7 +1139,7 @@ $("pickDir").addEventListener("click",()=>dirInput.click());
 const drop=$("drop");
 ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("hot");}));
 ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("hot");}));
-drop.addEventListener("drop",async e=>{ e.preventDefault(); log("읽는 중…"); addFiles(await entriesFrom(e.dataTransfer)); });
+drop.addEventListener("drop",async e=>{ e.preventDefault(); log(t("reading")); addFiles(await entriesFrom(e.dataTransfer)); });
 document.addEventListener("dragover",e=>e.preventDefault());
 document.addEventListener("drop",e=>e.preventDefault());
 $("q").addEventListener("input",e=>{ query=e.target.value.trim().toLowerCase(); render(); });
@@ -977,19 +1154,26 @@ $("theme").addEventListener("click",()=>{
   const dark=cur?cur==="dark":matchMedia("(prefers-color-scheme: dark)").matches;
   document.documentElement.setAttribute("data-theme",dark?"light":"dark");
 });
+for(const b of document.querySelectorAll("#lang button")) b.addEventListener("click",()=>{ lang=LANGS.includes(b.dataset.lang)?b.dataset.lang:"en";
+  try{ localStorage.setItem("msxPackForge.lang",lang); }catch(err){}
+  applyLang(); render(); showSave(); });
+applyLang();
 render();
 
 /* 저장 경로를 미리 해석해 둡니다: 아티팩트의 downloads 기능은 늦게 붙으므로
    첫 클릭이 그것을 기다리지 않도록 미리 깨워 두고, 어느 경로인지 표시합니다. */
+let saveKey="savePrep";
+const saveInfo=document.createElement("span"); saveInfo.className="saveinfo";
+document.querySelector(".toolbar").appendChild(saveInfo);
+const showSave=(k)=>{ if(k) saveKey=k; saveInfo.textContent=t(saveKey); };
 (async()=>{
-  const info=document.createElement("span"); info.className="saveinfo";
-  document.querySelector(".toolbar").appendChild(info);
-  if(!inArtifact()){ info.textContent="저장: 브라우저 다운로드 (.MSX)"; return; }
-  info.textContent="저장 경로 준비 중…";
+  if(!inArtifact()){ showSave("saveBrowser"); return; }
+  showSave("savePrep");
   for(let i=0;i<12;i++){
-    if(await downloader()){ info.textContent="저장: 아티팩트 (.zip)"; return; }
+    if(await downloader()){ showSave("saveArtifact"); return; }
     await new Promise(r=>setTimeout(r,1000));
   }
-  info.textContent="저장 기능 없음 — 파일로 내려받아 사용하세요";
+  showSave("saveNone");
 })();
 </script>
+</html>
