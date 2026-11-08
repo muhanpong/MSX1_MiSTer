@@ -47,6 +47,10 @@ one**, so it is stored once and referenced by index.
     cd tools/CreateMSXpack
     python3 packbuilder_extract.py > /tmp/packdata.json   # XML -> compact JSON
     # paste it in place of the DATA literal at the top of packbuilder.html's <script>
+    ./test_packbuilder.sh                                 # then check the page against the Python
+
+A page whose DATA is older than the XMLs offers packs the XMLs retired and lacks the
+ones they added; the test fails on exactly that before it compares a single byte.
 
 The block tables (`BLOCK_TYPES`, `MAPPER_TYPES`, `CONFIG_TYPES`, …) are duplicated in
 the page and must track `createMSXpack.py`. They are ordered lists whose index *is* the
@@ -54,6 +58,22 @@ value written to the pack, so entries are only ever appended — the same rule a
 `mapper_typ_t` in `rtl/package.sv`.
 
 ## Verified against the Python
+
+`test_packbuilder.sh [page] [ROM dir]` reruns this check: it builds the store with
+`createMSXpack.py`, loads the same files into the page in headless Chromium, presses
+the page's own "download all" button and unpacks that ZIP. PASS needs the page's DATA
+to equal a fresh `packbuilder_extract.py`, the ZIP to hold exactly the paths the Python
+writes under `MSX/` (firmware packs at the top), and every pack to match by SHA-1.
+`PACK_FW_SUBST=1` also covers the firmware packs by repointing their missing hashes at
+real ROMs of similar size in a private XML copy. Needs node with `playwright-core` and a
+headless Chromium (`$CHROME`, else `~/.cache/ms-playwright`).
+
+2026-11-08, 567-file store: 79 packs, 79 identical; with `PACK_FW_SUBST=1` 83 packs
+(the four `CART_FW_*` included), 83 identical. Negative controls: the 10-23 page with its
+stale DATA fails the DATA check (103 machines vs 96); one header byte changed fails 79 of
+79; the firmware packs put back under `Extension/` fail on their four paths.
+
+Earlier record:
 
 Both builders were run over the whole ROM store and compared byte for byte:
 
