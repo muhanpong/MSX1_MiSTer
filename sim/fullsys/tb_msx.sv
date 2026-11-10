@@ -669,7 +669,7 @@ module tb;
       reset = 1'b1; reset_ms = 1'b1; msx_pause = 1'b0;
       r800_fast = 1'b0; r800_vdpw = 3'd0; r800_set_stb = 1'b0; r800_set = 1'b0;
       turbor_en = 1'b1; probe_freeze = 1'b0; dma_active = 1'b0;
-      ps2_key = 11'd0; joy0 = 16'd0; joy1 = 16'd0; joymega_en = 2'd0;
+      ps2_key = 11'd0; joy0 = 16'd0; joy1 = 16'd0; joymega_en = 2'd0; joymega_six = 1'b1;
       cas_audio_in = 1'b0; rtc_time = 65'd0;
       ioctl_download = 1'b0; ioctl_index = 16'd0; ioctl_addr = 27'd0;
       ioctl_wr = 1'b0; ioctl_dout = 8'd0; cheat_en_master = 1'b0;

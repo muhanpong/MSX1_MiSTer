@@ -279,9 +279,15 @@ port behaves exactly as it did before, as a plain two-button joystick.
 
 The phase table is transcribed from openMSX `src/input/JoyMega.cc`, and the
 testbench checks the RTL against that source's own masks and shifts rather than
-against a re-typed copy of itself. It is always a 6-button pad: openMSX only
-picks 3-button when Mode is held as the pad is plugged in, which has no meaning
-for a USB pad that is simply always there.
+against a re-typed copy of itself. `JoyMega Buttons` picks a 6-button (default)
+or a 3-button pad; openMSX picks 3-button when Mode is held as the pad is plugged
+in, which has no meaning for a USB pad that is simply always there. The phase
+steps only on a pin-8 edge that disagrees with it, as openMSX does, so the first
+edge after the 1.5 ms timeout reads phase 0.
+
+The triggers are read as the pad gives them; the R#15 pin 6/7 outputs are not
+applied (nothing is wired to those pins). See
+[`docs/joystick_pin67_outputs.md`](docs/joystick_pin67_outputs.md).
 
 ### Pad buttons
 Buttons the MSX cannot reach through the joystick port do something else instead

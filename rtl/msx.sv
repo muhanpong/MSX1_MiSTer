@@ -59,6 +59,7 @@ module msx
    input             [15:0] joy0,
    input             [15:0] joy1,
    input              [1:0] joymega_en,   // [0] port A, [1] port B
+   input                    joymega_six,  // 1: 6-button pad, 0: 3-button (both ports)
    //Cassete
    output                   cas_motor,
    input                    cas_audio_in,
@@ -1192,10 +1193,10 @@ wire [7:0] d_from_psg, psg_ioa, psg_iob;
 // would move fire every time the menu option is toggled.  The pad's A lands on
 // bit 6 and is reachable only in JoyMega mode, which is where it exists.
 wire [5:0] jm_a_dout, jm_b_dout;
-joymega jm_a (.clk(clk21m), .reset(reset), .pin8(psg_iob[4]),
+joymega jm_a (.clk(clk21m), .reset(reset), .six(joymega_six), .pin8(psg_iob[4]),
               .btn({joy0[11:7], joy0[5], joy0[4], joy0[6], joy0[0], joy0[1], joy0[2], joy0[3]}),
               .dout(jm_a_dout));
-joymega jm_b (.clk(clk21m), .reset(reset), .pin8(psg_iob[5]),
+joymega jm_b (.clk(clk21m), .reset(reset), .six(joymega_six), .pin8(psg_iob[5]),
               .btn({joy1[11:7], joy1[5], joy1[4], joy1[6], joy1[0], joy1[1], joy1[2], joy1[3]}),
               .dout(jm_b_dout));
 
@@ -1205,8 +1206,20 @@ wire [5:0] joy_a = joymega_en[0] ? jm_a_dout
 wire [5:0] joy_b = joymega_en[1] ? jm_b_dout
                  : psg_iob[5]    ? 6'b111111
                  : {~joy1[5], ~joy1[4], ~joy1[0], ~joy1[1], ~joy1[2], ~joy1[3]};
-wire [5:0] joyA = joy_a & {psg_iob[0], psg_iob[1], 4'b1111};
-wire [5:0] joyB = joy_b & {psg_iob[2], psg_iob[3], 4'b1111};
+// Pins 6/7 (triggers) are read as the pad gives them; the R#15 pin 6/7 outputs
+// (IOB bits 0-3) are NOT applied.  On a real MSX those outputs are open-collector:
+// writing 0 pulls the line low and the trigger reads "pressed".  Here the pad comes
+// from USB and nothing is wired to pins 6/7, so there is nothing for the output to
+// drive; openMSX does the same (its AND is under #if 0).  The earlier AND (2022) also
+// had the bits crossed (pin 6 output gated trigger B).
+// IF A REAL JOYSTICK PORT IS EVER WIRED (e.g. USER_IO instead of MIDI), restore it
+// uncrossed -- port A: pin 6 = IOB[0] -> joy[4], pin 7 = IOB[1] -> joy[5];
+// port B: IOB[2] -> joy[4], IOB[3] -> joy[5]:
+//    joyA = joy_a & {psg_iob[1], psg_iob[0], 4'b1111};
+//    joyB = joy_b & {psg_iob[3], psg_iob[2], 4'b1111};
+// See docs/joystick_pin67_outputs.md.
+wire [5:0] joyA = joy_a;
+wire [5:0] joyB = joy_b;
 assign psg_ioa = {cas_audio_in,1'b0, psg_iob[6] ? joyB : joyA};
 wire [9:0] ay_ch_mix;
 

@@ -473,6 +473,7 @@ localparam CONF_STR = {
    "hFP5R[126],Reset Hanging Notes;",
    "-;",
    "O[16:15],JoyMega Pad,Off,Port A,Port B,Both;",
+   "O[17],JoyMega Buttons,6,3;",
    "O[43],Pause on OSD,No,Yes;",
    "T[44],Pause;",
    "-;",
@@ -1284,6 +1285,7 @@ msx MSX
    // Off / Port A / Port B / Both is already a per-port bit pair, so the menu
    // value is the enable pair unchanged.
    .joymega_en(status[16:15]),
+   .joymega_six(~status[17]),          // 0 (default) = 6-button pad
    .cheat_en_master(~status[51]),   // global "Cheats On/Off" (O[51], default On=0): gates ALL cheats (standard+FC7), non-destructive
    .*
 );
