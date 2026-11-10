@@ -14,7 +14,7 @@ module tb_joymega;
    int          fails = 0, checks = 0;
    logic  [5:0] p5, p7;
 
-   joymega #(.TIMEOUT(TO)) dut (.clk(clk), .reset(reset), .pin8(pin8), .btn(btn), .dout(dout));
+   joymega #(.TIMEOUT(TO)) dut (.clk(clk), .reset(reset), .pin8(pin8), .six(1'b1), .btn(btn), .dout(dout));
 
    always #5 clk = ~clk;
 

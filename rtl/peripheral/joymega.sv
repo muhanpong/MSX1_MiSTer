@@ -13,9 +13,9 @@
 //     0 Up  1 Down  2 Left  3 Right  4 A  5 B  6 C  7 Start
 //     8 X   9 Y    10 Z    11 Mode
 //
-//  Always a 6-button pad (openMSX's cycleMask == 7).  It only picks 3-button
-//  when Mode is held at plug-in time, which has no meaning for a USB pad that
-//  is simply always present.
+//  `six` picks the pad: 1 = 6-button (openMSX cycleMask 7), 0 = 3-button
+//  (cycleMask 1: only the two pin-8 levels, no X/Y/Z/Mode).  openMSX picks
+//  3-button when Mode is held at plug-in; here it is a menu choice.
 //  ---------------------------------------------------------------------------
 module joymega #(
    parameter TIMEOUT = 16'd32216      // 1.5 ms at 21.477 MHz
@@ -23,6 +23,7 @@ module joymega #(
    input               clk,
    input               reset,
    input               pin8,          // MSX joystick port pin 8
+   input               six,           // 1: 6-button pad (cycles 0-7), 0: 3-button pad (cycles 0-1)
    input        [11:0] btn,           // active high, in the status order above
    output logic  [5:0] dout           // active low: 0-3 U/D/L/R, 4 trigger A, 5 trigger B
 );
@@ -36,12 +37,18 @@ logic [15:0] idle  = 16'd0;
 // which keeps `cycle[0] == pin8` as an invariant.  Testing that mismatch
 // directly is the same thing as an edge detector, and it re-aligns by itself
 // after the timeout below has forced the cycle back to 0.
+logic pin8_d = 1'b0;
 always @(posedge clk) begin
+   pin8_d <= pin8;
    if (reset) begin
       cycle <= 3'd0;
       idle  <= 16'd0;
-   end else if (pin8 != cycle[0]) begin
-      cycle <= cycle + 3'd1;
+   end else if (pin8 != pin8_d) begin
+      // An edge: step only if it disagrees with the cycle, as JoyMega.cc's
+      // write() does.  After a timeout with pin 8 high the cycle is 0 and the
+      // next (falling) edge already agrees, so it stays in cycle 0.
+      // openMSX: cycle = (cycle + 1) & cycleMask, cycleMask 7 (6 buttons) or 1 (3 buttons).
+      if (pin8 != cycle[0]) cycle <= (cycle + 3'd1) & (six ? 3'd7 : 3'd1);
       idle  <= 16'd0;
    end else if (idle == TIMEOUT) begin
       cycle <= 3'd0;                  // checkTime(): 1.5 ms idle resets the phase
