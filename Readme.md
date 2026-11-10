@@ -140,8 +140,12 @@ SDRAM traffic). Ports `60h`-`6Fh`, the interrupt, and a WAIT handshake like Moon
   CPU; the CPU's open-loop read deadline keeps 4 clocks of margin with the V9990 at full load.
 - **Video**: the picture switches to the V9990 while its `R#8 DISP` is on, at the V9990's
   vertical blank; otherwise the MSX VDP. Same `CLK_VIDEO`, pixel clock 10.74 MHz: B0-B3, P1, P2
-  at full resolution, B4/B7 (1024 wide) at half, B5/B6 (25/31 kHz) not supported. No
-  superimpose, no manual source select.
+  at full resolution (B2 with uneven pixel widths); B4 shows 75 % and B7 50 % of the pixels;
+  B5/B6 (25/31 kHz) not supported. No superimpose, no manual source select.
+- **Not in the core**: the kanji ROM command (CMMK), ADVN, PSET moving DX/DY. Open items are
+  listed in [`docs/TODO_v9990.md`](docs/TODO_v9990.md).
+- **Licence**: the V9990 core is BSD-3 (Copyright 2026 Ramon Martinez); the full text is under
+  [Third-party licences](#third-party-licences). Its use here does not imply his endorsement.
 - **Verified**: the V9990 3D demo and *Monkey Island 2* (NEO-16) on the board; the core's VRAM
   image equals the openMSX-checked model over a replayed demo trace in simulation.
 - **Not yet**: an upload guard for the VRAM area (a pack + carts above 31.5 MB would overlap
@@ -497,3 +501,39 @@ extensions above are absent — in practice the FW PACK is standard equipment.
 - Slot 3-3 Panasonic firmware mapper with battery SRAM, built-in MSX-MIDI, kanji
 - turbo R I/O: PCM chip A4h/A5h (with the PCMPLY hardware player), system timer E6h/E7h, pause port A7h
 - Slot B may hold a MU-PACK (RAM/ROM mapper + MSX-MIDI)
+
+# Third-party licences
+
+## V9990 (E-VDP-III) core — `rtl/video/v9990/`
+
+rampa069's V9990 core (upstream 36170c5), used in the rbf of the `nextz80_v9990` branch.
+
+```
+Copyright 2026 Ramon Martinez
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+contributors may be used to endorse or promote products derived from this
+software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+POSSIBILITY OF SUCH DAMAGE.
+```
