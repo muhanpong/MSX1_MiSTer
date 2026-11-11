@@ -39,8 +39,10 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *Quartus 17.0; `SEED=N` picks the fitter seed. The plain V9958 build is `tools/sdram128/compile.sh`.*
 - **Geo3D 데모 / demos** — 내장 98h 판을 쓴다. ASCII16 롬은 자동 판별이 틀리므로 OSD 매퍼를 `ASCII16X`로 고르거나 파일 오프셋 10h에 `ASCII16X` 헤더를 넣는다
   *Use the internal 98h builds. Auto-detect gets these ASCII16 ROMs wrong: pick `ASCII16X` in the OSD mapper menu, or put an `ASCII16X` header at file offset 10h.*
-- **릴리스 / Releases** (`releases/`) — `MSX1_20261029d_sdram128v9968_923140c.rbf`: 현재판(engine3, V9968 FH 수정, Geo3D HMMV 옵션). `MSX1_20261029c_sdram128v9968_9b1cea1.rbf`: 같은 V9968 수정에 이전 PCM 엔진(engine2), 비교용
-  *`20261029d`: current (engine3, the V9968 FH fix, the Geo3D HMMV option). `20261029c`: the same V9968 fixes with the previous PCM engine (engine2), for comparison.*
+- **릴리스 / Releases** (`releases/`) — `MSX1_20261111a_sdram128v9968_45b8fb3.rbf`: 현재판(upstream V9968 v0.99(2a99ac9) 병합, 한 줄의 16번째 스프라이트가 한 점 밀리던 문제 수정, R800 OTIR 첫 바이트 간격 수정, JoyMega 수정과 OSD 3/6버튼 선택; 실기 확인)
+  *`20261111a`: current (upstream V9968 v0.99 (2a99ac9) merged, the 16th sprite of a line no longer one dot right, R800 OTIR first-byte spacing, the JoyMega fix with an OSD 3/6-button option; confirmed on the board).*
+  `MSX1_20261029d_sdram128v9968_923140c.rbf`: 이전판(engine3, V9968 FH 수정, Geo3D HMMV 옵션). `MSX1_20261029c_sdram128v9968_9b1cea1.rbf`: engine2, 비교용
+  *`20261029d`: previous (engine3, the V9968 FH fix, the Geo3D HMMV option). `20261029c`: engine2, for comparison.*
   이전 rbf(20261025b, 20261027a, 20261029a)도 그대로 둔다 *(the earlier rbfs stay in `releases/`)*
 - **라이선스 / Licence** — V9968 RTL 파일 헤더는 HRA!의 3조항 조건(**허가 없는 상업적 이용 금지** 포함), Geo3D는 MIT
   *The V9968 RTL file headers carry HRA!'s 3-clause terms (including **no commercial use without written permission**); Geo3D is MIT.*
