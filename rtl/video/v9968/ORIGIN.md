@@ -161,3 +161,17 @@ the core added, kept in both builds); the custom build equals a separate merge o
 - Also in: LMCM reads (SX, SY) and its HS wait, YJK/YAE palette fixes, the Geo3D fill-span HMMV
   conversion in vdp_command.v, h_en_start 748 -> 749.
 - ORIGIN.md5 now holds 419d1ff's sums.
+
+## Upstream fix taken early (2026-11-11): the 16th sprite of a line
+
+- `vdp_sprite_makeup_pixel.v` is upstream 1df063f ("Bugfix CC=1 sprite", 2026-11-08), not
+  419d1ff; the other files stay at 419d1ff.  ORIGIN.md5 still holds the 419d1ff sum for it.
+- Plane N is selected in sub-phase N and reaches `ff_color_*` in sub-phase N+4, but the
+  mixer started a dot at sub-phase 3: the 16th plane (sub-phase 15 -> 3) was taken as the
+  FIRST plane of the next dot -- drawn one dot to the right and on top of every other
+  sprite.  Lines with 15 sprites or fewer were unaffected (the 16th slot is inactive).
+  Seen on the board in WBML V9968: the right wall (16th sprite) under a 12-column text box.
+- Gate: `sim/v9968_replay/run_spr16.sh` (N = 13, 15, 16, 17 PASS; with the 419d1ff file
+  N = 16 and 17 FAIL: runs `213:13 226:16` instead of `213:14 227:14`).
+- Not taken: c71bc9d (R#23 latched at line start for the sprite Y test) and the rest of
+  419d1ff..2a99ac9 (v0.94-v0.99) -- a full upstream merge is a separate step.
