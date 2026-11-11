@@ -1,8 +1,18 @@
-# Draft issues for hra1129/V9968_Cartridge (2026-10-22)
+# Draft issues for hra1129/V9968_Cartridge (2026-10-22, refreshed 2026-11-11 for v0.99)
 
-Three issues, each to be posted separately.  Checked against upstream `main` at
-**31d82b8** ("Updated V9968 Detect"): all three are still present there.  Line numbers
-below are from 31d82b8, path `fpga/V9968_Cartridge_TangNano20K/src/v9968/`.
+Four issues, each to be posted separately.  Checked against upstream `main` at
+**2a99ac9** ("v0.99", 2026-11-08): all four are still present there.  Line numbers
+below are from 2a99ac9, path `fpga/V9968_Cartridge_TangNano20K/src/v9968/`.
+
+How "still present" was checked: the code blocks named below were compared between
+31d82b8 (the first draft's base) and 2a99ac9.  `vdp_timing_control_ssg.v` is unchanged;
+the hold branch of `vdp_sprite_select_visible_planes.v` is unchanged; the interrupt-flag
+block of `vdp_cpu_interface.v` differs only by the new comment about ZANAC EX / Space
+Manbow.  The repro numbers are from the runs made on the earlier upstream logic
+(31d82b8 / 7820668); they were not re-run on unmodified 2a99ac9.
+
+Not an issue any more: the 16th sprite of a line drawn one dot to the right in sprite
+mode 3 (found 2026-11-11 with WBML V9968) is fixed upstream by 1df063f, which is in v0.99.
 
 Context to state once (in each issue, short): found while integrating the V9968 as the
 internal VDP of the MiSTer MSX1 core (VRAM on SDRAM through a fixed-latency bridge, same
@@ -18,16 +28,16 @@ benches drive the V9968 host bus directly; nothing below depends on our SDRAM br
 
 ### 日本語
 
-`vdp_cpu_interface.v` 868行目からの割り込みフラグの always ブロックは、
+`vdp_cpu_interface.v` 850行目からの割り込みフラグの always ブロックは、
 
 ```
 if( !reset_n ) ...
-else if( w_read && ff_port1 ) begin ... end      // 875: ステータス読み出し(該当フラグのクリア)
-else if( w_write && ff_port4 ) begin ... end     // 885: Port#4 書き込み
+else if( w_read && ff_port1 ) begin ... end      // 857: ステータス読み出し(該当フラグのクリア)
+else if( w_write && ff_port4 ) begin ... end     // 867: Port#4 書き込み
 else begin
-    if( intr_frame ) ff_frame_interrupt <= 1;    // 901
+    if( intr_frame ) ff_frame_interrupt <= 1;    // 883
     ...
-    else if( intr_line ) ff_line_interrupt <= 1; // 912
+    else if( intr_line ) ff_line_interrupt <= 1; // 896
     if( intr_command_end ) ff_command_end_interrupt <= 1;
 end
 ```
@@ -69,7 +79,7 @@ else begin
     end
     //  events (assigned last: they win over a clear on the same clock)
     if( intr_frame ) ff_frame_interrupt <= 1'b1;
-    if( clear_line_interrupt || intr_frame ) ff_line_interrupt <= 1'b0;
+    if( clear_line_interrupt || intr_frame ) ff_line_interrupt <= 1'b0;    // see issue D
     else if( ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19) ) ff_line_interrupt <= 1'b0;
     else if( intr_line ) ff_line_interrupt <= 1'b1;
     if( intr_command_end ) ff_command_end_interrupt <= 1'b1;
@@ -78,9 +88,9 @@ end
 
 ### English
 
-The interrupt-flag block in `vdp_cpu_interface.v` (line 868 on) is one if / else-if chain:
-reset, then the port-1 read (875), then the Port#4 write (885), and only in the final
-`else` the events (`intr_frame` 901, `intr_line` 912, `intr_command_end`). When the
+The interrupt-flag block in `vdp_cpu_interface.v` (line 850 on) is one if / else-if chain:
+reset, then the port-1 read (857), then the Port#4 write (867), and only in the final
+`else` the events (`intr_frame` 883, `intr_line` 896, `intr_command_end`). When the
 one-clock `intr_line` pulse, `intr_frame` or `intr_command_end` falls on the clock of
 **any** status read (port 1) or a Port#4 write, the `else` branch does not run and the
 event is lost for good.
@@ -99,7 +109,8 @@ in 30 frames, at all four steps. In every one of those, the `intr_line` pulse fi
 
 ### Addendum (2026-10-22, later): a second window, one clock after the event
 
-`ff_status_register` is latched one clock behind the flags (the "Read data latch" block).
+`ff_status_register` is latched one clock behind the flags (the "Read data latch" block,
+line 789 on).
 A port-1 read on the clock *after* `ff_line_interrupt` rose returns FH = 0 from the stale
 latch and still clears the flag, so the CPU never sees that FH. The same applies to F on
 S#0. The same-clock fix above does not cover this.
@@ -129,7 +140,7 @@ end
 
 ### 日本語
 
-`vdp_sprite_select_visible_planes.v` 193行目の分岐
+`vdp_sprite_select_visible_planes.v` 195行目の分岐
 
 ```verilog
 else if( !screen_v_active || !screen_h_active || !reg_display_on || w_screen_pos_x[9]  ) begin
@@ -142,7 +153,7 @@ end
 ON になるまで続きます。
 
 `vdp_vram_interface.v` は毎スロット、スプライトの要求をコマンドや CPU より先に出します
-(154/219 行目付近)。そのため、VRAM を読むコマンド(LRMM, LMMM など)はデータを受け取れず、
+。そのため、VRAM を読むコマンド(LRMM, LMMM など)はデータを受け取れず、
 CE = 1 のまま止まります。続く Port#0 の書き込みも待たされます。
 
 **再現:** R#1 を 40h にして表示 ON・スプライト ON の状態で 20 ms 動かします。次に、
@@ -170,7 +181,7 @@ end
 
 ### English
 
-The hold branch at line 193 of `vdp_sprite_select_visible_planes.v` also holds
+The hold branch at line 195 of `vdp_sprite_select_visible_planes.v` also holds
 `ff_vram_valid`. If R#1 turns the display off on the clock right after the selector raised
 its request, the request stays up until the display is turned on again. This happens in 2
 of the 128 clocks of its cycle.
@@ -199,7 +210,7 @@ verified that.
 
 ### 日本語
 
-`vdp_timing_control_ssg.v` の `ff_top_line`(318行目から)は、R#9 の LN と 50Hz ビットから毎クロック
+`vdp_timing_control_ssg.v` の `ff_top_line`(317行目から)は、R#9 の LN と 50Hz ビットから毎クロック
 選び直されています。`w_screen_pos_y = v_count/2 - ff_top_line + adjust`(340行目)なので、
 フレームの途中で LN を変えると、その瞬間に画面ラインが 10 ライン飛びます。
 
@@ -230,7 +241,7 @@ else if( reg_212lines_mode ) begin
 
 ### English
 
-`ff_top_line` (line 318 on) is re-selected on every clock from R#9 LN and the 50 Hz bit.
+`ff_top_line` (line 317 on) is re-selected on every clock from R#9 LN and the 50 Hz bit.
 Since `w_screen_pos_y = v_count/2 - ff_top_line + adjust` (line 340), an LN change in the
 middle of a frame makes the screen line jump by 10 at once.
 
@@ -251,36 +262,25 @@ Repro: 212 lines with the display on; write R#9 = 00h at screen line 207.
 
 ---
 
-## Issue D — FH is cleared at the frame-interrupt timing (a late line-interrupt handler reads FH = 0)
+## Issue D — FH: set with IE1 off, and cleared at the frame-interrupt timing
 
-Added 2026-10-24.  Hardware-confirmed fix on the MiSTer core (ASO 224 runs).
+Added 2026-10-24, rewritten 2026-11-11 for v0.99 (the former "issue E", FH set while IE1 is
+off, is merged in: the two belong together).  Both changes are confirmed on hardware on the
+MiSTer core (ASO 224, Knightmare 224, ZANAC EX and Space Manbow, 2026-11-11).
+
+**Title:** `vdp_cpu_interface.v`: FH is set while IE1 = 0, and cleared at VSYNC; a line-interrupt handler that reads S#1 late sees FH = 0
 
 ### 日本語
 
-`vdp_cpu_interface.v` の割り込みフラグ処理で、走査線割り込みフラグ FH (`ff_line_interrupt`) が
-フレーム割り込みのタイミングで消されています。
+`vdp_cpu_interface.v` 888〜899行目(v0.99):
 
 ```verilog
+//  FH が次フレームへ持ち越されると、IE1=1 にした瞬間に割り込みが入ってしまう
+//  (ZANAC EX, Space Manbow)。VSYNC と R#0/R#19 書き込みでクリアする。
 if( clear_line_interrupt || intr_frame ) begin
     ff_line_interrupt <= 1'b0;
 end
-```
-
-`clear_line_interrupt` は `vdp_timing_control_ssg.v` の `w_intr_frame_timing` (250行, 431行) を
-1クロック遅らせたものです。このため、R#19 が画面下端付近の走査線を指している場合、FH が立ってから
-CPU が S#1 を読む前にフラグが消えます。実機 (V9938/V9958) と openMSX は FH をリセット、IE1=1 での
-S#1 読み出し、IE1 を 0 にする R#0 書き込みでのみクリアします (openMSX VDP.cc の irqHorizontal.reset())。
-
-ASO (turbo R) で発生します: 104ライン目の割り込み処理で R#19 = D2h (210)、R#9 = 212ライン に設定。
-210ライン目で FH が立ち、1248 clk (14.5 µs) 後のフレーム割り込みタイミングで消えます。ゲームの割り込み
-経路 (0038h → H.KEYI FD9Ah → 80BBh、S#1 読み出しは 80F2h、bit0 が 1 のときだけコールバック 058Bh) は
-S#1 を読むまで R800 で約 48 µs (openMSX では約 87 µs) かかるため、常に FH = 0 を読みます。コールバックが
-呼ばれず、メインループ (065Dh) が (9402h) を待ち続け、SPACE 後に黒画面のまま止まります。
-
-修正案 (この1行のクリアを削除するだけ):
-
-```verilog
-if( ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19) ) begin
+else if( ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19) ) begin
     ff_line_interrupt <= 1'b0;
 end
 else if( intr_line ) begin
@@ -288,27 +288,101 @@ else if( intr_line ) begin
 end
 ```
 
+一つ前のコミット c71bc9d (2026-11-08) では VSYNC クリアが外され、「IE1 を 0 にする R#0 書き込みで
+だけクリア」になっていましたが、FH のセットには IE1 の条件がありませんでした。v0.99 で VSYNC
+クリアに戻されています。
+
+コメントにある「持ち越し」は、**IE1 = 0 の間も R#19 一致で FH が立つ**ために起きています
+(`intr_line` に IE1 の条件がありません)。v0.99 はそれを VSYNC でのクリアで抑えていますが、
+このクリアには別の副作用があります。
+
+**副作用:** R#19 が画面下端付近の走査線を指している場合、FH が立ってから CPU が S#1 を読む前に
+フラグが消えます。`clear_line_interrupt` は `vdp_timing_control_ssg.v` の `w_intr_frame_timing`
+を 1 クロック遅らせたものです (250行)。
+
+実例は ASO 224 (turbo R) です。104 ライン目の割り込み処理で R#19 = D2h (210)、R#9 = 212 ラインに
+設定します。210 ライン目で FH が立ち、1248 clk (14.5 µs) 後のフレーム割り込みタイミングで消えます。
+ゲームの割り込み経路 (0038h → H.KEYI FD9Ah → 80BBh、S#1 読み出しは 80F2h、bit0 が 1 のときだけ
+コールバック 058Bh) は S#1 を読むまで R800 で約 48 µs (openMSX では約 87 µs) かかるため、常に
+FH = 0 を読みます。コールバックが呼ばれず、SPACE 後に黒画面のまま止まります。同じソフトは
+openMSX (V9958) では動きます。
+
+**提案:** VSYNC でのクリアをやめ、代わりに FH のセットに IE1 の条件を付けます。
+
+```verilog
+if( ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19) ) begin
+    ff_line_interrupt <= 1'b0;
+end
+else if( intr_line && ff_line_interrupt_enable ) begin
+    ff_line_interrupt <= 1'b1;
+end
+```
+
+これで IE1 = 0 の間は FH が立たないので、次フレームへの持ち越し (コメントの ZANAC EX /
+Space Manbow の件) は起きません。IE1 = 1 で立った FH は S#1 を読むまで残ります。
+openMSX の V9938/V9958 も同じ扱いです (`VDP::execHScan` は IE1 = 1 のときだけ irqHorizontal を
+セットし、クリアはリセット、IE1 = 1 での S#1 読み出し、IE1 を 0 にする R#0 書き込みだけ)。
+
+なお openMSX は、IE1 = 0 のとき S#1 の FH を「一致ラインの間だけ 1 になるレベル」として返します
+(ラッチしない)。上の提案はそこまでは再現していません(IE1 = 0 では常に 0 を読みます)。
+実機での測定はこちらでは行っていません。
+
+**確認したこと:**
+- ベンチ(表示 OFF、R#0 = 16h、R#9 = 80h、R#19 = D2h、int_n の立ち下がりから D µs 後に R#15 = 1 と
+  S#1 読み出し): 元のロジックは D = 20, 48, 90 µs で 6 フレーム中 6 回 FH = 0 (D = 5, 10 µs では
+  FH = 1)。VSYNC クリアを外すとどの D でも FH = 1。対照 R#19 = 68h はどちらも FH = 1。
+- VSYNC クリアだけを外した版では Knightmare 224 v2 が動かなくなりました (IE1 = 0 の 192 ライン
+  モードで、VBLANK 処理が S#1 の FH = 1 をライン割り込みと判断する)。ベンチ(IE1 = 0、R#19 = 68h、
+  VBLANK 処理の先頭で S#1 を読む): 6 フレーム中 6 回 FH = 1。IE1 の条件を付けると 0 回。
+- 実機 (MiSTer、V9968 ビルド): 両方を入れた版で ASO 224、Knightmare 224 v2、ZANAC EX
+  (ゲームオーバーからタイトルに戻るまで)、Space Manbow が動作 (2026-11-11、v0.99 マージ後)。
+
 ### English
 
-In `vdp_cpu_interface.v` the line-interrupt flag FH is cleared at the frame-interrupt timing
-(`clear_line_interrupt || intr_frame`; `clear_line_interrupt` is `w_intr_frame_timing` delayed
-one clock, vdp_timing_control_ssg.v:250/431). With R#19 near the bottom of the screen, FH is
-gone before the CPU reads S#1. The V9938/V9958 and openMSX clear FH only on reset, on the S#1
-read with IE1 on, and on an R#0 write that turns IE1 off.
+`vdp_cpu_interface.v` lines 888-899 (v0.99, quoted above): FH is set on every R#19 match,
+whatever IE1 says, and it is cleared at VSYNC (`clear_line_interrupt || intr_frame`) and on
+any R#0 / R#19 write.  The new comment gives the reason for the VSYNC clear: an FH carried
+into the next frame interrupts the moment IE1 is turned on (ZANAC EX, Space Manbow).
 
-ASO (turbo R): its line-104 handler sets R#19 = D2h (210) and 212 lines. FH rises at line 210
-and is cleared 1248 clk_vdp (14.5 µs) later. The game's IRQ path (0038h → H.KEYI FD9Ah →
-80BBh, S#1 read at 80F2h, callback 058Bh only if bit0) needs ~48 µs on an R800 (~87 µs in
-openMSX), so it always reads FH = 0, the callback never runs, the main loop waits on (9402h)
-at 065Dh for ever: a black screen after SPACE.
+The commit before it, c71bc9d (2026-11-08), had dropped the VSYNC clear and cleared FH
+only on an R#0 write that turns IE1 off, but still set FH with IE1 = 0; v0.99 went back to
+the VSYNC clear.
 
-Fix: drop that clear (diff above). Repro (our bench): display off, R#0 = 16h, R#9 = 80h,
-R#19 = D2h; on int_n falling wait D µs, then R#15 = 1 and read S#1. Unfixed: FH = 0 in 6 of 6
-frames at D = 20, 48, 90 µs (FH = 1 at 5 and 10 µs). Fixed: FH = 1 at every D. Control
-R#19 = 68h: FH = 1 on both. On hardware (MiSTer, V9968 build) ASO 224 plays after the fix.
+That carry-over exists because FH is set while IE1 = 0.  The VSYNC clear hides it, but it
+has a side effect: with R#19 near the bottom of the screen, FH is gone before the CPU
+reads S#1.  ASO 224 (turbo R): its line-104 handler sets R#19 = D2h (210) and 212 lines.
+FH rises at line 210 and is cleared 1248 clk_vdp (14.5 µs) later.  The game's IRQ path
+(0038h → H.KEYI FD9Ah → 80BBh, S#1 read at 80F2h, callback 058Bh only if bit0) needs
+~48 µs on an R800 (~87 µs in openMSX), so it always reads FH = 0, the callback never runs
+and the screen stays black after SPACE.  The same program runs in openMSX (V9958).
 
-Related, not changed on our side yet: the same block also clears FH on ANY write to R#0 or
-R#19 (openMSX: only an R#0 write that turns IE1 off), and that clear takes priority over an
+Proposal: drop the VSYNC clear and gate the set with IE1 instead (c71bc9d plus the gate;
+diff above:
+`else if( intr_line && ff_line_interrupt_enable )`).  With IE1 = 0 FH is never set, so
+nothing is carried into the next frame (the ZANAC EX / Space Manbow case); with IE1 = 1 it
+stays until S#1 is read.  This is how openMSX models the V9938/V9958: `VDP::execHScan`
+sets irqHorizontal only with IE1 on, and it is reset only at reset, on the S#1 read with
+IE1 on, and on an R#0 write that turns IE1 off.
+
+Not covered by the proposal: with IE1 = 0 openMSX returns FH in S#1 as a level that is 1
+only during the matching line (not latched); the proposal reads 0 there.  We have not
+measured a real V9938/V9958.
+
+Checked:
+- Bench (display off, R#0 = 16h, R#9 = 80h, R#19 = D2h; on int_n falling wait D µs, then
+  R#15 = 1 and read S#1).  Original logic: FH = 0 in 6 of 6 frames at D = 20, 48, 90 µs
+  (FH = 1 at 5 and 10 µs).  Without the VSYNC clear: FH = 1 at every D.  Control
+  R#19 = 68h: FH = 1 on both.
+- With only the VSYNC clear removed, Knightmare 224 v2 stopped running (192-line mode,
+  IE1 = 0: its VBLANK handler reads S#1 first and takes FH = 1 as a line interrupt).
+  Bench (IE1 = 0, R#19 = 68h, S#1 read first in the VBLANK handler): FH = 1 in 6 of 6
+  frames; with the IE1 gate, 0 of 6.
+- Hardware (MiSTer, V9968 build) with both changes: ASO 224, Knightmare 224 v2,
+  ZANAC EX (through game over and back to the title) and Space Manbow run (2026-11-11,
+  after the v0.99 merge).
+
+Related, not changed on our side: the same block clears FH on ANY write to R#0 or R#19
+(openMSX: only an R#0 write that turns IE1 off), and that clear takes priority over an
 `intr_line` on the same clock, so a line match coinciding with such a write is lost.
 
 ---
@@ -317,7 +391,10 @@ R#19 (openMSX: only an R#0 write that turns IE1 off), and that clear takes prior
 
 - Bench names on our side, if asked: `sim/v9968_vram/tb_v9968_vram.sv` with `+aso=30` (A),
   `+cmd=3 +demo=1 +ct55=1 +offat=N` (B), `+lnsw=207` / `+lnsw=0` (C), `sim/v9968_vram/run_irq.sh`
-  (D, with its own mutant), branch V9968_Geo3D of github.com/muhanpong/MSX1_MiSTer.
+  and `run_fhoff.sh` (D, each with its own mutant), branch V9968_Geo3D of github.com/muhanpong/MSX1_MiSTer.
+- The author's note on interrupts (note.com/thara1129/n/n5b79a197a4b1, 2025-10-09) describes
+  Port#4 and says a flag at 1 interrupts the CPU; it does not say what FH does with IE1 = 0
+  and does not mention the VSYNC clear.  Read through a summary, not the full text.
 - Not reported: HS=0 command speed vs the V9938 (by design; openMSX offers `timing=1`
   for that); our local additions (scanline levels, per-command wait port, Geo3D wiring).
 - Licence: the repository `LICENSE` is MIT, but the `vdp_*.v` headers carry Takayuki Hara's
