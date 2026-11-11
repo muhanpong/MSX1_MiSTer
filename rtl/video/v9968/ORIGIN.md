@@ -1,6 +1,6 @@
 # V9968 VDP -- upstream sources, unmodified
 
-- Source: https://github.com/hra1129/V9968_Cartridge , commit 419d1ffd (2026-11-04; first copied at 7820668b9f200ee745c6b01289f048e6a9981418, 2026-10-19),
+- Source: https://github.com/hra1129/V9968_Cartridge , commit 2a99ac9 (v0.99, 2026-11-08; 419d1ffd before that; first copied at 7820668b9f200ee745c6b01289f048e6a9981418, 2026-10-19),
   path `fpga/V9968_Cartridge_TangNano20K/src/v9968/*.v` (the 21 RTL files; test benches, docs and demos not copied).
 - Author: Takayuki Hara (HRA!).  Licence: the header of every file (Japanese text is the formal one): redistribution
   of source keeps the notice; binary redistribution carries the notice in its documentation; no sale or commercial
@@ -162,16 +162,18 @@ the core added, kept in both builds); the custom build equals a separate merge o
   conversion in vdp_command.v, h_en_start 748 -> 749.
 - ORIGIN.md5 now holds 419d1ff's sums.
 
-## Upstream fix taken early (2026-11-11): the 16th sprite of a line
+## Upstream 2a99ac9 (v0.99) merged (2026-11-11)
 
-- `vdp_sprite_makeup_pixel.v` is upstream 1df063f ("Bugfix CC=1 sprite", 2026-11-08), not
-  419d1ff; the other files stay at 419d1ff.  ORIGIN.md5 still holds the 419d1ff sum for it.
-- Plane N is selected in sub-phase N and reaches `ff_color_*` in sub-phase N+4, but the
-  mixer started a dot at sub-phase 3: the 16th plane (sub-phase 15 -> 3) was taken as the
-  FIRST plane of the next dot -- drawn one dot to the right and on top of every other
-  sprite.  Lines with 15 sprites or fewer were unaffected (the 16th slot is inactive).
-  Seen on the board in WBML V9968: the right wall (16th sprite) under a 12-column text box.
-- Gate: `sim/v9968_replay/run_spr16.sh` (N = 13, 15, 16, 17 PASS; with the 419d1ff file
-  N = 16 and 17 FAIL: runs `213:13 226:16` instead of `213:14 227:14`).
-- Not taken: c71bc9d (R#23 latched at line start for the sprite Y test) and the rest of
-  419d1ff..2a99ac9 (v0.94-v0.99) -- a full upstream merge is a separate step.
+Three-way merge (base 419d1ff) of the six files upstream changed since 419d1ff; ORIGIN.md5
+holds the 2a99ac9 sums, so `md5sum -c` lists the locally modified files.
+- `vdp_sprite_makeup_pixel.v` (1df063f, taken as is): the mixer started a dot at sub-phase 3
+  while plane N arrives at sub-phase N+4, so the 16th sprite of a line was mixed as the FIRST
+  plane of the next dot -- one dot to the right and on top of the others.  Seen on the board
+  in WBML V9968 (right wall = 16th sprite under a 12-column text box).  Gate:
+  `sim/v9968_replay/run_spr16.sh` (419d1ff file: N = 16 and 17 FAIL).
+- `vdp_sprite_select_visible_planes.v`, `vdp_timing_control_sprite.v` (c71bc9d): the sprite
+  Y test uses R#23 latched at the line start.
+- `vdp_cpu_interface.v`: S#0 bit 6 (5S) reads 0 while F is set.  Upstream's FH clear at the
+  frame interrupt stays out (our FH rules above; only its comment was merged).
+- `vdp_command.v` (a849a2c): R#44 write is the colour latch; LMCM TR handling.
+- `vdp_vram_interface.v`: command_vram_ready at timing B also waits for screen / sprite.
