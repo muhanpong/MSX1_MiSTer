@@ -10,8 +10,8 @@ LOG=${1:?io.log}; WAV=${2:?out.wav}
 O=${OUT:-/data/_claude/tmp/msx_audio_rtop.$$}; mkdir -p "$O"
 Y=$R/rtl/peripheral/SOUND/ymf278b_fpga/rtl
 FILES=$(grep -o 'ymf278b_fpga/rtl/[^]]*' $R/rtl/sound/sound.qip | sed "s#ymf278b_fpga/rtl#$Y#" | grep -v "leds.sv")
-verilator --binary --timing -j 8 -O3 -Wno-fatal -Wno-WIDTH -Wno-UNUSED -Wno-CASEINCOMPLETE -Wno-TIMESCALEMOD \
-    -Wno-PINMISSING -Wno-MULTIDRIVEN -Wno-BLKANDNBLK -Wno-UNOPTFLAT -Wno-IMPLICIT +define+PCM_ENGINE3 +define+RAM_AW=${RAM_AW:-15} \
+verilator --binary --timing -j 8 -O3 ${VFLAGS:-} -Wno-fatal -Wno-WIDTH -Wno-UNUSED -Wno-CASEINCOMPLETE -Wno-TIMESCALEMOD \
+    -Wno-PINMISSING -Wno-MULTIDRIVEN -Wno-BLKANDNBLK -Wno-UNOPTFLAT -Wno-IMPLICIT +define+PCM_ENGINE3 +define+RAM_AW=${RAM_AW:-15} +define+DIV=${DIV:-9} \
     --top-module tb -Mdir "$O/top" -o tb $FILES $Y/opl3/modules/misc/src/leds.sv \
     $R/rtl/peripheral/SOUND/msx_audio/y8950_addon.sv "$HERE/tb_top_replay.sv" > "$O/build.log" 2>&1
 [ -x "$O/top/tb" ] || { echo "RESULT FAIL: build: $(grep -m3 %Error "$O/build.log")"; exit 1; }
