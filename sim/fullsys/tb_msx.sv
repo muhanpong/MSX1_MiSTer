@@ -1478,6 +1478,7 @@ module tb;
          $display("aprobe: phase %0d at %.3f ms", ap_d, $realtime / 1e6);
          if (ap_d == 8'h0F) begin
             ap_done = 1'b1;
+            $display("aprobe: sample RAM home = %s", MSX.dbg_pcm_base_set ? "SDRAM (256 KB)" : "block RAM");
             $display("APROBE RESULT %s (%0d bytes, %0d bad)", (ap_n == AP_N && ap_bad == 0) ? "PASS" : "FAIL", ap_n, ap_bad);
             $finish;
          end

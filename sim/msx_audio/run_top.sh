@@ -13,4 +13,6 @@ verilator --binary --timing -j 8 -Wno-fatal -Wno-WIDTH -Wno-UNUSED -Wno-CASEINCO
     $R/rtl/peripheral/SOUND/msx_audio/y8950_addon.sv "$HERE/tb_top_audio.sv" > "$O/build.log" 2>&1
 [ -x "$O/top/tb" ] || { echo "RESULT FAIL: build: $(grep -m3 %Error "$O/build.log")"; exit 1; }
 "$O/top/tb" | tee "$O/run.log" | grep -v "^- "
-grep -q "TOP PASS" "$O/run.log" && echo "RESULT PASS" || { echo "RESULT FAIL"; exit 1; }
+echo "-- sample RAM in the SDRAM (+sdram)"
+"$O/top/tb" +sdram | tee "$O/run_sdram.log" | grep -v "^- "
+grep -q "TOP PASS" "$O/run.log" && grep -q "TOP PASS" "$O/run_sdram.log" && echo "RESULT PASS" || { echo "RESULT FAIL"; exit 1; }

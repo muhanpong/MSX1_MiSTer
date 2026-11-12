@@ -9,10 +9,13 @@ cd "$(dirname "$0")/../../.."
 PX=${1:-/data/_claude/tmp/msx1-handoff/gt2mb.MSX}
 MS=${2:-40}
 OUT=${OUT:-/tmp/aprobe}; mkdir -p "$OUT"
-python3 sim/fullsys/aprobe/mkaprobe.py > sim/fullsys/aprobe/aprobe.hex
+#  FW=<fw pack>: a firmware pack (16-byte "MSX" 0 8 0 128 header + yrw801.rom = the MoonSound ROM)
+#  HI=80: the sample RAM test at 20040h, which only the SDRAM home (a pack with the MoonSound
+#  ROM) can pass
+python3 sim/fullsys/aprobe/mkaprobe.py ${HI:-00} > sim/fullsys/aprobe/aprobe.hex
 H=$PWD/sim/fullsys/aprobe/aprobe.hex
 run() { XDEFS="-DAPROBE" EXTRA="+kprobe=$H $2" OUT=$OUT/$1 \
-           sim/fullsys/run_preload.sh tdm128 "$PX" "$MS" > "$OUT/$1.log" 2>&1; }
+           sim/fullsys/run_preload.sh tdm128 "$PX" "$MS" "" 0 "${FW:-}" > "$OUT/$1.log" 2>&1; }
 run msxaudio  "+msxaudio"  &
 run moonsound "+moonsound" &
 run none      ""           &
@@ -22,7 +25,7 @@ for r in msxaudio:PASS moonsound:FAIL none:FAIL; do
    n=${r%%:*}; want=${r##*:}
    got=$(grep -ho 'APROBE RESULT [A-Z]*' "$OUT/$n.log" | tail -1 | awk '{print $3}')
    echo "== $n: ${got:-no result} (want $want)"
-   grep -h '^aprobe: byte\|^APROBE\|BUILD FAIL\|%Error' "$OUT/$n.log" | head -20
+   grep -h '^aprobe: sample\|^aprobe: byte\|^APROBE\|BUILD FAIL\|%Error' "$OUT/$n.log" | head -20
    [ "$got" = "$want" ] || ok=0
 done
 [ $ok = 1 ] && echo "RESULT PASS" || echo "RESULT FAIL"

@@ -14,6 +14,8 @@ Every result is one byte on port 2Fh; tb_msx.sv holds the expected list.
 No assembler on this machine has the syntax of the other probes, so the bytes are
 emitted here; `mkaprobe.py > aprobe.hex`.  Code stays below 0180h (turbor.sv
 overlays 0180h-018Bh) and off 002Dh."""
+import sys
+HI = int(sys.argv[1], 16) if len(sys.argv) > 1 else 0x00   # address high byte: 80h = byte 20040h, above 32 KB
 code = bytearray(); labels = {}; fix = []
 def b(*x): code.extend(x)
 def lab(n): labels[n] = len(code)
@@ -52,7 +54,7 @@ b(0xFB, 0x76)                                            # ei / halt
 rep_status()
 out(0x2E, 2)
 def addr():
-    wr(0x09, 0x10); wr(0x0A, 0x00); wr(0x0B, 0x11); wr(0x0C, 0x00)
+    wr(0x09, 0x10); wr(0x0A, HI); wr(0x0B, 0x11); wr(0x0C, HI)
 wr(0x07, 0x01); wr(0x07, 0x60); addr()
 b(0x1E, 0xA0); lab('w1')                                 # ld e,A0h
 b(0x06, 0x0F, 0x4B); call('wr')                          # ld b,0Fh / ld c,e

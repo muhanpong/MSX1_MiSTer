@@ -2640,6 +2640,7 @@ ymf278b_top #(
     .fm_vol         (fm_vol),
     //  MSX-AUDIO: the ADPCM shares the PCM mute and trim rows of the OSD.
     .audio_mode_i     (msxaudio_en),
+    .ya_sdram_i     (dbg_pcm_base_set),   // the pack reserved the MoonSound area: 256 KB sample RAM there
     .adpcm_mute     (pcm_mute),
     .adpcm_vol      (pcm_vol),
     .dbg_pcm_valid  (dbg_pcm_valid),

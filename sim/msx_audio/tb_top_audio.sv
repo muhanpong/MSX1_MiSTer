@@ -5,6 +5,24 @@ module tb;
     logic clk = 0; always #3.88 clk = ~clk;
     logic [3:0] dv = 0; logic clk_opl3 = 0;
     always @(posedge clk) begin dv <= (dv == 8) ? 4'd0 : dv + 4'd1; clk_opl3 <= (dv < 4); end
+    //  +sdram: the sample RAM through a model of msx.sv's ch4 bridge (read on a rising
+    //  request, write on a level, about 20 clocks each) into a 4 MB memory
+    logic use_sdram; initial use_sdram = $test$plusargs("sdram");
+    wire [21:0] m_addr; wire m_rd, m_wr; wire [7:0] m_d;
+    logic [7:0] m_mem [0:(1 << 22) - 1]; logic [7:0] m_q; logic m_valid = 0, m_rd_q = 0, m_w = 0;
+    int m_st = 0;
+    always @(posedge clk) begin
+        m_valid <= 0; m_rd_q <= m_rd;
+        if (m_st == 0) begin
+            if (m_rd & ~m_rd_q) begin m_w <= 0; m_st <= 1; end
+            else if (m_wr)      begin m_w <= 1; m_st <= 1; end
+        end
+        else if (m_st == 20) begin
+            if (m_w) m_mem[m_addr] <= m_d; else begin m_q <= m_mem[m_addr]; m_valid <= 1; end
+            m_st <= 0;
+        end
+        else m_st <= m_st + 1;
+    end
     logic rst_n = 0;
     logic [7:0] io_port = 0, io_din = 0; logic io_wr = 0, io_rd = 0;
     wire  [7:0] io_dout, status; wire io_ack, irq_n;
@@ -16,11 +34,11 @@ module tb;
         .io_port(io_port), .io_data_in(io_din), .io_wr(io_wr), .io_rd(io_rd),
         .io_data_out(io_dout), .io_ack(io_ack),
         .status_export(status), .status_rd_notify(1'b0),
-        .mem_addr(), .mem_rd_req(), .mem_rd_data(8'h00), .mem_rd_data16(16'h0), .mem_rd_data16b(16'h0),
-        .mem_rd_valid(1'b0), .mem_wr_req(), .mem_wr_data(), .mem_busy(1'b0),
+        .mem_addr(m_addr), .mem_rd_req(m_rd), .mem_rd_data(m_q), .mem_rd_data16(16'h0), .mem_rd_data16b(16'h0),
+        .mem_rd_valid(m_valid), .mem_wr_req(m_wr), .mem_wr_data(m_d), .mem_busy(m_st != 0),
         .audio_left(al), .audio_right(ar), .audio_valid(av), .irq_n(irq_n),
         .pcm_mute(1'b0), .fm_mute(fm_mute), .pcm_vol(4'd0), .fm_vol(fm_vol),
-        .audio_mode_i(1'b1), .adpcm_mute(adpcm_mute), .adpcm_vol(adpcm_vol),
+        .audio_mode_i(1'b1), .ya_sdram_i(use_sdram), .adpcm_mute(adpcm_mute), .adpcm_vol(adpcm_vol),
         .dbg_pcm_valid(), .dbg_opl3_valid(), .dbg_pcm_level(), .dbg_new2(), .dbg_keyon_count(),
         .dbg_accum_cnt(), .dbg_env_min(), .dbg_mem_nonzero(), .dbg_pcm_base_set(), .dbg_slot_keyon(),
         .dbg_slot_active(), .dbg_slot_envlive(), .dbg_slot0_hdr_start(), .dbg_slot0_dyn_pos(),
@@ -83,7 +101,8 @@ module tb;
         rw(8'h07, 8'h01); rw(8'h07, 8'h20);
         rw(8'h09, 8'h00); rw(8'h0A, 8'h20); rw(8'h0B, 8'h00); rw(8'h0C, 8'h20);
         rr(8'h0F); rr(8'h0F); rr(8'h0F);
-        if (rv != 8'h00) begin $display("FAIL read above 32 KB = %02x", rv); fails++; end
+        if (rv != (use_sdram ? 8'h55 : 8'h00)) begin $display("FAIL read above 32 KB = %02x", rv); fails++; end
+        if (use_sdram && m_mem[22'h200040] !== 8'hA0) begin $display("FAIL SDRAM home: %02x at 200040h", m_mem[22'h200040]); fails++; end
         rw(8'h07, 8'h01);
 
         // --- FM: one channel, carrier only, full level

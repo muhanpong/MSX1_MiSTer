@@ -54,6 +54,8 @@ module ymf278b_top #(
     // ADPCM unit, status and timers; ports C0h-C3h.  The MoonSound side (register
     // front end, PCM engine) is held in reset while this is 1.  Change it only
     // together with a reset (rst_n low).
+    input  wire        ya_sdram_i,    // MSX-AUDIO sample RAM: 1 = 256 KB in the SDRAM (the MoonSound's RAM area
+                                      // is reserved in this pack), 0 = the 2**YA_RAM_AW block RAM.  Quasi-static.
     input  wire        audio_mode_i,  // quasi-static, from clk21m; changes only inside a reset
     input  wire        adpcm_mute,
     input  wire  [3:0] adpcm_vol,  // OSD ADPCM trim, same ladder as pcm_vol (adpcm_post())
@@ -83,6 +85,8 @@ module ymf278b_top #(
 //  (-1.6 ns on the first fit), so it is brought over through two flops.
 (* preserve *) logic audio_mode_s1 = 1'b0, audio_mode = 1'b0;
 always_ff @(posedge clk) begin audio_mode_s1 <= audio_mode_i; audio_mode <= audio_mode_s1; end
+(* preserve *) logic ya_sdram_s1 = 1'b0, ya_sdram = 1'b0;
+always_ff @(posedge clk) begin ya_sdram_s1 <= ya_sdram_i; ya_sdram <= ya_sdram_s1; end
 
 
 // ─── OPL3 core (gtaylormb opl3.sv) ───────────────────────────────────
@@ -197,7 +201,11 @@ logic [7:0]  pcm_reg_dout;
 logic signed [15:0] pcm_left, pcm_right;
 logic               pcm_valid;
 
-// Memory interface
+// Memory interface.  The ch4 bridge belongs to the PCM engine, or in MSX-AUDIO mode
+// (engine in reset) to the Y8950 sample RAM.
+logic [21:0] p_mem_addr;
+logic        p_mem_rd_req, p_mem_wr_req;
+logic [7:0]  p_mem_wr_data;
 logic [21:0] pcm_mem_addr;
 logic        pcm_mem_rd_req;
 logic [7:0]  pcm_cpu_mem_reg, pcm_cpu_mem_data;
@@ -243,16 +251,16 @@ localparam int PCM_MEM_WRITE_DELAY = (28 * (CLK_HZ / 1000) + 33868 / 2) / 33868;
     .reg_rd_data     (pcm_reg_rd_data_w),
 
     // SDRAM Direct Port
-    .mem_addr        (mem_addr),
-    .mem_rd_en       (mem_rd_req),
+    .mem_addr        (p_mem_addr),
+    .mem_rd_en       (p_mem_rd_req),
     .mem_rd_data     (mem_rd_data),
     .mem_rd_data16   (mem_rd_data16),
 `ifdef PCM_ENGINE3
     .mem_rd_data16b  (mem_rd_data16b),
 `endif
     .mem_rd_valid    (mem_rd_valid),
-    .mem_wr_en       (mem_wr_req),
-    .mem_wr_data     (mem_wr_data),
+    .mem_wr_en       (p_mem_wr_req),
+    .mem_wr_data     (p_mem_wr_data),
     .mem_busy        (mem_busy),
 
     // Audio Output
@@ -402,26 +410,48 @@ always_ff @(posedge clk) begin
     if (!rst_n || !audio_mode) begin ya_st <= 2'd0; ya_ack <= 1'b0; ya_latch <= 8'h00; end
 end
 
-//  sample RAM (block RAM).  Above 32 KB: reads 0, writes ignored (openMSX, a 32 KB module).
+//  sample RAM.  Two homes:
+//   ya_sdram = 1: 256 KB in the SDRAM, through the PCM engine's ch4 bridge, at 200000h of
+//                 the MoonSound area = the OPL4's own wave RAM (zeroed at upload).  The
+//                 bridge wants a rising read request answered by mem_rd_valid, and a write
+//                 request that is dropped once mem_busy shows it was taken.
+//   ya_sdram = 0: block RAM, 2**YA_RAM_AW bytes; above it reads 0 and writes are ignored
+//                 (openMSX with a 32 KB module).
+//  VGMPlay needs the first: it puts a tune's sample ROM at its original addresses, up to
+//  3FFFFh.
 logic [7:0] ya_ram [0:(1 << YA_RAM_AW) - 1];
 logic [7:0] ya_ram_q;
-logic [1:0] ya_mph;
-logic       ya_mem_done, ya_mem_in;
+logic [2:0] ya_mph;
+logic       ya_mem_done, ya_mem_in, ya_x_rd, ya_x_wr;
 always_ff @(posedge clk) begin
     ya_mem_done <= 1'b0;
     case (ya_mph)
-    2'd0: if (ya_mem_rd | ya_mem_wr) begin
-        ya_mem_in <= ((ya_mem_addr >> YA_RAM_AW) == '0);
-        ya_ram_q  <= ya_ram[ya_mem_addr[YA_RAM_AW-1:0]];
-        if (ya_mem_wr && (ya_mem_addr >> YA_RAM_AW) == '0)
-            ya_ram[ya_mem_addr[YA_RAM_AW-1:0]] <= ya_mem_wdata;
-        ya_mph <= 2'd1;
+    3'd0: if (ya_mem_rd | ya_mem_wr) begin
+        if (ya_sdram) begin
+            if (!mem_busy) begin ya_x_rd <= ya_mem_rd; ya_x_wr <= ya_mem_wr; ya_mph <= ya_mem_rd ? 3'd3 : 3'd4; end
+        end else begin
+            ya_mem_in <= ((ya_mem_addr >> YA_RAM_AW) == '0);
+            ya_ram_q  <= ya_ram[ya_mem_addr[YA_RAM_AW-1:0]];
+            if (ya_mem_wr && (ya_mem_addr >> YA_RAM_AW) == '0)
+                ya_ram[ya_mem_addr[YA_RAM_AW-1:0]] <= ya_mem_wdata;
+            ya_mph <= 3'd1;
+        end
     end
-    2'd1: begin ya_mem_done <= 1'b1; ya_mph <= 2'd2; end
-    default: if (!(ya_mem_rd | ya_mem_wr)) ya_mph <= 2'd0;
+    3'd1: begin ya_mem_done <= 1'b1; ya_mph <= 3'd2; end
+    3'd2: if (!(ya_mem_rd | ya_mem_wr)) ya_mph <= 3'd0;
+    3'd3: if (mem_rd_valid) begin                     // SDRAM read
+        ya_x_rd <= 1'b0; ya_ram_q <= mem_rd_data; ya_mem_in <= 1'b1; ya_mph <= 3'd1;
+    end
+    3'd4: if (mem_busy) begin ya_x_wr <= 1'b0; ya_mph <= 3'd5; end   // SDRAM write: taken
+    3'd5: if (!mem_busy) ya_mph <= 3'd1;                              // ... and finished
+    default: ya_mph <= 3'd0;
     endcase
-    if (!rst_n) ya_mph <= 2'd0;
+    if (!rst_n || !audio_mode) begin ya_mph <= 3'd0; ya_x_rd <= 1'b0; ya_x_wr <= 1'b0; end
 end
+assign mem_addr    = audio_mode ? {4'b1000, ya_mem_addr} : p_mem_addr;
+assign mem_rd_req  = audio_mode ? ya_x_rd      : p_mem_rd_req;
+assign mem_wr_req  = audio_mode ? ya_x_wr      : p_mem_wr_req;
+assign mem_wr_data = audio_mode ? ya_mem_wdata : p_mem_wr_data;
 
 y8950_addon u_y8950 (
     .clk       (clk),
