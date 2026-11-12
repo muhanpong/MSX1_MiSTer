@@ -55,7 +55,7 @@ module ymf278b_top #(
     // together with a reset (rst_n low).
     input  wire        audio_mode,
     input  wire        adpcm_mute,
-    input  wire  [3:0] adpcm_vol,  // OSD ADPCM trim, same ladder as fm_vol (fm_gain())
+    input  wire  [3:0] adpcm_vol,  // OSD ADPCM trim, same ladder as pcm_vol (adpcm_post())
 
     // Debug outputs (clk_sdram domain)
     output wire        dbg_pcm_valid,
@@ -367,7 +367,10 @@ always_ff @(posedge clk) begin
     else ya_acc <= ya_acc + YA_SMP_HZ;
 end
 
-wire        ya_sel = audio_mode && (io_port[7:2] == 6'b110000);
+//  C0h/C1h only.  C2h/C3h is where software looks for a SECOND module (stereo
+//  set-ups); a mirror there would be detected as one and get every ADPCM byte
+//  twice.
+wire        ya_sel = audio_mode && (io_port[7:1] == 7'b1100_000);
 logic [7:0] ya_latch;
 logic [1:0] ya_st;
 logic       ya_ack;
@@ -554,9 +557,26 @@ function automatic [11:0] fm_gain(input [3:0] sel);
         default: fm_gain = 12'd203;   //  +4dB  <- entry 0 = OSD default / out of range
     endcase
 endfunction
+//  MSX-AUDIO ADPCM trim.  It shares the OSD row of the OPL4 PCM trim (the status
+//  word has no room for a row of its own), so it uses that row's ladder; the +4 dB
+//  that the FM row has at its default entry is folded in, so that with both rows
+//  at their defaults one ADPCM full scale equals one FM channel, as on openMSX.
+function automatic [11:0] adpcm_post(input [3:0] sel);
+    case (sel)
+        4'd1: adpcm_post = 12'd161;   //  -2dB (+4)
+        4'd2: adpcm_post = 12'd128;   //  -4dB (+4)
+        4'd3: adpcm_post = 12'd102;   //  -6dB (+4)
+        4'd4: adpcm_post = 12'd81;    //  -8dB (+4)
+        4'd6: adpcm_post = 12'd255;   //  +2dB (+4)
+        4'd7: adpcm_post = 12'd322;   //  +4dB (+4)
+        4'd8: adpcm_post = 12'd405;   //  +6dB (+4)
+        4'd9: adpcm_post = 12'd510;   //  +8dB (+4)
+        default: adpcm_post = 12'd203; //  0dB (+4)  <- entries 0 and 5
+    endcase
+endfunction
 localparam int GAIN_SH = 7;
 logic signed [29:0] fm_l_mul, fm_r_mul, pc_l_mul, pc_r_mul;  // stage-1 registered products
-wire [11:0] pc_gain_sel = audio_mode ? fm_gain(adpcm_vol) : pcm_post(pcm_vol);
+wire [11:0] pc_gain_sel = audio_mode ? adpcm_post(adpcm_vol) : pcm_post(pcm_vol);
 logic signed [21:0] sum_l, sum_r;                            // stage-2 combinational
 logic               gain_v_q;
 

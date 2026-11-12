@@ -1011,11 +1011,37 @@ wire rtc_en =   (a[7:1] == 7'b1011010) & ~iorq_n & m1_n & bios_config.MSX_typ ==
 //  with no printer on the cable does anyway.
 wire prn_en =   (a[7:0] == 8'h90)      & ~iorq_n & m1_n;
 
+//  Audio card (OSD "Audio Card"): MoonSound, MSX-AUDIO or none.  The MSX-AUDIO
+//  borrows the MoonSound's OPL3, so they are one block with two personalities,
+//  and the personality may only change while that block is in reset.  A change
+//  of the OSD row therefore starts a reset of ~48 us (1023 clk21m; the PCM
+//  register file needs >= 24 clk_sdram) and the new choice is taken in the
+//  middle of it.
+logic [1:0] card_q   = 2'd0;
+logic [9:0] card_cnt = 10'd0;
+wire        card_rst = (card_cnt != 10'd0);
+always_ff @(posedge clk21m) begin
+    if (card_rst) begin
+        card_cnt <= card_cnt - 10'd1;
+        if (card_cnt == 10'd512) card_q <= msxConfig.audio_card;
+    end else if (msxConfig.audio_card != card_q)
+        card_cnt <= 10'd1023;
+end
+wire moonsound_en = (card_q == 2'd0);
+wire msxaudio_en  = (card_q == 2'd1);
+wire card_en      = moonsound_en | msxaudio_en;
+
 // MoonSound: WAVE 0x7E/7F, FM 0xC4-0xC7
-wire ms_wave_cs = msxConfig.moonsound_en & ~iorq_n & m1_n &
+wire ms_wave_cs = moonsound_en & ~iorq_n & m1_n &
                   (a[7:0] == 8'h7E | a[7:0] == 8'h7F);
-wire ms_fm_cs   = msxConfig.moonsound_en & ~iorq_n & m1_n &
+wire ms_fm_cs   = moonsound_en & ~iorq_n & m1_n &
                   (a[7:2] == 6'b11_0001);     // 0xC4-0xC7
+// MSX-AUDIO: C0h status / register latch, C1h data.  C2h/C3h (a second module)
+// stay undecoded.
+wire ma_cs      = msxaudio_en & ~iorq_n & m1_n &
+                  (a[7:1] == 7'b1100_000);
+wire ms_any_cs  = ms_wave_cs | ms_fm_cs | ma_cs;
+wire ms_st_cs   = (ms_fm_cs | ma_cs) & ~a[0];   // status read: served directly
 
 //  -----------------------------------------------------------------------------
 //  -- 82C55 PPI
@@ -1130,7 +1156,7 @@ assign d_to_cpu = rd_n              ? 8'hFF           :
 
                   ~psg_n            ? d_from_psg      :
                   ~ppi_n            ? d_from_8255     :
-                  (ms_wave_cs | ms_fm_cs) ? ms_dout   :
+                  ms_any_cs               ? ms_dout   :
                   cheat_act         ? cheat_value     :   // standard .gg cheat override (memory reads)
                                     d_from_slots    ;
 //  -----------------------------------------------------------------------------
@@ -1807,7 +1833,7 @@ always_ff @(posedge clk21m) begin
         ms_rd_n_prev  <= 1'b1;
         ms_io_pending <= 1'b0;
     end else begin
-        if ((ms_wave_cs | ms_fm_cs) & ~wr_n & ms_wr_n_prev) begin
+        if (ms_any_cs & ~wr_n & ms_wr_n_prev) begin
             // Falling edge of wr_n
             ms_io_port_lat <= a[7:0];
             ms_io_data_lat <= d_from_cpu;
@@ -1815,8 +1841,8 @@ always_ff @(posedge clk21m) begin
             ms_io_pending  <= 1'b1;        // hold CPU until this write is accepted
             ms_wait_cnt    <= 12'd4000;
         end
-        if ((ms_wave_cs | ms_fm_cs) & ~rd_n & ms_rd_n_prev) begin
-            if (ms_fm_cs & ~a[0]) begin
+        if (ms_any_cs & ~rd_n & ms_rd_n_prev) begin
+            if (ms_st_cs) begin
                 // FM STATUS read (0xC4/0xC6): served DIRECTLY from the
                 // continuously-synced status byte — no bridge round trip, no
                 // WAIT, no request/response pairing to corrupt.  The IRQ
@@ -2076,7 +2102,7 @@ end
 //    int-ack cycles see a rock-stable /INT.
 logic ms_int_hold = 1'b0;
 always @(posedge clk21m) begin
-    if (ms_irq_n_sync | ~msxConfig.moonsound_en)
+    if (ms_irq_n_sync | ~card_en)
         ms_int_hold <= 1'b0;                       // irq acked / disabled
     else if (iorq_n | ~m1_n)
         ms_int_hold <= 1'b1;                       // first non-I/O moment: assert, then hold
@@ -2586,7 +2612,7 @@ ymf278b_top #(
 ) u_moonsound (
     .clk          (clk_sdram),
     .clk_opl3     (clk_opl3),
-    .rst_n        (~reset_ms),
+    .rst_n        (~(reset_ms | card_rst)),
     .io_port      (ms_io_port_lat),
     .io_data_in   (ms_io_data_lat),
     .io_wr        (ms_io_wr_sdram),
@@ -2612,6 +2638,10 @@ ymf278b_top #(
     .fm_mute        (fm_mute),
     .pcm_vol        (pcm_vol),
     .fm_vol         (fm_vol),
+    //  MSX-AUDIO: the ADPCM shares the PCM mute and trim rows of the OSD.
+    .audio_mode     (msxaudio_en),
+    .adpcm_mute     (pcm_mute),
+    .adpcm_vol      (pcm_vol),
     .dbg_pcm_valid  (dbg_pcm_valid),
     .dbg_opl3_valid (dbg_opl3_valid),
     .dbg_pcm_level  (dbg_pcm_level),
@@ -2632,12 +2662,12 @@ ymf278b_top #(
 );
 
 // Gate audio to zero when MoonSound disabled
-assign ms_audio_l = msxConfig.moonsound_en ? ms_out_l : 16'sh0;
-assign ms_audio_r = msxConfig.moonsound_en ? ms_out_r : 16'sh0;
+assign ms_audio_l = card_en ? ms_out_l : 16'sh0;
+assign ms_audio_r = card_en ? ms_out_r : 16'sh0;
 
 // Read data back to the CPU: FM status (0xC4/0xC6) comes straight from the
 // live synced byte; everything else from the bridge latch.
-assign ms_dout = (ms_fm_cs & ~a[0])       ? ms_status_hold :
-                 (ms_wave_cs | ms_fm_cs)  ? ms_io_dout_lat : 8'h00;
+assign ms_dout = ms_st_cs  ? ms_status_hold :
+                 ms_any_cs ? ms_io_dout_lat : 8'h00;
 
 endmodule

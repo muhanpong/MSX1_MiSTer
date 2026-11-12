@@ -311,8 +311,10 @@ wire      [64:0] rtc;
 //[37:36] CPU SPEED (turbo)
 //[38]    BORDER
 //[48]    DEBUG OVERLAY
-//[50:49] free (was OPL4 PCM VOLUME, 2-bit -- DO NOT REUSE: saved .CFG files
-//        still carry values here, so a new meaning boots with stale state)
+//[45]    free since 2026-11-12 (was MoonSound Off/On; a saved .CFG may carry 1)
+//[50:49] AUDIO CARD: 0 MoonSound, 1 MSX-AUDIO, 2 None.  Was OPL4 PCM VOLUME
+//        (2-bit) until 2026-08: a .CFG that old boots with a stale choice here,
+//        which the row shows and the user can change.
 //[51]    CHEATS
 //[55]    JoyMega Buttons, 0 = 6-button.  It was on [17] for one build (20261111a), which is
 //        bit 0 of SLOT A CART TYPE: the two options changed each other.
@@ -565,7 +567,9 @@ localparam CONF_STR = {
    "P1O[69],SCC Ch5 Mute,Off,On;",
    `endif
    "P1-;",
-   "P1O[45],MoonSound,Off,On;",
+   //  One card at a time: the MSX-AUDIO borrows the MoonSound's OPL3.  Entry 0 is
+   //  MoonSound, so a fresh .CFG keeps what the core did before this row.
+   "P1O[50:49],Audio Card,MoonSound,MSX-AUDIO,None;",
    // The OPL4 rows are indented and carry the OPL4 prefix because "FM" alone was
    // ambiguous: OPLL is what everyone calls FM sound, but fm_mute gates the
    // MoonSound OPL3 side and never touches the OPLL.
@@ -585,10 +589,10 @@ localparam CONF_STR = {
    // They used to be offsets from the shipping default, so "0dB" was really -3.98 dB
    // and "+8dB" was really +4.01.  Fixed by moving the VALUES to the names, not by
    // renaming the steps: FM "+8dB" is mul 322 = a real +8 dB.  Entry 0 = default.
-   "P1O[46], OPL4 PCM Mute,Off,On;",
-   "P1O[112:109], OPL4 PCM Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
-   "P1O[47], OPL4 FM Mute,Off,On;",
-   "P1O[116:113], OPL4 FM Volume,+4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB;",
+   "P1O[46], PCM/ADPCM Mute,Off,On;",
+   "P1O[112:109], PCM/ADPCM Volume,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB,+4dB,+6dB,+8dB;",
+   "P1O[47], Card FM Mute,Off,On;",
+   "P1O[116:113], Card FM Volume,+4dB,+6dB,+8dB,0dB,-2dB,-4dB,-6dB,-8dB,0dB,+2dB;",
    "-;",
    "O[64],Reset on ROM change,Yes,No;",
    "O[48],Debug Overlay,Off,On;",

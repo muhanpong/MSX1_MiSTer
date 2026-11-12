@@ -41,7 +41,7 @@ package MSX;
         logic           vdp_id;
         video_mode_t    video_mode;
         cas_audio_src_t cas_audio_src;
-        logic           moonsound_en;
+        logic     [1:0] audio_card;     // OSD "Audio Card": 0 MoonSound, 1 MSX-AUDIO, 2/3 none
         logic           midi_io_en;     // OSD "MIDI": an I/O-only MSX-MIDI at E8h-EFh
     } user_config_t;
     

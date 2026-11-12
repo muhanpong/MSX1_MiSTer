@@ -39,6 +39,9 @@ module tb;
 `ifdef VPROBE
  `define PROBEPATCH
 `endif
+`ifdef APROBE
+ `define PROBEPATCH
+`endif
 `ifdef MSX_V9968
  `ifndef TDM
   `define TDM
@@ -1037,7 +1040,7 @@ module tb;
       scc_ch_en = 5'h1F; psg_mute = 1'b0; opll_mute = 1'b0;
       pcm_mute = 1'b1; fm_mute = 1'b1; pcm_vol = 4'd0; fm_vol = 4'd0;
       msxConfig = '{default:'0};
-      msxConfig.moonsound_en = $test$plusargs("moonsound");   // the OSD MoonSound switch
+      msxConfig.audio_card = $test$plusargs("moonsound") ? 2'd0 : $test$plusargs("msxaudio") ? 2'd1 : 2'd2;   // the OSD Audio Card row
       for (int i = 0; i < 2; i++) selected_mapper[i] = MAPPER_UNUSED;
       sram_save = 1'b0; sram_load = 1'b0;
    end
@@ -1447,6 +1450,40 @@ module tb;
       logic [15:0] w = u_chip.mem[`MEMW'(rxa(a) >> 1)];
       return (a & 1) ? w[15:8] : w[7:0];
    endfunction
+`endif
+`ifdef APROBE
+   //  -DAPROBE (sim/fullsys/aprobe/mkaprobe.py, through +kprobe=<hex>, with +msxaudio):
+   //  the MSX-AUDIO as the CPU sees it.  One result byte per OUT (2Fh); the list and
+   //  its masks are below.  Negative control: +moonsound (card = MoonSound) -- C0h is
+   //  then undecoded and the HALT is never left.
+   int   ap_n = 0, ap_bad = 0; logic ap_done = 1'b0;
+   logic ap_q2e = 1'b0, ap_q2f = 1'b0;
+   wire  ap_w2e = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n & (MSX.a[7:0] == 8'h2E);
+   wire  ap_w2f = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n & (MSX.a[7:0] == 8'h2F);
+   wire [7:0] ap_d = MSX.d_from_cpu;
+   localparam int AP_N = 13;
+   //                                  reset  T1    ISR   after  EOS   RAM read back
+   logic [7:0] ap_want [AP_N] = '{8'h06, 8'hC6, 8'hC6, 8'h06, 8'h10, 8'hA0, 8'hA1, 8'hA2, 8'hA3, 8'hA4, 8'hA5, 8'hA6, 8'hA7};
+   logic [7:0] ap_mask [AP_N] = '{8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'h10, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF};
+   always @(posedge clk21m) begin
+      ap_q2e <= ap_w2e; ap_q2f <= ap_w2f;
+      if (ap_w2f & ~ap_q2f) begin
+         automatic logic [7:0] v = ap_d;
+         automatic bit ok = (ap_n < AP_N) && ((v & ap_mask[ap_n % AP_N]) == ap_want[ap_n % AP_N]);
+         $display("aprobe: byte %0d = %02x %s at %.3f ms", ap_n, v, ok ? "ok" : "BAD", $realtime / 1e6);
+         if (!ok) ap_bad++;
+         ap_n++;
+      end
+      if (ap_w2e & ~ap_q2e) begin
+         $display("aprobe: phase %0d at %.3f ms", ap_d, $realtime / 1e6);
+         if (ap_d == 8'h0F) begin
+            ap_done = 1'b1;
+            $display("APROBE RESULT %s (%0d bytes, %0d bad)", (ap_n == AP_N && ap_bad == 0) ? "PASS" : "FAIL", ap_n, ap_bad);
+            $finish;
+         end
+      end
+   end
+   final if (!ap_done) $display("APROBE RESULT FAIL (not finished: %0d bytes, %0d bad)", ap_n, ap_bad);
 `endif
 `ifdef RPROBE
    //  -DRPROBE (sim/fullsys/rprobe/rprobe.asm, through +kprobe=<hex>): phases from
