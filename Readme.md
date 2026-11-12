@@ -39,10 +39,12 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *Quartus 17.0; `SEED=N` picks the fitter seed. The plain V9958 build is `tools/sdram128/compile.sh`.*
 - **Geo3D 데모 / demos** — 내장 98h 판을 쓴다. ASCII16 롬은 자동 판별이 틀리므로 OSD 매퍼를 `ASCII16X`로 고르거나 파일 오프셋 10h에 `ASCII16X` 헤더를 넣는다
   *Use the internal 98h builds. Auto-detect gets these ASCII16 ROMs wrong: pick `ASCII16X` in the OSD mapper menu, or put an `ASCII16X` header at file offset 10h.*
-- **릴리스 / Releases** (`releases/`) — `MSX1_20261111a_sdram128v9968_45b8fb3.rbf`: 현재판(upstream V9968 v0.99(2a99ac9) 병합, 한 줄의 16번째 스프라이트가 한 점 밀리던 문제 수정, R800 OTIR 첫 바이트 간격 수정, JoyMega 수정과 OSD 3/6버튼 선택; 실기 확인)
-  *`20261111a`: current (upstream V9968 v0.99 (2a99ac9) merged, the 16th sprite of a line no longer one dot right, R800 OTIR first-byte spacing, the JoyMega fix with an OSD 3/6-button option; confirmed on the board).*
-  `MSX1_20261029d_sdram128v9968_923140c.rbf`: 이전판(engine3, V9968 FH 수정, Geo3D HMMV 옵션). `MSX1_20261029c_sdram128v9968_9b1cea1.rbf`: engine2, 비교용
-  *`20261029d`: previous (engine3, the V9968 FH fix, the Geo3D HMMV option). `20261029c`: engine2, for comparison.*
+- **릴리스 / Releases** (`releases/`) — `MSX1_20261113a_sdram128v9968_7e4e67a.rbf`: 현재판(MSX-AUDIO 추가 — OSD `Audio Card`에서 MoonSound / MSX-AUDIO / None 선택, `JoyMega Buttons` 옵션이 Slot A 카트리지 종류와 같은 설정 비트를 쓰던 문제 수정; 실기 확인)
+  *`20261113a`: current (MSX-AUDIO added — OSD `Audio Card`: MoonSound / MSX-AUDIO / None; the `JoyMega Buttons` option no longer shares a setting bit with the slot A cartridge type; confirmed on the board).*
+  `MSX1_20261111a_sdram128v9968_45b8fb3.rbf`: 이전판(upstream V9968 v0.99(2a99ac9) 병합, 16번째 스프라이트 수정, R800 OTIR 첫 바이트 간격 수정, JoyMega 수정). **JoyMega를 3버튼으로 두면 Slot A 카트리지 종류가 바뀌는 문제가 있다 — 20261113a를 쓸 것**
+  *`20261111a`: previous (upstream V9968 v0.99 merged, the 16th-sprite fix, R800 OTIR first-byte spacing, the JoyMega fix). **Its 3-button JoyMega setting changes the slot A cartridge type — use 20261113a.***
+  `MSX1_20261029d_sdram128v9968_923140c.rbf`: engine3, V9968 FH 수정, Geo3D HMMV 옵션. `MSX1_20261029c_sdram128v9968_9b1cea1.rbf`: engine2, 비교용
+  *`20261029d`: engine3, the V9968 FH fix, the Geo3D HMMV option. `20261029c`: engine2, for comparison.*
   이전 rbf(20261025b, 20261027a, 20261029a)도 그대로 둔다 *(the earlier rbfs stay in `releases/`)*
 - **라이선스 / Licence** — V9968 RTL 파일 헤더는 HRA!의 3조항 조건(**허가 없는 상업적 이용 금지** 포함), Geo3D는 MIT
   *The V9968 RTL file headers carry HRA!'s 3-clause terms (including **no commercial use without written permission**); Geo3D is MIT.*
@@ -58,6 +60,8 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
 
 - **MoonSound (OPL4)** — YMF278B FM + PCM 웨이브테이블 엔진, 2MB 샘플 RAM
   *YMF278B FM plus the PCM wavetable engine, with 2MB of sample RAM.*
+- **MSX-AUDIO (Y8950)** — MoonSound의 OPL3를 FM으로 쓰고 ADPCM·타이머·샘플 RAM을 더했다. MoonSound와 동시에는 못 쓴다(OSD `Audio Card`). ADPCM은 openMSX와 샘플 단위로 일치(VGMPlay로 재생한 6곡). BIOS ROM 없음 — 포트를 직접 쓰는 소프트용
+  *The MoonSound's OPL3 as the FM part, plus ADPCM, timers and sample RAM. Exclusive with MoonSound (OSD `Audio Card`). The ADPCM matches openMSX sample for sample (six tunes played by VGMPlay). No BIOS ROM: for software that drives the ports itself.*
 - **turbo R** — FS-A1GT / FS-A1ST 기계 팩, R800과 Z80 실행 중 전환(소프트웨어 또는 OSD), R800 7.16 / 21.5 MHz
   *FS-A1GT / FS-A1ST machine packs; the R800 and the Z80 switch at run time (by software or the OSD); R800 at 7.16 / 21.5 MHz.*
 - **Z80 터보 / Z80 turbo** — 3.58 기본에 5.37 / 7.16 / 10.7 / 21.5 MHz 추가. 파나소닉 MSX2+ 방식 포트 토글도 지원
@@ -110,6 +114,20 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
 
 ## What this fork adds
 
+### MSX-AUDIO (Y8950)
+`Audio Card` = `MSX-AUDIO`. The FM part is the MoonSound's OPL3 run as an OPL at the Y8950's
+49716 Hz; ADPCM (sample RAM and CPU-fed), both timers with `/INT`, the 8-bit DAC and register
+read-back are added.
+
+- Ports `0xC0` (register / status) and `0xC1` (data); `0xC2/0xC3` stay free
+- Sample RAM: **256 KB when the pack carries the `MOONSOUND` record** (it lives in the
+  MoonSound's wave RAM area), 32 KB otherwise. VGMPlay needs the 256 KB
+- The mute and volume rows are shared with the MoonSound: `PCM/ADPCM` acts on the ADPCM
+- Not there: the BIOS ROM (FS-CA1 / NMS-1205 software that calls it), recording, CSM speech,
+  the keyboard and I/O port
+- Checked with `sim/msx_audio/replay_omsx.sh`: a VGM played by VGMPlay on openMSX, its port
+  log replayed through the RTL, ADPCM output compared with openMSX's own channel recording
+
 ### MoonSound (YMF278B / OPL4)
 Full OPL4 emulation — OPL3-compatible FM plus the PCM wavetable engine.
 
@@ -117,7 +135,7 @@ Full OPL4 emulation — OPL3-compatible FM plus the PCM wavetable engine.
 - 2MB sample RAM in addition to the wavetable ROM
 - Wave registers read back what was written, as `regs[reg]` does in openMSX (software that
   reads, modifies and writes back the pan / LFO registers keeps them)
-- Menu: `MoonSound On/Off`, `PCM Mute`, `FM Mute`, `PCM Volume`, `FM Volume` (2 dB steps), `Debug Overlay`
+- Menu: `Audio Card` (MoonSound / MSX-AUDIO / None), `PCM/ADPCM Mute`, `Card FM Mute`, `PCM/ADPCM Volume`, `Card FM Volume` (2 dB steps), `Debug Overlay`
 - Requires the `yrw801.rom` wavetable — supplied through the **FW PACK** (see below)
 - The wavetable is loaded **only when the machine pack carries a `MOONSOUND` device record**
   (`<device typ="MOONSOUND" ...>` in the pack's XML). The OSD `MoonSound` switch alone does not
