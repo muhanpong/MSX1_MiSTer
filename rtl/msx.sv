@@ -2534,7 +2534,7 @@ ymf278b_top #(
     .pcm_vol        (pcm_vol),
     .fm_vol         (fm_vol),
     //  MSX-AUDIO: the ADPCM shares the PCM mute and trim rows of the OSD.
-    .audio_mode     (msxaudio_en),
+    .audio_mode_i     (msxaudio_en),
     .adpcm_mute     (pcm_mute),
     .adpcm_vol      (pcm_vol),
     .dbg_pcm_valid  (dbg_pcm_valid),

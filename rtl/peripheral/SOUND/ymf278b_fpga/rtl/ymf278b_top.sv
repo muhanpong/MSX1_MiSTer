@@ -53,7 +53,7 @@ module ymf278b_top #(
     // ADPCM unit, status and timers; ports C0h-C3h.  The MoonSound side (register
     // front end, PCM engine) is held in reset while this is 1.  Change it only
     // together with a reset (rst_n low).
-    input  wire        audio_mode,
+    input  wire        audio_mode_i,  // quasi-static, from clk21m; changes only inside a reset
     input  wire        adpcm_mute,
     input  wire  [3:0] adpcm_vol,  // OSD ADPCM trim, same ladder as pcm_vol (adpcm_post())
 
@@ -77,6 +77,12 @@ module ymf278b_top #(
     output wire [2:0]  dbg_slot0_dyn_env_state,  // EG state
     output logic       dbg_ack_stopped   // reg4 (timer ack) writes stopped reaching OPL3
 );
+//  audio_mode comes from the clk21m domain.  It only changes in the middle of a
+//  long reset, but STA sees a one-clock path from it into the mixer multiplier
+//  (-1.6 ns on the first fit), so it is brought over through two flops.
+(* preserve *) logic audio_mode_s1 = 1'b0, audio_mode = 1'b0;
+always_ff @(posedge clk) begin audio_mode_s1 <= audio_mode_i; audio_mode <= audio_mode_s1; end
+
 
 // ─── OPL3 core (gtaylormb opl3.sv) ───────────────────────────────────
 // The opl3 module uses its own internal clock divider to hit ~49.7kHz.
@@ -462,9 +468,12 @@ always_ff @(posedge clk)
 // ─── Audio mixing ─────────────────────────────────────────────────────
 // OPL3 at ~49.7kHz drives the output rate; latest PCM sample is held and added.
 logic signed [15:0] pcm_left_hold, pcm_right_hold;
-wire signed [15:0] pc_l_sel    = audio_mode ? ya_smp : pcm_left_hold;
-wire signed [15:0] pc_r_sel    = audio_mode ? ya_smp : pcm_right_hold;
-wire               pc_mute_sel = audio_mode ? adpcm_mute : pcm_mute;
+//  The card select sits in a register stage of its own, in front of the multiplier
+//  (the mux straight into the DSP block missed timing by 1.6 ns).  The values are
+//  held for a whole sample, so the extra clock changes nothing audible.
+logic signed [15:0] pc_l_sel, pc_r_sel;
+logic               pc_mute_sel;
+logic        [11:0] pc_gain_sel;
 
 // ── OPL4 output gain (OSD) ────────────────────────────────────
 // Calibrated 2026-08-21 against a measured reference, not by ear.
@@ -576,7 +585,12 @@ function automatic [11:0] adpcm_post(input [3:0] sel);
 endfunction
 localparam int GAIN_SH = 7;
 logic signed [29:0] fm_l_mul, fm_r_mul, pc_l_mul, pc_r_mul;  // stage-1 registered products
-wire [11:0] pc_gain_sel = audio_mode ? adpcm_post(adpcm_vol) : pcm_post(pcm_vol);
+always_ff @(posedge clk) begin
+    pc_l_sel    <= audio_mode ? ya_smp : pcm_left_hold;
+    pc_r_sel    <= audio_mode ? ya_smp : pcm_right_hold;
+    pc_mute_sel <= audio_mode ? adpcm_mute : pcm_mute;
+    pc_gain_sel <= audio_mode ? adpcm_post(adpcm_vol) : pcm_post(pcm_vol);
+end
 logic signed [21:0] sum_l, sum_r;                            // stage-2 combinational
 logic               gain_v_q;
 

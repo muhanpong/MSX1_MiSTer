@@ -20,7 +20,7 @@ module tb;
         .mem_rd_valid(1'b0), .mem_wr_req(), .mem_wr_data(), .mem_busy(1'b0),
         .audio_left(al), .audio_right(ar), .audio_valid(av), .irq_n(irq_n),
         .pcm_mute(1'b0), .fm_mute(fm_mute), .pcm_vol(4'd0), .fm_vol(fm_vol),
-        .audio_mode(1'b1), .adpcm_mute(adpcm_mute), .adpcm_vol(adpcm_vol),
+        .audio_mode_i(1'b1), .adpcm_mute(adpcm_mute), .adpcm_vol(adpcm_vol),
         .dbg_pcm_valid(), .dbg_opl3_valid(), .dbg_pcm_level(), .dbg_new2(), .dbg_keyon_count(),
         .dbg_accum_cnt(), .dbg_env_min(), .dbg_mem_nonzero(), .dbg_pcm_base_set(), .dbg_slot_keyon(),
         .dbg_slot_active(), .dbg_slot_envlive(), .dbg_slot0_hdr_start(), .dbg_slot0_dyn_pos(),
