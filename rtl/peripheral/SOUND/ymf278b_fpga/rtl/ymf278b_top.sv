@@ -5,7 +5,8 @@
 
 module ymf278b_top #(
     parameter int CLK_HZ     = 33868800,
-    parameter int CLK_OPL3   = 14318180  // OPL3 master clock (14.318MHz)
+    parameter int CLK_OPL3   = 14318180, // OPL3 master clock (14.318MHz)
+    parameter int YA_RAM_AW  = 15        // MSX-AUDIO sample RAM: 15 = 32 KB (NMS-1205 / HX-MU900 / FS-CA1) .. 18 = 256 KB
 ) (
     input  wire        clk,          // 33.8688 MHz master
     input  wire        clk_opl3,     // 14.318 MHz for OPL3 core
@@ -158,6 +159,7 @@ logic       opl3_irq_n;
 
 opl3 u_opl3 (
     .clk          (clk_opl3),
+    .rate_alt     (audio_mode),    // MSX-AUDIO: the Y8950's sample rate
     .clk_host     (clk),           // host write signals are in clk (clk_sdram) domain
     .clk_dac      (clk_opl3),
     .ic_n         (rst_n),
@@ -355,22 +357,19 @@ assign opl3_status = opl3_status_s2;
 
 // ─── MSX-AUDIO (Y8950) personality ────────────────────────────────────
 // Ports C0h/C2h = register latch (write) / status (read), C1h/C3h = data.
-localparam int YA_RAM_AW   = 15;      // sample RAM: 32 KB, as in the NMS-1205 / HX-MU900 / FS-CA1
-localparam int YA_SMP_HZ   = 49716;   // 3579545 / 72
+//  YA_RAM_AW (module parameter): sample RAM address width, 15 = 32 KB ... 18 = 256 KB
 //  ADPCM (+-2040 in openMSX, where one FM channel is +-2047) to the 16-bit PCM path: << 2
 //  makes its full scale equal one OPL3 channel's (8186 against 8206, sim/msx_audio/run_top.sh).
 localparam int ADPCM_SH    = 2;
 
-logic [31:0] ya_acc;
-logic        ya_tick;
+//  The sample tick is the OPL3's own sample strobe (49715.9 Hz in this mode, see
+//  SAMPLE_DIV_NUM_ALT), so ADPCM, timers and FM share one sample clock as they do in
+//  the chip, and the mixer never repeats or drops an ADPCM sample.  (It was a separate
+//  49716 Hz divider at first: the two rates slipped by a sample every few seconds.)
+logic ya_sv_q, ya_tick;
 always_ff @(posedge clk) begin
-    ya_tick <= 1'b0;
-    if (!rst_n) ya_acc <= '0;
-    else if (ya_acc + YA_SMP_HZ >= CLK_HZ) begin
-        ya_acc  <= ya_acc + YA_SMP_HZ - CLK_HZ;
-        ya_tick <= audio_mode;
-    end
-    else ya_acc <= ya_acc + YA_SMP_HZ;
+    ya_sv_q <= opl3_sample_valid;
+    ya_tick <= audio_mode & opl3_sample_valid & ~ya_sv_q;
 end
 
 //  C0h/C1h only.  C2h/C3h is where software looks for a SECOND module (stereo
@@ -412,9 +411,9 @@ always_ff @(posedge clk) begin
     ya_mem_done <= 1'b0;
     case (ya_mph)
     2'd0: if (ya_mem_rd | ya_mem_wr) begin
-        ya_mem_in <= (ya_mem_addr[17:YA_RAM_AW] == '0);
+        ya_mem_in <= ((ya_mem_addr >> YA_RAM_AW) == '0);
         ya_ram_q  <= ya_ram[ya_mem_addr[YA_RAM_AW-1:0]];
-        if (ya_mem_wr && ya_mem_addr[17:YA_RAM_AW] == '0)
+        if (ya_mem_wr && (ya_mem_addr >> YA_RAM_AW) == '0)
             ya_ram[ya_mem_addr[YA_RAM_AW-1:0]] <= ya_mem_wdata;
         ya_mph <= 2'd1;
     end
@@ -460,8 +459,12 @@ assign opl3_reg_data = audio_mode ? ya_fm_data          : r_opl3_reg_data;
 //  ADPCM + DAC into the 16-bit PCM path of the mixer.  The OSD trim uses the FM ladder
 //  (fm_gain), so equal settings on the two rows keep the openMSX balance.
 wire signed [17:0] ya_sum = 18'(ya_adpcm <<< ADPCM_SH) + 18'(ya_dac >>> 1);
+//  Taken on the sample tick, i.e. the finished value of the sample before: the add-on
+//  needs a few clocks for a plain sample and more when it fetches a nibble, and the
+//  mixer multiplies within the first clocks after the tick -- unlatched it saw the new
+//  value on some samples and the old one on others.
 logic signed [15:0] ya_smp;
-always_ff @(posedge clk)
+always_ff @(posedge clk) if (ya_tick)
     ya_smp <= (ya_sum >  18'sd32767) ? 16'sh7FFF :
               (ya_sum < -18'sd32768) ? 16'sh8000 : ya_sum[15:0];
 
