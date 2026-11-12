@@ -49,6 +49,14 @@ module ymf278b_top #(
     input  wire  [3:0] pcm_vol,    // OSD OPL4 PCM trim, 2 dB ladder; see pcm_pre()/pcm_post()
     input  wire  [3:0] fm_vol,     // OSD OPL4 FM  trim, 2 dB ladder; see fm_gain()
 
+    // MSX-AUDIO personality (Y8950): the OPL3 serves as the OPL, y8950_addon adds the
+    // ADPCM unit, status and timers; ports C0h-C3h.  The MoonSound side (register
+    // front end, PCM engine) is held in reset while this is 1.  Change it only
+    // together with a reset (rst_n low).
+    input  wire        audio_mode,
+    input  wire        adpcm_mute,
+    input  wire  [3:0] adpcm_vol,  // OSD ADPCM trim, same ladder as fm_vol (fm_gain())
+
     // Debug outputs (clk_sdram domain)
     output wire        dbg_pcm_valid,
     output wire        dbg_opl3_valid,
@@ -140,6 +148,7 @@ always_ff @(posedge clk) begin
 end
 
 logic [7:0] opl3_status_raw;
+logic       opl3_irq_n;
 
 opl3 u_opl3 (
     .clk          (clk_opl3),
@@ -159,7 +168,7 @@ opl3 u_opl3 (
     .sample_l     (opl3_left),
     .sample_r     (opl3_right),
     .led          (),
-    .irq_n        (irq_n),
+    .irq_n        (opl3_irq_n),
     .status_o     (opl3_status_raw)
 );
 
@@ -213,7 +222,7 @@ localparam int PCM_MEM_WRITE_DELAY = (28 * (CLK_HZ / 1000) + 33868 / 2) / 33868;
     .CLK_HZ (CLK_HZ)
 ) u_pcm (
     .clk             (clk),
-    .rst_n           (rst_n),
+    .rst_n           (rst_n & ~audio_mode),
 
     // CPU Register Interface — reg 0x06 read path now wired through to engine
     .reg_addr        (pcm_reg_addr),
@@ -298,22 +307,25 @@ assign dbg_mem_nonzero = 1'b0;
 
 // ─── Register decode ─────────────────────────────────────────────────
 logic busy_reg, load_busy_reg;
+logic [7:0] r_io_data_out, r_status_export, r_opl3_reg_data;
+logic [8:0] r_opl3_reg_addr;
+logic       r_io_ack, r_opl3_reg_wr;
 
 ymf278b_regs #(
     `YMF278_REGS_PARAMS
 ) u_regs (
     .clk            (clk),
-    .rst_n          (rst_n),
+    .rst_n          (rst_n & ~audio_mode),
     .io_port        (io_port),
     .io_data_in     (io_data_in),
-    .io_wr          (io_wr),
-    .io_rd          (io_rd),
-    .io_data_out    (io_data_out),
-    .io_ack         (io_ack),
+    .io_wr          (io_wr & ~audio_mode),
+    .io_rd          (io_rd & ~audio_mode),
+    .io_data_out    (r_io_data_out),
+    .io_ack         (r_io_ack),
     .new2           (new2),
-    .opl3_reg_addr  (opl3_reg_addr),
-    .opl3_reg_data  (opl3_reg_data),
-    .opl3_reg_wr    (opl3_reg_wr),
+    .opl3_reg_addr  (r_opl3_reg_addr),
+    .opl3_reg_data  (r_opl3_reg_data),
+    .opl3_reg_wr    (r_opl3_reg_wr),
     .opl3_status_rd (opl3_status_rd),
     .opl3_reg_rd    (opl3_reg_rd),
     .opl3_status    (opl3_status),
@@ -326,7 +338,7 @@ ymf278b_regs #(
     .pcm_reg_rd_done(pcm_reg_rd_done),
     .pcm_cpu_mem_busy(pcm_cpu_mem_busy_w),
     .busy           (busy_reg),
-    .status_live    (status_export),
+    .status_live    (r_status_export),
     .status_rd_notify(status_rd_notify),
     .load_busy      (load_busy_reg)
 );
@@ -335,9 +347,121 @@ ymf278b_regs #(
 // timer-based chip detection in MoonSound software (e.g. MBwave).
 assign opl3_status = opl3_status_s2;
 
+// ─── MSX-AUDIO (Y8950) personality ────────────────────────────────────
+// Ports C0h/C2h = register latch (write) / status (read), C1h/C3h = data.
+localparam int YA_RAM_AW   = 15;      // sample RAM: 32 KB, as in the NMS-1205 / HX-MU900 / FS-CA1
+localparam int YA_SMP_HZ   = 49716;   // 3579545 / 72
+//  ADPCM (+-2040 in openMSX, where one FM channel is +-2047) to the 16-bit PCM path: << 2
+//  makes its full scale equal one OPL3 channel's (8186 against 8206, sim/msx_audio/run_top.sh).
+localparam int ADPCM_SH    = 2;
+
+logic [31:0] ya_acc;
+logic        ya_tick;
+always_ff @(posedge clk) begin
+    ya_tick <= 1'b0;
+    if (!rst_n) ya_acc <= '0;
+    else if (ya_acc + YA_SMP_HZ >= CLK_HZ) begin
+        ya_acc  <= ya_acc + YA_SMP_HZ - CLK_HZ;
+        ya_tick <= audio_mode;
+    end
+    else ya_acc <= ya_acc + YA_SMP_HZ;
+end
+
+wire        ya_sel = audio_mode && (io_port[7:2] == 6'b110000);
+logic [7:0] ya_latch;
+logic [1:0] ya_st;
+logic       ya_ack;
+logic [7:0] ya_dout;
+wire  [7:0] ya_rdata, ya_status, ya_fm_addr, ya_fm_data, ya_mem_wdata;
+wire        ya_busy, ya_irq_n, ya_fm_wr, ya_mem_rd, ya_mem_wr;
+wire [17:0] ya_mem_addr;
+wire signed [15:0] ya_adpcm, ya_dac;
+wire        ya_wr = ya_sel & io_wr &  io_port[0];
+wire        ya_rd = ya_sel & io_rd &  io_port[0];
+
+always_ff @(posedge clk) begin
+    ya_ack <= 1'b0;
+    case (ya_st)
+    2'd0: begin
+        if (ya_wr | ya_rd) ya_st <= 2'd1;
+        else if (ya_sel & io_wr) begin ya_latch <= io_data_in; ya_ack <= 1'b1; end
+        else if (ya_sel & io_rd) begin ya_dout  <= ya_status;  ya_ack <= 1'b1; end
+    end
+    2'd1: ya_st <= 2'd2;                     // y8950_addon.busy is up from here
+    2'd2: if (!ya_busy) begin ya_dout <= ya_rdata; ya_ack <= 1'b1; ya_st <= 2'd0; end
+    default: ya_st <= 2'd0;
+    endcase
+    if (!rst_n || !audio_mode) begin ya_st <= 2'd0; ya_ack <= 1'b0; ya_latch <= 8'h00; end
+end
+
+//  sample RAM (block RAM).  Above 32 KB: reads 0, writes ignored (openMSX, a 32 KB module).
+logic [7:0] ya_ram [0:(1 << YA_RAM_AW) - 1];
+logic [7:0] ya_ram_q;
+logic [1:0] ya_mph;
+logic       ya_mem_done, ya_mem_in;
+always_ff @(posedge clk) begin
+    ya_mem_done <= 1'b0;
+    case (ya_mph)
+    2'd0: if (ya_mem_rd | ya_mem_wr) begin
+        ya_mem_in <= (ya_mem_addr[17:YA_RAM_AW] == '0);
+        ya_ram_q  <= ya_ram[ya_mem_addr[YA_RAM_AW-1:0]];
+        if (ya_mem_wr && ya_mem_addr[17:YA_RAM_AW] == '0)
+            ya_ram[ya_mem_addr[YA_RAM_AW-1:0]] <= ya_mem_wdata;
+        ya_mph <= 2'd1;
+    end
+    2'd1: begin ya_mem_done <= 1'b1; ya_mph <= 2'd2; end
+    default: if (!(ya_mem_rd | ya_mem_wr)) ya_mph <= 2'd0;
+    endcase
+    if (!rst_n) ya_mph <= 2'd0;
+end
+
+y8950_addon u_y8950 (
+    .clk       (clk),
+    .rst_n     (rst_n & audio_mode),
+    .tick      (ya_tick),
+    .addr      (ya_latch),
+    .wdata     (io_data_in),
+    .wr        (ya_wr),
+    .rd        (ya_rd),
+    .rdata     (ya_rdata),
+    .busy      (ya_busy),
+    .status    (ya_status),
+    .irq_n     (ya_irq_n),
+    .fm_wr     (ya_fm_wr),
+    .fm_addr   (ya_fm_addr),
+    .fm_data   (ya_fm_data),
+    .mem_addr  (ya_mem_addr),
+    .mem_rd    (ya_mem_rd),
+    .mem_wr    (ya_mem_wr),
+    .mem_wdata (ya_mem_wdata),
+    .mem_rdata (ya_mem_in ? ya_ram_q : 8'h00),
+    .mem_done  (ya_mem_done),
+    .adpcm_out (ya_adpcm),
+    .dac_out   (ya_dac)
+);
+
+assign io_data_out   = audio_mode ? ya_dout   : r_io_data_out;
+assign io_ack        = audio_mode ? ya_ack    : r_io_ack;
+assign status_export = audio_mode ? ya_status : r_status_export;
+assign irq_n         = audio_mode ? ya_irq_n  : opl3_irq_n;
+assign opl3_reg_wr   = audio_mode ? ya_fm_wr            : r_opl3_reg_wr;
+assign opl3_reg_addr = audio_mode ? {1'b0, ya_fm_addr}  : r_opl3_reg_addr;
+assign opl3_reg_data = audio_mode ? ya_fm_data          : r_opl3_reg_data;
+
+//  ADPCM + DAC into the 16-bit PCM path of the mixer.  The OSD trim uses the FM ladder
+//  (fm_gain), so equal settings on the two rows keep the openMSX balance.
+wire signed [17:0] ya_sum = 18'(ya_adpcm <<< ADPCM_SH) + 18'(ya_dac >>> 1);
+logic signed [15:0] ya_smp;
+always_ff @(posedge clk)
+    ya_smp <= (ya_sum >  18'sd32767) ? 16'sh7FFF :
+              (ya_sum < -18'sd32768) ? 16'sh8000 : ya_sum[15:0];
+
 // ─── Audio mixing ─────────────────────────────────────────────────────
 // OPL3 at ~49.7kHz drives the output rate; latest PCM sample is held and added.
 logic signed [15:0] pcm_left_hold, pcm_right_hold;
+wire signed [15:0] pc_l_sel    = audio_mode ? ya_smp : pcm_left_hold;
+wire signed [15:0] pc_r_sel    = audio_mode ? ya_smp : pcm_right_hold;
+wire               pc_mute_sel = audio_mode ? adpcm_mute : pcm_mute;
 
 // ── OPL4 output gain (OSD) ────────────────────────────────────
 // Calibrated 2026-08-21 against a measured reference, not by ear.
@@ -432,6 +556,7 @@ function automatic [11:0] fm_gain(input [3:0] sel);
 endfunction
 localparam int GAIN_SH = 7;
 logic signed [29:0] fm_l_mul, fm_r_mul, pc_l_mul, pc_r_mul;  // stage-1 registered products
+wire [11:0] pc_gain_sel = audio_mode ? fm_gain(adpcm_vol) : pcm_post(pcm_vol);
 logic signed [21:0] sum_l, sum_r;                            // stage-2 combinational
 logic               gain_v_q;
 
@@ -458,8 +583,9 @@ function automatic signed [16:0] fm_mix_gain(input [2:0] idx, input signed [16:0
     endcase
 endfunction
 logic signed [16:0] opl3_l_eff, opl3_r_eff;
-assign opl3_l_eff    = fm_mute  ? 17'sh0 : fm_mix_gain(fm_mix_l, $signed({opl3_left[20],  opl3_left[20:5]}));
-assign opl3_r_eff    = fm_mute  ? 17'sh0 : fm_mix_gain(fm_mix_r, $signed({opl3_right[20], opl3_right[20:5]}));
+//  MSX-AUDIO: the Y8950 is mono; C0-C8 are written with both OPL3 outputs on, so left = right.
+assign opl3_l_eff    = fm_mute  ? 17'sh0 : fm_mix_gain(audio_mode ? 3'd0 : fm_mix_l, $signed({opl3_left[20],  opl3_left[20:5]}));
+assign opl3_r_eff    = fm_mute  ? 17'sh0 : fm_mix_gain(audio_mode ? 3'd0 : fm_mix_r, $signed({opl3_right[20], opl3_right[20:5]}));
 
 // ─── DIAGNOSTIC MODE ────────────────────────────────────────────────────
 // User reports overlay row 2 (PCM valid) OFF on hardware even after
@@ -523,10 +649,9 @@ always_ff @(posedge clk) begin
     if (fm_v0_q) begin
         fm_l_mul <= $signed(opl3_l_q) * $signed({1'b0, fm_gain(fm_vol)});
         fm_r_mul <= $signed(opl3_r_q) * $signed({1'b0, fm_gain(fm_vol)});
-        pc_l_mul <= (pcm_mute ? 30'sh0 : $signed({pcm_left_hold [15], pcm_left_hold })
-                                         * $signed({1'b0, pcm_post(pcm_vol)}));
-        pc_r_mul <= (pcm_mute ? 30'sh0 : $signed({pcm_right_hold[15], pcm_right_hold})
-                                         * $signed({1'b0, pcm_post(pcm_vol)}));
+        //  MSX-AUDIO: the ADPCM / DAC sample takes the PCM path, with its own OSD trim
+        pc_l_mul <= (pc_mute_sel ? 30'sh0 : $signed({pc_l_sel[15], pc_l_sel}) * $signed({1'b0, pc_gain_sel}));
+        pc_r_mul <= (pc_mute_sel ? 30'sh0 : $signed({pc_r_sel[15], pc_r_sel}) * $signed({1'b0, pc_gain_sel}));
         gain_v_q <= 1'b1;
     end
     // Stage 2 — descale, sum, saturate ONCE to 16-bit signed.  Worst case after
