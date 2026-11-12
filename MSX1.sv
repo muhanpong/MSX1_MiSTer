@@ -314,6 +314,8 @@ wire      [64:0] rtc;
 //[50:49] free (was OPL4 PCM VOLUME, 2-bit -- DO NOT REUSE: saved .CFG files
 //        still carry values here, so a new meaning boots with stale state)
 //[51]    CHEATS
+//[55]    JoyMega Buttons, 0 = 6-button.  It was on [17] for one build (20261111a), which is
+//        bit 0 of SLOT A CART TYPE: the two options changed each other.
 //[53:52] free (was OPL4 FM VOLUME, 2-bit)
 //[56:54] OPL4 PCM VOLUME (5 steps, first entry = default)
 //[59:57] free (was OPL4 FM VOLUME, 3-bit -- same stale-.CFG hazard as [50:49])
@@ -486,7 +488,7 @@ localparam CONF_STR = {
    "hFP5R[126],Reset Hanging Notes;",
    "-;",
    "O[16:15],JoyMega Pad,Off,Port A,Port B,Both;",
-   "O[17],JoyMega Buttons,6,3;",
+   "O[55],JoyMega Buttons,6,3;",
    "O[43],Pause on OSD,No,Yes;",
    "T[44],Pause;",
    "-;",
@@ -1346,7 +1348,7 @@ msx MSX
    // Off / Port A / Port B / Both is already a per-port bit pair, so the menu
    // value is the enable pair unchanged.
    .joymega_en(status[16:15]),
-   .joymega_six(~status[17]),          // 0 (default) = 6-button pad
+   .joymega_six(~status[55]),          // 0 (default) = 6-button pad
    .cheat_en_master(~status[51]),   // global "Cheats On/Off" (O[51], default On=0): gates ALL cheats (standard+FC7), non-destructive
    .*
 );
