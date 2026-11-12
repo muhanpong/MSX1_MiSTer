@@ -9,7 +9,7 @@ module tb;
     logic [7:0] io_port = 0, io_din = 0; logic io_wr = 0, io_rd = 0;
     wire  [7:0] io_dout, status; wire io_ack, irq_n;
     wire signed [15:0] al, ar; wire av;
-    logic adpcm_mute = 0, fm_mute = 0; logic [3:0] adpcm_vol = 4'd3, fm_vol = 4'd3;      // both rows at their 0dB entry
+    logic adpcm_mute = 0, fm_mute = 0; logic [3:0] adpcm_vol = 4'd2, fm_vol = 4'd3;      // both at unity: PCM row -4dB (+4 folded in), FM row 0dB
 
     ymf278b_top #(.CLK_HZ(CLK_HZ), .CLK_OPL3(14318182)) dut (
         .clk(clk), .clk_opl3(clk_opl3), .rst_n(rst_n),

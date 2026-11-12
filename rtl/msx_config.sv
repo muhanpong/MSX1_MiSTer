@@ -211,7 +211,7 @@ assign msxConfig.video_mode = video_mode_t'(bios_config.MSX_typ == MSX1 ? (HPS_s
 assign msxConfig.cas_audio_src = cas_audio_src_t'(HPS_status[8]);
 assign msxConfig.border = HPS_status[41];
 assign msxConfig.vdp_id = HPS_status[42];
-assign msxConfig.moonsound_en = HPS_status[45];
+assign msxConfig.audio_card = HPS_status[50:49];
 //  status[24] was free: no CONF_STR row and no reader anywhere (checked against
 //  every source, comments stripped, legacy O/T/o tokens included -- 2026-09-26).
 assign msxConfig.midi_io_en   = HPS_status[24];
