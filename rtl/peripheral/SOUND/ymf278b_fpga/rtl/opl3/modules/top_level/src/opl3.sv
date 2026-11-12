@@ -45,6 +45,7 @@ module opl3
     import opl3_pkg::*;
 (
     input wire clk, // opl3 clk
+    input wire rate_alt, // MSX1_MiSTer: sample rate SAMPLE_DIV_NUM_ALT (the Y8950's), quasi-static
     input wire clk_host,
     input wire clk_dac, // only used if INSTANTIATE_SAMPLE_SYNC_TO_DAC_CLK is set
     input wire ic_n, // clk_host reset
@@ -85,11 +86,16 @@ module opl3
     );
 
     // pulse once per sample period
+    logic [1:0] rate_alt_q = '0;
+    always_ff @(posedge clk) rate_alt_q <= {rate_alt_q[0], rate_alt};
+
     clk_div #(
         .CLK_DIV_COUNT(CLK_DIV_COUNT),
         .NUM(SAMPLE_DIV_NUM),
-        .DEN(SAMPLE_DIV_DEN)
+        .DEN(SAMPLE_DIV_DEN),
+        .NUM_ALT(SAMPLE_DIV_NUM_ALT)
     ) sample_clk_gen (
+        .alt(rate_alt_q[1]),
         .clk_en(sample_clk_en),
         .*
     );

@@ -48,9 +48,12 @@ module clk_div #(
     // MSX1_MiSTer: fractional mode.  NUM != 0 gives one clk_en per NUM/DEN clk
     // cycles on average (accumulate DEN, wrap at NUM); CLK_DIV_COUNT is then unused.
     parameter NUM = 0,
-    parameter DEN = 1
+    parameter DEN = 1,
+    // MSX1_MiSTer: a second fractional rate, taken while `alt` is high (quasi-static)
+    parameter NUM_ALT = 0
 )(
     input wire clk,
+    input wire alt,
     output logic clk_en = 0
 );
     generate
@@ -68,10 +71,11 @@ module clk_div #(
     end else begin : frac_div
         localparam W = $clog2(NUM + DEN);
         logic [W-1:0] acc = 0;
+        wire  [W-1:0] num = (alt && NUM_ALT != 0) ? W'(NUM_ALT) : W'(NUM);
 
         always_ff @(posedge clk)
-            if (acc + W'(DEN) >= W'(NUM)) begin
-                acc    <= acc + W'(DEN) - W'(NUM);
+            if (acc + W'(DEN) >= num) begin
+                acc    <= acc + W'(DEN) - num;
                 clk_en <= 1'b1;
             end else begin
                 acc    <= acc + W'(DEN);

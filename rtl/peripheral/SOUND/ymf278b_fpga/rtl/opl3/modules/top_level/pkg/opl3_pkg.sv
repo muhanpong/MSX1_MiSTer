@@ -74,6 +74,10 @@ package opl3_pkg;
     // = 85909090 / 1735 = 49515.3 Hz (-0.017 cent).  Never fewer than 289 cycles.
     localparam SAMPLE_DIV_NUM = 1735;
     localparam SAMPLE_DIV_DEN = 6;
+    // MSX-AUDIO personality: a Y8950 on 3.579545 MHz / 72 = 49715.9 Hz, the YMF262 figure:
+    // one sample every 1728/6 = 288 clk_opl3 cycles.  Left at the OPL4 rate the FM of
+    // an MSX-AUDIO tune is 7 cents flat (found replaying a VGM against openMSX, 2026-11-12).
+    localparam SAMPLE_DIV_NUM_ALT = 1728;
     localparam ACTUAL_SAMPLE_FREQ = CLK_FREQ/CLK_DIV_COUNT;
 
     localparam NUM_REG_PER_BANK = 'hF6;
