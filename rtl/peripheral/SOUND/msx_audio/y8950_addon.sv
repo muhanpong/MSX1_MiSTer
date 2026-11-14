@@ -96,6 +96,13 @@ logic signed [17:0] mul_a, mul_b;
 logic signed [35:0] mul_p;
 always_ff @(posedge clk) mul_p <= mul_a * mul_b;
 
+//  "The next nibble is past the stop address", one clock ahead of its use in S_T11.
+//  Neither mem_ptr nor stop_a changes in S_T10, so the registered value is the one
+//  S_T11 would compute; taken directly, the 20-bit add and compare ran into the
+//  restart() clears of output_q / step_q in one 7.76 ns clock (-0.05 ns at 90 % fill).
+logic eos1_q;
+always_ff @(posedge clk) eos1_q <= (mem_ptr + 20'd1 > {1'b0, stop_a});
+
 function automatic [7:0] f2(input [2:0] v);
     case (v)
         3'd4:    f2 = 8'd77;
@@ -458,7 +465,7 @@ always_ff @(posedge clk) begin
     S_T11: begin                                             // mul_p = prevLeveling * volume
         output_q <= output_q + 28'(mul_p);
         mem_ptr  <= mem_ptr + 20'd1;
-        if (reg7[5] && (mem_ptr + 20'd1 > {1'b0, stop_a})) begin
+        if (reg7[5] && eos1_q) begin
             st[4] <= 1'b1;                                   // end of sample
             if (reg7[4]) restart();
             else         reg7 <= 8'h00;
