@@ -206,6 +206,14 @@ module msx
    //  MSX1.sv, which offers it on the HPS UART and on the USER port at once.
    output                    midi_tx,
    input                     midi_rx,
+   //  Y8960 Cartridge ADPCM RAM: a client of the SDRAM's upload channel (y8960_mem.sv)
+   output             [26:0] y8960_sdram_addr,
+   output              [7:0] y8960_sdram_din,
+   output                    y8960_sdram_req,
+   output                    y8960_sdram_rnw,
+   input               [7:0] y8960_sdram_dout,
+   input                     y8960_sdram_ready,
+   input                     y8960_sdram_busy,
    output logic       [15:0] dbg_wait_ratio,    // P5: CPU T-states with WAIT_n low, per 65536 T-states
    output logic       [15:0] dbg_hit_ratio,     // P5: SDRAM reads answered by the read cache, per 65536 reads
    output logic       [15:0] dbg_a8_pc,         // PC of the last OUT (A8) -- who moved page 0
@@ -238,7 +246,15 @@ module msx
 // PSG Mute gates ay_ch_mix ALONE.  Only that is the PSG: keybeep is PPI port C bit 7
 // and cas_audio_in is the tape, and both merely ride this same mix bus (as they do on
 // real hardware).  Muting via psg_mul would have silenced all three.
-wire  [9:0] audioPSG = (psg_mute ? 10'd0 : ay_ch_mix) + {keybeep,5'b00000} + {(cas_audio_in & ~cas_motor),4'b0000};
+//  Y8960 Cartridge with its SSG ports on (A0h-A3h): its SSG1 takes the same writes as
+//  this PSG and plays them with the cartridge's volume and pan registers, so the PSG's
+//  own sound steps aside instead of doubling.  The PSG keeps its registers and ports
+//  (keyboard, joystick, cassette input).
+//  y8960_io_en = {timer B0h-B3h, OPM 7Eh-7Fh, OPL2 C0h-C1h, OPLL 7Ch-7Dh, SSG A0h-A3h}
+wire signed [15:0] y8960_l, y8960_r;
+wire               y8960_irq, y8960_dout_io;
+wire         [4:0] y8960_io_en;
+wire  [9:0] audioPSG = ((psg_mute | y8960_io_en[0]) ? 10'd0 : ay_ch_mix) + {keybeep,5'b00000} + {(cas_audio_in & ~cas_motor),4'b0000};
 // Internal PSG trim (x/128: 128=0dB, 203=+4dB, 81=-4dB, 51=-8dB).  audioPSG is
 // UNSIGNED with silence at 0, so scaling it is a plain multiply -- no sign handling.
 // Entry 0 is x128>>>7, exactly the old value, so an untouched menu is bit-identical.
@@ -283,8 +299,8 @@ wire       [15:0] tr_pcm_a;
 wire              kb_ctrl_stop;
 wire signed [7:0] tr_pcm_s = tr_pcm_dac ^ 8'h80;
 wire signed [17:0] tr_pcm18 = {{4{tr_pcm_s[7]}}, tr_pcm_s, 6'b000000};
-wire signed [17:0] mix_l = $signed({{2{mono_audio[15]}}, mono_audio}) + $signed({{2{ms_audio_l[15]}}, ms_audio_l}) + tr_pcm18;
-wire signed [17:0] mix_r = $signed({{2{mono_audio[15]}}, mono_audio}) + $signed({{2{ms_audio_r[15]}}, ms_audio_r}) + tr_pcm18;
+wire signed [17:0] mix_l = $signed({{2{mono_audio[15]}}, mono_audio}) + $signed({{2{ms_audio_l[15]}}, ms_audio_l}) + tr_pcm18 + $signed({{2{y8960_l[15]}}, y8960_l});
+wire signed [17:0] mix_r = $signed({{2{mono_audio[15]}}, mono_audio}) + $signed({{2{ms_audio_r[15]}}, ms_audio_r}) + tr_pcm18 + $signed({{2{y8960_r[15]}}, y8960_r});
 // Saturate 18-bit signed → 16-bit signed: clip only on real overflow
 wire signed [15:0] sat_l = (mix_l[17:15] == 3'b000 || mix_l[17:15] == 3'b111) ? mix_l[15:0] : (mix_l[17] ? 16'sh8000 : 16'sh7FFF);
 wire signed [15:0] sat_r = (mix_r[17:15] == 3'b000 || mix_r[17:15] == 3'b111) ? mix_r[15:0] : (mix_r[17] ? 16'sh8000 : 16'sh7FFF);
@@ -1032,13 +1048,15 @@ wire msxaudio_en  = (card_q == 2'd1);
 wire card_en      = moonsound_en | msxaudio_en;
 
 // MoonSound: WAVE 0x7E/7F, FM 0xC4-0xC7
-wire ms_wave_cs = moonsound_en & ~iorq_n & m1_n &
+//  A Y8960 Cartridge that has switched on its OPM (7Eh/7Fh) or its OPL2 + ADPCM
+//  (C0h/C1h) owns those ports: the card's wave part / MSX-AUDIO is not selected then.
+wire ms_wave_cs = moonsound_en & ~y8960_io_en[3] & ~iorq_n & m1_n &
                   (a[7:0] == 8'h7E | a[7:0] == 8'h7F);
 wire ms_fm_cs   = moonsound_en & ~iorq_n & m1_n &
                   (a[7:2] == 6'b11_0001);     // 0xC4-0xC7
 // MSX-AUDIO: C0h status / register latch, C1h data.  C2h/C3h (a second module)
 // stay undecoded.
-wire ma_cs      = msxaudio_en & ~iorq_n & m1_n &
+wire ma_cs      = msxaudio_en & ~y8960_io_en[2] & ~iorq_n & m1_n &
                   (a[7:1] == 7'b1100_000);
 wire ms_any_cs  = ms_wave_cs | ms_fm_cs | ma_cs;
 wire ms_st_cs   = (ms_fm_cs | ma_cs) & ~a[0];   // status read: served directly
@@ -1154,6 +1172,7 @@ assign d_to_cpu = rd_n              ? 8'hFF           :
                   rtc_en            ? d_from_rtc      :
                   prn_en            ? 8'h00           :   // printer: always ready
 
+                  y8960_dout_io     ? d_from_slots    :   // Y8960 register read (SSG2 at A2h, OPL2/OPM status, timer)
                   ~psg_n            ? d_from_psg      :
                   ~ppi_n            ? d_from_8255     :
                   ms_any_cs               ? ms_dout   :
@@ -1712,7 +1731,49 @@ msx_slots msx_slots
    .midi_int_n(midi_int_n),
    .midi_rx(midi_rx),
    .midi_tx(midi_tx),
-   .midi_io_en(msxConfig.midi_io_en)
+   .midi_io_en(msxConfig.midi_io_en),
+   .y8960_l(y8960_l),
+   .y8960_r(y8960_r),
+   .y8960_irq(y8960_irq),
+   .y8960_io_en(y8960_io_en),
+   .y8960_dout_io(y8960_dout_io),
+   .y8960_base(y8960_base),
+   .y8960_base_valid(y8960_base_valid),
+   .y8960_ya_addr(y8960_ya_addr),
+   .y8960_ya_valid(y8960_ya_valid),
+   .y8960_ya_write(y8960_ya_write),
+   .y8960_ya_wdata(y8960_ya_wdata),
+   .y8960_ya_ready(y8960_ya_ready),
+   .y8960_ya_rdata(y8960_ya_rdata),
+   .y8960_ya_rdata_en(y8960_ya_rdata_en)
+);
+
+//  Y8960 Cartridge: its ADPCM RAM is the upper half of the cartridge's SDRAM block.
+wire [26:0] y8960_base;
+wire        y8960_base_valid;
+wire [17:0] y8960_ya_addr;
+wire        y8960_ya_valid, y8960_ya_write, y8960_ya_ready, y8960_ya_rdata_en;
+wire  [7:0] y8960_ya_wdata, y8960_ya_rdata;
+y8960_mem y8960_mem
+(
+   .clk(clk21m),
+   .reset(reset),
+   .base(y8960_base),
+   .base_valid(y8960_base_valid),
+   .ch1_busy(y8960_sdram_busy),
+   .ya_addr(y8960_ya_addr),
+   .ya_valid(y8960_ya_valid),
+   .ya_write(y8960_ya_write),
+   .ya_wdata(y8960_ya_wdata),
+   .ya_ready(y8960_ya_ready),
+   .ya_rdata(y8960_ya_rdata),
+   .ya_rdata_en(y8960_ya_rdata_en),
+   .sdram_addr(y8960_sdram_addr),
+   .sdram_din(y8960_sdram_din),
+   .sdram_req(y8960_sdram_req),
+   .sdram_rnw(y8960_sdram_rnw),
+   .sdram_dout(y8960_sdram_dout),
+   .sdram_ready(y8960_sdram_ready)
 );
 
 //  -----------------------------------------------------------------------------
@@ -2107,7 +2168,7 @@ always @(posedge clk21m) begin
     else if (iorq_n | ~m1_n)
         ms_int_hold <= 1'b1;                       // first non-I/O moment: assert, then hold
 end
-wire ms_int_n = ~ms_int_hold;
+wire ms_int_n = ~ms_int_hold & ~y8960_irq;   // + the Y8960 Cartridge (OPL2 / OPM / timer interrupts)
 
 // ═══ MoonSound freeze-diagnosis infrastructure ═══════════════════════════════
 // Battle-tested during the 2026-06 vgmplay-OPL4 freeze hunt (detectors, T80

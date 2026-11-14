@@ -1232,10 +1232,22 @@ reg         sram_rtc_q;
 always @(posedge clk21m) sram_rtc_q <= sram_addr[17];      // both ports answer one clock later
 assign      sram_dout   = sram_rtc_q ? rtc_nv_dout : sram_bram_dout;
 
+//  Y8960 Cartridge ADPCM RAM <-> SDRAM ch1 (rtl/peripheral/SOUND/y8960/y8960_mem.sv)
+wire [26:0] y8960_sdram_addr;
+wire  [7:0] y8960_sdram_din;
+wire        y8960_sdram_req, y8960_sdram_rnw;
+wire        ch1_others;
 msx MSX
 (
    .midi_tx(midi_tx),
    .midi_rx(midi_rx),
+   .y8960_sdram_addr(y8960_sdram_addr),
+   .y8960_sdram_din(y8960_sdram_din),
+   .y8960_sdram_req(y8960_sdram_req),
+   .y8960_sdram_rnw(y8960_sdram_rnw),
+   .y8960_sdram_dout(nvbak_sdram_dout),
+   .y8960_sdram_ready(upload_ram_ready),
+   .y8960_sdram_busy(ch1_others),
    // ce_10m7_p / ce_5m39_n are NOT pause-gated: their only consumers inside
    // msx.sv are the vdp18 core and ce_pix (video timing/pixel stream).  The
    // V9938 path was never gated (CLK21M direct), so on MSX2 machines the
@@ -1694,6 +1706,9 @@ wire [26:0] nvbak_sdram_addr;
 wire        nvbak_sdram_req, nvbak_sdram_rnw;
 wire  [7:0] nvbak_sdram_din;
 wire        upload_active = upload_ram_ce & upload_sdram_rq;
+//  ch1 belongs to the loader, the flash dump and the NVRAM backup first; the Y8960's
+//  ADPCM RAM uses it while none of them does (they stop the machine while they run).
+assign      ch1_others = upload_active | dump_active | nvbak_dma_active | nvbak_sdram_req;
 
 //  The CPU's SDRAM ch2 request is the raw decode for both cores: T80s leads MREQ
 //  with its address, and nz_bus gives NextZ80 a full clk21m of address lead.
@@ -1746,10 +1761,10 @@ sdram_tdm sdram
 `endif
 
    .ch1_dout(nvbak_sdram_dout),
-   .ch1_din (upload_active ? upload_ram_din  : dump_active ? dump_sdram_din  : nvbak_sdram_din),
-   .ch1_addr(upload_active ? upload_ram_addr : dump_active ? dump_sdram_addr : nvbak_sdram_addr),
-   .ch1_req (upload_active ? upload_active   : dump_active ? dump_sdram_req  : nvbak_sdram_req),
-   .ch1_rnw (upload_active ? 1'b0            : dump_active ? dump_sdram_rnw  : nvbak_sdram_rnw),
+   .ch1_din (upload_active ? upload_ram_din  : dump_active ? dump_sdram_din  : ch1_others ? nvbak_sdram_din  : y8960_sdram_din),
+   .ch1_addr(upload_active ? upload_ram_addr : dump_active ? dump_sdram_addr : ch1_others ? nvbak_sdram_addr : y8960_sdram_addr),
+   .ch1_req (upload_active ? upload_active   : dump_active ? dump_sdram_req  : ch1_others ? nvbak_sdram_req  : y8960_sdram_req),
+   .ch1_rnw (upload_active ? 1'b0            : dump_active ? dump_sdram_rnw  : ch1_others ? nvbak_sdram_rnw  : y8960_sdram_rnw),
    .ch1_ready(upload_ram_ready),
 
    .ch2_dout(sdram_dout),

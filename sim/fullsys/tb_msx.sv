@@ -42,6 +42,9 @@ module tb;
 `ifdef APROBE
  `define PROBEPATCH
 `endif
+`ifdef YPROBE
+ `define PROBEPATCH
+`endif
 `ifdef MSX_V9968
  `ifndef TDM
   `define TDM
@@ -312,11 +315,15 @@ module tb;
 
    //  ── SDRAM: the real controller over a behavioural chip ───────────────────
    wire        upload_active = upl_ce & upl_sdram_rq;
-   wire [26:0] ch1_addr = upl_addr;
-   wire  [7:0] ch1_din  = upl_din;
-   wire        ch1_req  = upload_active;
-   wire        ch1_rnw  = 1'b0;
+   //  ch1: the loader, and behind it the Y8960 Cartridge's ADPCM RAM (as MSX1.sv)
+   wire [26:0] ch1_addr = upload_active ? upl_addr : y8960_sdram_addr;
+   wire  [7:0] ch1_din  = upload_active ? upl_din  : y8960_sdram_din;
+   wire        ch1_req  = upload_active ? 1'b1     : y8960_sdram_req;
+   wire        ch1_rnw  = upload_active ? 1'b0     : y8960_sdram_rnw;
    wire  [7:0] ch1_dout;
+   assign y8960_sdram_dout  = ch1_dout;
+   assign y8960_sdram_ready = sdram_ready;
+   assign y8960_sdram_busy  = upload_active;
    wire        sdram_ready;
 
    wire  [7:0] sdram_dout, sdram_dout_c;
@@ -1485,6 +1492,55 @@ module tb;
       end
    end
    final if (!ap_done) $display("APROBE RESULT FAIL (not finished: %0d bytes, %0d bad)", ap_n, ap_bad);
+`endif
+`ifdef YPROBE
+   //  -DYPROBE (sim/fullsys/yprobe/mkyprobe.py, through +kprobe=<hex>; slot A = a ROM
+   //  with the Y8960 mapper): the Y8960 Cartridge as the CPU sees it.  One result
+   //  byte per OUT (2Fh); the list and its masks are below.  Negative control: the
+   //  same ROM with another mapper.
+   int   yp_n = 0, yp_bad = 0; logic yp_done = 1'b0;
+   logic yp_q2e = 1'b0, yp_q2f = 1'b0;
+   wire  yp_w2e = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n & (MSX.a[7:0] == 8'h2E);
+   wire  yp_w2f = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n & (MSX.a[7:0] == 8'h2F);
+   wire [7:0] yp_d = MSX.d_from_cpu;
+   localparam int YP_N = 32;
+   logic [7:0] yp_want [YP_N] = '{
+      8'h41, 8'h42, 8'h00, 8'h01, 8'h02,              // 1 slot memory
+      8'h00, 8'hFF, 8'h00, 8'h87,                     // 2 enablers (A2h before: not checked)
+      8'h55, 8'h12,                                   // 3 SSG2 R#0, main PSG R#0
+      8'h00, 8'hC0, 8'hC0, 8'h00,                     // 4 OPL2 status: reset, timer 1, in the ISR, after
+      8'h00, 8'hA0, 8'hA1, 8'hA2, 8'hA3, 8'hA4, 8'hA5, 8'hA6, 8'hA7,   // 5 ADPCM RAM
+      8'h5A, 8'hA5, 8'hFF, 8'h5A, 8'h41,              // 6 mapper RAM mode
+      8'h12, 8'h34,                                   // 7 SCC wave RAM
+      8'h00};                                         // 8 OPM status
+   logic [7:0] yp_mask [YP_N] = '{
+      8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF,
+      8'hFF, 8'hFF, 8'h00, 8'hFF,
+      8'hFF, 8'hFF,
+      8'hC0, 8'hC0, 8'hC0, 8'hC0,
+      8'h00, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF,   // status after the RAM write: not checked
+      8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF,                                //   (upstream's ADPCM does not raise EOS there; a Y8950 does)
+      8'hFF, 8'hFF,
+      8'h03};
+   always @(posedge clk21m) begin
+      yp_q2e <= yp_w2e; yp_q2f <= yp_w2f;
+      if (yp_w2f & ~yp_q2f) begin
+         automatic logic [7:0] v = yp_d;
+         automatic bit ok = (yp_n < YP_N) && ((v & yp_mask[yp_n % YP_N]) == yp_want[yp_n % YP_N]);
+         $display("yprobe: byte %0d = %02x %s at %.3f ms", yp_n, v, ok ? "ok" : "BAD", $realtime / 1e6);
+         if (!ok) yp_bad++;
+         yp_n++;
+      end
+      if (yp_w2e & ~yp_q2e) begin
+         $display("yprobe: phase %0d at %.3f ms", yp_d, $realtime / 1e6);
+         if (yp_d == 8'h0F) begin
+            yp_done = 1'b1;
+            $display("YPROBE RESULT %s (%0d bytes, %0d bad)", (yp_n == YP_N && yp_bad == 0) ? "PASS" : "FAIL", yp_n, yp_bad);
+            $finish;
+         end
+      end
+   end
+   final if (!yp_done) $display("YPROBE RESULT FAIL (not finished: %0d bytes, %0d bad)", yp_n, yp_bad);
 `endif
 `ifdef RPROBE
    //  -DRPROBE (sim/fullsys/rprobe/rprobe.asm, through +kprobe=<hex>): phases from

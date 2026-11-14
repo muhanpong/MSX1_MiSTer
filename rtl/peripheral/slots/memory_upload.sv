@@ -286,9 +286,15 @@ module memory_upload
                                     // can erase/program its save sectors at the TOP of the chip.  Without
                                     // this a short image (e.g. GoFigure 0x7DC000) has its top-sector
                                     // programs suppressed by the rom_size bound and the save silently fails.
+                                    //  Y8960 Cartridge: the image is the 128 KB BIOS (banks #0-15); the
+                                    //  cartridge's memory is 512 KB -- RAM banks #16-31 behind the BIOS and
+                                    //  256 KB of ADPCM RAM above that.  Same padding, to 512 KB.
                                     x16_pad <= ((cart_mapper == MAPPER_ASCII16X | cart_mapper == MAPPER_YAMANOOTO)
                                                 & ioctl_size[curr_conf == CONFIG_SLOT_A ? 2 : 3][24:0] < 25'h800000)
                                              ? 25'h800000 - ioctl_size[curr_conf == CONFIG_SLOT_A ? 2 : 3][24:0]
+                                             : (cart_mapper == MAPPER_Y8960
+                                                & ioctl_size[curr_conf == CONFIG_SLOT_A ? 2 : 3][24:0] < 25'h80000)
+                                             ? 25'h80000 - ioctl_size[curr_conf == CONFIG_SLOT_A ? 2 : 3][24:0]
                                              : 25'd0;
                                  end else begin
                                     // No file for this ROM row.  Skip just this subslot and
@@ -853,6 +859,7 @@ assign rom_mapper = (selected_mapper == MAPPER_AUTO || promote_x16) ? detected_m
 // See docs/yamanooto_spec.md S6.
 assign rom_device = rom_mapper == MAPPER_KONAMI_SCC ? DEV_SCC                             :
                     rom_mapper == MAPPER_YAMANOOTO  ? (DEV_SCC2 | DEV_PSG | DEV_FLASH)    :
+                    rom_mapper == MAPPER_Y8960      ? DEV_Y8960                           :
                                                       DEV_NONE ;     
 
 

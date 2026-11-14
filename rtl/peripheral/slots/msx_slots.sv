@@ -91,7 +91,24 @@ module msx_slots
    output                   main_rom0,
    output            [22:0] flash16x_prog_addr,
    output             [7:0] flash16x_prog_data,
-   input                    midi_io_en          // OSD "MIDI": I/O-only MSX-MIDI at E8h-EFh
+   input                    midi_io_en,         // OSD "MIDI": I/O-only MSX-MIDI at E8h-EFh
+   //  Y8960 Cartridge (ROM mapper "Y8960"): stereo audio, interrupt, the I/O ports it
+   //  has claimed {timer B0h, OPM 7Eh, OPL2 C0h, OPLL 7Ch, SSG A0h}, and its ADPCM RAM
+   //  (rtl/peripheral/SOUND/y8960).
+   output signed     [15:0] y8960_l,
+   output signed     [15:0] y8960_r,
+   output                   y8960_irq,
+   output             [4:0] y8960_io_en,
+   output                   y8960_dout_io,      // the cartridge answers the current I/O read
+   output            [26:0] y8960_base,
+   output                   y8960_base_valid,
+   output            [17:0] y8960_ya_addr,
+   output                   y8960_ya_valid,
+   output                   y8960_ya_write,
+   output             [7:0] y8960_ya_wdata,
+   input                    y8960_ya_ready,
+   input              [7:0] y8960_ya_rdata,
+   input                    y8960_ya_rdata_en
 );
 
 assign flash16x_prog_we   = mapper_ascii16x_prog_we | mapper_yamanooto_prog_we;
@@ -131,7 +148,9 @@ function automatic signed [9:0] vol_mul(input [3:0] v);
 endfunction
 
 // Mute is a separate control, not a ladder rung -- see the CONF_STR note in MSX1.sv.
-wire signed [24:0] opll_scaled = opll_mute ? 25'sd0 : $signed(sound_opll) * vol_mul(opll_vol);
+//  A Y8960 Cartridge with its OPLL ports on (7Ch/7Dh) takes the same writes and plays
+//  them with its own pan and voice bank registers: this OPLL's sound steps aside.
+wire signed [24:0] opll_scaled = (opll_mute | y8960_io_en[1]) ? 25'sd0 : $signed(sound_opll) * vol_mul(opll_vol);
 wire signed [24:0] scc_scaled  = $signed(scc_wave)   * vol_mul(scc_vol);
 // 19 bits, not 18: worst case is 51966 + 51966 + 32767 = 136699, which overflows
 // an 18-bit signed sum and would wrap BEFORE the clamp could see it.
@@ -255,6 +274,7 @@ wire [26:0] mapper_addr_raw =
                           cart_neo8                   ? mapper_neo8_addr            :
                           cart_neo16                  ? mapper_neo16_addr           :
                           mapper == MAPPER_YAMANOOTO  ? 27'(mapper_yamanooto_addr)  :
+                          mapper == MAPPER_Y8960      ? 27'(mapper_y8960_addr)      :
                           mapper == MAPPER_GM2        ? 27'(mapper_gm2_addr)        :
                                                         27'hDEAD                    ;
 
@@ -267,6 +287,7 @@ assign cpu_din          = mapper_ram_dout                        //IO
                         & d_to_cpu_FDC                           //UNMAPPED
                         & scc_sound_dout                         //UNMAPPED
                         & yamanooto_dout                         //UNMAPPED
+                        & y8960_dout                             //UNMAPPED + IO
                         & psg_dout                               //IO (cart PSG read, port 12H)
                         & flash_dout
                         & d_to_cpu_reset_status                  //IO
@@ -282,10 +303,13 @@ assign cpu_din          = mapper_ram_dout                        //IO
 //  first edge saw a request and an FFFF write landed on the page-3 segment's 3FFFh
 //  (fullsys INJ_UNMAP; docs/evidence_20261018/field_race_ae02602.txt).  Same
 //  decode as mapper_en without cpu_mreq, so the value of sdram_ce does not change.
+//  The Y8960's block is its BIOS image padded with its RAM, so the loader marks it
+//  read-only; the cartridge's mapper says which banks are RAM.
+wire ram_wr_ok = ~ram_ro | (mapper == MAPPER_Y8960 & y8960_mem_writable);
 wire ffff_reg = cpu_addr == 16'hFFFF & bios_config.slot_expander_en[active_slot] & mapper_mask[active_slot];
-assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ~ram_ro)) & mapper != MAPPER_UNUSED & ~mem_unmaped & ~ffff_reg) | kanji_sdram_rq | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
-assign bram_ce  = (sdram_size == 2'd0 | sram_cs)  & ((cpu_mreq & (cpu_rd | (cpu_wr & (~ram_ro | sram_cs))) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce);
-assign ram_rnw  = ~((sram_cs & sram_wr) | (~sram_cs & cpu_wr & cpu_mreq & ~ram_ro) | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
+assign sdram_ce = (sdram_size != 2'd0 & ~sram_cs) & ((cpu_mreq & (cpu_rd | (cpu_wr & ram_wr_ok)) & mapper != MAPPER_UNUSED & ~mem_unmaped & ~ffff_reg) | kanji_sdram_rq | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
+assign bram_ce  = (sdram_size == 2'd0 | sram_cs)  & ((cpu_mreq & (cpu_rd | (cpu_wr & (ram_wr_ok | sram_cs))) & mapper != MAPPER_UNUSED & ~mem_unmaped) | device_kanji_ram_ce);
+assign ram_rnw  = ~((sram_cs & sram_wr) | (~sram_cs & cpu_wr & cpu_mreq & ram_wr_ok) | mapper_ascii16x_prog_we | mapper_yamanooto_prog_we);
 
 assign ram_din  = cpu_dout;
 
@@ -310,6 +334,7 @@ wire mem_unmaped = sram_over                |
                    mapper_neo8_unmaped       |
                    mapper_neo16_unmaped      |
                    mapper_yamanooto_unmaped  |
+                   mapper_y8960_unmaped      |
                    mapper_msxdos2_unmaped    | 
                    mapper_halnote_unmaped    | 
                    mapper_panasonic_unmaped  | 
@@ -635,6 +660,87 @@ cart_yamanooto yamanooto
    .*
 );
 
+// ---------------------------------------------------------------------------------
+// Y8960 Cartridge (github.com/hra1129/Y8960_Cartridge): SSG x2, OPLL, OPL2 + ADPCM,
+// SCC, OPM behind an SCC-style mapper with 128 KB BIOS ROM + 128 KB RAM.  One
+// instance; a ROM loaded with the "Y8960" mapper is its BIOS.  Held in reset while
+// no such cartridge is in a slot, so none of its I/O ports can be claimed then.
+// ---------------------------------------------------------------------------------
+wire        y8960_present = |((cart_device[0] | cart_device[1]) & DEV_Y8960);
+wire        y8960_cs      = mapper == MAPPER_Y8960;
+wire  [4:0] y8960_bank;
+wire        y8960_mem_cs, y8960_mem_writable;
+wire  [7:0] y8960_cart_dout;
+wire        y8960_cart_dout_en;
+wire signed [23:0] y8960_al, y8960_ar;
+wire        y8960_en_ssg, y8960_en_opll, y8960_en_opl2, y8960_en_opm, y8960_en_timer;
+
+y8960_cart y8960
+(
+   .clk(clk),
+   .reset(reset | ~y8960_present),
+   .cpu_addr(cpu_addr),
+   .cpu_din(cpu_dout),
+   .cpu_iorq(cpu_iorq & ~cpu_m1),
+   .cpu_mreq_cs(cpu_mreq & y8960_cs),
+   .cpu_rd(cpu_rd),
+   .cpu_wr(cpu_wr),
+   .dout(y8960_cart_dout),
+   .dout_en(y8960_cart_dout_en),
+   .irq(y8960_irq),
+   .mem_bank(y8960_bank),
+   .mem_cs(y8960_mem_cs),
+   .mem_writable(y8960_mem_writable),
+   .ya_addr(y8960_ya_addr),
+   .ya_valid(y8960_ya_valid),
+   .ya_write(y8960_ya_write),
+   .ya_wdata(y8960_ya_wdata),
+   .ya_ready(y8960_ya_ready),
+   .ya_rdata(y8960_ya_rdata),
+   .ya_rdata_en(y8960_ya_rdata_en),
+   .io_en_ssg(y8960_en_ssg),
+   .io_en_opll(y8960_en_opll),
+   .io_en_opl2(y8960_en_opl2),
+   .io_en_opm(y8960_en_opm),
+   .io_en_timer(y8960_en_timer),
+   .audio_l(y8960_al),
+   .audio_r(y8960_ar),
+   .audio_valid()
+);
+
+wire [26:0] mapper_y8960_addr    = {9'd0, y8960_bank, cpu_addr[12:0]};
+//  Outside 4000h-BFFFh, in the SCC register bank (#63), and wherever the cartridge
+//  itself answers the read (SCC registers, 7FFFh), the block is not on the bus.
+wire        mapper_y8960_unmaped = y8960_cs & cpu_mreq & (~y8960_mem_cs | y8960_cart_dout_en);
+wire  [7:0] y8960_dout           = y8960_cart_dout_en ? y8960_cart_dout : 8'hFF;
+assign      y8960_dout_io        = y8960_cart_dout_en & cpu_iorq;
+assign      y8960_io_en          = {y8960_en_timer, y8960_en_opm, y8960_en_opl2, y8960_en_opll, y8960_en_ssg};
+
+//  24-bit mixer output to the core's 16 bits.  The mixer carries a chip's 16-bit
+//  sample in bits [23:8] at volume 128 (x1.0) and clips the sum itself, so the top
+//  16 bits are the chips at their own level.
+logic signed [15:0] y8960_l_r, y8960_r_r;
+always_ff @(posedge clk) begin
+   y8960_l_r <= y8960_present ? y8960_al[23:8] : 16'sd0;
+   y8960_r_r <= y8960_present ? y8960_ar[23:8] : 16'sd0;
+end
+assign y8960_l = y8960_l_r;
+assign y8960_r = y8960_r_r;
+
+//  Where the cartridge's block is in the SDRAM (for its ADPCM RAM, y8960_mem.sv):
+//  taken at the first access, as the flash carts do.
+logic [26:0] y8960_base_r;
+logic        y8960_base_valid_r;
+always_ff @(posedge clk) begin
+   if (reset) y8960_base_valid_r <= 1'b0;
+   else if (y8960_cs & cpu_mreq) begin
+      y8960_base_r       <= base_ram;
+      y8960_base_valid_r <= 1'b1;
+   end
+end
+assign y8960_base       = y8960_base_r;
+assign y8960_base_valid = y8960_base_valid_r;
+
 wire [20:0] mapper_konami_scc_addr;
 wire        mapper_konami_scc_unmaped;
 wire        mapper_konami_scc_sccReq;
@@ -803,8 +909,11 @@ opll opll
 // from the first counted cycle and constant across the window (address and
 // mapper state are stable while the strobe is asserted).
 // I/O cycles never consult this — msx.sv keeps ALL of them on the slow path.
+//   * Y8960 Cartridge: its bus front end and chips take a write over several clk and
+//     latch on the 3.58 MHz enable (SCC registers, 7FF0h-7FFFh, bank registers).  The
+//     whole slot stays slow: the address alone decides it.
 assign slow_dev = mapper_konami_scc_sccReq | mapper_mfrdsd1_sccReq | mapper_yamanooto_sccReq
-                | fmpac_opll_win;
+                | fmpac_opll_win | y8960_cs;
 
 wire        device_kanji_ram_ce;     // address select (ram_addr), bram_ce, the counters
 wire        device_kanji_ram_req;    // SDRAM request: ram_ce, rise one clk21m later (kanji.sv)
