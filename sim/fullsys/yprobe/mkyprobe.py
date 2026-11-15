@@ -8,15 +8,17 @@ tb_msx.sv holds the expected list.
                             every 8 KB bank = its bank number
 
   phase 1  slot memory     4000h, 4001h ("AB"), 4010h (bank 0), 6010h (1), 8010h (2)
-  phase 2  enablers        7FFFh reads 00; C0h and A2h (SSG2 R#0) are not the
-                           cartridge's yet; 7FFFh <- 87h, reads back 87h
-  phase 3  SSG             SSG2 R#0 <- 55h, read at A2h; main PSG R#0 <- 12h, read
-  phase 4  OPL2            status; timer 1 -> flags; EI/HALT, the ISR reads the
-                           status (so the cartridge's /INT reached the CPU); after
-  phase 5  ADPCM RAM       8 bytes in, EOS, the 8 bytes back (through SDRAM ch1)
+  phase 2  enablers        7FFFh reads 00; C0h (the forced MSX-AUDIO) does not answer
+                           yet; 7FFFh <- 87h, reads back 87h
+  phase 3  SSG             SSG2 R#0 <- 55h, read at A2h; main PSG R#0 <- 12h by I/O,
+                           read; main PSG R#1 <- 0Ah through 7FF0h/7FF1h, read
+  phase 4  MSX-AUDIO       status at C0h; timer 1 (set through 7FF2h/7FF3h) -> flags;
+                           EI/HALT, the ISR reads the status; after
+  phase 5  ADPCM RAM       8 bytes in, EOS, the 8 bytes back
   phase 6  mapper          RAM mode, bank 10h in 8000h: write/read; bank 11h is not
                            it; bank 10h again; bank 0 at 8000h is not writable
-  phase 7  SCC             bank 3Fh in 8000h: wave RAM 9800h write/read
+  phase 7  SCC             bank 3Fh in 8000h: wave RAM 9800h write/read; a write to
+                           9900h (the cartridge's pan) must not land in 9800h
   phase 8  OPM             status at 7Fh
   phase 0Fh done
 """
@@ -49,7 +51,7 @@ def phase(n): out(0x2E, n)
 b(0xF3); jp('start')
 pad(0x38)                                                # IM 1 handler
 rep_in(0xC0)
-wr(0x04, 0x78)                                           # mask everything: /INT off
+wr(0x04, 0x08)                                           # timers off, BUF RDY masked
 wr(0x04, 0x80)                                           # flag reset
 b(0xC9)
 pad(0x50); lab('wr')
@@ -71,8 +73,7 @@ rep_mem(0x4000); rep_mem(0x4001); rep_mem(0x4010); rep_mem(0x6010); rep_mem(0x80
 
 phase(2)
 rep_mem(0x7FFF)
-rep_in(0xC0)                                             # nobody there: FFh (Audio Card = None)
-out(0xA0, 0x10); rep_in(0xA2)                            # main PSG: R#16 does not exist
+rep_in(0xC0)                                             # the MSX-AUDIO waits for the enabler: FFh
 poke(0x7FFF, 0x87); rep_mem(0x7FFF)
 
 phase(3)
@@ -80,10 +81,13 @@ out(0xA0, 0x10); out(0xA1, 0x55)
 out(0xA0, 0x10); rep_in(0xA2)                            # the cartridge's SSG2 R#0
 out(0xA0, 0x00); out(0xA1, 0x12)
 out(0xA0, 0x00); rep_in(0xA2)                            # the main PSG's R#0
+poke(0x7FF0, 0x01); poke(0x7FF1, 0x0A)                   # the main PSG's R#1 through the slot
+out(0xA0, 0x01); rep_in(0xA2)
 
 phase(4)
 wr(0x04, 0x80); rep_in(0xC0)
-wr(0x02, 0xFF); wr(0x04, 0x01)                           # timer 1, 80 us, unmasked
+poke(0x7FF2, 0x02); poke(0x7FF3, 0xFF)                   # timer 1 value through the slot
+poke(0x7FF2, 0x04); poke(0x7FF3, 0x09)                   # start timer 1, BUF RDY masked
 b(0x06, 0x00); lab('d1'); djnz('d1')                     # ~0.9 ms at 3.58 MHz
 rep_in(0xC0)
 b(0xFB, 0x76)                                            # ei / halt
@@ -91,8 +95,8 @@ rep_in(0xC0)
 
 phase(5)
 def addr():
-    wr(0x09, 0x10); wr(0x0A, 0x80); wr(0x0B, 0x11); wr(0x0C, 0x80)
-wr(0x07, 0x01); wr(0x07, 0x60); wr(0x08, 0x00); addr()
+    wr(0x09, 0x10); wr(0x0A, 0x00); wr(0x0B, 0x11); wr(0x0C, 0x00)
+wr(0x07, 0x01); wr(0x07, 0x60); addr()
 b(0x1E, 0xA0); lab('w1')                                 # ld e,A0h
 b(0x06, 0x0F, 0x4B); call('wr')                          # ld b,0Fh / ld c,e
 b(0x1C, 0x7B, 0xFE, 0xA8); jrnz('w1')                    # inc e / ld a,e / cp A8h
@@ -115,6 +119,7 @@ poke(0x4FFE, 0x00); poke(0x8000, 0x77); rep_mem(0x8000)  # ROM bank: still 'A'
 phase(7)
 poke(0x4FFE, 0x3F)                                       # bank 2 = #63: SCC registers
 poke(0x9800, 0x12); poke(0x9801, 0x34)
+poke(0x9900, 0x77)
 rep_mem(0x9800); rep_mem(0x9801)
 
 phase(8)

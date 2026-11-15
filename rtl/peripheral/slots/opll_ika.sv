@@ -35,8 +35,8 @@ module opll
    input rst,
    input [7:0] din,
    input addr,
-   input [2:0] wr,    // [2] built-in (7C/7D), [1] slot B FM-PAC, [0] slot A FM-PAC
-   input [2:0] cs,    // same order: the device exists in this configuration
+   input [3:0] wr,    // [3] Y8960 Cartridge (7C/7D with its enabler, or its 7FF4/7FF5), [2] built-in (7C/7D), [1] slot B FM-PAC, [0] slot A FM-PAC
+   input [3:0] cs,    // same order: the device exists in this configuration
    output signed [15:0] sound
 );
 

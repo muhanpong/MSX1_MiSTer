@@ -315,15 +315,11 @@ module tb;
 
    //  ── SDRAM: the real controller over a behavioural chip ───────────────────
    wire        upload_active = upl_ce & upl_sdram_rq;
-   //  ch1: the loader, and behind it the Y8960 Cartridge's ADPCM RAM (as MSX1.sv)
-   wire [26:0] ch1_addr = upload_active ? upl_addr : y8960_sdram_addr;
-   wire  [7:0] ch1_din  = upload_active ? upl_din  : y8960_sdram_din;
-   wire        ch1_req  = upload_active ? 1'b1     : y8960_sdram_req;
-   wire        ch1_rnw  = upload_active ? 1'b0     : y8960_sdram_rnw;
+   wire [26:0] ch1_addr = upl_addr;
+   wire  [7:0] ch1_din  = upl_din;
+   wire        ch1_req  = upload_active;
+   wire        ch1_rnw  = 1'b0;
    wire  [7:0] ch1_dout;
-   assign y8960_sdram_dout  = ch1_dout;
-   assign y8960_sdram_ready = sdram_ready;
-   assign y8960_sdram_busy  = upload_active;
    wire        sdram_ready;
 
    wire  [7:0] sdram_dout, sdram_dout_c;
@@ -1495,7 +1491,9 @@ module tb;
 `endif
 `ifdef YPROBE
    //  -DYPROBE (sim/fullsys/yprobe/mkyprobe.py, through +kprobe=<hex>; slot A = a ROM
-   //  with the Y8960 mapper): the Y8960 Cartridge as the CPU sees it.  One result
+   //  with the Y8960 mapper; Audio Card = None, the cartridge forces MSX-AUDIO): the
+   //  Y8960 Cartridge and the machine's chips that stand in for its own, as the CPU
+   //  sees them.  One result
    //  byte per OUT (2Fh); the list and its masks are below.  Negative control: the
    //  same ROM with another mapper.
    int   yp_n = 0, yp_bad = 0; logic yp_done = 1'b0;
@@ -1506,20 +1504,20 @@ module tb;
    localparam int YP_N = 32;
    logic [7:0] yp_want [YP_N] = '{
       8'h41, 8'h42, 8'h00, 8'h01, 8'h02,              // 1 slot memory
-      8'h00, 8'hFF, 8'h00, 8'h87,                     // 2 enablers (A2h before: not checked)
-      8'h55, 8'h12,                                   // 3 SSG2 R#0, main PSG R#0
-      8'h00, 8'hC0, 8'hC0, 8'h00,                     // 4 OPL2 status: reset, timer 1, in the ISR, after
-      8'h00, 8'hA0, 8'hA1, 8'hA2, 8'hA3, 8'hA4, 8'hA5, 8'hA6, 8'hA7,   // 5 ADPCM RAM
+      8'h00, 8'hFF, 8'h87,                            // 2 enablers; C0h before the enabler
+      8'h55, 8'h12, 8'h0A,                            // 3 SSG2 R#0, main PSG R#0 (I/O), R#1 (7FF0h/7FF1h)
+      8'h06, 8'hC6, 8'hC6, 8'h06,                     // 4 MSX-AUDIO status: reset, timer 1, in the ISR, after
+      8'h10, 8'hA0, 8'hA1, 8'hA2, 8'hA3, 8'hA4, 8'hA5, 8'hA6, 8'hA7,   // 5 EOS, ADPCM RAM
       8'h5A, 8'hA5, 8'hFF, 8'h5A, 8'h41,              // 6 mapper RAM mode
       8'h12, 8'h34,                                   // 7 SCC wave RAM
       8'h00};                                         // 8 OPM status
    logic [7:0] yp_mask [YP_N] = '{
       8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF,
-      8'hFF, 8'hFF, 8'h00, 8'hFF,
-      8'hFF, 8'hFF,
-      8'hC0, 8'hC0, 8'hC0, 8'hC0,
-      8'h00, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF,   // status after the RAM write: not checked
-      8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF,                                //   (upstream's ADPCM does not raise EOS there; a Y8950 does)
+      8'hFF, 8'hFF, 8'hFF,
+      8'hFF, 8'hFF, 8'hFF,
+      8'hFF, 8'hFF, 8'hFF, 8'hFF,
+      8'h10, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF,
+      8'hFF, 8'hFF, 8'hFF, 8'hFF, 8'hFF,
       8'hFF, 8'hFF,
       8'h03};
    always @(posedge clk21m) begin

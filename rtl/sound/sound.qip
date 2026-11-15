@@ -56,4 +56,3 @@ set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) .
 # Y8960 Cartridge (github.com/hra1129/Y8960_Cartridge), imported by tools/y8960/import.py
 set_global_assignment -name QIP_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/y8960/y8960.qip]
 set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/y8960/y8960_cart.sv]
-set_global_assignment -name SYSTEMVERILOG_FILE [file join $::quartus(qip_path) ../peripheral/SOUND/y8960/y8960_mem.sv]

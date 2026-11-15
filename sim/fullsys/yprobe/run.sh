@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-#  YPROBE: the Y8960 Cartridge through the whole machine (slot memory, enablers, port
-#  overlap with the main PSG, OPL2 status and /INT, ADPCM RAM over SDRAM ch1, mapper
-#  RAM mode, SCC, OPM).
+#  YPROBE: the Y8960 Cartridge through the whole machine (slot memory, enablers, SSG2
+#  next to the main PSG, the PSG / MSX-AUDIO through 7FF0h-7FF3h, the forced MSX-AUDIO's
+#  status, /INT and ADPCM RAM, mapper RAM mode, the slot's SCC, OPM).
 #    y8960   slot A = stand-in BIOS, mapper Y8960 (27)    want PASS
 #    plain   the same ROM, mapper "none" (3)              want FAIL
 #  sim/fullsys/prep.sh first.   sim/fullsys/yprobe/run.sh [pack.MSX] [ms]   env: OUT=<dir>

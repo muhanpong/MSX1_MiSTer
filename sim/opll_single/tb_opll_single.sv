@@ -32,7 +32,9 @@ logic [2:0]  wr = 0, cs = 0;
 wire signed [15:0] s_ref, s_dut;
 
 opll_ref3 u_ref (.clk(clk), .cen(cen), .rst(rst), .din(din), .addr(addr), .wr(wr), .cs(cs), .sound(s_ref));
-opll      u_dut (.clk(clk), .cen(cen), .rst(rst), .din(din), .addr(addr), .wr(wr), .cs(cs), .sound(s_dut));
+//  the wrapper's fourth source (the Y8960 Cartridge's path) is not driven here; +sc=G does
+logic        wr3 = 0, cs3 = 0;
+opll      u_dut (.clk(clk), .cen(cen), .rst(rst), .din(din), .addr(addr), .wr({wr3, wr}), .cs({cs3, cs}), .sound(s_dut));
 
 //  One OPLL register write through the given strobe bits: address then data,
 //  each held for two 3.58 MHz periods, with the chip's own settling time after.

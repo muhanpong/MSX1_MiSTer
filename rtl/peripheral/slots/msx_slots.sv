@@ -92,23 +92,19 @@ module msx_slots
    output            [22:0] flash16x_prog_addr,
    output             [7:0] flash16x_prog_data,
    input                    midi_io_en,         // OSD "MIDI": I/O-only MSX-MIDI at E8h-EFh
-   //  Y8960 Cartridge (ROM mapper "Y8960"): stereo audio, interrupt, the I/O ports it
-   //  has claimed {timer B0h, OPM 7Eh, OPL2 C0h, OPLL 7Ch, SSG A0h}, and its ADPCM RAM
-   //  (rtl/peripheral/SOUND/y8960).
+   //  Y8960 Cartridge (ROM mapper "Y8960", rtl/peripheral/SOUND/y8960): its own chips'
+   //  audio (SSG2, OPM), interrupt, the I/O ports it has switched on {timer B0h,
+   //  OPM 7Eh, OPL2 C0h, OPLL 7Ch, SSG A0h}, and what the machine's chips need from it.
    output signed     [15:0] y8960_l,
    output signed     [15:0] y8960_r,
    output                   y8960_irq,
    output             [4:0] y8960_io_en,
    output                   y8960_dout_io,      // the cartridge answers the current I/O read
-   output            [26:0] y8960_base,
-   output                   y8960_base_valid,
-   output            [17:0] y8960_ya_addr,
-   output                   y8960_ya_valid,
-   output                   y8960_ya_write,
-   output             [7:0] y8960_ya_wdata,
-   input                    y8960_ya_ready,
-   input              [7:0] y8960_ya_rdata,
-   input                    y8960_ya_rdata_en
+   output                   y8960_present,      // a Y8960 is in a slot
+   output                   y8960_ssg_mio_wr,   // 7FF0h/7FF1h write: main PSG address / data
+   output                   y8960_opl2_mio_wr,  // 7FF2h/7FF3h write: MSX-AUDIO address / data
+   output             [7:0] y8960_vol_ssg,      // mixer volumes, 128 = x1 (also with no cartridge)
+   output             [7:0] y8960_vol_opl2
 );
 
 assign flash16x_prog_we   = mapper_ascii16x_prog_we | mapper_yamanooto_prog_we;
@@ -148,15 +144,24 @@ function automatic signed [9:0] vol_mul(input [3:0] v);
 endfunction
 
 // Mute is a separate control, not a ladder rung -- see the CONF_STR note in MSX1.sv.
-//  A Y8960 Cartridge with its OPLL ports on (7Ch/7Dh) takes the same writes and plays
-//  them with its own pan and voice bank registers: this OPLL's sound steps aside.
-wire signed [24:0] opll_scaled = (opll_mute | y8960_io_en[1]) ? 25'sd0 : $signed(sound_opll) * vol_mul(opll_vol);
-wire signed [24:0] scc_scaled  = $signed(scc_wave)   * vol_mul(scc_vol);
+//  The Y8960 Cartridge's mixer volumes (7FF7h SSG, 7FF8h OPLL, 7FFAh SCC, each times
+//  its master 7FFEh) act on the machine's chips, which play its SSG1, OPLL and SCC
+//  parts: OSD multiplier x volume / 128.  128 (no cartridge, or after reset) leaves
+//  the OSD multiplier as it is -- x128 >>> 7 is exact.
+wire [7:0] y8960_vol_opll, y8960_vol_scc;
+logic signed [9:0] opll_mul_q, scc_mul_q;
+always_ff @(posedge clk) begin
+   opll_mul_q <= 10'((vol_mul(opll_vol) * $signed({1'b0, y8960_vol_opll})) >>> 7);
+   scc_mul_q  <= 10'((vol_mul(scc_vol)  * $signed({1'b0, y8960_vol_scc}))  >>> 7);
+end
+wire signed [24:0] opll_scaled = opll_mute ? 25'sd0 : $signed(sound_opll) * opll_mul_q;
+wire signed [24:0] scc_scaled  = $signed(scc_wave)   * scc_mul_q;
+wire signed [24:0] cpsg_scaled = $signed(sound_psg)  * $signed({1'b0, y8960_vol_ssg});   // cartridge PSGs
 // 19 bits, not 18: worst case is 51966 + 51966 + 32767 = 136699, which overflows
 // an 18-bit signed sum and would wrap BEFORE the clamp could see it.
 wire signed [18:0] snd_sum     = 19'($signed(opll_scaled) >>> 7)
                                + 19'($signed(scc_scaled)  >>> 7)
-                               + 19'(sound_psg);
+                               + 19'($signed(cpsg_scaled) >>> 7);
 assign sound = (snd_sum > 19'sd32767)  ? 16'sh7FFF :
                (snd_sum < -19'sd32768) ? 16'sh8000 : 16'(snd_sum);
 assign debug_FDC_req = FDC_req;
@@ -661,12 +666,13 @@ cart_yamanooto yamanooto
 );
 
 // ---------------------------------------------------------------------------------
-// Y8960 Cartridge (github.com/hra1129/Y8960_Cartridge): SSG x2, OPLL, OPL2 + ADPCM,
-// SCC, OPM behind an SCC-style mapper with 128 KB BIOS ROM + 128 KB RAM.  One
-// instance; a ROM loaded with the "Y8960" mapper is its BIOS.  Held in reset while
-// no such cartridge is in a slot, so none of its I/O ports can be claimed then.
+// Y8960 Cartridge (github.com/hra1129/Y8960_Cartridge).  A ROM loaded with the
+// "Y8960" mapper is its BIOS.  The cartridge brings SSG2, the OPM, a timer and its
+// mapper; its SSG1, OPLL, OPL2 + ADPCM and SCC are the machine's PSG, OPLL, MSX-AUDIO
+// and the slot's SCC (y8960_cart.sv).  One instance, held in reset while no such
+// cartridge is in a slot.
 // ---------------------------------------------------------------------------------
-wire        y8960_present = |((cart_device[0] | cart_device[1]) & DEV_Y8960);
+assign      y8960_present = |((cart_device[0] | cart_device[1]) & DEV_Y8960);
 wire        y8960_cs      = mapper == MAPPER_Y8960;
 wire  [4:0] y8960_bank;
 wire        y8960_mem_cs, y8960_mem_writable;
@@ -674,6 +680,7 @@ wire  [7:0] y8960_cart_dout;
 wire        y8960_cart_dout_en;
 wire signed [23:0] y8960_al, y8960_ar;
 wire        y8960_en_ssg, y8960_en_opll, y8960_en_opl2, y8960_en_opm, y8960_en_timer;
+wire        y8960_scc_req, y8960_opll_mio_wr;
 
 y8960_cart y8960
 (
@@ -691,13 +698,14 @@ y8960_cart y8960
    .mem_bank(y8960_bank),
    .mem_cs(y8960_mem_cs),
    .mem_writable(y8960_mem_writable),
-   .ya_addr(y8960_ya_addr),
-   .ya_valid(y8960_ya_valid),
-   .ya_write(y8960_ya_write),
-   .ya_wdata(y8960_ya_wdata),
-   .ya_ready(y8960_ya_ready),
-   .ya_rdata(y8960_ya_rdata),
-   .ya_rdata_en(y8960_ya_rdata_en),
+   .scc_req(y8960_scc_req),
+   .ssg_mio_wr(y8960_ssg_mio_wr),
+   .opl2_mio_wr(y8960_opl2_mio_wr),
+   .opll_mio_wr(y8960_opll_mio_wr),
+   .vol_ssg(y8960_vol_ssg),
+   .vol_opll(y8960_vol_opll),
+   .vol_opl2(y8960_vol_opl2),
+   .vol_scc(y8960_vol_scc),
    .io_en_ssg(y8960_en_ssg),
    .io_en_opll(y8960_en_opll),
    .io_en_opl2(y8960_en_opl2),
@@ -710,7 +718,7 @@ y8960_cart y8960
 
 wire [26:0] mapper_y8960_addr    = {9'd0, y8960_bank, cpu_addr[12:0]};
 //  Outside 4000h-BFFFh, in the SCC register bank (#63), and wherever the cartridge
-//  itself answers the read (SCC registers, 7FFFh), the block is not on the bus.
+//  itself answers the read (7FFFh), the block is not on the bus.
 wire        mapper_y8960_unmaped = y8960_cs & cpu_mreq & (~y8960_mem_cs | y8960_cart_dout_en);
 wire  [7:0] y8960_dout           = y8960_cart_dout_en ? y8960_cart_dout : 8'hFF;
 assign      y8960_dout_io        = y8960_cart_dout_en & cpu_iorq;
@@ -726,20 +734,6 @@ always_ff @(posedge clk) begin
 end
 assign y8960_l = y8960_l_r;
 assign y8960_r = y8960_r_r;
-
-//  Where the cartridge's block is in the SDRAM (for its ADPCM RAM, y8960_mem.sv):
-//  taken at the first access, as the flash carts do.
-logic [26:0] y8960_base_r;
-logic        y8960_base_valid_r;
-always_ff @(posedge clk) begin
-   if (reset) y8960_base_valid_r <= 1'b0;
-   else if (y8960_cs & cpu_mreq) begin
-      y8960_base_r       <= base_ram;
-      y8960_base_valid_r <= 1'b1;
-   end
-end
-assign y8960_base       = y8960_base_r;
-assign y8960_base_valid = y8960_base_valid_r;
 
 wire [20:0] mapper_konami_scc_addr;
 wire        mapper_konami_scc_unmaped;
@@ -763,7 +757,7 @@ wire        [7:0] scc_sound_dout;
 wire signed [15:0] scc_wave;
 scc_sound scc_sound
 (
-   .cs(mapper_konami_scc_sccReq | mapper_mfrdsd1_sccReq | mapper_yamanooto_sccReq),  
+   .cs(mapper_konami_scc_sccReq | mapper_mfrdsd1_sccReq | mapper_yamanooto_sccReq | y8960_scc_req),
    .cpu_rd(cpu_rd),
    .cpu_wr(cpu_wr),
    .cpu_mreq(cpu_mreq),
@@ -848,7 +842,7 @@ wire fmpac_opll_win = (mapper == MAPPER_FMPAC) & cpu_mreq & cpu_addr[13:1] == 13
 localparam [9:0] OPLL_GAP_ADDR = 10'd72;    // 12 XIN * 6 clk21m
 localparam [9:0] OPLL_GAP_DATA = 10'd504;   // 84 XIN * 6 clk21m
 
-wire opll_win = opll_io_wr | (fmpac_opll_win & cpu_wr);   // any OPLL-bound write window
+wire opll_win = opll_io_wr | (fmpac_opll_win & cpu_wr) | y8960_opll_mio_wr;   // any OPLL-bound write window
 logic [9:0] opll_gap   = '0;
 logic       opll_grant = 1'b0;
 logic       opll_done  = 1'b0;   // chip-visible strobe has spanned a clk_en edge
@@ -875,7 +869,7 @@ end
 // sees exactly the ungated strobes.  The counter itself always runs, so a
 // mid-tune speed switch keeps the pacing history.
 wire opll_wr_gate = ~cpu_turbo | opll_grant;
-wire opll_wr_chip = (opll_io_wr | fmpac_opll_wr[0] | fmpac_opll_wr[1]) & opll_wr_gate;
+wire opll_wr_chip = (opll_io_wr | fmpac_opll_wr[0] | fmpac_opll_wr[1] | y8960_opll_mio_wr) & opll_wr_gate;
 assign opll_pace_n = ~(cpu_turbo & opll_win & ~(opll_grant & opll_done));
 
 wire signed [15:0] sound_OPL_int, sound_OPL_EXT[2];
@@ -887,8 +881,9 @@ opll opll
    .cen(clk_en),
    .din(cpu_dout),
    .addr(cpu_addr[0]),
-   .wr({3{opll_wr_gate}} & {opll_io_wr, (opll_io_wr & fmpac_opll_io_enable[1]) | fmpac_opll_wr[1] , (opll_io_wr & fmpac_opll_io_enable[0]) | fmpac_opll_wr[0]}),
-   .cs({|(msx_device & DEV_OPL3), |(cart_device[1] & DEV_OPL3), |(cart_device[0] & DEV_OPL3)}),
+   //  [3] the Y8960 Cartridge: 7Ch/7Dh while its OPLL enabler (7FF6h) is set, or its 7FF4h/7FF5h
+   .wr({4{opll_wr_gate}} & {(opll_io_wr & y8960_io_en[1]) | y8960_opll_mio_wr, opll_io_wr, (opll_io_wr & fmpac_opll_io_enable[1]) | fmpac_opll_wr[1] , (opll_io_wr & fmpac_opll_io_enable[0]) | fmpac_opll_wr[0]}),
+   .cs({y8960_present, |(msx_device & DEV_OPL3), |(cart_device[1] & DEV_OPL3), |(cart_device[0] & DEV_OPL3)}),
    .sound(sound_opll)
 );
 

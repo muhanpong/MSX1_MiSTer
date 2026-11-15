@@ -31,7 +31,7 @@ parameter DEV_MFRSD2         = dev_typ_t'(1 << 10);
 parameter DEV_FLASH          = dev_typ_t'(1 << 11);
 parameter DEV_PSG            = dev_typ_t'(1 << 12);
 parameter DEV_MUPACK_RAM     = dev_typ_t'(1 << 13);  // MU-PACK subslot 1: its own 256kB memory mapper
-parameter DEV_Y8960          = dev_typ_t'(1 << 14);  // Y8960 Cartridge: SSG x2, OPLL, OPL2+ADPCM, SCC, OPM
+parameter DEV_Y8960          = dev_typ_t'(1 << 14);  // Y8960 Cartridge: SSG2, OPM, timer, mapper; the other chips are the machine's
 
 package MSX;
     
