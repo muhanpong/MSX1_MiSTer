@@ -182,7 +182,8 @@ assign cart_conf[1].subslot_dev[3] = subB[3];
 // "this slot loads a ROM file": classic ROM type, or an expanded slot with a
 // ROM / SCC subslot.  Drives the Load / Mapper / SRAM entries.
 wire fileA_present = expanded_A ? fileA_used : typ_A == CART_TYP_ROM;
-wire fileB_present = expanded_B ? fileB_used : cart_conf[1].typ == CART_TYP_ROM | cart_conf[1].typ == CART_TYP_Y8960;
+// (SLOT B = Y8960 also takes a file, its BIOS, on a row of its own: menumask E, MSX1.sv.)
+wire fileB_present = expanded_B ? fileB_used : cart_conf[1].typ == CART_TYP_ROM;
 wire romA_present  = expanded_A ? romA_used  : typ_A == CART_TYP_ROM;
 wire romB_present  = expanded_B ? romB_used  : cart_conf[1].typ == CART_TYP_ROM;
 

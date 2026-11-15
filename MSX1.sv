@@ -365,6 +365,10 @@ localparam CONF_STR = {
    // and reachable in the DEFAULT configuration.  Slot B saving needs a firmware
    // answer, not a CONF_STR flag.
    "H8H4F4,ROM,Load,33000000;",        // slot-level copy; the sub-slot page has its own (msx_config.sv)
+   //  SLOT B = Y8960: the same file index, named for what it takes.  The BIOS is
+   //  optional (the chips work without it) and cannot ship with the core.  Shown
+   //  in place of the row above (never both), so the rows below do not move.
+   "hEF4,ROM,Load Y8960 BIOS ROM(opt),33000000;",
    CONF_STR_MAPPER_B,
    //  Disabled (D6), not hidden (H6), since 2026-10-05: with no SRAM the rows below
    //  stay in place, greyed, and Enter on them does nothing (Main_MiSTer menu.cpp:
@@ -660,7 +664,7 @@ assign status_menumask[8]  = slotB_classic_hide;
 assign status_menumask[11] = mapper_A_hide;        // 'B': no ROM sub-slot -> Mapper/SRAM entries hidden
 assign status_menumask[12] = mapper_B_hide;        // 'C'
 assign status_menumask[13] = pack_turbor;                  // 'D': the loaded pack is a turbo R (CPU page rows)
-assign status_menumask[14] = 1'b0;                         // 'E': free since 2026-09-28 (was: Force Z80 hides the R800 ladder)
+assign status_menumask[14] = status[31:29] == 3'd6 & ~status[72];  // 'E': SLOT B = Y8960 (not expanded) -> its BIOS row
 assign status_menumask[15] = mt32_avail_s;                 // 'F': an MT32-pi answers -> show its page
 //  Auto shows BOTH: the two ladders are independent knobs and in Auto both are live,
 //  each applying while its own core has the bus.
