@@ -5,7 +5,8 @@
 #
 #    sim/fullsys/run_preload.sh <old|tdm|tdm128> <pack.MSX> <ms> [roma.rom mapper] [fw.bin]
 #      tdm128: sdram_tdm in the 128 MB board map (two chips), sdram_size 3
-#      env: OUT=<dir>  V9968=1 (MSX_V9968 build)  MOONSOUND=1 (OSD MoonSound on)  EXTRA="+plusargs"  XDEFS="-D..."  VFLAGS="--threads 4"
+#      env: ROMB=<file> MAPB=<n> TYPA=<n> TYPB=<n> (slot B ROM, mapper, OSD slot types)
+#           OUT=<dir>  V9968=1 (MSX_V9968 build)  MOONSOUND=1 (OSD MoonSound on)  EXTRA="+plusargs"  XDEFS="-D..."  VFLAGS="--threads 4"
 #  Validated against a normal upload run: see docs/handoff_20261013b_tdm_boot.md 7.
 set -eu
 cd "$(dirname "$0")/../.."
@@ -24,6 +25,9 @@ SDSZ=2; [ "$MODE" = tdm128 ] && SDSZ=3
 A=("+pack=$PACK" +sdsz=$SDSZ +limit=4000000 "+dump=$OUT/pre")
 [ -n "$FW" ]   && A+=("+fw=$FW")
 [ -n "$ROMA" ] && A+=("+roma=$ROMA" "+mapa=$MAPA")
+[ -n "${ROMB:-}" ] && A+=("+romb=$ROMB" "+mapb=${MAPB:-0}")
+[ -n "${TYPA:-}" ] && A+=("+typa=$TYPA")
+[ -n "${TYPB:-}" ] && A+=("+typb=$TYPB")
 "$OUT/u/tbu" "${A[@]}" > "$OUT/upload.log" 2>&1
 grep -E "^dump:|FILL|UPLOAD32" "$OUT/upload.log" | tail -4
 #  2. the machine

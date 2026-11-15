@@ -858,7 +858,6 @@ assign rom_mapper = (selected_mapper == MAPPER_AUTO || promote_x16) ? detected_m
 // See docs/yamanooto_spec.md S6.
 assign rom_device = rom_mapper == MAPPER_KONAMI_SCC ? DEV_SCC                             :
                     rom_mapper == MAPPER_YAMANOOTO  ? (DEV_SCC2 | DEV_PSG | DEV_FLASH)    :
-                    rom_mapper == MAPPER_Y8960      ? (DEV_Y8960 | DEV_SCC)               :   // its SCC is the slot's SCC
                                                       DEV_NONE ;     
 
 
@@ -893,6 +892,10 @@ assign                                        {mapper             , mem_device  
    // DEV_MIDI_EXT is on BOTH rows: the ROM row is dropped when the FW pack has no
    // MU_PACK, and the MIDI must survive that -- MIDRY /I5 drives the 8251 through E2h
    // with no ROM at all.  The mapper row always loads (RAM, no firmware needed).
+   // Y8960 Cartridge (SLOT B entry 6): the slot's ROM file is its BIOS image (banks
+   // #0-15, padded to 256 KB for the RAM banks), mapper and devices fixed.  Its SCC is
+   // the slot's SCC.  No file -> the row is skipped like ROM's: an empty slot.
+   typ == CART_TYP_Y8960  & subslot == 2'd0 ? {MAPPER_Y8960       , DEVICE_NONE   , ROM_ROM            , 8'hAA , 8'h00 , 8'd0               , 8'd0    ,   DEV_Y8960 | DEV_SCC  } :
    typ == CART_TYP_MUPACK & subslot == 2'd1 ? {MAPPER_MUPACK      , DEVICE_NONE   , ROM_RAM            , 8'hAA , 8'h00 , 8'd0               , 8'd16   ,   DEV_MUPACK_RAM | DEV_MIDI_EXT } :
    typ == CART_TYP_MUPACK & subslot == 2'd2 ? {MAPPER_NONE        , DEVICE_NONE   , ROM_MUPACK         , 8'h08 , 8'h00 , 8'd0               , 8'd0    ,   DEV_MIDI_EXT         } :
    /*typ == CART_TYP_EMPTY*/                  {MAPPER_UNUSED      , DEVICE_NONE   , ROM_NONE           , 8'h00 , 8'h00 , 8'd0               , 8'd0    ,   DEV_NONE             } ;

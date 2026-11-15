@@ -2,8 +2,10 @@
 #  YPROBE: the Y8960 Cartridge through the whole machine (slot memory, enablers, SSG2
 #  next to the main PSG, the PSG / MSX-AUDIO through 7FF0h-7FF3h, the forced MSX-AUDIO's
 #  status, /INT and ADPCM RAM, mapper RAM mode, the slot's SCC, OPM).
-#    y8960   slot A = stand-in BIOS, mapper Y8960 (27)    want PASS
-#    plain   the same ROM, mapper "none" (3)              want FAIL
+#    y8960   slot A = stand-in BIOS, slot type Y8960 (9)          want PASS
+#    plain   the same ROM, slot type ROM, mapper "none" (3)      want FAIL
+#  (the OSD offers Y8960 on SLOT B only; the upload row is the same for both slots,
+#  and the probe code addresses slot 1.  sim/fullsys/ylog boots a real BIOS on B.)
 #  sim/fullsys/prep.sh first.   sim/fullsys/yprobe/run.sh [pack.MSX] [ms]   env: OUT=<dir>
 set -u
 cd "$(dirname "$0")/../../.."
@@ -12,10 +14,10 @@ MS=${2:-60}
 OUT=${OUT:-/tmp/yprobe}; mkdir -p "$OUT"
 python3 sim/fullsys/yprobe/mkyprobe.py > "$OUT/yprobe.hex"
 python3 sim/fullsys/yprobe/mkyprobe.py rom "$OUT/y8960bios.rom"
-run() { XDEFS="-DYPROBE" EXTRA="+kprobe=$OUT/yprobe.hex" OUT=$OUT/$1 \
-           sim/fullsys/run_preload.sh tdm128 "$PX" "$MS" "$OUT/y8960bios.rom" "$2" > "$OUT/$1.log" 2>&1; }
-run y8960 27 &
-run plain 3  &
+run() { TYPA=$2 XDEFS="-DYPROBE" EXTRA="+kprobe=$OUT/yprobe.hex" OUT=$OUT/$1 \
+           sim/fullsys/run_preload.sh tdm128 "$PX" "$MS" "$OUT/y8960bios.rom" "$3" > "$OUT/$1.log" 2>&1; }
+run y8960 9 0 &
+run plain 0 3 &
 wait
 ok=1
 for r in y8960:PASS plain:FAIL; do

@@ -10,6 +10,7 @@
 //
 //      +pack=<machine .MSX>  +fw=<fw pack>  +roma=<file> +romb=<file>
 //      +mapa=<n> +mapb=<n>   (selected mapper, mapper_typ_t value)
+//      +typa=<n> +typb=<n>   (OSD slot type, cart_typ_t value; default 0 = ROM, 9 = Y8960)
 //      +limit=<hex byte address, default 1800000 = 24 MB>
 //
 //  A full-size upload is ~25 MB of byte writes: far too slow for fullsys
@@ -185,6 +186,8 @@ module tb_upload32;
       for (int i = 0; i < 2; i++) cart_conf[i] = '{default:'0};
       if ($value$plusargs("mapa=%d", ma)) cart_conf[0].selected_mapper = mapper_typ_t'(ma);
       if ($value$plusargs("mapb=%d", mb)) cart_conf[1].selected_mapper = mapper_typ_t'(mb);
+      begin int ty; if ($value$plusargs("typa=%d", ty)) cart_conf[0].typ = cart_typ_t'(ty); end
+      begin int ty; if ($value$plusargs("typb=%d", ty)) cart_conf[1].typ = cart_typ_t'(ty); end
       if ($value$plusargs("limit=%h", lim)) limit = 27'(lim);
       begin int z; if ($value$plusargs("sdsz=%d", z)) sdram_size = 2'(z); end
       rd("pack", pack_n, 0); rd("fw", fw_n, 1); rd("roma", roma_n, 2); rd("romb", romb_n, 3);
