@@ -149,10 +149,15 @@ endfunction
 //  parts: OSD multiplier x volume / 128.  128 (no cartridge, or after reset) leaves
 //  the OSD multiplier as it is -- x128 >>> 7 is exact.
 wire [7:0] y8960_vol_opll, y8960_vol_scc;
-logic signed [9:0] opll_mul_q, scc_mul_q;
+//  The products are wires of their full width on purpose: inside a size cast the
+//  multiply is self-determined, i.e. 10 bits, and 128 x 128 came out as 0 (both chips
+//  silent in the first build of this).  sim/fullsys/yprobe reads these two registers.
+logic signed [9:0]  opll_mul_q, scc_mul_q;
+wire  signed [18:0] opll_mul_w = vol_mul(opll_vol) * $signed({1'b0, y8960_vol_opll});
+wire  signed [18:0] scc_mul_w  = vol_mul(scc_vol)  * $signed({1'b0, y8960_vol_scc});
 always_ff @(posedge clk) begin
-   opll_mul_q <= 10'((vol_mul(opll_vol) * $signed({1'b0, y8960_vol_opll})) >>> 7);
-   scc_mul_q  <= 10'((vol_mul(scc_vol)  * $signed({1'b0, y8960_vol_scc}))  >>> 7);
+   opll_mul_q <= opll_mul_w[16:7];
+   scc_mul_q  <= scc_mul_w[16:7];
 end
 wire signed [24:0] opll_scaled = opll_mute ? 25'sd0 : $signed(sound_opll) * opll_mul_q;
 wire signed [24:0] scc_scaled  = $signed(scc_wave)   * scc_mul_q;

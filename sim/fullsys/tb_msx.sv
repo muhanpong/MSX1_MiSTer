@@ -1496,11 +1496,14 @@ module tb;
    //  sees them.  One result
    //  byte per OUT (2Fh); the list and its masks are below.  Negative control: the
    //  same ROM with another mapper.
-   int   yp_n = 0, yp_bad = 0; logic yp_done = 1'b0;
+   int   yp_n = 0, yp_bad = 0, yp_vol = 0; logic yp_done = 1'b0;
    logic yp_q2e = 1'b0, yp_q2f = 1'b0;
    wire  yp_w2e = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n & (MSX.a[7:0] == 8'h2E);
    wire  yp_w2f = ~MSX.iorq_n & ~MSX.wr_n & MSX.m1_n & (MSX.a[7:0] == 8'h2F);
    wire [7:0] yp_d = MSX.d_from_cpu;
+   //  (hierarchical names cannot sit in an automatic initializer: wires)
+   wire signed [9:0] yp_om = MSX.msx_slots.opll_mul_q, yp_sm = MSX.msx_slots.scc_mul_q;
+   wire        [7:0] yp_pv = MSX.y8960_vol_ssg,        yp_cv = MSX.y8960_vol_opl2;
    localparam int YP_N = 32;
    logic [7:0] yp_want [YP_N] = '{
       8'h41, 8'h42, 8'h00, 8'h01, 8'h02,              // 1 slot memory
@@ -1531,9 +1534,20 @@ module tb;
       end
       if (yp_w2e & ~yp_q2e) begin
          $display("yprobe: phase %0d at %.3f ms", yp_d, $realtime / 1e6);
+         //  The cartridge's mixer volumes on the machine's chips.  OSD volumes are 0 dB
+         //  here (multiplier 128), so the registers read volume x master directly.
+         if (yp_d == 8'd9 || yp_d == 8'd10) begin
+            automatic int wo = (yp_d == 8'd9) ? 128 : 16, ws = (yp_d == 8'd9) ? 128 : 32;
+            automatic int wp = (yp_d == 8'd9) ? 128 : 32, wc = (yp_d == 8'd9) ? 128 : 8;
+            automatic bit ok = (int'(yp_om) == wo) && (int'(yp_sm) == ws) && (int'(yp_pv) == wp) && (int'(yp_cv) == wc);
+            $display("yprobe: volume multipliers OPLL %0d SCC %0d PSG %0d card %0d (want %0d %0d %0d %0d) %s",
+                     yp_om, yp_sm, yp_pv, yp_cv, wo, ws, wp, wc, ok ? "ok" : "BAD");
+            if (!ok) yp_bad++;
+            yp_vol++;
+         end
          if (yp_d == 8'h0F) begin
             yp_done = 1'b1;
-            $display("YPROBE RESULT %s (%0d bytes, %0d bad)", (yp_n == YP_N && yp_bad == 0) ? "PASS" : "FAIL", yp_n, yp_bad);
+            $display("YPROBE RESULT %s (%0d bytes, %0d volume checks, %0d bad)", (yp_n == YP_N && yp_vol == 2 && yp_bad == 0) ? "PASS" : "FAIL", yp_n, yp_vol, yp_bad);
             $finish;
          end
       end

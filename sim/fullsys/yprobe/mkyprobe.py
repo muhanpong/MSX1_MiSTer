@@ -20,6 +20,8 @@ tb_msx.sv holds the expected list.
   phase 7  SCC             bank 3Fh in 8000h: wave RAM 9800h write/read; a write to
                            9900h (the cartridge's pan) must not land in 9800h
   phase 8  OPM             status at 7Fh
+  phase 9  volumes         every multiplier of the machine's chips is x1
+  phase 10 volumes         7FF7h-7FFAh, 7FFEh written: the multipliers follow
   phase 0Fh done
 """
 import sys
@@ -124,6 +126,14 @@ rep_mem(0x9800); rep_mem(0x9801)
 
 phase(8)
 rep_in(0x7F)
+
+#  phases 9 and 10 carry no result byte: tb_msx.sv reads the volume multipliers of the
+#  machine's chips at each (all x1 before; after SSG 40h, OPLL 20h, OPL2 10h, SCC 40h,
+#  master 40h: 32, 16, 8, 32 of 128)
+phase(9)
+poke(0x7FF7, 0x40); poke(0x7FF8, 0x20); poke(0x7FF9, 0x10); poke(0x7FFA, 0x40); poke(0x7FFE, 0x40)
+phase(10)
+poke(0x7FF7, 0x80); poke(0x7FF8, 0x80); poke(0x7FF9, 0x80); poke(0x7FFA, 0x80); poke(0x7FFE, 0x80)
 phase(0x0F)
 lab('end'); b(0x18, 0xFE)
 for pos, n, k in fix:
