@@ -291,7 +291,9 @@ assign io_en_ssg   = en_ssg;
 assign io_en_opm   = en_opm;
 assign io_en_timer = en_timer;
 
-msx_timer u_msx_timer (
+//  The timer counts its clk, upstream the 42.95 MHz system clock (12 x 3.58 MHz).
+//  At ENABLE_DIV = 6 clk is half that: HALF_CLK keeps the periods (sim/y8960 measures).
+msx_timer #(.HALF_CLK(ENABLE_DIV == 6)) u_msx_timer (
    .clk(clk), .reset_n(reset_n),
    .bus_cs(bus_timer_cs), .bus_address(bus_address[1:0]), .bus_write(bus_write), .bus_valid(bus_valid),
    .bus_ready(bus_timer_ready), .bus_wdata(bus_wdata),

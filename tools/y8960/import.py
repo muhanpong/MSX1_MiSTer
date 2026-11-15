@@ -5,7 +5,7 @@ usage: import.py <upstream checkout> <core root>
 
 Copies the sources of the chips the core takes from the cartridge (KEEP below) into
 rtl/peripheral/SOUND/y8960/upstream/ and gives every module that also exists in
-this core a Y89_ prefix.
+this core a Y89_ prefix, and applies PATCHES (the MSX-TIMER clock).
 Nothing else is changed; re-run after pulling upstream.
 """
 import os, re, shutil, subprocess, sys
@@ -17,6 +17,26 @@ KEEP = ('src/ssg/', 'src/ikaopm/', 'src/ikaopm_patch/', 'src/mixer/', 'src/pan/'
         'src/y8960_address_decode/')
 SKIP = ()
 PREFIX = 'Y89_'
+
+# The one change to the upstream code.  The MSX-TIMER counts its clk, which upstream
+# is the cartridge's 42.95 MHz system clock; the core clocks it at 21.477 MHz.  With
+# HALF_CLK = 1 the counter steps by 2 from 1 (odd values only), so every count end
+# (low bits all ones) comes after half as many clocks: the same periods in time.
+# (file, old, new, expected count)
+PATCHES = (
+    ('timer/msx_timer_core.v', 'module msx_timer_core (',
+     'module msx_timer_core #( parameter HALF_CLK = 0 ) (   // core patch, tools/y8960/import.py', 1),
+    ('timer/msx_timer_core.v', '\treg\t\t[31:0]\tff_counter;\n',
+     '\treg\t\t[31:0]\tff_counter;\n'
+     '\tlocalparam [31:0] c_count_start = HALF_CLK ? 32\'d1 : 32\'d0;\t// core patch\n'
+     '\tlocalparam [31:0] c_count_step  = HALF_CLK ? 32\'d2 : 32\'d1;\t// core patch\n', 1),
+    ('timer/msx_timer_core.v', 'ff_counter\t<= 32\'d0;', 'ff_counter\t<= c_count_start;', 3),
+    ('timer/msx_timer_core.v', 'ff_counter + 32\'d1;', 'ff_counter + c_count_step;', 1),
+    ('timer/msx_timer.v', 'module msx_timer (',
+     'module msx_timer #( parameter HALF_CLK = 0 ) (   // core patch, tools/y8960/import.py', 1),
+    ('timer/msx_timer.v', 'msx_timer_core u_msx_timer_core',
+     'msx_timer_core #( .HALF_CLK( HALF_CLK ) ) u_msx_timer_core', 4),
+)
 
 def main():
     up, core = sys.argv[1], sys.argv[2]
@@ -50,6 +70,12 @@ def main():
     for f, t in texts.items():
         t2 = rename(t)
         rel = f[len('src/'):]
+        for pf, old, new, cnt in PATCHES:
+            if pf == rel:
+                got = t2.count(old)
+                if got != cnt:
+                    sys.exit('patch for %s: %r found %d times, want %d -- upstream changed' % (pf, old, got, cnt))
+                t2 = t2.replace(old, new)
         p = os.path.join(dst, rel)
         os.makedirs(os.path.dirname(p), exist_ok=True)
         open(p, 'w', encoding='utf-8', errors='surrogateescape').write(t2)
@@ -66,7 +92,9 @@ def main():
         u.write('# Y8960 Cartridge RTL\n\n'
                 'Source: https://github.com/hra1129/Y8960_Cartridge  \n'
                 'Commit: %s  \n'
-                'Imported by tools/y8960/import.py -- do not edit here.\n\n'
+                'Imported by tools/y8960/import.py -- do not edit here.  Patched there (PATCHES):\n'
+                'msx_timer / msx_timer_core take HALF_CLK (the core clocks the timer at half\n'
+                'the cartridge\'s 42.95 MHz).\n\n'
                 'Licences: see the header of each file and the LICENSE / README.txt in each\n'
                 'directory (IKAOPM: BSD 2-Clause; the remaining files: the terms in their\n'
                 'headers, (C) Takayuki Hara).\n\n'

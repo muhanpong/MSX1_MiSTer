@@ -29,6 +29,8 @@ module tb_y8960;
    // time unit of the stimulus: one chip clock (DIV clk cycles).  Bus cycles start
    // right after an enable pulse, so both clockings place them in the same chip clock.
    task automatic ticks(input int n); repeat (n * DIV) @(posedge clk); endtask
+   longint tclk = 0;
+   always @(posedge clk) tclk <= tclk + 1;
    int errors = 0;
    task automatic busw(input bit io, input [15:0] adr, input [7:0] dat);
       @(posedge clk); while (!dut.enable) @(posedge clk);
@@ -178,9 +180,35 @@ module tb_y8960;
       busw(0, 16'h4FFD, 8'h3F);
       strobe("SCC request, RAM mode bank 1 = 63", 16'h7800, 0, 1, 0);
 
+      // ---- MSX-TIMER period: counts the cartridge's 42.95 MHz system clock, i.e.
+      //  (compare + 1) * 1024 system clocks at resolution 0 = (N+1)*1024*DIV/12 clk here,
+      //  whatever clk the bench (or the core) runs at.  Measured between two /INT edges
+      //  in repeat mode, the flag cleared in between (B2h).
+      begin
+         longint t1, t2, want; int n = 5;
+         iow(8'hB0, 8'h00); iow(8'hB1, 8'h81);          // counter 0: irq on, reso 0, repeat
+         iow(8'hB0, 8'h01); iow(8'hB1, 8'(n));          // compare
+         iow(8'hB0, 8'h02); iow(8'hB1, 8'h03);          // clear + count
+         t1 = 0; t2 = 0;
+         fork
+            begin
+               @(posedge irq); t1 = tclk;
+               iow(8'hB2, 8'h01);
+               @(posedge irq); t2 = tclk;
+            end
+            begin ticks(20 * (n + 1) * 1024 / 12); end
+         join_any
+         disable fork;
+         iow(8'hB0, 8'h02); iow(8'hB1, 8'h00); iow(8'hB2, 8'h0F);
+         want = longint'(n + 1) * 1024 * DIV / 12;
+         if (t2 == 0 || t2 - t1 != want) begin
+            errors++; $display("FAIL timer period: %0d clk (want %0d)", t2 - t1, want);
+         end else $display("ok   timer period: %0d clk = %0d system clocks", t2 - t1, (t2 - t1) * 12 / DIV);
+      end
+
       if (nz_mix == 0) begin errors++; $display("FAIL mixer output stayed zero"); end
       $display("records %0d  mixer nonzero %0d  errors %0d", nrec, nz_mix, errors);
-      $display(errors == 0 ? "RESULT PASS" : "RESULT FAIL");
+      if (errors == 0) $display("RESULT PASS"); else $display("RESULT FAIL");   // a ternary of strings printed as a number
       $fclose(fo);
       $finish;
    end

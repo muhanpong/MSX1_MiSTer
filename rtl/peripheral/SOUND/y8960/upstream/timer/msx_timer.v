@@ -55,7 +55,7 @@
 //
 //-----------------------------------------------------------------------------
 
-module msx_timer (
+module msx_timer #( parameter HALF_CLK = 0 ) (   // core patch, tools/y8960/import.py
 	input			clk,
 	input			reset_n,
 	input			bus_cs,
@@ -257,7 +257,7 @@ module msx_timer (
 	assign w_register_valid2	= (ff_register_index[3:2] == 2'd2) ? ff_register_valid: 1'b0;
 	assign w_register_valid3	= (ff_register_index[3:2] == 2'd3) ? ff_register_valid: 1'b0;
 
-	msx_timer_core u_msx_timer_core0 (
+	msx_timer_core #( .HALF_CLK( HALF_CLK ) ) u_msx_timer_core0 (
 		.clk			( clk						),
 		.reset_n		( reset_n					),
 		.bus_address	( ff_register_index[1:0]	),
@@ -272,7 +272,7 @@ module msx_timer (
 		.intr			( w_intr0					)
 	);
 
-	msx_timer_core u_msx_timer_core1 (
+	msx_timer_core #( .HALF_CLK( HALF_CLK ) ) u_msx_timer_core1 (
 		.clk			( clk						),
 		.reset_n		( reset_n					),
 		.bus_address	( ff_register_index[1:0]	),
@@ -287,7 +287,7 @@ module msx_timer (
 		.intr			( w_intr1					)
 	);
 
-	msx_timer_core u_msx_timer_core2 (
+	msx_timer_core #( .HALF_CLK( HALF_CLK ) ) u_msx_timer_core2 (
 		.clk			( clk						),
 		.reset_n		( reset_n					),
 		.bus_address	( ff_register_index[1:0]	),
@@ -302,7 +302,7 @@ module msx_timer (
 		.intr			( w_intr2					)
 	);
 
-	msx_timer_core u_msx_timer_core3 (
+	msx_timer_core #( .HALF_CLK( HALF_CLK ) ) u_msx_timer_core3 (
 		.clk			( clk						),
 		.reset_n		( reset_n					),
 		.bus_address	( ff_register_index[1:0]	),

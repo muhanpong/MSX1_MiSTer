@@ -55,7 +55,7 @@
 //
 //-----------------------------------------------------------------------------
 
-module msx_timer_core (
+module msx_timer_core #( parameter HALF_CLK = 0 ) (   // core patch, tools/y8960/import.py
 	input			clk,			//	85.90908MHz
 	input			reset_n,
 	input	[1:0]	bus_address,
@@ -74,6 +74,8 @@ module msx_timer_core (
 	localparam		c_control_register		= 2'd2;
 
 	reg		[31:0]	ff_counter;
+	localparam [31:0] c_count_start = HALF_CLK ? 32'd1 : 32'd0;	// core patch
+	localparam [31:0] c_count_step  = HALF_CLK ? 32'd2 : 32'd1;	// core patch
 	reg		[2:0]	ff_reso;
 	reg		[7:0]	ff_count;
 	reg				ff_repeat;
@@ -153,24 +155,24 @@ module msx_timer_core (
 	// --------------------------------------------------------------------
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
-			ff_counter	<= 32'd0;
+			ff_counter	<= c_count_start;
 		end
 		else if( bus_valid && bus_write && (bus_address == c_control_register) && bus_wdata[1] ) begin
-			ff_counter	<= 32'd0;
+			ff_counter	<= c_count_start;
 		end
 		else if( !ff_count_enable ) begin
 			//	hold
 		end
 		else if( w_count_end ) begin
 			if( ff_repeat ) begin
-				ff_counter	<= 32'd0;
+				ff_counter	<= c_count_start;
 			end
 			else begin
 				//	hold
 			end
 		end
 		else begin
-			ff_counter	<= ff_counter + 32'd1;
+			ff_counter	<= ff_counter + c_count_step;
 		end
 	end
 
