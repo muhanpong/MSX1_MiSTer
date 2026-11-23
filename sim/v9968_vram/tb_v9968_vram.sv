@@ -52,6 +52,7 @@ module tb #(parameter int RELEASE_PH = 0);
         void'($value$plusargs("pollpad=%d", pollpad));
         void'($value$plusargs("ie1=%d", ie1)); void'($value$plusargs("disp=%d", disp)); void'($value$plusargs("ie1off=%d", ie1off)); void'($value$plusargs("fhoff=%d", fhoff));   // +fhoff=N: IE1 off, VBLANK IRQ handler reads S#1 first (Knightmare 224 v2)
         void'($value$plusargs("ie1line=%h", ie1line)); void'($value$plusargs("ie1r9=%h", ie1r9)); void'($value$plusargs("ie1dly=%d", ie1dly));
+        void'($value$plusargs("bank=%d", bank));
         void'($value$plusargs("mix=%d", mix)); void'($value$plusargs("mixrep=%d", mixrep)); void'($value$plusargs("iogap=%d", iogap));
         void'($value$plusargs("ovs=%d", ovs)); void'($value$plusargs("ovsln=%d", ovsln)); void'($value$plusargs("ovscmd=%d", ovscmd));   // +ovs=N trials of Shaolin's overscan + display-off + HMMV/HMMM; +ovsln=0 control (no LN=0); +ovscmd=HMMMs per trial   // +ie1line=D2 +ie1r9=80: ASO's second split (line 210, 212 lines); +ie1dly=clk_vdp from int_n to the S#1 read
         void'($value$plusargs("rpl=%s", rplf)); void'($value$plusargs("rplscale=%d", rplscale));   // +rplscale=P: event times x P/100 (R800 runs ~1.8x openMSX between I/O)   // +rpl=<file>: replay an oracle window (tools: aso_win.txt), paced, reads not forced   // +ie1=N: ASO 224's first in-game wait, line IRQ taken as int_n (no polling); +disp=1 control: display on   // +aso: extra clk_vdp per S#1 poll (moves the read phase against the line match)        // >0: ASO 224's per-frame line-IRQ loop for that many frames
@@ -64,7 +65,7 @@ module tb #(parameter int RELEASE_PH = 0);
     wire nCS, nWE, nRAS, nCAS, CKE, SCLK, DQML, DQMH;
     logic init = 1;
     wire v_go, v_req, v_we, v_grant, v_rvalid;
-    wire [15:0] v_addr; wire [31:0] v_wdata, v_rdata; wire [3:0] v_be, tdm_ph;
+    wire [19:0] v_addr; wire [31:0] v_wdata, v_rdata; wire [3:0] v_be, tdm_ph;
     wire [7:0] cd [4];
     sdram_tdm #(.CACHE_LINES(1024)) dut (
         .init(init), .clk(clk_sdram), .mode128(m128[0]), .mode64(1'b0), .v_en(1'b1),
@@ -91,7 +92,7 @@ module tb #(parameter int RELEASE_PH = 0);
 
     //  ── link + V9968 ──────────────────────────────────────────────────────
     wire        vdp_reset_n;
-    wire [17:2] vram_address; wire vram_write, vram_valid, vram_rdata_en;
+    wire [21:2] vram_address; wire vram_write, vram_valid, vram_rdata_en;
     wire [31:0] vram_wdata, vram_rdata; wire [3:0] vram_wdata_mask;
     wire [15:0] mon_drop, mon_mis;
     v9968_link #(.RELEASE_PH(RELEASE_PH)) link (
@@ -107,6 +108,7 @@ module tb #(parameter int RELEASE_PH = 0);
     logic [2:0] bus_address = 0; logic bus_ioreq = 0, bus_write = 0, bus_valid = 0;
     logic [7:0] bus_wdata = 0; wire bus_ready, bus_rdata_en; wire [7:0] bus_rdata;
     string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1, lr_sx = -1, lr_sy = 0, lr_vx = 0, lr_vy = 0, aso = 0, pollpad = 0, ie1 = 0, disp = 0, ie1off = 0, fhoff = 0, ie1line = 'h68, ie1r9 = 'h00, ie1dly = 400, ovs = 0, ovsln = 1, ovscmd = 64;
+    int bank = 0;                          // +bank=1: the 4 MB VRAM banks (R#28) through the whole V path
     int mix = 0, mixrep = 1, iogap = 40;   // +mix=N: N bytes to 98h (10000h) while the command runs; +iogap: clk_vdp after each OUT
     string rplf = ""; int rplscale = 100;
     int scan = 0, sp3 = 0, demo = 0, r1 = 0, r20 = 8'h1F, r21 = 8'h3A, r25 = 3, r8 = 8;
@@ -210,8 +212,10 @@ module tb #(parameter int RELEASE_PH = 0);
         end
     end
     //  ── VRAM port checker (clk_vdp) ───────────────────────────────────────
-    logic [7:0] shadow [0:262143];
-    bit         known  [0:262143];
+    //  4 MB (16 banks), on every board map (the 32 MB map's upper 2 MB is on bank 3 rows 01)
+    logic [7:0] shadow [0:4194303];
+    bit         known  [0:4194303];
+    function automatic int sh(input int a); return a; endfunction
     longint kv = 0;                               // clk_vdp edge count
     longint q_k[$]; int q_a[$];
     int nrd = 0, nwr = 0, nbyte_cmp = 0, bad_lat = 0, bad_data = 0, bad_order = 0, noans = 0;
@@ -238,11 +242,11 @@ module tb #(parameter int RELEASE_PH = 0);
                         if (bad_lat <= 5) $display("TB ERR t=%0t read %05h answered %0d clk_vdp after its request (want 8)", $time, a*4, d);
                     end
                     for (int b = 0; b < 4; b++)
-                        if (known[a*4+b]) begin
+                        if (known[sh(a*4+b)]) begin
                             nbyte_cmp++;
-                            if (vram_rdata[b*8 +: 8] !== shadow[a*4+b]) begin
+                            if (vram_rdata[b*8 +: 8] !== shadow[sh(a*4+b)]) begin
                                 bad_data++;
-                                if (bad_data <= 5) $display("TB ERR t=%0t read %05h byte %0d = %02h, written %02h", $time, a*4, b, vram_rdata[b*8 +: 8], shadow[a*4+b]);
+                                if (bad_data <= 5) $display("TB ERR t=%0t read %06h byte %0d = %02h, written %02h", $time, a*4, b, vram_rdata[b*8 +: 8], shadow[sh(a*4+b)]);
                             end
                         end
                 end
@@ -252,8 +256,8 @@ module tb #(parameter int RELEASE_PH = 0);
                     nwr++;
                     for (int b = 0; b < 4; b++)
                         if (!vram_wdata_mask[b]) begin
-                            shadow[{vram_address, 2'b00} + b] = vram_wdata[b*8 +: 8];
-                            known [{vram_address, 2'b00} + b] = 1;
+                            shadow[sh({vram_address, 2'b00} + b)] = vram_wdata[b*8 +: 8];
+                            known [sh({vram_address, 2'b00} + b)] = 1;
                         end
                 end else begin
                     nrd++; q_k.push_back(kv); q_a.push_back(int'(vram_address));
@@ -343,6 +347,35 @@ module tb #(parameter int RELEASE_PH = 0);
         repeat (2000) @(posedge clk_vdp);
         //  SCREEN 5, 212 lines, display on, sprites on, name table 0, sprite tables at 7600h/7A00h
         wreg(0, scr == 8 ? 8'h0E : scr == 7 ? 8'h0A : 8'h06); wreg(1, 8'h60); wreg(2, 8'h1F); wreg(5, 8'hEF); wreg(11, 8'h00);
+        //  +bank=1: R#28 (CPU bank) through the link and sdram_tdm.  Banks 0, 1, 9, 15 get a
+        //  4-byte pattern each at 01230h, then each is read back; all four distinct on every
+        //  board map (banks 8-15 = the upper 2 MB: bank 3 rows 01 on a 32 MB board).
+        //  Negative control: +bank=2 leaves the bank at 0 for the reads (must FAIL).
+        if (bank > 0) begin
+            automatic int bad = 0;
+            automatic int banks [4] = '{0, 1, 9, 15};
+            io(1, 3'd4, 8'h00, q);             // Port#4: LockExtReg = 0
+            wreg(21, 8'h00);                   // V58 = 0: extended mode
+            foreach (banks[i]) begin
+                wreg(28, 8'(banks[i])); set_addr(17'h01230, 1);
+                for (int k = 0; k < 4; k++) io(1, 3'd0, 8'(banks[i] * 16 + k + 1), q);
+            end
+            foreach (banks[i]) begin
+                automatic int src = banks[i];
+                wreg(28, bank == 2 ? 8'd0 : 8'(banks[i])); set_addr(17'h01230, 0);
+                for (int k = 0; k < 4; k++) begin
+                    io(0, 3'd0, 8'h00, q);
+                    if (q !== 8'(src * 16 + k + 1)) begin
+                        $display("BANKBAD bank %0d byte %0d exp %02h got %02h", banks[i], k, 8'(src * 16 + k + 1), q);
+                        bad++;
+                    end
+                end
+            end
+            //  (no string ternaries in $display: Verilator prints them as numbers)
+            $display("BANK m128=%0d: %0d bad of 16 (banks 0 1 9 15)", m128, bad);
+            if (bad == 0) $display("BANK RESULT PASS"); else $display("BANK RESULT FAIL");
+            $finish;
+        end
         wreg(6, 8'h0F); wreg(8, 8'h08); wreg(9, 8'h80);
         $display("TB t=%0t registers written", $time);
         //  write nbytes through port 98h from 0, then read them back

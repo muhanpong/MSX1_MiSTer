@@ -132,8 +132,6 @@ module vdp_timing_control_ssg (
 	reg					ff_sprite_overmap_v_active;
 	wire				w_intr_line_timing;
 	wire				w_intr_frame_timing;
-	reg			[2:0]	ff_horizontal_offset_l;
-	reg			[8:3]	ff_horizontal_offset_h;
 	reg					ff_vram_refresh;
 	reg			[3:0]	ff_blink_counter;
 	reg			[3:0]	ff_blink_base;				//	10 frame counter
@@ -147,26 +145,16 @@ module vdp_timing_control_ssg (
 	reg					ff_vsync;
 	reg					ff_clear_line_interrupt;
 	reg					ff_intr_line;
-
 	assign w_half_line_shift	= ff_field & (reg_interlace_mode | reg_flat_interlace_mode);
 
 	// --------------------------------------------------------------------
-	//	Latch horizontal scroll register
+	//	Horizontal scroll registers
+	//		R#26/R#27 are not latched; the register values are used directly.
+	//		BG VRAM fetch timing is fixed, so R#26 takes effect from the next fetch
+	//		and R#27 (output delay) from the current output, like V9958.
 	// --------------------------------------------------------------------
-	always @( posedge clk ) begin
-		if( !reset_n ) begin
-			ff_horizontal_offset_l <= 3'd0;
-			ff_horizontal_offset_h <= 6'd0;
-		end
-		else if( (w_screen_pos_x[13:4] - { 7'd0, reg_horizontal_offset_l }) == 10'h3FF &&
-				  w_screen_pos_x[3:0] == 4'hF ) begin
-			ff_horizontal_offset_l <= reg_horizontal_offset_l;
-			ff_horizontal_offset_h <= reg_horizontal_offset_h;
-		end
-	end
-
-	assign horizontal_offset_l	= ff_horizontal_offset_l;
-	assign horizontal_offset_h	= ff_horizontal_offset_h;
+	assign horizontal_offset_l	= reg_horizontal_offset_l;
+	assign horizontal_offset_h	= reg_horizontal_offset_h;
 
 	// --------------------------------------------------------------------
 	//	Horizontal Counter
@@ -348,7 +336,7 @@ module vdp_timing_control_ssg (
 	assign w_screen_pos_x		= { 1'b0, ff_half_count   } - c_left_pos;
 	assign w_screen_pos_y		= { 1'b0, ff_v_count_clone[9:1] } - ff_top_line + { 6'd0, ~reg_display_adjust[7], reg_display_adjust[6:4] };
 
-	assign w_pixel_pos_x		= w_screen_pos_x[12:4] + { ff_horizontal_offset_h, 3'd0 };
+	assign w_pixel_pos_x		= w_screen_pos_x[12:4] + { reg_horizontal_offset_h, 3'd0 };
 	assign w_pixel_pos_y		= w_screen_pos_y[ 7:0] + reg_vertical_offset;
 
 	// --------------------------------------------------------------------

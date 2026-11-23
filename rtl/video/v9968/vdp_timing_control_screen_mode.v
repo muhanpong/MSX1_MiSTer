@@ -73,6 +73,7 @@ module vdp_timing_control_screen_mode (
 
 	output		[7:0]	display_color,
 	output				display_color_en,
+	output				display_color_border,
 	output				sprite_off,
 	input				interleaving_page,
 	input				blink,
@@ -162,7 +163,10 @@ module vdp_timing_control_screen_mode (
 	//	Display color
 	reg			[7:0]	ff_display_color;
 	reg					ff_display_color_en;
+	reg					ff_display_color_border;
 	wire		[7:0]	w_backdrop_color;
+	wire		[3:0]	w_text_fg2;
+	wire		[3:0]	w_text_fg3;
 	reg			[7:0]	ff_pattern0;
 	reg			[7:0]	ff_pattern1;
 	reg			[7:0]	ff_pattern2;
@@ -178,6 +182,21 @@ module vdp_timing_control_screen_mode (
 	reg					ff_vram_interleave;
 	wire				w_left_mask;
 	reg			[9:0]	ff_left_mask_pos;
+	//	R#27 output delay
+	wire		[9:0]	w_shift_pos_x;
+	wire		[9:0]	w_bg_start_pos;
+	wire				w_h_blank;
+	wire				w_r27_mask;
+	wire				w_dot_r27_mask;
+	reg					ff_dot_r27_mask;
+	wire				w_first_half;
+	wire		[7:0]	w_out_pattern;
+	wire		[7:0]	w_out_now;
+	wire		[7:0]	w_out_delayed;
+	wire		[7:0]	w_out_color;
+	reg					ff_pattern_valid;		//	ff_pattern0 holds data of the active area
+	reg			[7:0]	ff_bg_delay [0:13];		//	half-dot steps, R#27 = 1..7 uses index 1..13
+	integer				i;
 
 	// --------------------------------------------------------------------
 	//	Screen mode decoder
@@ -222,12 +241,15 @@ module vdp_timing_control_screen_mode (
 	// --------------------------------------------------------------------
 	//	Screen Position for active area
 	// --------------------------------------------------------------------
+	//	VRAM の読み出しタイミングは R#27 に関係なく固定 (R#27=0 と同じ)。
+	//	R#27 は背景色の出力を遅らせることで実現する (Output pixel 参照)。
 	assign w_sub_phase			= screen_pos_x[3:0];
-	assign w_scroll_pos_x		= screen_pos_x[13:4]              - { 7'd0, horizontal_offset_l };
-	assign w_pos_x				= { pixel_pos_x[8], pixel_pos_x } - { 7'd0, horizontal_offset_l };
+	assign w_scroll_pos_x		= screen_pos_x[13:4];
+	assign w_pos_x				= { pixel_pos_x[8], pixel_pos_x };
 	assign w_scroll_page		= ( reg_scroll_planes && reg_pattern_name_table_base[15] ) ? w_pos_x[8]: reg_pattern_name_table_base[15];
 	assign w_blink_page			= w_scroll_page & interleaving_page;
-	assign pixel_phase_x		= w_scroll_pos_x[1:0];
+	assign w_shift_pos_x		= screen_pos_x[13:4] - { 7'd0, horizontal_offset_l };
+	assign pixel_phase_x		= w_shift_pos_x[1:0];
 
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
@@ -603,8 +625,14 @@ module vdp_timing_control_screen_mode (
 	// --------------------------------------------------------------------
 	assign w_backdrop_color	= ( ff_mode[c_g7] ) ? reg_backdrop_color: { reg_backdrop_color[3:0], reg_backdrop_color[3:0] };
 
+	//	TEXT1/2: foreground colour 0 is transparent, so the character's own background colour shows
+	//	(R#7 for normal characters, R#12 for the blink area). Background colour 0 stays palette 0.
+	assign w_text_fg2		= ( ff_next_vram2[7:4] == 4'd0 ) ? ff_next_vram2[3:0]: ff_next_vram2[7:4];
+	assign w_text_fg3		= ( ff_next_vram3[7:4] == 4'd0 ) ? ff_next_vram3[3:0]: ff_next_vram3[7:4];
+
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
+			ff_pattern_valid <= 1'b0;
 			ff_pattern0 <= 8'd0;
 			ff_pattern1 <= 8'd0;
 			ff_pattern2 <= 8'd0;
@@ -616,6 +644,7 @@ module vdp_timing_control_screen_mode (
 		end
 		else if( w_sub_phase == 4'd11 ) begin
 			if( !w_screen_in_active ) begin
+				ff_pattern_valid <= 1'b0;
 				ff_pattern0 <= w_backdrop_color;
 				ff_pattern1 <= w_backdrop_color;
 				ff_pattern2 <= w_backdrop_color;
@@ -626,8 +655,9 @@ module vdp_timing_control_screen_mode (
 				ff_pattern7 <= w_backdrop_color;
 			end
 			else if( ff_phase == 3'd5 ) begin
-				if( ff_mode[c_g1] || ff_mode[c_g2] || ff_mode[c_g3] || ff_mode[c_t1] ) begin
-					//	SCREEN 1, 2, 4, 0(W40) bit pattern --> color code
+				ff_pattern_valid <= 1'b1;
+				if( ff_mode[c_g1] || ff_mode[c_g2] || ff_mode[c_g3] ) begin
+					//	SCREEN 1, 2, 4 bit pattern --> color code
 					ff_pattern0 <= ff_next_vram1[7] ? { 4'd0, ff_next_vram2[ 7: 4] }: { 4'd0, ff_next_vram2[ 3: 0] };
 					ff_pattern1 <= ff_next_vram1[6] ? { 4'd0, ff_next_vram2[ 7: 4] }: { 4'd0, ff_next_vram2[ 3: 0] };
 					ff_pattern2 <= ff_next_vram1[5] ? { 4'd0, ff_next_vram2[ 7: 4] }: { 4'd0, ff_next_vram2[ 3: 0] };
@@ -637,14 +667,25 @@ module vdp_timing_control_screen_mode (
 					ff_pattern6 <= ff_next_vram1[1] ? { 4'd0, ff_next_vram2[ 7: 4] }: { 4'd0, ff_next_vram2[ 3: 0] };
 					ff_pattern7 <= ff_next_vram1[0] ? { 4'd0, ff_next_vram2[ 7: 4] }: { 4'd0, ff_next_vram2[ 3: 0] };
 				end
+				else if( ff_mode[c_t1] ) begin
+					//	SCREEN 0(W40) bit pattern --> color code
+					ff_pattern0 <= ff_next_vram1[7] ? { 4'd0, w_text_fg2 }: { 4'd0, ff_next_vram2[ 3: 0] };
+					ff_pattern1 <= ff_next_vram1[6] ? { 4'd0, w_text_fg2 }: { 4'd0, ff_next_vram2[ 3: 0] };
+					ff_pattern2 <= ff_next_vram1[5] ? { 4'd0, w_text_fg2 }: { 4'd0, ff_next_vram2[ 3: 0] };
+					ff_pattern3 <= ff_next_vram1[4] ? { 4'd0, w_text_fg2 }: { 4'd0, ff_next_vram2[ 3: 0] };
+					ff_pattern4 <= ff_next_vram1[3] ? { 4'd0, w_text_fg2 }: { 4'd0, ff_next_vram2[ 3: 0] };
+					ff_pattern5 <= ff_next_vram1[2] ? { 4'd0, w_text_fg2 }: { 4'd0, ff_next_vram2[ 3: 0] };
+					ff_pattern6 <= ff_next_vram1[1] ? { 4'd0, w_text_fg2 }: { 4'd0, ff_next_vram2[ 3: 0] };
+					ff_pattern7 <= ff_next_vram1[0] ? { 4'd0, w_text_fg2 }: { 4'd0, ff_next_vram2[ 3: 0] };
+				end
 				else if( ff_mode[c_t2] ) begin
 					//	SCREEN 0(W80) bit pattern --> color code
-					ff_pattern0 <= { ff_next_vram1[7] ? { ff_next_vram2[ 7: 4] }: { ff_next_vram2[ 3: 0] }, ff_next_vram1[6] ? { ff_next_vram2[ 7: 4] }: { ff_next_vram2[ 3: 0] } };
-					ff_pattern1 <= { ff_next_vram1[5] ? { ff_next_vram2[ 7: 4] }: { ff_next_vram2[ 3: 0] }, ff_next_vram1[4] ? { ff_next_vram2[ 7: 4] }: { ff_next_vram2[ 3: 0] } };
-					ff_pattern2 <= { ff_next_vram1[3] ? { ff_next_vram2[ 7: 4] }: { ff_next_vram2[ 3: 0] }, ff_next_vram1[2] ? { ff_next_vram2[ 7: 4] }: { ff_next_vram2[ 3: 0] } };
-					ff_pattern3 <= { ff_next_vram5[7] ? { ff_next_vram3[ 7: 4] }: { ff_next_vram3[ 3: 0] }, ff_next_vram5[6] ? { ff_next_vram3[ 7: 4] }: { ff_next_vram3[ 3: 0] } };
-					ff_pattern4 <= { ff_next_vram5[5] ? { ff_next_vram3[ 7: 4] }: { ff_next_vram3[ 3: 0] }, ff_next_vram5[4] ? { ff_next_vram3[ 7: 4] }: { ff_next_vram3[ 3: 0] } };
-					ff_pattern5 <= { ff_next_vram5[3] ? { ff_next_vram3[ 7: 4] }: { ff_next_vram3[ 3: 0] }, ff_next_vram5[2] ? { ff_next_vram3[ 7: 4] }: { ff_next_vram3[ 3: 0] } };
+					ff_pattern0 <= { ff_next_vram1[7] ? w_text_fg2: { ff_next_vram2[ 3: 0] }, ff_next_vram1[6] ? w_text_fg2: { ff_next_vram2[ 3: 0] } };
+					ff_pattern1 <= { ff_next_vram1[5] ? w_text_fg2: { ff_next_vram2[ 3: 0] }, ff_next_vram1[4] ? w_text_fg2: { ff_next_vram2[ 3: 0] } };
+					ff_pattern2 <= { ff_next_vram1[3] ? w_text_fg2: { ff_next_vram2[ 3: 0] }, ff_next_vram1[2] ? w_text_fg2: { ff_next_vram2[ 3: 0] } };
+					ff_pattern3 <= { ff_next_vram5[7] ? w_text_fg3: { ff_next_vram3[ 3: 0] }, ff_next_vram5[6] ? w_text_fg3: { ff_next_vram3[ 3: 0] } };
+					ff_pattern4 <= { ff_next_vram5[5] ? w_text_fg3: { ff_next_vram3[ 3: 0] }, ff_next_vram5[4] ? w_text_fg3: { ff_next_vram3[ 3: 0] } };
+					ff_pattern5 <= { ff_next_vram5[3] ? w_text_fg3: { ff_next_vram3[ 3: 0] }, ff_next_vram5[2] ? w_text_fg3: { ff_next_vram3[ 3: 0] } };
 					ff_pattern6 <= w_backdrop_color;
 					ff_pattern7 <= w_backdrop_color;
 				end
@@ -684,34 +725,71 @@ module vdp_timing_control_screen_mode (
 
 	// --------------------------------------------------------------------
 	//	Output pixel
+	//		R#27 delays the background output by 0..7 dots (half-dot steps so
+	//		512-dot modes work too). Display range and MSK are not delayed.
+	//		The background dot d is output at X = d + w_bg_start_pos (sub phase 15).
 	// --------------------------------------------------------------------
+	function [7:0] func_out_color(
+		input	[7:0]	pattern,
+		input			first_half,
+		input			hires,
+		input			g5
+	);
+		if( hires ) begin
+			func_out_color = first_half ? { 4'd0, pattern[3:0] }: { 4'd0, pattern[7:4] };
+		end
+		else if( g5 ) begin
+			func_out_color = first_half ? { 6'd0, pattern[1:0] }: { 6'd0, pattern[3:2] };
+		end
+		else begin
+			func_out_color = pattern;
+		end
+	endfunction
+
 	assign w_left_mask		= (!reg_left_mask || (screen_pos_x[13:4] >= ff_left_mask_pos));
+	assign w_bg_start_pos	= ff_left_mask_pos - 10'd8;
+	//	H blanking: fill the delay buffer with the backdrop color
+	assign w_h_blank		= screen_pos_x[13] || (screen_pos_x[13:4] >= 10'd264);
+	//	Left part pushed out by R#27 is explicitly masked with the backdrop color.
+	//	Like MSK, it also clears display_color_en so sprites are hidden there (as on V9958).
+	//	The right end is fixed, so sprites stay visible up to the right edge.
+	assign w_r27_mask		= !screen_pos_x[13] && (screen_pos_x[13:4] >= w_bg_start_pos) && (screen_pos_x[13:4] < (w_bg_start_pos + { 7'd0, horizontal_offset_l }));
+	assign w_first_half		= (w_sub_phase == 4'd7);
+	assign w_out_pattern	= w_h_blank ? w_backdrop_color: ff_pattern0;
+	assign w_out_now		= func_out_color( w_out_pattern, w_first_half, ff_mode[c_t2] || ff_mode[c_g6], ff_mode[c_g5] );
+	assign w_out_delayed	= ( horizontal_offset_l == 3'd0 ) ? w_out_now: ff_bg_delay[ { horizontal_offset_l, 1'b0 } - 4'd1 ];
+	//	The right end of the display range is not delayed either: once the undelayed
+	//	pattern becomes inactive, the delayed output is replaced with the backdrop color.
+	//	In 512-dot modes the right half of dot c is output at sub phase 7 of X=c+1,
+	//	so it reuses the R#27 mask judged for dot c at sub phase 15.
+	assign w_dot_r27_mask	= w_first_half ? ff_dot_r27_mask: w_r27_mask;
+	assign w_out_color		= ( w_dot_r27_mask || !ff_pattern_valid ) ? func_out_color( w_backdrop_color, w_first_half, ff_mode[c_t2] || ff_mode[c_g6], ff_mode[c_g5] ): w_out_delayed;
+
+	always @( posedge clk ) begin
+		if( w_sub_phase == 4'd7 || w_sub_phase == 4'd15 ) begin
+			ff_bg_delay[0] <= w_out_now;
+			for( i = 1; i < 14; i = i + 1 ) begin
+				ff_bg_delay[i] <= ff_bg_delay[i - 1];
+			end
+		end
+	end
 
 	always @( posedge clk ) begin
 		if( w_sub_phase == 4'd7 ) begin
-			if( ff_mode[c_t2] || ff_mode[c_g6] ) begin
-				ff_display_color <= { 4'd0, ff_pattern0[3:0] };
-				ff_display_color_en	= reg_display_on & w_left_mask;
-			end
-			else if( ff_mode[c_g5] ) begin
-				ff_display_color <= { 4'd0, ff_pattern0[1:0] };
-				ff_display_color_en	= reg_display_on & w_left_mask;
+			if( ff_mode[c_t2] || ff_mode[c_g6] || ff_mode[c_g5] ) begin
+				//	Right half of the same dot: ff_display_color_en keeps the value judged at sub phase 15.
+				ff_display_color <= w_out_color;
 			end
 			else begin
 				//	hold
 			end
 		end
 		else if( w_sub_phase == 4'd15 ) begin
-			if( ff_mode[c_t2] || ff_mode[c_g6] ) begin
-				ff_display_color <= { 4'd0, ff_pattern0[7:4] };
-			end
-			else if( ff_mode[c_g5] ) begin
-				ff_display_color <= { 4'd0, ff_pattern0[3:2] };
-			end
-			else begin
-				ff_display_color <= ff_pattern0;
-			end
-			ff_display_color_en	= reg_display_on & w_left_mask;
+			ff_display_color <= w_out_color;
+			ff_display_color_en	= reg_display_on & w_left_mask & !w_r27_mask;
+			ff_dot_r27_mask		<= w_r27_mask;
+			//	Border pixel (R#7 output as display_color). YJK modes need this to select the palette backdrop.
+			ff_display_color_border	<= !ff_pattern_valid;
 		end
 		else begin
 			//	hold
@@ -721,4 +799,5 @@ module vdp_timing_control_screen_mode (
 	//	phase 6 のタイミングが 8dot/state の起点
 	assign display_color		= ff_display_color;
 	assign display_color_en		= ff_display_color_en;
+	assign display_color_border	= ff_display_color_border;
 endmodule

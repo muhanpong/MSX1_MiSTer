@@ -154,6 +154,11 @@ module vdp_cpu_interface (
 	output				reg_vram256k_mode,
 	output				reg_sprite16_mode,
 	output				reg_flat_interlace_mode,
+	output	[3:0]		reg_cpu_bank,
+	output	[3:0]		reg_bg_bank,
+	output	[3:0]		reg_sprite_bank,
+	output	[3:0]		reg_command_src_bank,
+	output	[3:0]		reg_command_dst_bank,
 
 	input	[1:0]		button,
 	output				pulse0,
@@ -233,6 +238,11 @@ module vdp_cpu_interface (
 	reg					ff_flat_interlace_mode;
 	reg					ff_force_highspeed;
 	reg					ff_v9958_mode;
+	reg		[3:0]		ff_cpu_bank;
+	reg		[3:0]		ff_bg_bank;
+	reg		[3:0]		ff_sprite_bank;
+	reg		[3:0]		ff_command_src_bank;
+	reg		[3:0]		ff_command_dst_bank;
 
 	reg					ff_2nd_access;
 	reg		[7:0]		ff_1st_byte;
@@ -544,6 +554,11 @@ module vdp_cpu_interface (
 			ff_command_end_interrupt_enable <= 1'b0;
 			ff_flat_interlace_mode <= 1'b0;
 			ff_v9958_mode <= 1'b1;
+			ff_cpu_bank <= 4'd0;
+			ff_bg_bank <= 4'd0;
+			ff_sprite_bank <= 4'd0;
+			ff_command_src_bank <= 4'd0;
+			ff_command_dst_bank <= 4'd0;
 		end
 		else if( ff_register_write ) begin
 			case( ff_register_num )
@@ -683,6 +698,11 @@ module vdp_cpu_interface (
 							ff_sprite_pattern_generator_table_base[17] <= 1'b0;
 							ff_color_table_base[17] <= 1'b0;
 							ff_sprite_attribute_table_base[17] <= 1'b0;
+							ff_cpu_bank <= 4'd0;
+							ff_bg_bank <= 4'd0;
+							ff_sprite_bank <= 4'd0;
+							ff_command_src_bank <= 4'd0;
+							ff_command_dst_bank <= 4'd0;
 						end
 					end
 				end
@@ -690,14 +710,16 @@ module vdp_cpu_interface (
 				begin
 					ff_vertical_offset <= ff_1st_byte;
 				end
-			8'd25:	//	R#25 = [N/A][CMD][N/A][YAE][YJK][N/A][MSK][SP2]
+			8'd25:	//	R#25 = [SPS][CMD][N/A][YAE][YJK][N/A][MSK][SP2]
 				begin
 					ff_scroll_planes <= ff_1st_byte[0];
 					ff_left_mask <= ff_1st_byte[1];
 					ff_yjk_mode <= ff_1st_byte[3];
 					ff_yae_mode <= ff_1st_byte[4];
 					ff_command_enable <= ff_1st_byte[6];
-					ff_sprite_priority_shuffle <= ff_1st_byte[7];
+					if( !ff_lock_extregs && !ff_v9958_mode ) begin
+						ff_sprite_priority_shuffle <= ff_1st_byte[7];
+					end
 				end
 			8'd26:	//	R#26 = [N/A][N/A][HO8][HO7][HO6][HO5][HO4][HO3]
 				begin
@@ -706,6 +728,26 @@ module vdp_cpu_interface (
 			8'd27:	//	R#27 = [N/A][N/A][N/A][N/A][N/A][HO2][HO1][HO0]
 				begin
 					ff_horizontal_offset_l <= ff_1st_byte[2:0];
+				end
+			8'd28:	//	R#28 = [N/A][N/A][N/A][N/A][CB3][CB2][CB1][CB0]	CPU access VRAM bank (A21..A18)
+				begin
+					if( !ff_lock_extregs && !ff_v9958_mode ) begin
+						ff_cpu_bank <= ff_1st_byte[3:0];
+					end
+				end
+			8'd29:	//	R#29 = [SB3][SB2][SB1][SB0][BB3][BB2][BB1][BB0]	Sprite / Background VRAM bank
+				begin
+					if( !ff_lock_extregs && !ff_v9958_mode ) begin
+						ff_bg_bank <= ff_1st_byte[3:0];
+						ff_sprite_bank <= ff_1st_byte[7:4];
+					end
+				end
+			8'd30:	//	R#30 = [DB3][DB2][DB1][DB0][SB3][SB2][SB1][SB0]	VDP command destination / source VRAM bank
+				begin
+					if( !ff_lock_extregs && !ff_v9958_mode ) begin
+						ff_command_src_bank <= ff_1st_byte[3:0];
+						ff_command_dst_bank <= ff_1st_byte[7:4];
+					end
 				end
 			default:
 				begin
@@ -819,7 +861,16 @@ module vdp_cpu_interface (
 				ff_bus_rdata_en	<= 1'b1;
 			end
 			else if( ff_port1 ) begin
-				ff_bus_rdata	<= ff_status_register;
+				//	ACK と同時に返す F/FH は、1クロック前のステータスではなく現在のフラグを使う。
+				if( ff_status_register_pointer == 4'd0 ) begin
+					ff_bus_rdata <= { ff_frame_interrupt, ff_status_register[6] & ~ff_frame_interrupt, ff_status_register[5:0] };
+				end
+				else if( ff_status_register_pointer == 4'd1 ) begin
+					ff_bus_rdata <= { ff_status_register[7:1], ff_line_interrupt };
+				end
+				else begin
+					ff_bus_rdata <= ff_status_register;
+				end
 				ff_bus_rdata_en	<= 1'b1;
 			end
 			else if( ff_port4 ) begin
@@ -865,110 +916,78 @@ module vdp_cpu_interface (
 		end
 `ifndef V9968_UPSTREAM
 		else begin
-			//	clears by the CPU.  MSX1 core: a status read clears F / FH only when the byte it
-			//	returns shows the flag.  ff_status_register is latched one clock behind the flags,
-			//	so a read on the clock after a line match returned FH = 0 and still cleared FH:
-			//	the CPU never saw it (sim/v9968_vram +aso +pollpad=0..11: 9 of 1440 FH lost
-			//	with the same-clock fix alone).
-			if( w_read && ff_port1 ) begin
-				if( ff_status_register_pointer == 4'd0 ) begin
-					//	Clear frame interrupt flag
-					if( ff_status_register[7] ) ff_frame_interrupt <= 1'b0;
-				end
-				else if( ff_status_register_pointer == 4'd1 ) begin
-					//	Clear line interrupt flag
-					if( ff_status_register[0] ) ff_line_interrupt <= 1'b0;
-				end
-			end
+			//	MSX1 core: upstream's structure (clears and events per flag, the event wins on
+			//	the same clock; F / FH are returned live with the read that clears them), with
+			//	the core's two FH rules kept (see ORIGIN.md, 2026-10-24 and 2026-10-29):
+			//	FH is not cleared by the frame interrupt, and it arms only while IE1 is on.
 			if( w_write && ff_port4 ) begin
-				if( ff_bus_wdata[0] == 1'b1 ) begin
-					//	Clear frame interrupt flag
-					ff_frame_interrupt <= 1'b0;
-				end
-				if( ff_bus_wdata[1] == 1'b1 ) begin
-					//	Clear line interrupt flag
-					ff_line_interrupt <= 1'b0;
-				end
-				if( ff_bus_wdata[2] == 1'b1 ) begin
-					//	Clear command end interrupt flag
-					ff_command_end_interrupt <= 1'b0;
-				end
 				ff_lock_extregs <= ff_bus_wdata[7];
-`else
-		else if( w_read && ff_port1 ) begin
-			if( ff_status_register_pointer == 4'd0 ) begin
-				//	Clear frame interrupt flag
-				ff_frame_interrupt <= 1'b0;
-`endif
 			end
-`ifndef V9968_UPSTREAM
 
-			//	events (assigned last: they win over a clear on the same clock)
-`else
-			else if( ff_status_register_pointer == 4'd1 ) begin
-				//	Clear line interrupt flag
-				ff_line_interrupt <= 1'b0;
-			end
-		end
-		else if( w_write && ff_port4 ) begin
-			if( ff_bus_wdata[0] == 1'b1 ) begin
-				//	Clear frame interrupt flag
-				ff_frame_interrupt <= 1'b0;
-			end
-			if( ff_bus_wdata[1] == 1'b1 ) begin
-				//	Clear line interrupt flag
-				ff_line_interrupt <= 1'b0;
-			end
-			if( ff_bus_wdata[2] == 1'b1 ) begin
-				//	Clear command end interrupt flag
-				ff_command_end_interrupt <= 1'b0;
-			end
-			ff_lock_extregs <= ff_bus_wdata[7];
-		end
-		else begin
-`endif
 			if( intr_frame ) begin
-`ifndef V9968_UPSTREAM
-				//	Happend frame interrupt
-`else
-				//	Happend line interrupt
-`endif
 				ff_frame_interrupt <= 1'b1;
 			end
+			else if( (w_read && ff_port1 && ff_status_register_pointer == 4'd0) ||
+			         (w_write && ff_port4 && ff_bus_wdata[0]) ) begin
+				ff_frame_interrupt <= 1'b0;
+			end
 
-`ifndef V9968_UPSTREAM
-			//	FH is not cleared at the frame interrupt (MSX1 core, 2026-10-24): see ORIGIN.md
 			if( ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19) ) begin
-`else
-			//	FH が次フレームへ持ち越されると、IE1=1 にした瞬間に割り込みが入ってしまう
-			//	(ZANAC EX, Space Manbow)。VSYNC と R#0/R#19 書き込みでクリアする。
-			if( clear_line_interrupt || intr_frame ) begin
 				ff_line_interrupt <= 1'b0;
 			end
-			else if( ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19) ) begin
-`endif
-				ff_line_interrupt <= 1'b0;
-			end
-`ifndef V9968_UPSTREAM
-			//	FH arms only while IE1 (R#0 bit4) is on (MSX1 core, 2026-10-29): see ORIGIN.md
 			else if( intr_line && ff_line_interrupt_enable ) begin
-`else
-			else if( intr_line ) begin
-`endif
-				//	Happend line interrupt
 				ff_line_interrupt <= 1'b1;
+			end
+			else if( (w_read && ff_port1 && ff_status_register_pointer == 4'd1) ||
+			         (w_write && ff_port4 && ff_bus_wdata[1]) ) begin
+				ff_line_interrupt <= 1'b0;
 			end
 
 			if( intr_command_end ) begin
-`ifndef V9968_UPSTREAM
-				//	Happend command end interrupt
-`else
-				//	Happend line interrupt
-`endif
 				ff_command_end_interrupt <= 1'b1;
+			end
+			else if( w_write && ff_port4 && ff_bus_wdata[2] ) begin
+				ff_command_end_interrupt <= 1'b0;
 			end
 		end
 	end
+`else
+		else begin
+			if( w_write && ff_port4 ) begin
+				ff_lock_extregs <= ff_bus_wdata[7];
+			end
+
+			if( intr_frame ) begin
+				ff_frame_interrupt <= 1'b1;
+			end
+			else if( (w_read && ff_port1 && ff_status_register_pointer == 4'd0) ||
+			         (w_write && ff_port4 && ff_bus_wdata[0]) ) begin
+				ff_frame_interrupt <= 1'b0;
+			end
+
+			//	IE1=0 の間は VSYNC で古い FH をクリアし、IE1=1 の保留中 FH は ACK まで保持する。
+			//	R#0/R#19 の書き込みでも FH をクリアする (ZANAC EX, Space Manbow)。
+			if( ((clear_line_interrupt || intr_frame) && !ff_line_interrupt_enable) ||
+			    (ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19)) ) begin
+				ff_line_interrupt <= 1'b0;
+			end
+			else if( intr_line ) begin
+				ff_line_interrupt <= 1'b1;
+			end
+			else if( (w_read && ff_port1 && ff_status_register_pointer == 4'd1) ||
+			         (w_write && ff_port4 && ff_bus_wdata[1]) ) begin
+				ff_line_interrupt <= 1'b0;
+			end
+
+			if( intr_command_end ) begin
+				ff_command_end_interrupt <= 1'b1;
+			end
+			else if( w_write && ff_port4 && ff_bus_wdata[2] ) begin
+				ff_command_end_interrupt <= 1'b0;
+			end
+		end
+	end
+`endif
 
 	assign w_line_interrupt			= ff_line_interrupt			& ff_line_interrupt_enable;
 	assign w_frame_interrupt		= ff_frame_interrupt		& ff_frame_interrupt_enable;
@@ -1038,4 +1057,9 @@ module vdp_cpu_interface (
 	assign reg_vram256k_mode						= ~ff_v9958_mode;
 	assign reg_sprite16_mode						= ff_sprite16_mode;
 	assign reg_flat_interlace_mode					= ff_flat_interlace_mode;
+	assign reg_cpu_bank								= ff_cpu_bank;
+	assign reg_bg_bank								= ff_bg_bank;
+	assign reg_sprite_bank							= ff_sprite_bank;
+	assign reg_command_src_bank						= ff_command_src_bank;
+	assign reg_command_dst_bank						= ff_command_dst_bank;
 endmodule

@@ -75,7 +75,6 @@ module vdp_timing_control_sprite (
 	output		[1:0]	display_color_transparent,
 	output				display_color_en,
 
-	input		[2:0]	horizontal_offset_l,
 	input				clear_sprite_collision,
 	output				sprite_collision,
 	input				clear_sprite_collision_xy,
@@ -121,7 +120,6 @@ module vdp_timing_control_sprite (
 	wire		[5:0]	w_selected_plane_num;
 	wire		[31:0]	w_selected_attribute;
 	wire		[4:0]	w_selected_count;
-	wire		[8:0]	w_selected_pixel_pos_y;
 	wire				w_start_info_collect;
 	wire				w_sprite_mode2;
 	wire		[9:0]	w_plane_x;
@@ -159,8 +157,8 @@ module vdp_timing_control_sprite (
 			reg_screen_mode == c_mode_g5 ||
 			reg_screen_mode == c_mode_g6 ||
 			reg_screen_mode == c_mode_g7 );
-	assign w_screen_pos_x[13:4]	= screen_pos_x[13:4] - { 7'd0, horizontal_offset_l };
-	assign w_screen_pos_x[ 3:0]	= screen_pos_x[ 3:0];
+	//	スプライトの VRAM 読み出し枠は、BG と同じく R#27 に関係なく固定
+	assign w_screen_pos_x		= screen_pos_x;
 
 	// --------------------------------------------------------------------
 	//	Active period
@@ -224,7 +222,7 @@ module vdp_timing_control_sprite (
 		.selected_plane_num							( w_selected_plane_num						),
 		.selected_attribute							( w_selected_attribute						),
 		.selected_count								( w_selected_count							),
-		.selected_pixel_pos_y						( w_selected_pixel_pos_y					),
+		.selected_pixel_pos_y						(											),
 		.start_info_collect							( w_start_info_collect						),
 		.clear_sprite_overmap						( clear_sprite_overmap						),
 		.sprite_overmap_enable					( sprite_overmap_enable				),
@@ -286,14 +284,11 @@ module vdp_timing_control_sprite (
 	// --------------------------------------------------------------------
 	//	Makeup pixels
 	// --------------------------------------------------------------------
-`ifndef V9968_UPSTREAM
-	wire				w_display_color_en_raw;		//	before the left mask (R#25 MSK), see below
-`endif
 	vdp_sprite_makeup_pixel u_makeup_pixel (
 		.reset_n									( reset_n									),
 		.clk										( clk										),
 		.screen_pos_x								( screen_pos_x								),
-		.pixel_pos_y								( w_selected_pixel_pos_y					),
+		.screen_pos_y								( screen_pos_y								),
 		.screen_v_active							( screen_v_active							),
 		.sprite_mode2								( w_sprite_mode2							),
 		.clear_sprite_collision						( clear_sprite_collision					),
@@ -322,36 +317,8 @@ module vdp_timing_control_sprite (
 		.sample_x									( w_sample_x								),
 		.display_color								( display_color								),
 		.display_color_transparent					( display_color_transparent					),
-`ifndef V9968_UPSTREAM
-		.display_color_en							( w_display_color_en_raw					)
-`else
 		.display_color_en							( display_color_en							)
-`endif
 	);
-
-`ifndef V9968_UPSTREAM
-	// --------------------------------------------------------------------
-	//	Left mask (R#25 MSK) for sprites (MSX1 core, 2026-11-01): see ORIGIN.md
-	//	Upstream took reg_left_mask but never used it; the palette's gate with the
-	//	background enable ends one dot early (mode 3) or not at all (mode 1/2), so
-	//	sprites at screen X 0-7 showed through the masked strip.  openMSX draws the
-	//	strip as border: no sprites there.  screen_pos_x here is the position at
-	//	which the palette latches this enable (screen_pos_x[3:0] == 0).
-	// --------------------------------------------------------------------
-`ifndef SPRITE_MASK_POS
-`define SPRITE_MASK_POS 10'd15
-`endif
-	//	256-dot modes only.  In G5/G6 (512 dots) this core's bitmap mask ends half a dot
-	//	before column 15, and the GT boot logo covers that gap with sprites (blue sprites over
-	//	a black bitmap at the left edge); a mask at 15 opened a one-pixel black column there
-	//	(rbf 20261101a).  Those modes keep upstream's behaviour.
-`ifdef SPRITE_MASK_ALLMODES
-	wire				w_sprite_mask_hires	= 1'b0;		//	bench mutant: rbf 20261101a's rule
-`else
-	wire				w_sprite_mask_hires	= (reg_screen_mode == c_mode_g5) || (reg_screen_mode == c_mode_g6);
-`endif
-	assign display_color_en		= w_display_color_en_raw & (!reg_left_mask || w_sprite_mask_hires || (screen_pos_x[13:4] >= `SPRITE_MASK_POS));
-`endif
 
 	// --------------------------------------------------------------------
 	//	Divider

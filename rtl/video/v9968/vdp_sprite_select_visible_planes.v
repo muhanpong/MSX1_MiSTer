@@ -101,6 +101,8 @@ module vdp_sprite_select_visible_planes (
 	wire		[2:0]	w_phase;
 	wire		[3:0]	w_sub_phase;
 	wire		[8:0]	w_pixel_pos_y;
+	wire				w_y_out_of_ring;
+	wire		[9:0]	w_offset_y3;
 	reg			[8:0]	ff_pixel_pos_y;
 	reg			[5:0]	ff_plane_count;
 	reg			[5:0]	ff_current_plane_num;		//	Plane#0...#63
@@ -151,7 +153,9 @@ module vdp_sprite_select_visible_planes (
 										(w_phase[2] && vram_interleave) ? w_sprite_mode2_attribute_i:
 										(    sprite_mode2               ? w_sprite_mode2_attribute  : w_sprite_mode1_attribute)) :18'd0;
 	assign w_selected_full			= ff_select_finish | (
-										(reg_sprite_mode3 || reg_sprite16_mode) ? ff_selected_count[4]:
+										 reg_sprite_mode3                       ? ff_selected_count[4]:
+										//	S16 in mode 1/2: the 33rd attribute read wraps to the first plane, so never select it.
+										 reg_sprite16_mode                      ? (ff_selected_count[4] | ff_plane_count[5]):
 										     sprite_mode2                       ? (ff_selected_count[4] | ff_selected_count[3] | ff_plane_count[5]): 
 										                                          (ff_selected_count[4] | ff_selected_count[3] | ff_selected_count[2] | ff_plane_count[5]) );
 	assign w_finish_line			= (reg_sprite_mode3 || sprite_mode2) ? 10'd216: 10'd208;
@@ -193,18 +197,7 @@ module vdp_sprite_select_visible_planes (
 			ff_vram_valid			<= 1'b0;
 		end
 		else if( !screen_v_active || !screen_h_active || !reg_display_on || w_screen_pos_x[9]  ) begin
-`ifndef V9968_UPSTREAM
-			//	hold -- except the VRAM request: upstream held it too, and a request set on the
-			//	clock before the display is turned off (R#1 landing right after the (phase 2|4,
-			//	sub 0) set: 2 of 128 clocks) then stays asserted until the display is on again.
-			//	vdp_vram_interface issues the sprite request ahead of the command and CPU paths
-			//	on every slot, so a VDP command that reads VRAM never gets its data and the
-			//	VDP freezes (MSX1 core, 2026-10-22: SUPER CAT / COASTAL FLIGHT's first LRMM in
-			//	sim/v9968_replay, reproduced in sim/v9968_vram +offat=29/125).
 			ff_vram_valid			<= 1'b0;
-`else
-			//	hold
-`endif
 		end
 		else if( !reg_sprite_mode3 && ff_plane_count[5] && !(w_phase == 3'd2 && w_sub_phase == 4'd0 && screen_pos_x[13:7] == 7'd0) ) begin
 			ff_vram_valid			<= 1'b0;
@@ -284,9 +277,9 @@ module vdp_sprite_select_visible_planes (
 					ff_attribute1[7:0]	<= w_attribute_y;
 				end
 				else if( w_phase == 3'd4 ) begin
-					//	vram_rdata = { --, X1, --, X0 };
-					ff_attribute1		<= { 8'd0, ff_attribute1[15: 8], vram_rdata[ 7: 0], ff_attribute1[ 7: 0] };
-					ff_attribute2		<= { 8'd0, ff_attribute1[31:24], vram_rdata[23:16], ff_attribute1[23:16] };
+					//	vram_rdata = { attribute+3 for plane 1, X1, attribute+3 for plane 0, X0 };
+					ff_attribute1		<= { vram_rdata[15: 8], ff_attribute1[15: 8], vram_rdata[ 7: 0], ff_attribute1[ 7: 0] };
+					ff_attribute2		<= { vram_rdata[31:24], ff_attribute1[31:24], vram_rdata[23:16], ff_attribute1[23:16] };
 				end
 				else if( w_phase == 3'd5 ) begin
 					ff_attribute2[7:0]	<= w_attribute_y;
@@ -337,7 +330,12 @@ module vdp_sprite_select_visible_planes (
 
 	assign w_invisible12	= (!reg_sprite_16x16 && !reg_sprite_magify) ?   w_offset_y[7:3]        : 
 	                  		  (!reg_sprite_16x16 || !reg_sprite_magify) ? { w_offset_y[7:4], 1'd0 }: { w_offset_y[7:5], 2'd0 };
-	assign w_invisible3		= (w_mgy == 8'd0) ? (w_offset_y[9:8] != 2'd0): ( { 2'd0, w_mgy } <= w_offset_y );
+	//	SVNS=0: sprites follow the 256-line background ring, so the offset wraps at 256 like SP1/2.
+	//	Only Y = -256...255 is on the ring; Y = 256...767 is never displayed.
+	assign w_y_out_of_ring	= !reg_sprite_nonR23_mode && (w_y[9] != w_y[8]);
+	assign w_offset_y3		= reg_sprite_nonR23_mode ? w_offset_y : { 2'd0, w_offset_y[7:0] };
+	assign w_invisible3		= w_y_out_of_ring ||
+							  ((w_mgy == 8'd0) ? (w_offset_y3[9:8] != 2'd0): ( { 2'd0, w_mgy } <= w_offset_y3 ));
 	assign w_invisible		= reg_sprite_mode3 ? w_invisible3: (w_invisible12 != 5'd0);
 
 	always @( posedge clk ) begin

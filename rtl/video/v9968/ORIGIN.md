@@ -1,6 +1,6 @@
 # V9968 VDP -- upstream sources, unmodified
 
-- Source: https://github.com/hra1129/V9968_Cartridge , commit 2a99ac9 (v0.99, 2026-11-08; 419d1ffd before that; first copied at 7820668b9f200ee745c6b01289f048e6a9981418, 2026-10-19),
+- Source: https://github.com/hra1129/V9968_Cartridge , commit 453d5f3 (v0.99.14, 2026-11-22; 2a99ac9 (v0.99) and 419d1ffd before that; first copied at 7820668b9f200ee745c6b01289f048e6a9981418, 2026-10-19),
   path `fpga/V9968_Cartridge_TangNano20K/src/v9968/*.v` (the 21 RTL files; test benches, docs and demos not copied).
 - Author: Takayuki Hara (HRA!).  Licence: the header of every file (Japanese text is the formal one): redistribution
   of source keeps the notice; binary redistribution carries the notice in its documentation; no sale or commercial
@@ -30,6 +30,8 @@ Driven from the OSD "Scandoubler Fx" (MSX1.sv: CRT 25/50/75% -> 1/2/3, others 0)
   (`+cmd=3 +demo=1 +ct55=1 +offat=29` and `125`: STILL RUNNING; the other 126 offsets
   finish in 12.66 ms).  On the board the same ROM runs 126 times out of 128.  Worth
   reporting upstream (hra1129/V9968_Cartridge).
+- Retired 2026-11-24: upstream clears `ff_vram_valid` in the hold branch itself (v0.99.10, "VDP
+  hang" fix); the file is upstream's again.
 
 ## Local change (2026-10-22, user request): per-command waits from outside (V9938 option)
 
@@ -62,6 +64,10 @@ Driven from the OSD "Scandoubler Fx" (MSX1.sv: CRT 25/50/75% -> 1/2/3, others 0)
   V9968 build only (the V9958 build and openMSX V9958/V9968 run it).
   sim/v9968_vram `+aso=30`: unfixed 11 waits never answered (every stage, ~1 in 11 FH),
   fixed 0.  Worth reporting upstream.
+- 2026-11-24: upstream (v0.99.12, 2026-11-21) now has the same rule (events win) and returns F /
+  FH live with the read that clears them; the block takes upstream's structure, with the FH
+  rules of the next two sections kept.  The core's earlier "a status read clears F / FH only
+  when the byte it returns shows the flag" is gone with it: the byte is the live flag now.
 
 ## Local change (2026-10-24, bug): FH survives the frame interrupt (ASO 224 black screen)
 
@@ -147,6 +153,11 @@ and ignores the HMMV switch; custom build: run_gates.sh GATES PASS.
   SPRITE_MASK_ALLMODES = the 20261101a rule must show the bitmap gap). GT logo replay: 28 frames
   identical to the 20261029d RTL.
 
+- Retired 2026-11-24: upstream v0.99.x masks sprites with the BG display enable in the palette
+  (vdp_color_palette.v `ff_display_color_delay0_en`); the same bench probes (X=7 hidden, X=8
+  shown in sprite modes 2 and 3, the G5 logo with no gap) pass on pure upstream, so the file is
+  upstream's again.  run_spmask.sh now mutates upstream's mask (off / 24 columns wide).
+
 ## Upstream merge (2026-11-05, user request): 7820668 / 8a37b33 -> 419d1ff
 
 Three-way merge of the five RTL files upstream changed (vdp.v, vdp_color_palette.v, vdp_command.v,
@@ -177,3 +188,27 @@ holds the 2a99ac9 sums, so `md5sum -c` lists the locally modified files.
   frame interrupt stays out (our FH rules above; only its comment was merged).
 - `vdp_command.v` (a849a2c): R#44 write is the colour latch; LMCM TR handling.
 - `vdp_vram_interface.v`: command_vram_ready at timing B also waits for screen / sprite.
+
+## Upstream 453d5f3 (v0.99.14) merged (2026-11-24, user request)
+
+Three-way merge (base 2a99ac9) of the twelve files upstream changed; ORIGIN.md5 holds the
+453d5f3 sums, so `md5sum -c` lists the locally modified files.  Conflicts: vdp.v (ports),
+vdp_command.v (cmd_wait port, LFMM X-overflow), vdp_sprite_select_visible_planes.v (upstream's
+fix = ours, taken), vdp_cpu_interface.v (interrupt block, see above).
+- vdp_timing_control_sprite.v: the core's MSK gate (2026-11-01) retired, upstream's own mask
+  covers it (see that section).
+- VRAM 4 MB (v0.99.11): R#28 CPU bank, R#29 background / sprite banks, R#30 command source /
+  destination banks, 16 x 256 KB; writable only with LockExtReg = 0 and V58 = 0, all 0 when
+  V58 is set.  `vram_address` is [21:2].  In the core: v9968_link / msx.sv / MSX1.sv widened,
+  sdram_tdm's V port takes a 20-bit word address.  128 MB board: 28-32 MB (rows 00).  64 MB:
+  the upper 2 MB on the column MSB of bank 3's rows 00.  32 MB board: the upper 2 MB on bank
+  3's rows 01, handled in sdram_tdm (G2 word order / ch4 void + retry, docs/sdram_tdm_design.md
+  section 15).  Gates: sim/v9968_vram/run_bank.sh (end to end, both maps), sim/sdram_tdm/run.sh
+  (mutants mv4mb, mnovoid, mnoswap).
+- Command end state matches the V9958's table (NY = rows left, STOP, LMCM, POINT -> CLR), and
+  LFMM / LFMC leave the next character position (v0.99.13 / .14).
+- Interrupts: FH held while IE1 = 1, cleared at VSYNC while IE1 = 0 (upstream; not taken, our
+  FH rules stay), events win, live F / FH on the read (taken).
+- Sprites: SP3 line 0 at the top, SP3 seam of the vertical wrap, SCREEN 8 EPAL = 0 SP3
+  translucency, sprites over YJK (SCREEN 10-12), SpriteMode2 EPAL, collision Y, SPS locked.
+- SCREEN 10-12 border colour, FG4 commands, LMCM start TR, R#26/R#27 latch for the MSX2+ logo.

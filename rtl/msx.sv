@@ -48,7 +48,7 @@ module msx
    //  below are then in clk_vdp (CLK_VIDEO = clk_vdp), the TMS9918 re-timed into it.
    input                    clk_vdp,
    input                    v99_reset_n,
-   output            [17:2] v99_vram_address,
+   output            [21:2] v99_vram_address,
    output                   v99_vram_write,
    output                   v99_vram_valid,
    output            [31:0] v99_vram_wdata,

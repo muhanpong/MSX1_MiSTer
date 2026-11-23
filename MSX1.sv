@@ -790,7 +790,7 @@ wire        use_nz;                 // from msx.sv: NextZ80 owns the bus
 wire        cpu_paced;              // from msx.sv: 0 = stock T80s (sdram_tdm learns its T-state grid)
 `ifdef MSX_V9968
 //  The V9968 build (plan S5): msx.sv's V9968 VRAM port -> v9968_link -> sdram_tdm's V slot.
-wire [17:2] v99_vram_address; wire v99_vram_write, v99_vram_valid, v99_vram_rdata_en;
+wire [21:2] v99_vram_address; wire v99_vram_write, v99_vram_valid, v99_vram_rdata_en;
 wire [31:0] v99_vram_wdata, v99_vram_rdata; wire [3:0] v99_vram_wdata_mask;
 wire        v99_reset_n, v99_go, v99_tdm_run, v99_video;
 //  "Scandoubler Fx" (status[5:3]) drives the V9968's own scanlines in this build: the
@@ -803,7 +803,7 @@ wire        v99_cmd_v9938 = status[127];   // OSD: HS=0 command waits of the V99
 wire        v99_geo_hmmv  = status[35];    // OSD: Geo3D flat rows as HMMV in SCREEN 8 (never used before: .CFG = 0 = LINE)
 wire  [3:0] v99_tdm_ph;
 wire        v99_req, v99_we, v99_grant, v99_rvalid;
-wire [15:0] v99_addr; wire [31:0] v99_wdata, v99_rdata; wire [3:0] v99_be;
+wire [19:0] v99_addr; wire [31:0] v99_wdata, v99_rdata; wire [3:0] v99_be;
 wire [15:0] v99_late_cnt, v99_mon_drop, v99_mon_mis;
 `else
 wire        v99_video = 1'b0;
@@ -1745,7 +1745,7 @@ sdram_tdm sdram
    .v_req(v99_req), .v_we(v99_we), .v_addr(v99_addr), .v_wdata(v99_wdata), .v_be(v99_be),
    .v_grant(v99_grant), .v_rdata(v99_rdata), .v_rvalid(v99_rvalid),
 `else
-   .v_en(1'b0), .v_go(1'b1), .tdm_ph(), .tdm_run(), .cpu_paced(cpu_paced), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
+   .v_en(1'b0), .v_go(1'b1), .tdm_ph(), .tdm_run(), .cpu_paced(cpu_paced), .v_req(1'b0), .v_we(1'b0), .v_addr(20'd0), .v_wdata(32'd0), .v_be(4'd0),
    .v_grant(), .v_rdata(), .v_rvalid(),
 `endif
 

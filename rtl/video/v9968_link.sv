@@ -38,7 +38,7 @@ module v9968_link #(
     output logic       vdp_reset_n,    // clk_vdp domain
 
     //  V9968 side (clk_vdp)
-    input  wire [17:2] vram_address,
+    input  wire [21:2] vram_address,
     input  wire        vram_write,
     input  wire        vram_valid,
     input  wire [31:0] vram_wdata,
@@ -49,7 +49,7 @@ module v9968_link #(
     //  sdram_tdm V port (clk_sdram)
     output logic       v_req,
     output logic       v_we,
-    output logic [15:0] v_addr,
+    output logic [19:0] v_addr,
     output logic [31:0] v_wdata,
     output logic [3:0] v_be,              // 1 = write that byte
     input  wire        v_grant,

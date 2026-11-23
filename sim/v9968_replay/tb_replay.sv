@@ -45,7 +45,7 @@ module tb #(parameter int RELEASE_PH = 5);
     wire nCS, nWE, nRAS, nCAS, CKE, SCLK, DQML, DQMH;
     logic init = 1;
     wire v_go, v_req, v_we, v_grant, v_rvalid;
-    wire [15:0] v_addr; wire [31:0] v_wdata, v_rdata; wire [3:0] v_be, tdm_ph;
+    wire [19:0] v_addr; wire [31:0] v_wdata, v_rdata; wire [3:0] v_be, tdm_ph;
     wire [7:0] cd [4];
     sdram_tdm #(.CACHE_LINES(1024)) dut (
         .init(init), .clk(clk_sdram), .mode128(m128[0]), .mode64(1'b0), .v_en(1'b1),
@@ -67,7 +67,7 @@ module tb #(parameter int RELEASE_PH = 5);
         .nras(nRAS), .ncas(nCAS), .nwe(nWE), .fpga_oe(dut.dq_oe_o));
 
     wire        vdp_reset_n;
-    wire [17:2] vram_address; wire vram_write, vram_valid, vram_rdata_en;
+    wire [21:2] vram_address; wire vram_write, vram_valid, vram_rdata_en;
     wire [31:0] vram_wdata, vram_rdata; wire [3:0] vram_wdata_mask;
     wire [15:0] mon_drop, mon_mis;
     v9968_link #(.RELEASE_PH(RELEASE_PH)) link (

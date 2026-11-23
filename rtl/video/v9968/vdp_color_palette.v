@@ -70,6 +70,7 @@ module vdp_color_palette (
 
 	input		[7:0]	display_color_screen_mode,
 	input				display_color_screen_mode_en,
+	input				display_color_screen_mode_border,
 	input		[7:0]	display_color_sprite,
 	input		[1:0]	display_color_sprite_transparent,
 	input				display_color_sprite_en,
@@ -100,10 +101,19 @@ module vdp_color_palette (
 	wire				w_256colors_mode;
 	wire				w_4colors_mode;
 	wire				w_t12_mode;
+	wire				w_gm_mode;
 	wire				w_g4567_mode;
 	wire				w_g5_mode;
 	wire				w_g6_mode;
 	reg			[7:0]	ff_display_color256;
+	reg			[7:0]	ff_display_bg256;
+	wire				w_g7_rgb_sp3;
+	wire		[4:0]	w_bg256_r;
+	wire		[4:0]	w_bg256_g;
+	wire		[4:0]	w_bg256_b;
+	wire		[4:0]	w_sprite256_r;
+	wire		[4:0]	w_sprite256_g;
+	wire		[4:0]	w_sprite256_b;
 	reg			[7:0]	ff_display_color;
 	reg					ff_display_color_oe;
 	wire		[4:0]	w_display_r_pre;
@@ -161,6 +171,19 @@ module vdp_color_palette (
 	reg			[7:0]	ff_display_color_sprite;
 	reg			[1:0]	ff_display_color_sprite_transparent;
 	reg					ff_display_color_sprite_en;
+	reg			[10:0]	ff_sprite_delay1;
+	reg			[10:0]	ff_sprite_delay2;
+	reg			[10:0]	ff_sprite_delay3;
+	reg			[10:0]	ff_sprite_delay4;
+	wire		[7:0]	w_display_color_sprite;
+	wire		[1:0]	w_display_color_sprite_transparent;
+	wire				w_display_color_sprite_en;
+	reg					ff_display_color_delay0_en;
+	reg			[8:0]	ff_display_color_hires;
+	reg					ff_display_color_hires_en;
+	wire		[8:0]	w_bg_color;
+	wire				w_bg_color_en;
+	wire				w_yjk_background;
 
 	// --------------------------------------------------------------------
 	//	Palette initializer
@@ -228,7 +251,7 @@ module vdp_color_palette (
 			end
 			else if( !reg_yae_mode ) begin
 				//	SCREEN12 の場合
-				if( display_color_screen_mode_en ) begin
+				if( display_color_screen_mode_en && !display_color_screen_mode_border ) begin
 					//	映像期間
 					ff_display_color_delay0 <= { 1'b0, display_color_screen_mode };
 				end
@@ -248,7 +271,7 @@ module vdp_color_palette (
 			end
 			else begin
 				//	SCREEN10/11 の場合
-				if( display_color_screen_mode_en ) begin
+				if( display_color_screen_mode_en && !display_color_screen_mode_border ) begin
 					//	映像期間
 					ff_display_color_delay0 <= { display_color_screen_mode[3], display_color_screen_mode[7:4], 1'b0, display_color_screen_mode[2:0] };
 				end
@@ -269,6 +292,26 @@ module vdp_color_palette (
 		end
 	end
 
+	//	ff_display_color_delay0 と同じタイミングで取り込む映像期間フラグ。
+	//	画素ごとに混ぜる BG 画素の表示有効フラグで、スプライトのマスク (MSK / R#27 左端) に使う。
+	always @( posedge clk ) begin
+		if( screen_pos_x[2:0] == 3'd0 ) begin
+			ff_display_color_delay0_en <= display_color_screen_mode_en;
+		end
+	end
+
+	//	512ドットモードは左半分の画素を sub-phase 15、右半分を次の sub-phase 7 で受け取るため、
+	//	そのままでは通常モードより半画素早く出力される。半画素 1 段遅らせて通常モードと揃える。
+	always @( posedge clk ) begin
+		if( screen_pos_x[2:0] == 3'd0 ) begin
+			ff_display_color_hires		<= ff_display_color_delay0;
+			ff_display_color_hires_en	<= ff_display_color_delay0_en;
+		end
+	end
+
+	assign w_bg_color		= w_high_resolution ? ff_display_color_hires   : ff_display_color_delay0;
+	assign w_bg_color_en	= w_high_resolution ? ff_display_color_hires_en: ff_display_color_delay0_en;
+
 	always @( posedge clk ) begin
 		//	画素単位でシフトする
 		if( screen_pos_x[3:0] == 4'd0 ) begin
@@ -286,12 +329,21 @@ module vdp_color_palette (
 		if( screen_pos_x[3:0] == 4'd0 ) begin
 			ff_display_color_sprite					<= display_color_sprite;
 			ff_display_color_sprite_transparent		<= display_color_sprite_transparent;
-			ff_display_color_sprite_en				<= display_color_sprite_en & display_color_screen_mode_en;
+			ff_display_color_sprite_en				<= display_color_sprite_en & w_bg_color_en;
+			ff_sprite_delay1 <= { ff_display_color_sprite_en, ff_display_color_sprite_transparent, ff_display_color_sprite };
+			ff_sprite_delay2 <= ff_sprite_delay1;
+			ff_sprite_delay3 <= ff_sprite_delay2;
+			ff_sprite_delay4 <= ff_sprite_delay3;
 		end
 		else begin
 			//	hold
 		end
 	end
+
+	//	YJK の背景は delay4 を使うため、スプライトとマスクも同じ画素まで遅らせる。
+	assign { w_display_color_sprite_en, w_display_color_sprite_transparent, w_display_color_sprite } =
+		reg_yjk_mode ? ff_sprite_delay4 :
+		{ ff_display_color_sprite_en, ff_display_color_sprite_transparent, ff_display_color_sprite };
 
 	// --------------------------------------------------------------------
 	//	Latch YJK color (screen_pos_x = 0)
@@ -355,6 +407,8 @@ module vdp_color_palette (
 	                        	  (reg_screen_mode == 5'b00101) ||	// Text1 (SCREEN0:W40)
 	                        	  (reg_screen_mode == 5'b01001);	// Text2 (SCREEN0:W80)
 	assign w_g5_mode			= (reg_screen_mode == 5'b10000);	// Graphic5 (SCREEN6)
+	assign w_gm_mode			= (reg_screen_mode == 5'b00010) ||	// Multicolor (SCREEN3)
+	                        	  (reg_screen_mode == 5'b00110);	// Multicolor (SCREEN3)
 	assign w_g6_mode			= (reg_screen_mode == 5'b10100);	// Graphic6 (SCREEN7)
 	assign w_high_resolution	= w_g5_mode | w_g6_mode | (reg_screen_mode == 5'b01001);		// Text2 or Graphic5 or 6 (SCREEN0(W80) or SCREEN6 or 7)
 
@@ -362,7 +416,7 @@ module vdp_color_palette (
 	//	Palette RAM Read Signal ( screen_pos_x = 0 )
 	// --------------------------------------------------------------------
 	//	YJK モードでは ff_y / ff_yjk_en と同じ画素 (delay4) を使う
-	assign w_display_color		= reg_yjk_mode ? ff_display_color_delay4: ff_display_color_delay0;
+	assign w_display_color		= reg_yjk_mode ? ff_display_color_delay4: w_bg_color;
 
 	always @( posedge clk ) begin
 		if( !reset_n ) begin
@@ -377,8 +431,8 @@ module vdp_color_palette (
 					ff_display_color	<= w_display_color[8] ? w_display_color[7:0] : reg_backdrop_color;
 					ff_display_color_oe	<= 1'b1;
 				end
-				else if( reg_yjk_mode && reg_yae_mode && w_display_color[8] ) begin
-					//	SCREEN10/11 の A=1 画素と周辺色は、上位4bit をパレット番号とする
+				else if( reg_yjk_mode && w_display_color[8] ) begin
+					//	SCREEN10/11 の A=1 画素と、SCREEN10/11/12 の周辺色は、上位4bit をパレット番号とする
 					ff_display_color	<= { 4'd0, w_display_color[7:4] };
 					ff_display_color_oe	<= 1'b1;
 				end
@@ -403,8 +457,8 @@ module vdp_color_palette (
 				ff_display_color <= { 4'd0, w_display_color[3:0] };
 				ff_display_color_oe <= 1'b1;
 			end
-			else if( (w_display_color[3:0] != 4'd0 || reg_color0_opaque) ) begin
-				//	Background
+			else if( w_display_color[3:0] != 4'd0 || (reg_color0_opaque && !w_gm_mode) ) begin
+				//	Background (TP does not apply to Multicolor: its colour 0 is always transparent)
 				ff_display_color <= { 4'd0, w_display_color[3:0] };
 				ff_display_color_oe <= 1'b1;
 			end
@@ -422,10 +476,10 @@ module vdp_color_palette (
 		else if( screen_pos_x[3:0] == 4'd1 ) begin
 			//	Sprite
 			if( w_g5_mode ) begin
-				ff_display_color <= { ff_display_color_sprite[7:4], 2'd0, ff_display_color_sprite[3:2] };
+				ff_display_color <= { w_display_color_sprite[7:4], 2'd0, w_display_color_sprite[3:2] };
 			end
 			else begin
-				ff_display_color <= ff_display_color_sprite;
+				ff_display_color <= w_display_color_sprite;
 			end
 			ff_display_color_oe <= 1'b1;
 		end
@@ -461,10 +515,10 @@ module vdp_color_palette (
 		else if( w_high_resolution && screen_pos_x[3:0] == 4'd9 ) begin
 			//	Sprite
 			if( w_g5_mode ) begin
-				ff_display_color <= { ff_display_color_sprite[7:4], 2'd0, ff_display_color_sprite[1:0] };
+				ff_display_color <= { w_display_color_sprite[7:4], 2'd0, w_display_color_sprite[1:0] };
 			end
 			else begin
-				ff_display_color <= ff_display_color_sprite;
+				ff_display_color <= w_display_color_sprite;
 			end
 			ff_display_color_oe <= 1'b1;
 		end
@@ -514,20 +568,20 @@ module vdp_color_palette (
 
 	endfunction
 
-	assign w_display_sprite_mix_r16	= func_sprite_mix( ff_display_r16, w_display_r16, ff_display_color_sprite_transparent );
-	assign w_display_sprite_mix_g16	= func_sprite_mix( ff_display_g16, w_display_g16, ff_display_color_sprite_transparent );
-	assign w_display_sprite_mix_b16	= func_sprite_mix( ff_display_b16, w_display_b16, ff_display_color_sprite_transparent );
+	assign w_display_sprite_mix_r16	= func_sprite_mix( ff_display_r16, w_g7_rgb_sp3 ? w_sprite256_r : w_display_r16, w_display_color_sprite_transparent );
+	assign w_display_sprite_mix_g16	= func_sprite_mix( ff_display_g16, w_g7_rgb_sp3 ? w_sprite256_g : w_display_g16, w_display_color_sprite_transparent );
+	assign w_display_sprite_mix_b16	= func_sprite_mix( ff_display_b16, w_g7_rgb_sp3 ? w_sprite256_b : w_display_b16, w_display_color_sprite_transparent );
 
 	always @( posedge clk ) begin
 		if( screen_pos_x[3:0] == 4'd2 || (w_high_resolution && screen_pos_x[3:0] == 4'd10) ) begin
-			ff_display_r16	<= w_display_r16;
-			ff_display_g16	<= w_display_g16;
-			ff_display_b16	<= w_display_b16;
+			ff_display_r16	<= w_g7_rgb_sp3 ? w_bg256_r : w_yjk_background ? ff_yjk_r : w_display_r16;
+			ff_display_g16	<= w_g7_rgb_sp3 ? w_bg256_g : w_yjk_background ? ff_yjk_g : w_display_g16;
+			ff_display_b16	<= w_g7_rgb_sp3 ? w_bg256_b : w_yjk_background ? ff_yjk_b : w_display_b16;
 		end
 		else if( screen_pos_x[3:0] == 4'd3 || (w_high_resolution && screen_pos_x[3:0] == 4'd11) ) begin
 			if( reg_sprite_mode3 ) begin
 				//	Sprite mode3
-				if( ff_display_color_sprite_en ) begin
+				if( w_display_color_sprite_en ) begin
 					ff_display_r16	<= w_display_sprite_mix_r16[6:2];
 					ff_display_g16	<= w_display_sprite_mix_g16[6:2];
 					ff_display_b16	<= w_display_sprite_mix_b16[6:2];
@@ -538,7 +592,7 @@ module vdp_color_palette (
 			end
 			else begin
 				//	Sprite mode1 and 2
-				if( ff_display_color_sprite_en ) begin
+				if( w_display_color_sprite_en ) begin
 					//	overwrite sprite color
 					ff_display_r16	<= w_display_r16;
 					ff_display_g16	<= w_display_g16;
@@ -559,7 +613,7 @@ module vdp_color_palette (
 			ff_display_color256 <= 8'd0;
 		end
 		else if( screen_pos_x[3:0] == 4'd1 && w_256colors_mode && !reg_yjk_mode && !reg_ext_palette_mode ) begin
-			if( display_color_sprite_en ) begin
+			if( ff_display_color_sprite_en ) begin
 				case( ff_display_color_sprite[3:0] )
 				4'd0:		ff_display_color256 <= { 3'd0, 3'd0, 2'd0 };
 				4'd1:		ff_display_color256 <= { 3'd0, 3'd0, 2'd1 };
@@ -589,13 +643,30 @@ module vdp_color_palette (
 	// --------------------------------------------------------------------
 	//	RGB Color Conversion ( screen_pos_x = 4 )
 	// --------------------------------------------------------------------
-	assign w_display_r_pre = (!reg_ext_palette_mode && w_256colors_mode && !reg_yjk_mode) ? { ff_display_color256[4:2], ff_display_color256[4:3] } : ff_display_r16;
-	assign w_display_g_pre = (!reg_ext_palette_mode && w_256colors_mode && !reg_yjk_mode) ? { ff_display_color256[7:5], ff_display_color256[7:6] } : ff_display_g16;
-	assign w_display_b_pre = (!reg_ext_palette_mode && w_256colors_mode && !reg_yjk_mode) ? { ff_display_color256[1:0], ff_display_color256[1] & ff_display_color256[0], ff_display_color256[1:0] } : ff_display_b16;
+	//	SCREEN8 (EPAL=0) + SP3: スプライトは固定16色のまま、半透明を効かせるため 5bit RGB に広げた背景と ff_display_*16 で合成する
+	always @( posedge clk ) begin
+		if( screen_pos_x[3:0] == 4'd1 ) begin
+			ff_display_bg256 <= ff_display_color;
+		end
+	end
 
-	assign w_display_r = (reg_yjk_mode && (!reg_yae_mode || !ff_yjk_rgb_en)) ? ff_yjk_r : w_display_r_pre;
-	assign w_display_g = (reg_yjk_mode && (!reg_yae_mode || !ff_yjk_rgb_en)) ? ff_yjk_g : w_display_g_pre;
-	assign w_display_b = (reg_yjk_mode && (!reg_yae_mode || !ff_yjk_rgb_en)) ? ff_yjk_b : w_display_b_pre;
+	assign w_g7_rgb_sp3		= !reg_ext_palette_mode && w_256colors_mode && !reg_yjk_mode && reg_sprite_mode3;
+	assign w_bg256_r		= { ff_display_bg256[4:2], ff_display_bg256[4:3] };
+	assign w_bg256_g		= { ff_display_bg256[7:5], ff_display_bg256[7:6] };
+	assign w_bg256_b		= { ff_display_bg256[1:0], ff_display_bg256[1] & ff_display_bg256[0], ff_display_bg256[1:0] };
+	assign w_sprite256_r	= { ff_display_color256[4:2], ff_display_color256[4:3] };
+	assign w_sprite256_g	= { ff_display_color256[7:5], ff_display_color256[7:6] };
+	assign w_sprite256_b	= { ff_display_color256[1:0], ff_display_color256[1] & ff_display_color256[0], ff_display_color256[1:0] };
+
+	assign w_display_r_pre = (!reg_ext_palette_mode && w_256colors_mode && !reg_yjk_mode && !reg_sprite_mode3) ? w_sprite256_r : ff_display_r16;
+	assign w_display_g_pre = (!reg_ext_palette_mode && w_256colors_mode && !reg_yjk_mode && !reg_sprite_mode3) ? w_sprite256_g : ff_display_g16;
+	assign w_display_b_pre = (!reg_ext_palette_mode && w_256colors_mode && !reg_yjk_mode && !reg_sprite_mode3) ? w_sprite256_b : ff_display_b16;
+
+	//	bit8=1 (SCREEN10/11 の A=1 画素、または周辺色) はパレット、それ以外は YJK
+	assign w_yjk_background = reg_yjk_mode && !ff_yjk_rgb_en;
+	assign w_display_r = (w_yjk_background && !w_display_color_sprite_en) ? ff_yjk_r : w_display_r_pre;
+	assign w_display_g = (w_yjk_background && !w_display_color_sprite_en) ? ff_yjk_g : w_display_g_pre;
+	assign w_display_b = (w_yjk_background && !w_display_color_sprite_en) ? ff_yjk_b : w_display_b_pre;
 
 	always @( posedge clk ) begin
 		ff_rgb_load	<= (screen_pos_x[3:0] == 4'd3) || (w_high_resolution && screen_pos_x[3:0] == 4'd11);

@@ -15,9 +15,10 @@ cp $R/rtl/video/v9968/*.v "$O/mut/"
 python3 - "$O/mut/vdp_cpu_interface.v" <<'E'
 import sys
 p = sys.argv[1]; s = open(p).read()
-old = "\t\t\t//\tFH is not cleared at the frame interrupt (MSX1 core, 2026-10-24): see ORIGIN.md\n\t\t\tif( ff_register_write"
-new = "\t\t\tif( clear_line_interrupt || intr_frame ) begin\n\t\t\t\tff_line_interrupt <= 1'b0;\n\t\t\tend\n\t\t\telse if( ff_register_write"
-if old not in s: sys.exit("mutant: anchor not found in vdp_cpu_interface.v (the fix moved?)")
+#  2026-11-24 (upstream v0.99.14 merge): the core's FH block, with the frame-time clear put back
+old = "\t\t\tif( ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19) ) begin\n\t\t\t\tff_line_interrupt <= 1'b0;\n\t\t\tend\n\t\t\telse if( intr_line && ff_line_interrupt_enable ) begin"
+new = "\t\t\tif( clear_line_interrupt || intr_frame || (ff_register_write && (ff_register_num == 6'd0 || ff_register_num == 6'd19)) ) begin\n\t\t\t\tff_line_interrupt <= 1'b0;\n\t\t\tend\n\t\t\telse if( intr_line && ff_line_interrupt_enable ) begin"
+if s.count(old) != 1: sys.exit("mutant: anchor not found in vdp_cpu_interface.v (the fix moved?)")
 open(p, "w").write(s.replace(old, new, 1))
 E
 [ $? -eq 0 ] || { echo "RESULT FAIL: could not build the mutant"; exit 1; }

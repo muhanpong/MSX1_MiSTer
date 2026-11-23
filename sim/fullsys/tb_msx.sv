@@ -58,7 +58,8 @@ module tb;
 `else
  `define MEMW 24
 `endif
-   wire [15:0] pcm_sdram_dout16b = 16'd0;   // msx input: ch4 BL2 word1 (PCM engine3); the PCM is not checked here
+   //  pcm_sdram_dout16b (msx input: ch4 BL2 word1, PCM engine3) is declared by gen/msx_ports.svh;
+   //  tied 0 below (the PCM is not checked here)
 `ifdef TDMCLK
  `define TDM_CLOCK
 `endif
@@ -497,7 +498,7 @@ module tb;
       .v_req(v99_req), .v_we(v99_we), .v_addr(v99_addr), .v_wdata(v99_wdata), .v_be(v99_be),
       .v_grant(v99_grant), .v_rdata(v99_rdata), .v_rvalid(v99_rvalid),
 `else
-      .v_en(1'b0), .v_go(1'b1), .tdm_ph(), .tdm_run(), .cpu_paced(cpu_paced_o), .v_req(1'b0), .v_we(1'b0), .v_addr(16'd0), .v_wdata(32'd0), .v_be(4'd0),
+      .v_en(1'b0), .v_go(1'b1), .tdm_ph(), .tdm_run(), .cpu_paced(cpu_paced_o), .v_req(1'b0), .v_we(1'b0), .v_addr(20'd0), .v_wdata(32'd0), .v_be(4'd0),
       .v_grant(), .v_rdata(), .v_rvalid(),
 `endif
       .ch2_busy(sdram_busy),
@@ -518,6 +519,7 @@ module tb;
       .ch4_ready(pcm_sdram_ready)
    );
 
+   assign pcm_sdram_dout16b = 16'd0;
 `ifndef TDM
    assign sdram_busy = 1'b0;               // sdram.sv has no ch2 queue
    sdram_big u_chip

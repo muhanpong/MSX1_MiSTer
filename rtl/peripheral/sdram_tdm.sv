@@ -105,7 +105,7 @@ module sdram_tdm
     // with v_rvalid; word0 (column 2n) is v_rdata[15:0].
     input             v_req,
     input             v_we,
-    input      [15:0] v_addr,      // 32-bit word address, 256 KB
+    input      [19:0] v_addr,      // 32-bit word address, 4 MB (16 banks of 256 KB, R#28-R#30)
     input      [31:0] v_wdata,
     input       [3:0] v_be,        // byte enables, 1 = write that byte
     output reg        v_grant,
@@ -327,6 +327,7 @@ typedef struct packed {
     loc_t        l;
 } gslot_t;
 gslot_t g1, g2;                  // decided at cycle 2 / 6, issued from 4 / 8
+gslot_t rt;                      // the retry of a voided G2 read
 loc_t   ch2_hl;                      // the latest CPU request's location (bank reservation)
 reg     ch2_bv = 1'b0, ch2_brnw;      // ch2 queue, second entry
 reg [26:0] ch2_baddr;
@@ -354,6 +355,21 @@ assign c2_hit_now = c_pend3 && c_hit_q && ~ch2_rq && ~ch2_bv && ~(c_we && c_wadd
 `endif
 
 reg        vs_v, vs_we;          // this frame's V access
+//  32 MB board, 4 MB VRAM: the VRAM's upper 2 MB sits on bank 3's rows 01.  A V ACT with
+//  row bits 01 (cycle 0) is the DQM of the word the previous frame's G2 READ (cycle 11) puts
+//  on the bus two clocks later: that word is masked.  The G2 read is then void -- its data is
+//  not delivered -- and the same access is retried (rt) in a later G slot.  g2_void is known on
+//  the boundary edge; the G2 capture (cycle 6 of the next frame) sees it.
+reg        g2_void = 1'b0;
+reg        g2w1_v = 1'b0;        // a one-word G2 read: capture its (second) word on this edge
+gslot_t    g2w1;
+`ifndef TDM_MUT_NOSWAP
+wire       g2_noswap = 1'b0;
+`else
+wire       g2_noswap = 1'b1;
+`endif
+reg        rt_v = 1'b0;          // a voided G2 read waits to be retried
+reg [15:0] mon_void = '0;        // voided G2 reads (benches)
 loc_t      vs_l;
 reg [31:0] vs_wdata;
 reg  [3:0] vs_be;
@@ -443,6 +459,7 @@ function automatic logic ok(input loc_t l, input logic sens, input logic blk_c0,
 endfunction
 
 reg  [3:0] cand_ok;
+reg        rt_ok;
 loc_t      cand_l [0:3];         // registered: map() of each channel's held address
 reg  [3:0] rq_d;                 // the request was already up last cycle (cand_l is its)
 reg        c2_hold;              // registered CPU reservation
@@ -478,6 +495,7 @@ always_comb begin
 `ifndef TDM_MUT_VREF_NOG2   // negative control: G2 may take the VRAM chip while its refresh waits
 `endif
     cand_ok[0] = ch2_rq & rq_d[0] & ok(cand_l[0], sens, b0, b1, prev_v, prev_c, prev_b, m128);
+    //  the retry goes to a G1 only: a G2 read can be voided again by the next V, for ever
     //  The CPU's hold and location from the edge after its request, not a clock
     //  later through c2_hold/c2_l: the decision on that edge used to give the CPU's
     //  bank away (sim/sdram_tdm +stock +cpulow=2, "OB-" at 3 of 36 grid phases).
@@ -505,9 +523,21 @@ always_comb begin
 `else
     rsv  = 1'b0;
 `endif
+    //  (it also keeps out of a G1 the waiting CPU has reserved: a read there would close G2 to it)
+    rt_ok      = rt_v & ps[2] & ~rsv & ok(rt.l, sens, b0, b1, prev_v, prev_c, prev_b, m128);
     cand_ok[1] = ch1_rq & rq_d[1] & ok(cand_l[1], sens, b0, b1, prev_v, prev_c, prev_b, m128) & ~(hold & ~cand_ok[0] & cand_l[1].c == hl.c & cand_l[1].b == hl.b) & ~(rsv & ch1_rnw_1);
     cand_ok[2] = ch3_rq & rq_d[2] & ok(cand_l[2], sens, b0, b1, prev_v, prev_c, prev_b, m128) & ~(hold & ~cand_ok[0] & cand_l[2].c == hl.c & cand_l[2].b == hl.b) & ~(rsv & ch3_rnw_1);
     cand_ok[3] = ch4_rq & rq_d[3] & ok(cand_l[3], sens, b0, b1, prev_v, prev_c, prev_b, m128) & ~(hold & ~cand_ok[0] & cand_l[3].c == hl.c & cand_l[3].b == hl.b) & ~(rsv & ch4_rnw_1);
+    //  one retry at a time: while it waits and cannot take this G2, G2 takes no read (a read
+    //  voided now would overwrite rt)
+    //  ... and keeps G2 off the retry's bank, so the next G1 can take it (tRC)
+    //  Only a ch4 read can be voided (the others read their word second), so only ch4 reads
+    //  wait; the CPU keeps G2 whatever the retry needs (its stock deadline comes first).
+    if (ps[6] && rt_v) begin
+        if (cand_l[1].c == rt.l.c && cand_l[1].b == rt.l.b) cand_ok[1] = 1'b0;
+        if (cand_l[2].c == rt.l.c && cand_l[2].b == rt.l.b) cand_ok[2] = 1'b0;
+        if (ch4_rnw_1 || (cand_l[3].c == rt.l.c && cand_l[3].b == rt.l.b)) cand_ok[3] = 1'b0;
+    end
 `ifndef TDM_MUT_VREF_NOG1W
     //  the VRAM chip's refresh is urgent: in the frame before the one it is meant for,
     //  G2 keeps off that chip and G1 does not write it -- except for the CPU, whose
@@ -682,6 +712,7 @@ always @(posedge clk) begin
             run <= 1'b1; ph <= 4'd0; ps <= 12'd1;
             ch1_ready <= 1; ch2_ready <= 1; ch3_ready <= 1; ch4_ready <= 1;
             g1.v <= 0; g2.v <= 0; prev_v <= 0; vs_v <= 0; v_grant <= 0;
+            rt_v <= 0; g2_void <= 0;
             //  rf_vcnt starts a little in: the model (and the chip) count from the mode
             //  register, ~100 clocks before the first frame (as rf_cnt[0] does)
             rf_due <= 0; rf_now <= 0; rf_next <= 0; rf_late <= 0; rf_early <= 0; rf_vcnt <= 11'd200;
@@ -757,18 +788,31 @@ always @(posedge clk) begin
             //  (the deferral branch above may hold a frame where vgo was true: only for
             //  the other chip's cycle-10 refresh; rf_late stays bounded by it)
             else                           begin rf_now <= 2'b00; rf_early <= 1'b0; end
-            vl = map((m128 ? VBASE128 : VBASE32) + {9'd0, v_addr, 2'b00}, m128);
+            //  4 MB of VRAM.  128 MB: 28-32 MB (rows 00).  64 MB: bank 3 rows 00, the upper 2 MB
+            //  (byte bit 21) on the column MSB a[25].  32 MB (9 column bits): the upper 2 MB on
+            //  bank 3's rows 01 (24-28 MB); such a V ACT masks the word the previous G2 READ puts
+            //  on the bus in cycle 2 -- see g2_void and the one-word G2 read order below.
+`ifndef TDM_MUT_V4MB_ROW        // negative control: 32 MB map contiguous (rows 01 above 2 MB)
+            vl = m128 ? map(VBASE128 + {5'd0, v_addr, 2'b00}, 1'b1)
+                      : map(VBASE32 | {1'b0, m64 & v_addr[19], 2'b00, 1'b0, ~m64 & v_addr[19], v_addr[18:0], 2'b00}, 1'b0);
+`else
+            vl = map((m128 ? VBASE128 : VBASE32) + {5'd0, v_addr, 2'b00}, m128);
+`endif
             //  with v_en the VRAM's chip has no cycle-10 refresh: a V request is always taken
             took = v_en && v_req;
             vs_v <= took; vs_we <= v_we; vs_l <= vl; vs_wdata <= v_wdata; vs_be <= v_be;
             v_grant <= took;
             //  chip / bank / row are loaded whether or not V asks this frame: nothing else
-            //  uses them on this edge, the row's A12:A11 are 0 for every V address (VBASE +
-            //  18-bit word address), so the cycle-0 DQM stays 00, and a NOP ignores them.
+            //  uses them on this edge and a NOP ignores them.  The row's A12:A11 (the cycle-0
+            //  DQM) follow took: with no V access they stay 00.
             //  Only the command depends on v_req: the V9968's request (clk_vdp, 7.76 ns
             //  away) no longer enables 20-odd address flops (MSX1_V9968 f8fb45d: a_i <-
             //  ff_vram_address -0.162 ns at SEED 10, a_i <- ff_vram_valid -0.135 at SEED 11).
-            chip <= vl.c; ba_i <= vl.b; a_i <= vl.r;
+            chip <= vl.c; ba_i <= vl.b; a_i <= {took ? vl.r[12:11] : 2'b00, vl.r[10:0]};
+`ifndef TDM_MUT_NOVOID          // negative control: the masked G2 word is delivered
+            g2_void <= took && vl.r[12:11] != 2'b00 && g2.v && g2.rnw && g2.ch == 2'd3;
+            if (took && vl.r[12:11] != 2'b00 && g2.v && g2.rnw && g2.ch == 2'd3) begin rt <= g2; rt_v <= 1'b1; mon_void <= mon_void + 1'b1; end
+`endif
             if (took) command <= CMD_ACT;
         end
         ps[2]: begin         // V READ (cycle 3) / G1 decision
@@ -803,6 +847,7 @@ always @(posedge clk) begin
             pick = '0;
             if      (cand_ok[0]) begin pick.v = 1; pick.ch = 2'd1; pick.rnw = ch2_rnw_1; pick.a0 = ch2_addr_1[0];
                                        pick.din = ch2_din_1; pick.word = ch2_addr_1[26:1]; pick.l = cand_l[0]; end
+            else if (rt_ok)      begin pick = rt; end
             else if (cand_ok[1]) begin pick.v = 1; pick.ch = 2'd0; pick.rnw = ch1_rnw_1; pick.a0 = ch1_addr_1[0];
                                        pick.din = ch1_din_1; pick.word = ch1_addr_1[26:1]; pick.l = cand_l[1]; end
             else if (cand_ok[2]) begin pick.v = 1; pick.ch = 2'd2; pick.rnw = ch3_rnw_1; pick.a0 = ch3_addr_1[0];
@@ -812,7 +857,8 @@ always @(posedge clk) begin
             //  chN_saved_a0 is taken with the data (read capture below), not here: on
             //  this edge it hung off the whole cand_ok cone (ch2_saved_a0 <- ps -0.130 ns
             //  on the 13e72cd fit, 2026-10-20), and a0 and data now change together
-            if (pick.v) begin
+            if (rt_ok && !cand_ok[0]) rt_v <= 1'b0;
+            if (pick.v && !(rt_ok && !cand_ok[0])) begin
                 case (pick.ch)
                     2'd0: begin ch1_rq <= 0; ch1_ready <= 0; end
                     2'd1: begin ch2_rq <= 0; ch2_ready <= 0; end
@@ -840,8 +886,16 @@ always @(posedge clk) begin
         if (ps[6] && g1.v && g1.rnw) begin
             command <= CMD_READ; chip <= g1.l.c; ba_i <= g1.l.b; a_i <= {2'b00, 1'b1, g1.l.k};
         end
+        //  A one-word G2 read (every channel but ch4) asks for the other word of the pair
+        //  first: its own word comes second (cycle 3), out of reach of the next V ACT's row
+        //  bits (they are the DQM of cycle 2's word only).  ch4 needs both words: void/retry.
         if (ps[10] && g2.v && g2.rnw) begin
-            command <= CMD_READ; chip <= g2.l.c; ba_i <= g2.l.b; a_i <= {2'b00, 1'b1, g2.l.k};
+            command <= CMD_READ; chip <= g2.l.c; ba_i <= g2.l.b;
+`ifndef TDM_MUT_NOSWAP
+            a_i <= {2'b00, 1'b1, g2.l.k[9:1], g2.l.k[0] ^ (g2.ch != 2'd3)};
+`else
+            a_i <= {2'b00, 1'b1, g2.l.k};
+`endif
         end
         // WRITE (cycles 9, 1): one byte, the other byte and word1 masked
         if ((ps[8] && g1.v && !g1.rnw) || (ps[0] && g2.v && !g2.rnw)) begin
@@ -869,10 +923,10 @@ always @(posedge clk) begin
 `elsif TDM_MUT_CAPE         // negative control: one clock early
         if ((ps[1] && g1.v && g1.rnw) || (ps[5] && g2.v && g2.rnw)) begin
 `else
-        if ((ps[2] && g1.v && g1.rnw) || (ps[6] && g2.v && g2.rnw)) begin
+        if ((ps[2] && g1.v && g1.rnw) || (ps[6] && g2.v && g2.rnw && !g2_void && (g2.ch == 2'd3 || g2_noswap)) || g2w1_v) begin
 `endif
             gslot_t g;
-            g = (ps[1] | ps[2] | ps[3]) ? g1 : g2;
+            g = g2w1_v ? g2w1 : (ps[1] | ps[2] | ps[3]) ? g1 : g2;
             case (g.ch)
                 2'd0: begin ch1_saved_data <= dq_p; ch1_saved_a0 <= g.a0; ch1_ready <= 1; end
                 2'd1: begin
@@ -891,6 +945,10 @@ always @(posedge clk) begin
 `else
         if (ch4_w1) begin ch4_saved_data1 <= dq_p; ch4_w1 <= 1'b0; end
 `endif
+        if (ps[6]) g2_void <= 1'b0;
+        //  the one-word G2 read's word is on dq_p one clock after word0's edge
+        g2w1_v <= ps[6] && g2.v && g2.rnw && g2.ch != 2'd3 && !g2_noswap;
+        if (ps[6]) g2w1 <= g2;
 
         if (rf_cxl) begin                // see rf_cxl: back to due, not done
             rf_due  <= rf_due | rf_now;

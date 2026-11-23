@@ -37,6 +37,7 @@ module tb;
     int switch_n = 0;
     bit stock_now = 0;
     int ven = 1, vbusy = 60, vrun = 12, vrun_n = 0;
+    int vhi = 0;
     int ch4ser = 0;
     int ch4_hist [0:1023];
     int e0_vcnt; bit e0_urg, e0_early; bit [2:0] e0_cmask;      // diagnosis of a LATE read                          // +ven=0: no VRAM port (MSX1.sv today: v_en = 0)
@@ -52,6 +53,7 @@ module tb;
         void'($value$plusargs("m64=%d", m64));
         void'($value$plusargs("r800wr=%d", r800wr));
         void'($value$plusargs("ven=%d", ven));
+        void'($value$plusargs("vhi=%d", vhi));
         void'($value$plusargs("vbusy=%d", vbusy));
         void'($value$plusargs("vrun=%d", vrun));
         void'($value$plusargs("ch4ser=%d", ch4ser));   // 1: ch4 back to back (the PCM engine's serial reads), latency histogram   // at most this many V-request frames in a row (0 = no cap)
@@ -74,7 +76,7 @@ module tb;
     wire  [15:0] ch4_dout16, ch4_dout16b;
 
     logic        v_req = 0, v_we = 0;
-    logic [15:0] v_addr = 0;
+    logic [19:0] v_addr = 0;
     logic [31:0] v_wdata = 0;
     logic  [3:0] v_be = 0;
     wire         v_grant, v_rvalid;
@@ -328,12 +330,23 @@ module tb;
     //  expected V reads in grant order: the result of one frame's read can arrive
     //  on the edge that grants the next (v_rvalid at the frame boundary)
     logic [31:0] vexp_q [$];
-    logic [15:0] vexpa_q [$];
+    logic [19:0] vexpa_q [$];
     task automatic vagent();
 
         wait (dut.run); repeat (30) @(posedge clk);
         forever begin
-            v_addr  = $urandom % 4096;
+            //  4 MB of VRAM: one of the 16 banks (R#28-R#30) and a 16 KB window of it.  A
+            //  32 MB chip mirrors the upper 2 MB onto the lower (no column MSB): there the
+            //  agent keeps to banks 0-7 so its reference stays exact.
+            v_addr  = {4'($urandom % 16), 16'($urandom % 4096)};
+`ifdef ONECHIP
+`ifndef CHIP64
+`ifndef CHK_ALLOW_MASKED
+            if (m128 == 0) v_addr[19] = 1'b0;
+`endif
+`endif
+`endif
+            if (vhi == 1) v_addr[19] = 1'b1;       // +vhi=1: every V access in the upper 2 MB
             v_we    = ($urandom % 3) == 0 || !vref.exists(v_addr);
             v_wdata = $urandom;
             v_be    = v_we ? ($urandom % 16) : 4'hF;
@@ -413,6 +426,9 @@ module tb;
         if (stock) $display("  ch2 stock: grid phase %0d: LATE=%0d  completion max E0+%0d (deadline E0+%0d)", gph, nlate, stock_lat_max, dl);
         $display("  chip: ACT=%0d READ=%0d WRITE=%0d REFRESH=%0d ras_lockout=%0d errors=%0d",
                  chip2.nact, chip2.nrd, chip2.nwr, chip2.nref, chip2.ras_lockout, chip2.errs);
+`ifdef CHK_ALLOW_MASKED
+        $display("  G2 void: masked words %0d, voided G2 reads %0d", chip2.n_masked, dut.mon_void);
+`endif
         if (dut.ch2_ovf) $display("  ch2 queue overflow: a write was lost");
         if (bad == 0 && !dut.ch2_ovf && chip2.errs == 0 && done[0] > 0 && done[1] > 0 && done[2] > 0 && done[3] > 0
             && (vreads > 0 || ven == 0) && chip2.nref > 0 && nread[1] > 0 && nw1 > 0)

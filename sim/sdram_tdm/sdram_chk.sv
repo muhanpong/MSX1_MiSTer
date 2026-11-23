@@ -44,6 +44,7 @@ module sdram_chk #(parameter int NCHIP = 1, parameter int COLS = 512, parameter 
     final for (int c = 0; c < NCHIP; c++)
         $display("  SDCHK refresh chip %0d: max interval %0.3f us, max debt %0.2f%s", c, gap_max[c] / 1e6, dbt_max[c],
                  refdebt ? $sformatf(" (rule: debt <= %0d)", refdebt) : " (rule: interval <= 7.8125 us)");
+    int n_masked = 0;
     task automatic err(input string s);
         errs++;
         if (errs <= 20) $display("SDCHK ERR t=%0t %s", $time, s);
@@ -143,7 +144,13 @@ module sdram_chk #(parameter int NCHIP = 1, parameter int COLS = 512, parameter 
             if (dqm_at.exists(e - 2)) rd_m = dqm_at[e - 2];     // DQM latency 2
             if (rd_m[0]) nx_v[7:0]  = 8'hzz;
             if (rd_m[1]) nx_v[15:8] = 8'hzz;
+`ifdef CHK_ALLOW_MASKED
+            //  the controller may void a masked word (G2 retry): count it; the bench's data
+            //  check catches it if it is ever delivered (its bits are Z here)
+            if (rd_m != 2'b00) n_masked++;
+`else
             if (rd_m != 2'b00) err($sformatf("read word masked by DQM=%b (row bits on A12:A11?)", rd_m));
+`endif
             nx_ok = 1'b1;
             last_word = e;
         end else nx_ok = 1'b0;
