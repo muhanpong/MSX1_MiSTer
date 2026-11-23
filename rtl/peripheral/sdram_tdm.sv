@@ -733,7 +733,7 @@ always @(posedge clk) begin
             run <= 1'b1; ph <= 4'd0; ps <= 12'd1;
             ch1_ready <= 1; ch2_ready <= 1; ch3_ready <= 1; ch4_ready <= 1;
             g1.v <= 0; g2.v <= 0; prev_v <= 0; vs_v <= 0; v_grant <= 0;
-            rt_v <= 0; g2_void <= 0; rt_go <= 0;
+            rt_v <= 0; g2_void <= 0;           // (rt_go follows rt_v at cycle 1)
             //  rf_vcnt starts a little in: the model (and the chip) count from the mode
             //  register, ~100 clocks before the first frame (as rf_cnt[0] does)
             rf_due <= 0; rf_now <= 0; rf_next <= 0; rf_late <= 0; rf_early <= 0; rf_vcnt <= 11'd200;
