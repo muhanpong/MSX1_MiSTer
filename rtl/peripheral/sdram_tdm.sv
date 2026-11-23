@@ -460,6 +460,8 @@ endfunction
 
 reg  [3:0] cand_ok;
 reg        rt_ok;
+reg        rt_go = 1'b0;         // the retry may take this frame's G1 (registered at cycle 1)
+reg  [3:1] cand_rtb = '0;        // candidate i is in the retry's bank (registered)
 loc_t      cand_l [0:3];         // registered: map() of each channel's held address
 reg  [3:0] rq_d;                 // the request was already up last cycle (cand_l is its)
 reg        c2_hold;              // registered CPU reservation
@@ -472,6 +474,18 @@ assign rf_cxl = cpu_wait && rf_late != 2'd3 && (c2_l.c ? rf_now[1] : rf_now[0]) 
 assign rf_cxl = 1'b0;
 `endif
 always @(posedge clk) begin
+    for (int i = 1; i < 4; i++) cand_rtb[i] <= cand_l[i].c == rt.l.c && cand_l[i].b == rt.l.b;
+    //  rt_go, for the G1 decision on the next edge (ps[2]): everything it reads is stable
+    //  from here to there -- prev_* (set at the G2 decision, ps[6]), vs_* and the refresh
+    //  frame (ps[11]) -- except the CPU, which rt_ok checks again on the edge itself.  A
+    //  refresh frame on the retry's chip (now or next) keeps it waiting; rf_cxl is not read.
+    if (ps[1])
+        rt_go <= rt_v && !c2_hold
+              && !(prev_v && rt.l.c == prev_c && rt.l.b == prev_b)
+              && !(vs_v && !vs_we && rt.l.r[12:11] != 2'b00)
+              && !(rt.l.c ? (rf_now[1] | rf_next[1]) : (rf_now[0] | rf_next[0]))
+              && !(v_en && rt.l.b == 2'd3 && rt.l.c == m128);
+    else if (ps[2]) rt_go <= 1'b0;
     cand_l[0] <= gmap(ch2_addr_1, m128, m64);
     cand_l[1] <= gmap(ch1_addr_1, m128, m64);
     cand_l[2] <= gmap(ch3_addr_1, m128, m64);
@@ -523,8 +537,12 @@ always_comb begin
 `else
     rsv  = 1'b0;
 `endif
-    //  (it also keeps out of a G1 the waiting CPU has reserved: a read there would close G2 to it)
-    rt_ok      = rt_v & ps[2] & ~rsv & ok(rt.l, sens, b0, b1, prev_v, prev_c, prev_b, m128);
+    //  The retry, decided a clock early (rt_go, registered at cycle 1) so that it adds no
+    //  depth to the slot decision (4cc8046: ch2_hl -> rsv -> rt_ok -> g2.word -0.366 ns):
+    //  it goes only when no CPU access is waiting at all, which also keeps it out of a G1
+    //  the CPU has reserved.
+    //  (a CPU read still in its cache lookup counts: on a miss it needs this G1)
+    rt_ok      = rt_go & ps[2] & ~ch2_rq & ~ch2_cpend & ~c_pend2 & ~c_pend3;
     cand_ok[1] = ch1_rq & rq_d[1] & ok(cand_l[1], sens, b0, b1, prev_v, prev_c, prev_b, m128) & ~(hold & ~cand_ok[0] & cand_l[1].c == hl.c & cand_l[1].b == hl.b) & ~(rsv & ch1_rnw_1);
     cand_ok[2] = ch3_rq & rq_d[2] & ok(cand_l[2], sens, b0, b1, prev_v, prev_c, prev_b, m128) & ~(hold & ~cand_ok[0] & cand_l[2].c == hl.c & cand_l[2].b == hl.b) & ~(rsv & ch3_rnw_1);
     cand_ok[3] = ch4_rq & rq_d[3] & ok(cand_l[3], sens, b0, b1, prev_v, prev_c, prev_b, m128) & ~(hold & ~cand_ok[0] & cand_l[3].c == hl.c & cand_l[3].b == hl.b) & ~(rsv & ch4_rnw_1);
@@ -533,10 +551,13 @@ always_comb begin
     //  ... and keeps G2 off the retry's bank, so the next G1 can take it (tRC)
     //  Only a ch4 read can be voided (the others read their word second), so only ch4 reads
     //  wait; the CPU keeps G2 whatever the retry needs (its stock deadline comes first).
+    //  (the bank flags are registered a clock behind cand_l: stale only for a request that
+    //  came up a clock ago, and then the retry simply waits a frame -- the ch4 read rule,
+    //  which keeps rt from being overwritten, uses the live ch4_rnw_1)
     if (ps[6] && rt_v) begin
-        if (cand_l[1].c == rt.l.c && cand_l[1].b == rt.l.b) cand_ok[1] = 1'b0;
-        if (cand_l[2].c == rt.l.c && cand_l[2].b == rt.l.b) cand_ok[2] = 1'b0;
-        if (ch4_rnw_1 || (cand_l[3].c == rt.l.c && cand_l[3].b == rt.l.b)) cand_ok[3] = 1'b0;
+        if (cand_rtb[1]) cand_ok[1] = 1'b0;
+        if (cand_rtb[2]) cand_ok[2] = 1'b0;
+        if (ch4_rnw_1 || cand_rtb[3]) cand_ok[3] = 1'b0;
     end
 `ifndef TDM_MUT_VREF_NOG1W
     //  the VRAM chip's refresh is urgent: in the frame before the one it is meant for,
@@ -712,7 +733,7 @@ always @(posedge clk) begin
             run <= 1'b1; ph <= 4'd0; ps <= 12'd1;
             ch1_ready <= 1; ch2_ready <= 1; ch3_ready <= 1; ch4_ready <= 1;
             g1.v <= 0; g2.v <= 0; prev_v <= 0; vs_v <= 0; v_grant <= 0;
-            rt_v <= 0; g2_void <= 0;
+            rt_v <= 0; g2_void <= 0; rt_go <= 0;
             //  rf_vcnt starts a little in: the model (and the chip) count from the mode
             //  register, ~100 clocks before the first frame (as rf_cnt[0] does)
             rf_due <= 0; rf_now <= 0; rf_next <= 0; rf_late <= 0; rf_early <= 0; rf_vcnt <= 11'd200;
@@ -857,8 +878,8 @@ always @(posedge clk) begin
             //  chN_saved_a0 is taken with the data (read capture below), not here: on
             //  this edge it hung off the whole cand_ok cone (ch2_saved_a0 <- ps -0.130 ns
             //  on the 13e72cd fit, 2026-10-20), and a0 and data now change together
-            if (rt_ok && !cand_ok[0]) rt_v <= 1'b0;
-            if (pick.v && !(rt_ok && !cand_ok[0])) begin
+            if (rt_ok) rt_v <= 1'b0;             // (rt_ok excludes a CPU request: cand_ok[0] is 0)
+            if (pick.v && !rt_ok) begin
                 case (pick.ch)
                     2'd0: begin ch1_rq <= 0; ch1_ready <= 0; end
                     2'd1: begin ch2_rq <= 0; ch2_ready <= 0; end
