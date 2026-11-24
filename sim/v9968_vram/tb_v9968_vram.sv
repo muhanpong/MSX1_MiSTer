@@ -406,6 +406,43 @@ module tb #(parameter int RELEASE_PH = 0);
         $display("WB line %0d sprite dots: %s", ln, sp);
     endtask
 
+    //  +wb=3|4 helpers: a handler's I/O list ({write, port, data}) from the next FH pulse, the
+    //  first I/O +wbent ns after it and the rest +wbgap ns apart; the bank-aware line dump
+    //  (VRAM byte = {bank, page, y group, x mod 32})
+    task automatic wbseq(input string nm, input logic [11:0] ops [$]);
+        realtime t0; logic [7:0] q;
+        @(posedge vdp9968.w_intr_line);
+        t0 = $realtime + wbent * 1000.0;
+        foreach (ops[i]) begin
+            io_at(t0 + i * wbgap * 1000.0, ops[i][11], ops[i][10:8], ops[i][7:0], q);
+            if (ops[i][11] && ops[i][10:8] == 3'd1 && ops[i][7])
+                $display("WB %s: R#%0d written at line %0d dot %0d", nm, ops[i][5:0], vdp9968.w_screen_pos_y, $signed(vdp9968.w_screen_pos_x[13:4]));
+        end
+    endtask
+    task automatic wbline2(input int ln);
+        logic [9:0] last; int run, st; string sp; int d;
+        last = '1; run = 0; st = 0; sp = "";
+        wait (vdp9968.w_screen_pos_y == 10'(ln));
+        while (vdp9968.w_screen_pos_y == 10'(ln)) begin
+            @(posedge clk_vdp);
+            if (vdp9968.w_screen_pos_x[3:0] == 4'd8) begin
+                logic [9:0] c; logic [7:0] b;
+                d = $signed(vdp9968.w_screen_pos_x[13:4]);
+                b = vdp9968.w_screen_mode_display_color;
+                c = {vdp9968.w_screen_mode_display_color_en, 1'b0, b[7], b[6], b[5], 5'(b[4:0] - 5'(d))};
+                if (!vdp9968.w_screen_mode_display_color_en) c[8:0] = '0;
+                if (vdp9968.w_sprite_display_color_en && vdp9968.w_sprite_display_color != 0) sp = {sp, $sformatf("%0d ", d)};
+                if (c == last) run++;
+                else begin
+                    if (run > 0) $display("WB2 line %0d dots %0d..%0d: en %0d bank %0d page %0d ygrp %0d shift %0d", ln, st, st + run - 1, last[9], last[7], last[6], last[5], last[4:0]);
+                    last = c; run = 1; st = d;
+                end
+            end
+        end
+        if (run > 0) $display("WB2 line %0d dots %0d..%0d: en %0d bank %0d page %0d ygrp %0d shift %0d", ln, st, st + run - 1, last[9], last[7], last[6], last[5], last[4:0]);
+        $display("WB2 line %0d sprite dots: %s", ln, sp);
+    endtask
+
     logic [7:0] pat [0:65535];
     initial begin
         logic [7:0] q;
@@ -466,6 +503,70 @@ module tb #(parameter int RELEASE_PH = 0);
         //   +wbent ns from the FH pulse to the first I/O; +wbgap ns between I/Os (internal V9968:
         //   8660); +wbhr=1: cartridge -- HR wait (0 then 1) before the eight scroll I/Os, which
         //   then start +wbhrlag ns after HR rises.
+        //  +wb=3|4: WBML V9968's band splits through the BG bank (knightmare-v2's second request).
+        //  Same registers as +wb=1|2.  VRAM byte = {bank, page, y group, x mod 32} in banks 0 and 1.
+        //  SP3 tables: A (FA00h, R#5 F4h): plane 0 at X 64, plane 1 hidden, plane 2 at X 100;
+        //  B (FC00h, R#5 F8h): plane 0 at X 160, plane 1 at X 200, plane 2 hidden with X 220 --
+        //  so a line chosen by A's Y but drawn with B's X shows dots at 160 and 220.
+        //   wb=3 (A): FH 19: IN P4, P4=2, R#29=01, R#2, R#23, R#26, R#27 (game), R#19=22;
+        //             FH 22: R#5=F8h, P4=2, R#19=23, first byte 00h; FH 23: 9Dh, P4=2, R#19=87
+        //   wb=4 (B): FH 214: IN P4, P4=2, R#19=215, first byte 01h; FH 215: 9Dh, P4=2, R#19=223
+        if (wb == 3 || wb == 4) begin
+            iogap = 0;
+            io(1, 3'd4, 8'h00, q);
+            wreg(0, 8'h1E); wreg(1, 8'h40); wreg(8, 8'h08); wreg(9, 8'h80); wreg(7, 8'h00);
+            wreg(20, 8'h1F); wreg(21, 8'h00); wreg(25, 8'h02); wreg(15, 8'h02);
+            wreg(11, 8'h01); wreg(6, 8'h1E); wreg(29, 8'h00); wreg(30, 8'h00);
+            for (int bk = 0; bk < 2; bk++) begin
+                wreg(28, 8'(bk));
+                for (int pg = 0; pg < 2; pg++)
+                    for (int g = 0; g < 3; g++) begin
+                        automatic int y0 = g == 0 ? 4 : g == 1 ? 17 : 65;
+                        automatic int ny = g == 0 ? 8 : 11;
+                        automatic logic [16:0] a = {pg[0], 8'(y0), 8'h00};
+                        set_addr(a, 1);
+                        for (int i = 0; i < ny * 256; i++) io(1, 3'd0, {bk[0], pg[0], g == 2, 5'(i)}, q);
+                    end
+            end
+            wreg(28, 8'd0);
+            for (int r = 0; r < 16; r++) begin
+                set_addr(17'h0F000 + 17'(128 * r), 1);
+                io(1, 3'd0, 8'h20, q); for (int i = 1; i < 8; i++) io(1, 3'd0, 8'h00, q);
+            end
+            for (int tb = 0; tb < 2; tb++) begin
+                set_addr(tb ? 17'h0FC00 : 17'h0FA00, 1);
+                for (int p = 0; p < 16; p++) begin
+                    automatic int on = tb ? (p == 0 || p == 1) : (p == 0 || p == 2);
+                    automatic int y = on ? 19 : 400;
+                    automatic int x = tb ? (p == 0 ? 160 : p == 1 ? 200 : 220) : (p == 0 ? 64 : p == 2 ? 100 : 130);
+                    io(1, 3'd0, 8'(y), q); io(1, 3'd0, 8'(y >> 8), q); io(1, 3'd0, 8'd16, q); io(1, 3'd0, 8'h00, q);
+                    io(1, 3'd0, 8'(x), q); io(1, 3'd0, 8'(x >> 8), q); io(1, 3'd0, 8'd16, q); io(1, 3'd0, 8'h00, q);
+                end
+            end
+            if (wb == 3) begin wreg(2, 8'h3F); wreg(23, 8'h00); wreg(26, 8'h00); wreg(27, 8'h00); wreg(5, 8'hF4); wreg(19, 8'd19); end
+            else         begin wreg(2, 8'h1F); wreg(23, 8'h30); wreg(26, 8'h05); wreg(27, 8'h03); wreg(5, 8'hF8); wreg(19, 8'd214); end
+            wait (vdp9968.w_screen_pos_y == 10'd240); wait (vdp9968.w_screen_pos_y == 10'd2);
+            io(0, 3'd4, 8'h00, q); io(1, 3'd4, 8'h02, q);
+            fork
+                begin
+                    if (wb == 3) for (int l = 19; l <= 25; l++) wbline2(l);
+                    else         for (int l = 214; l <= 218; l++) wbline2(l);
+                end
+                begin
+                    if (wb == 3) begin
+                        wbseq("FH19", '{12'h400, 12'hC02, 12'h901, 12'h99D, 12'h91F, 12'h982, 12'h930, 12'h997,
+                                        12'h905, 12'h99A, 12'h903, 12'h99B, 12'h916, 12'h993});
+                        wbseq("FH22", '{12'h9F8, 12'h985, 12'hC02, 12'h917, 12'h993, 12'h900});
+                        wbseq("FH23", '{12'h99D, 12'hC02, 12'h957, 12'h993});
+                    end else begin
+                        wait (vdp9968.w_screen_pos_y == 10'd205); wreg(9, 8'h00);
+                        wbseq("FH214", '{12'h400, 12'hC02, 12'h9D7, 12'h993, 12'h901});
+                        wbseq("FH215", '{12'h99D, 12'hC02, 12'h9DF, 12'h993});
+                    end
+                end
+            join
+            $finish;
+        end
         if (wb > 0) begin
             automatic realtime t0; automatic int k = 0;
             automatic logic [7:0] g2 = 8'h1F, g23 = 8'h30, g26 = 8'h05, g27 = 8'h03;
