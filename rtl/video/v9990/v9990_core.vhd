@@ -102,6 +102,7 @@ architecture rtl of v9990_core is
    signal c0_addr    : unsigned(17 downto 0);
    signal c0_wdata   : std_logic_vector(15 downto 0);
    signal c1_req, c2_req, c3_req, c4_req, c4_we : std_logic;
+   signal pat_busy : std_logic;
    signal c1_addr, c2_addr, c3_addr, c4_addr : unsigned(17 downto 0);
    signal c4_be      : std_logic_vector(1 downto 0);
    signal c4_wdata   : std_logic_vector(15 downto 0);
@@ -213,11 +214,16 @@ begin
    -- served is done (ack) or idle, so a transfer in progress is never cut.
    process (clk)
       variable reqs : std_logic_vector(0 to 4);
+      variable cand : std_logic_vector(0 to 4);
       variable cur  : std_logic;
    begin
       if rising_edge(clk) then
          reqs := c0_req & c1_req & c2_req & c3_req & c4_req;
          cur  := reqs(gnt);
+         -- While a P1 / P2 line is being fetched the command engine waits (it
+         -- may finish a transfer it has started): with a slow VRAM the fetch
+         -- needs nearly the whole line (LOCAL, 2026-11-24).
+         cand := c0_req & c1_req & c2_req & c3_req & (c4_req and not pat_busy);
          if vram_ack_i = '1' or cur = '0' then
             if c1_req = '1' then
                -- the bitmap fetch (the next display line) goes first: with a
@@ -226,7 +232,7 @@ begin
                gnt <= 1;
             else
                for k in 1 to 4 loop
-                  if reqs((gnt + k) mod 5) = '1' then
+                  if cand((gnt + k) mod 5) = '1' then
                      gnt <= (gnt + k) mod 5;
                      exit;
                   end if;
@@ -377,6 +383,7 @@ begin
       vram_addr_o    => c2_addr,
       vram_ack_i     => ack2,
       vram_rdata_i   => vram_rdata_i,
+      fetch_busy_o   => pat_busy,
       pix_idx        => pat_idx,
       pix_fg         => pat_fg
    );

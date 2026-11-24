@@ -80,6 +80,8 @@ entity v9990_pattern is
       vram_addr_o  : out unsigned(17 downto 0);
       vram_ack_i   : in  std_logic;
       vram_rdata_i : in  std_logic_vector(15 downto 0);
+      -- LOCAL (nextz80_v9990): a line's fetch is in progress (for the VRAM arbiter)
+      fetch_busy_o : out std_logic;
 
       -- Pixel.
       pix_idx      : out unsigned(5 downto 0);
@@ -437,6 +439,7 @@ begin
    end process;
 
    vram_req_o  <= freq;
+   fetch_busy_o <= '0' when fs = F_IDLE else '1';
    vram_addr_o <= faddr;
 
    ---------------------------------------------------------------------------
