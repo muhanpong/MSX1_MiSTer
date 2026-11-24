@@ -53,6 +53,8 @@ module tb #(parameter int RELEASE_PH = 0);
         void'($value$plusargs("ie1=%d", ie1)); void'($value$plusargs("disp=%d", disp)); void'($value$plusargs("ie1off=%d", ie1off)); void'($value$plusargs("fhoff=%d", fhoff));   // +fhoff=N: IE1 off, VBLANK IRQ handler reads S#1 first (Knightmare 224 v2)
         void'($value$plusargs("ie1line=%h", ie1line)); void'($value$plusargs("ie1r9=%h", ie1r9)); void'($value$plusargs("ie1dly=%d", ie1dly));
         void'($value$plusargs("bank=%d", bank));
+        void'($value$plusargs("hsr=%d", hsr));
+        void'($value$plusargs("tput=%d", tput)); void'($value$plusargs("tpn=%d", tpn));
         void'($value$plusargs("mix=%d", mix)); void'($value$plusargs("mixrep=%d", mixrep)); void'($value$plusargs("iogap=%d", iogap));
         void'($value$plusargs("ovs=%d", ovs)); void'($value$plusargs("ovsln=%d", ovsln)); void'($value$plusargs("ovscmd=%d", ovscmd));   // +ovs=N trials of Shaolin's overscan + display-off + HMMV/HMMM; +ovsln=0 control (no LN=0); +ovscmd=HMMMs per trial   // +ie1line=D2 +ie1r9=80: ASO's second split (line 210, 212 lines); +ie1dly=clk_vdp from int_n to the S#1 read
         void'($value$plusargs("rpl=%s", rplf)); void'($value$plusargs("rplscale=%d", rplscale));   // +rplscale=P: event times x P/100 (R800 runs ~1.8x openMSX between I/O)   // +rpl=<file>: replay an oracle window (tools: aso_win.txt), paced, reads not forced   // +ie1=N: ASO 224's first in-game wait, line IRQ taken as int_n (no polling); +disp=1 control: display on   // +aso: extra clk_vdp per S#1 poll (moves the read phase against the line match)        // >0: ASO 224's per-frame line-IRQ loop for that many frames
@@ -108,6 +110,8 @@ module tb #(parameter int RELEASE_PH = 0);
     logic [2:0] bus_address = 0; logic bus_ioreq = 0, bus_write = 0, bus_valid = 0;
     logic [7:0] bus_wdata = 0; wire bus_ready, bus_rdata_en; wire [7:0] bus_rdata;
     string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1, lr_sx = -1, lr_sy = 0, lr_vx = 0, lr_vy = 0, aso = 0, pollpad = 0, ie1 = 0, disp = 0, ie1off = 0, fhoff = 0, ie1line = 'h68, ie1r9 = 'h00, ie1dly = 400, ovs = 0, ovsln = 1, ovscmd = 64;
+    int hsr = 1;                           // +hsr=0: R#20 HS off in +tput=2/3
+    int tput = 0, tpn = 12;                // +tput=1: command throughput in G7 (see below)
     int bank = 0;                          // +bank=1: the 4 MB VRAM banks (R#28) through the whole V path
     int mix = 0, mixrep = 1, iogap = 40;   // +mix=N: N bytes to 98h (10000h) while the command runs; +iogap: clk_vdp after each OUT
     string rplf = ""; int rplscale = 100;
@@ -336,6 +340,39 @@ module tb #(parameter int RELEASE_PH = 0);
         io(1, 3'd1, {2'b00, a[13:8]} | (wr ? 8'h40 : 8'h00), q);
     endtask
 
+    //  +tput helpers: one VDP command, timed from the edge after the R#46 write to CE = 0
+    task automatic cmd1(input logic [7:0] r30, input int sx, sy, dx, dy, nx, ny,
+                        input logic [7:0] col, arg, cmd, output realtime d);
+        realtime t0; int w;
+        wreg(30, r30);
+        wreg(32, 8'(sx)); wreg(33, 8'(sx >> 8)); wreg(34, 8'(sy)); wreg(35, 8'(sy >> 8));
+        wreg(36, 8'(dx)); wreg(37, 8'(dx >> 8)); wreg(38, 8'(dy)); wreg(39, 8'(dy >> 8));
+        wreg(40, 8'(nx)); wreg(41, 8'(nx >> 8)); wreg(42, 8'(ny)); wreg(43, 8'(ny >> 8));
+        wreg(44, col); wreg(45, arg); wreg(46, cmd);
+        t0 = $realtime; w = 0;
+        while (vdp9968.u_command.ff_command_execute && w < 40000000) begin @(posedge clk_vdp); w++; end
+        if (w >= 40000000) begin $display("TPUT: a command did not finish (cmd %02h)", cmd); $finish; end
+        d = $realtime - t0;
+    endtask
+    task automatic cmdt(input string nm, input int n, input logic [7:0] r30, input int sx, sy, dx, dy, nx, ny,
+                        input logic [7:0] col, arg, cmd);
+        realtime d, mn, mx, sm; mn = 1e18; mx = 0; sm = 0;
+        for (int r = 0; r < n; r++) begin
+            cmd1(r30, sx, sy, dx, dy, nx, ny, col, arg, cmd, d);
+            sm += d; if (d < mn) mn = d; if (d > mx) mx = d;
+            repeat (3571 + r * 977) @(posedge clk_vdp);
+        end
+        $display("TPUT %s: n %0d  min %0.2f us (%0d clk)  mean %0.2f us  max %0.2f us (%0d clk)", nm, n,
+                 mn / 1e6, int'(mn / 11640), sm / n / 1e6, mx / 1e6, int'(mx / 11640));
+    endtask
+    //  n bytes of one bank through port 98h reads, as a hex string
+    task automatic rdbank(input string nm, input int bk, input logic [16:0] a, input int n);
+        logic [7:0] q; string s; s = "";
+        wreg(28, 8'(bk)); set_addr(a, 0);
+        for (int k = 0; k < n; k++) begin io(0, 3'd0, 8'h00, q); s = {s, $sformatf("%02h ", q)}; end
+        $display("TPUT read %s (bank %0d, %05h): %s", nm, bk, a, s);
+    endtask
+
     logic [7:0] pat [0:65535];
     initial begin
         logic [7:0] q;
@@ -374,6 +411,122 @@ module tb #(parameter int RELEASE_PH = 0);
             //  (no string ternaries in $display: Verilator prints them as numbers)
             $display("BANK m128=%0d: %0d bad of 16 (banks 0 1 9 15)", m128, bad);
             if (bad == 0) $display("BANK RESULT PASS"); else $display("BANK RESULT FAIL");
+            $finish;
+        end
+        //  +tput=1: command throughput in GRAPHIC7 (SCREEN 8), HS = 1, display and sprites on,
+        //  212 lines, extended mode -- WBML V9968's setup (R#0 = 0Eh, R#20 = 1Fh, R#21 = 0).
+        //  Time from the edge after the R#46 write to CE = 0 (vdp9968.u_command.ff_command_execute),
+        //  each case TPN times at different points of the frame.  Build with -DCHK_UNWRITTEN_ZERO.
+        //    A  HMMM 256 x 8,   bank 0 page 1 -> bank 0 page 0
+        //    B  HMMM 256 x 256, bank 3 page 0 -> bank 0 page 0
+        //    C  HMMM 256 x 256, bank 0 page 1 -> bank 0 page 0   (same size, one bank: the control)
+        //    D  LFMM 8 characters of 8 x 8, font in bank 5 at 0, TIMP, to bank 0
+        //    E  the same LFMM with the font in bank 0 (30000h)       (the control)
+        //  +tput=2 (ninjakid2_v9968's mode: G7, 192 lines, R#20 = 1Fh, R#25 = 01h) and +tput=3
+        //  (shaolin-v9968's: G4, R#20 = 1Eh | +hsr, 212 lines): 16 x 16 commands between banks,
+        //  with the results read back through the CPU port.
+        if (tput == 2 || tput == 3) begin
+            automatic realtime d;
+            io(1, 3'd4, 8'h00, q);
+            wreg(0, tput == 2 ? 8'h0E : 8'h06); wreg(1, 8'h40); wreg(8, 8'h08); wreg(9, tput == 2 ? 8'h00 : 8'h80);
+            wreg(2, 8'h1F); wreg(5, 8'hEF); wreg(11, 8'h00); wreg(6, 8'h0F); wreg(25, 8'h01);
+            wreg(20, 8'(8'h1E | (hsr != 0))); wreg(21, 8'h00); wreg(12, 8'h00); wreg(15, 8'h02);
+            repeat (2000000) @(posedge clk_vdp);
+            if (tput == 3) begin
+                //  HMMM 16 x 16 dots (8 bytes x 16 lines), bank 1 (0,0) -> bank 0 (0,512) = 10000h
+                cmdt($sformatf("G4 HMMM 16x16 b1->b0 (hsr=%0d v9938=%0d)", hsr, v9938), tpn, 8'h01, 0, 0, 0, 512, 16, 16, 8'h00, 8'h00, 8'hD0);
+                cmdt($sformatf("G4 HMMM 16x16 b0->b0 (hsr=%0d v9938=%0d)", hsr, v9938), tpn, 8'h00, 0, 0, 0, 512, 16, 16, 8'h00, 8'h00, 8'hD0);
+                $display("TPUT port: reads %0d not answered %0d, link dropped %0d", nrd, noans, mon_drop);
+                $finish;
+            end
+            //  timings
+            cmdt("G7 HMMV 16x16 -> b2",            tpn, 8'h20, 0, 0, 0, 0, 16, 16, 8'h30, 8'h00, 8'hC0);
+            cmdt("G7 HMMM 16x16 b3->b2",           tpn, 8'h23, 0, 0, 0, 0, 16, 16, 8'h00, 8'h00, 8'hD0);
+            cmdt("G7 LMMM OR 16x16 b3->b2",        tpn, 8'h23, 0, 0, 0, 0, 16, 16, 8'h00, 8'h00, 8'h92);
+            cmdt("G7 LMMM OR 16x16 b2->b2",        tpn, 8'h22, 64, 0, 0, 0, 16, 16, 8'h00, 8'h00, 8'h92);
+            cmdt("G7 HMMM FG4 16x16 b3->b7",       tpn, 8'h73, 0, 256, 0, 0, 16, 16, 8'h00, 8'h80, 8'hD0);
+            cmdt("G7 LMMM FG4 OR 16x16 b3->b7",    tpn, 8'h73, 0, 256, 0, 0, 16, 16, 8'h00, 8'h80, 8'h92);
+            cmdt("G7 LFMM 1ch 8x8 TIMP font b5->b2", tpn, 8'h25, 0, 0, 32, 0, 1, 8, 8'hE3, 8'h00, 8'h18);
+            //  LMMM OR: destination from the destination bank, source from the source bank
+            cmd1(8'h30, 0, 0, 0, 0, 16, 16, 8'h05, 8'h00, 8'hC0, d);       // bank 3 tile = 05h
+            cmd1(8'h20, 0, 0, 0, 0, 16, 16, 8'h30, 8'h00, 8'hC0, d);       // bank 2 tile = 30h
+            cmd1(8'h23, 0, 0, 0, 0, 16, 16, 8'h00, 8'h00, 8'h92, d);       // OR, source bank 3
+            rdbank("LMMM OR b3->b2: want 35", 2, 17'h00000, 4);
+            rdbank("its source: want 05", 3, 17'h00000, 4);
+            cmd1(8'h20, 0, 0, 0, 0, 16, 16, 8'h30, 8'h00, 8'hC0, d);
+            cmd1(8'h22, 64, 0, 0, 0, 16, 16, 8'h00, 8'h00, 8'h92, d);      // control: source in bank 2 (zeros at x=64)
+            rdbank("control, source bank 2: want 30", 2, 17'h00000, 4);
+            //  LFMM TIMP: font byte 0 of bank 5 = A5h (1010 0101)
+            wreg(28, 8'd5); set_addr(17'h00000, 1);
+            for (int k = 0; k < 8; k++) io(1, 3'd0, 8'(8'hA5 ^ k), q);
+            cmd1(8'h20, 32, 0, 32, 0, 8, 8, 8'h30, 8'h00, 8'hC0, d);       // destination cell = 30h
+            wreg(12, 8'h00);
+            cmd1(8'h25, 0, 0, 32, 0, 1, 8, 8'hE3, 8'h00, 8'h18, d);
+            rdbank("LFMM TIMP R#12=00: want e3 30 e3 30 30 e3 30 e3", 2, 17'h00020, 8);
+            cmd1(8'h20, 32, 0, 32, 0, 8, 8, 8'h30, 8'h00, 8'hC0, d);
+            wreg(12, 8'h11);
+            cmd1(8'h25, 0, 0, 32, 0, 1, 8, 8'hE3, 8'h00, 8'h18, d);
+            rdbank("control, R#12=11h", 2, 17'h00020, 8);
+            wreg(12, 8'h00);
+            //  FG4: 16 source bytes at 08000h of bank 3; FG4 HMMM NX = 16 dots = 8 bytes to bank 7
+            wreg(28, 8'd3); set_addr(17'h08000, 1);
+            for (int k = 0; k < 16; k++) io(1, 3'd0, 8'(8'h11 * (k + 1)), q);
+            cmd1(8'h73, 0, 256, 0, 0, 16, 1, 8'h00, 8'h80, 8'hD0, d);      // FG4: (0,256) of a 4-bit page = 08000h
+            rdbank("HMMM FG4 b3->b7: want 11..88 then 00 x8", 7, 17'h00000, 16);
+            cmd1(8'h63, 0, 128, 0, 0, 16, 1, 8'h00, 8'h00, 8'hD0, d);      // control, no FG4: G7 (0,128) = 08000h, 16 bytes
+            rdbank("control, no FG4 b3->b6: want 11..ff, 00", 6, 17'h00000, 16);
+            //  port 98h write acceptance, bank 0 against bank 9 (clk_vdp from valid to bus_ready)
+            for (int b = 0; b < 2; b++) begin
+                acc_max[0] = 0;
+                wreg(28, b ? 8'd9 : 8'd0); set_addr(17'h04000, 1);
+                for (int k = 0; k < 2048; k++) io(1, 3'd0, 8'(k), q);
+                $display("TPUT 98h writes to bank %0d: 2048 writes, worst accept wait %0d clk_vdp", b ? 9 : 0, acc_max[0]);
+            end
+            $display("TPUT port: reads %0d not answered %0d, link dropped %0d", nrd, noans, mon_drop);
+            $finish;
+        end
+        if (tput > 0) begin
+            automatic realtime t0, d, mn, mx, sm;
+            automatic string nm [5] = '{"A HMMM 256x8 b0->b0", "B HMMM 256x256 b3->b0", "C HMMM 256x256 b0->b0", "D LFMM 8ch font b5", "E LFMM 8ch font b0"};
+            io(1, 3'd4, 8'h00, q);                         // LockExtReg = 0
+            wreg(0, 8'h0E); wreg(1, 8'h40); wreg(8, 8'h08); wreg(9, 8'h80);
+            wreg(2, 8'h1F); wreg(5, 8'hEF); wreg(11, 8'h00); wreg(6, 8'h0F);
+            wreg(20, 8'h1F); wreg(21, 8'h00);
+            //  font: 64 bytes at 00000h of bank 5 and at 30000h of bank 0
+            wreg(28, 8'd5); set_addr(17'h00000, 1);
+            for (int k = 0; k < 64; k++) io(1, 3'd0, 8'(8'hA5 ^ k), q);
+            wreg(28, 8'd0); wreg(14, 8'h0C); io(1, 3'd1, 8'h00, q); io(1, 3'd1, 8'h40, q);
+            for (int k = 0; k < 64; k++) io(1, 3'd0, 8'(8'hA5 ^ k), q);
+            wreg(12, 8'h00); wreg(15, 8'h02);
+            repeat (2000000) @(posedge clk_vdp);            // into the first displayed frames
+            for (int c = 0; c < 5; c++) begin
+                automatic int rep = (c == 1 || c == 2) ? 2 : tpn;
+                mn = 1e18; mx = 0; sm = 0;
+                for (int r = 0; r < rep; r++) begin
+                    case (c)
+                      0: begin wreg(30, 8'h00); wreg(32, 0); wreg(33, 0); wreg(34, 0); wreg(35, 1);
+                               wreg(36, 0); wreg(37, 0); wreg(38, 8'(r * 8)); wreg(39, 0);
+                               wreg(40, 0); wreg(41, 1); wreg(42, 8); wreg(43, 0); wreg(45, 0); end
+                      1, 2: begin wreg(30, c == 1 ? 8'h03 : 8'h00); wreg(32, 0); wreg(33, 0); wreg(34, 0); wreg(35, c == 1 ? 0 : 1);
+                               wreg(36, 0); wreg(37, 0); wreg(38, 0); wreg(39, 0);
+                               wreg(40, 0); wreg(41, 1); wreg(42, 0); wreg(43, 1); wreg(45, 0); end
+                      default: begin wreg(30, c == 3 ? 8'h05 : 8'h00); wreg(32, 0); wreg(33, 0); wreg(34, c == 3 ? 0 : 3); wreg(35, 0);
+                               wreg(36, 8'd16); wreg(37, 0); wreg(38, 8'(r * 8)); wreg(39, 0);
+                               wreg(40, 8); wreg(41, 0); wreg(42, 8); wreg(43, 0); wreg(44, 8'hE3); wreg(45, 0); end
+                    endcase
+                    wreg(46, c == 0 || c == 1 || c == 2 ? 8'hD0 : 8'h18);
+                    t0 = $realtime;
+                    begin
+                        automatic int w = 0;
+                        while (vdp9968.u_command.ff_command_execute && w < 40000000) begin @(posedge clk_vdp); w++; end
+                        if (w >= 40000000) begin $display("TPUT %s: did not finish", nm[c]); $finish; end
+                    end
+                    d = $realtime - t0; sm += d; if (d < mn) mn = d; if (d > mx) mx = d;
+                    repeat (3571 + r * 977) @(posedge clk_vdp);     // move the next start within the line / frame
+                end
+                $display("TPUT %s: n %0d  min %0.1f us  mean %0.1f us  max %0.1f us", nm[c], rep, mn / 1e6, sm / rep / 1e6, mx / 1e6);
+            end
+            $display("TPUT port: reads %0d not answered %0d, link dropped %0d", nrd, noans, mon_drop);
             $finish;
         end
         wreg(6, 8'h0F); wreg(8, 8'h08); wreg(9, 8'h80);
