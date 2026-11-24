@@ -53,6 +53,7 @@ module tb #(parameter int RELEASE_PH = 0);
         void'($value$plusargs("ie1=%d", ie1)); void'($value$plusargs("disp=%d", disp)); void'($value$plusargs("ie1off=%d", ie1off)); void'($value$plusargs("fhoff=%d", fhoff));   // +fhoff=N: IE1 off, VBLANK IRQ handler reads S#1 first (Knightmare 224 v2)
         void'($value$plusargs("ie1line=%h", ie1line)); void'($value$plusargs("ie1r9=%h", ie1r9)); void'($value$plusargs("ie1dly=%d", ie1dly));
         void'($value$plusargs("bank=%d", bank));
+        void'($value$plusargs("wb=%d", wb)); void'($value$plusargs("wbent=%d", wbent)); void'($value$plusargs("wbgap=%d", wbgap)); void'($value$plusargs("wbhr=%d", wbhr)); void'($value$plusargs("wbhrlag=%d", wbhrlag));
         void'($value$plusargs("hsr=%d", hsr));
         void'($value$plusargs("tput=%d", tput)); void'($value$plusargs("tpn=%d", tpn));
         void'($value$plusargs("mix=%d", mix)); void'($value$plusargs("mixrep=%d", mixrep)); void'($value$plusargs("iogap=%d", iogap));
@@ -110,6 +111,7 @@ module tb #(parameter int RELEASE_PH = 0);
     logic [2:0] bus_address = 0; logic bus_ioreq = 0, bus_write = 0, bus_valid = 0;
     logic [7:0] bus_wdata = 0; wire bus_ready, bus_rdata_en; wire [7:0] bus_rdata;
     string satf = ""; int satms = 50, satpre = 0, ct55 = 0, offat = -1, wl = -1, lnsw = -1, lr_sx = -1, lr_sy = 0, lr_vx = 0, lr_vy = 0, aso = 0, pollpad = 0, ie1 = 0, disp = 0, ie1off = 0, fhoff = 0, ie1line = 'h68, ie1r9 = 'h00, ie1dly = 400, ovs = 0, ovsln = 1, ovscmd = 64;
+    int wb = 0, wbent = 10000, wbgap = 8660, wbhr = 0, wbhrlag = 1000;   // +wb: WBML band splits (ns)
     int hsr = 1;                           // +hsr=0: R#20 HS off in +tput=2/3
     int tput = 0, tpn = 12;                // +tput=1: command throughput in G7 (see below)
     int bank = 0;                          // +bank=1: the 4 MB VRAM banks (R#28) through the whole V path
@@ -373,6 +375,37 @@ module tb #(parameter int RELEASE_PH = 0);
         $display("TPUT read %s (bank %0d, %05h): %s", nm, bk, a, s);
     endtask
 
+    //  +wb helpers (WBML V9968's band splits): an I/O at an absolute time; a port #1 pair
+    task automatic io_at(input realtime tt, input logic wr, input logic [2:0] port, input logic [7:0] d, output logic [7:0] q);
+        if ($realtime < tt) #(tt - $realtime);
+        io(wr, port, d, q);
+    endtask
+    //  per output dot of one line: the palette inputs, as runs of {bg enable, page, y group,
+    //  (x6 - dot) mod 64} and the dots where a sprite pixel is on
+    task automatic wbline(input int ln);
+        logic [9:0] last; int run, st; string sp; int d;
+        last = '1; run = 0; st = 0; sp = "";
+        wait (vdp9968.w_screen_pos_y == 10'(ln));
+        while (vdp9968.w_screen_pos_y == 10'(ln)) begin
+            @(posedge clk_vdp);
+            if (vdp9968.w_screen_pos_x[3:0] == 4'd8) begin
+                logic [9:0] c; logic [7:0] b;
+                d = $signed(vdp9968.w_screen_pos_x[13:4]);
+                b = vdp9968.w_screen_mode_display_color;
+                c = {vdp9968.w_screen_mode_display_color_en, b[7], b[6], 1'b0, 6'(b[5:0] - 6'(d))};
+                if (!vdp9968.w_screen_mode_display_color_en) c[8:0] = '0;
+                if (vdp9968.w_sprite_display_color_en && vdp9968.w_sprite_display_color != 0) sp = {sp, $sformatf("%0d ", d)};
+                if (c == last) run++;
+                else begin
+                    if (run > 0) $display("WB line %0d dots %0d..%0d: en %0d page %0d ygrp %0d shift %0d", ln, st, st + run - 1, last[9], last[8], last[7], last[5:0]);
+                    last = c; run = 1; st = d;
+                end
+            end
+        end
+        if (run > 0) $display("WB line %0d dots %0d..%0d: en %0d page %0d ygrp %0d shift %0d", ln, st, st + run - 1, last[9], last[8], last[7], last[5:0]);
+        $display("WB line %0d sprite dots: %s", ln, sp);
+    endtask
+
     logic [7:0] pat [0:65535];
     initial begin
         logic [7:0] q;
@@ -422,6 +455,86 @@ module tb #(parameter int RELEASE_PH = 0);
         //    C  HMMM 256 x 256, bank 0 page 1 -> bank 0 page 0   (same size, one bank: the control)
         //    D  LFMM 8 characters of 8 x 8, font in bank 5 at 0, TIMP, to bank 0
         //    E  the same LFMM with the font in bank 0 (30000h)       (the control)
+        //  +wb=1|2: WBML V9968's band splits (knightmare-v2's request, 2026-11-24).  G7, R#0 = 1Eh
+        //  (IE1), R#20 = 1Fh, R#21 = 0, R#25 = 02h (MSK), R#9 = 80h, interrupts through Port#4.
+        //  VRAM byte = {page, y group, x mod 64}; "shift" printed per run is (x6 - output dot)
+        //  mod 64, so a change of page / R#23 / R#26 / R#27 shows as a new run.  Two SP3
+        //  attribute tables (A at FA00h: single dots at X 64/84/104/124 on planes 0/16/32/48;
+        //  B at FC00h: X 160/180/200/220), all on lines 20-35.
+        //   wb=1: line 22, band (R#2 3Fh, R#23 0, R#26 0, R#27 0, table A) -> game (1Fh, 30h, 05h, 03h, table B)
+        //   wb=2: line 214, game -> lower band (3Fh, A0h, 0, 0); R#9 LN = 0 is written at line 205
+        //   +wbent ns from the FH pulse to the first I/O; +wbgap ns between I/Os (internal V9968:
+        //   8660); +wbhr=1: cartridge -- HR wait (0 then 1) before the eight scroll I/Os, which
+        //   then start +wbhrlag ns after HR rises.
+        if (wb > 0) begin
+            automatic realtime t0; automatic int k = 0;
+            automatic logic [7:0] g2 = 8'h1F, g23 = 8'h30, g26 = 8'h05, g27 = 8'h03;
+            iogap = 0;
+            io(1, 3'd4, 8'h00, q);
+            wreg(0, 8'h1E); wreg(1, 8'h40); wreg(8, 8'h08); wreg(9, 8'h80); wreg(7, 8'h00);
+            wreg(20, 8'h1F); wreg(21, 8'h00); wreg(25, 8'h02); wreg(15, 8'h02);
+            wreg(11, 8'h01); wreg(6, 8'h1E);
+            //  bitmap: lines 5-11, 20-26 (y group 0) and 68-74, 117-123 (y group 1) of both pages
+            for (int pg = 0; pg < 2; pg++)
+                for (int g = 0; g < 4; g++) begin
+                    automatic int y0 = g == 0 ? 5 : g == 1 ? 20 : g == 2 ? 68 : 117;
+                    automatic logic [16:0] a = {pg[0], 8'(y0), 8'h00};
+                    set_addr(a, 1);
+                    for (int i = 0; i < 7 * 256; i++) io(1, 3'd0, {pg[0], g >= 2, 6'(i)}, q);
+                end
+            //  sprite patterns (F000h + 128 r: dot 0 = colour 2) and the two tables
+            for (int r = 0; r < 16; r++) begin
+                set_addr(17'h0F000 + 17'(128 * r), 1);
+                io(1, 3'd0, 8'h20, q); for (int i = 1; i < 8; i++) io(1, 3'd0, 8'h00, q);
+            end
+            for (int tb = 0; tb < 2; tb++) begin
+                set_addr(tb ? 17'h0FC00 : 17'h0FA00, 1);
+                for (int p = 0; p < 64; p++) begin
+                    automatic int on = (p % 16) == 0;
+                    automatic int y = on ? 19 : 400;
+                    automatic int x = (tb ? 160 : 64) + (p / 16) * 20;
+                    io(1, 3'd0, 8'(y), q); io(1, 3'd0, 8'(y >> 8), q); io(1, 3'd0, 8'd16, q); io(1, 3'd0, 8'h00, q);
+                    io(1, 3'd0, 8'(x), q); io(1, 3'd0, 8'(x >> 8), q); io(1, 3'd0, 8'd16, q); io(1, 3'd0, 8'h00, q);
+                end
+            end
+            if (wb == 1) begin wreg(2, 8'h3F); wreg(23, 8'h00); wreg(26, 8'h00); wreg(27, 8'h00); wreg(5, 8'hF4); wreg(19, 8'd22); end
+            else         begin wreg(2, g2);    wreg(23, g23);   wreg(26, g26);   wreg(27, g27);   wreg(5, 8'hF8); wreg(19, 8'd214); end
+            //  (screen_pos_y never reaches 300 at 60 Hz: the first version of this waited for ever)
+            wait (vdp9968.w_screen_pos_y == 10'd240); wait (vdp9968.w_screen_pos_y == 10'd2);   // a whole frame from line 2
+            io(0, 3'd4, 8'h00, q); io(1, 3'd4, 8'h02, q);
+            fork
+                begin
+                    if (wb == 1) for (int l = 21; l <= 26; l++) wbline(l);
+                    else         for (int l = 213; l <= 218; l++) wbline(l);
+                end
+                begin
+                    if (wb == 2) begin wait (vdp9968.w_screen_pos_y == 10'd205); wreg(9, 8'h00); end
+                    @(posedge vdp9968.w_intr_line);
+                    t0 = $realtime + wbent * 1000.0;
+                    $display("WB FH pulse at line %0d dot %0d", vdp9968.w_screen_pos_y, $signed(vdp9968.w_screen_pos_x[13:4]));
+                    io_at(t0 + (k++) * wbgap * 1000.0, 0, 3'd4, 8'h00, q);
+                    $display("WB Port#4 read %02h", q);
+                    io_at(t0 + (k++) * wbgap * 1000.0, 1, 3'd4, 8'h02, q);
+                    if (wb == 1) begin
+                        io_at(t0 + (k++) * wbgap * 1000.0, 1, 3'd1, 8'hF8, q); io_at(t0 + (k++) * wbgap * 1000.0, 1, 3'd1, 8'h85, q);
+                        $display("WB R#5 written at line %0d dot %0d", vdp9968.w_screen_pos_y, $signed(vdp9968.w_screen_pos_x[13:4]));
+                        io_at(t0 + (k++) * wbgap * 1000.0, 1, 3'd1, 8'd87, q); io_at(t0 + (k++) * wbgap * 1000.0, 1, 3'd1, 8'h93, q);
+                    end
+                    if (wbhr != 0 || wb == 2) begin
+                        wait (!vdp9968.w_status_hsync); wait (vdp9968.w_status_hsync);
+                        t0 = $realtime + wbhrlag * 1000.0; k = 0;
+                    end
+                    for (int i = 0; i < 4; i++) begin
+                        automatic int rn = i == 0 ? 2 : i == 1 ? 23 : i == 2 ? 26 : 27;
+                        automatic logic [7:0] v = wb == 1 ? (i == 0 ? g2 : i == 1 ? g23 : i == 2 ? g26 : g27)
+                                                          : (i == 0 ? 8'h3F : i == 1 ? 8'hA0 : 8'h00);
+                        io_at(t0 + (k++) * wbgap * 1000.0, 1, 3'd1, v, q); io_at(t0 + (k++) * wbgap * 1000.0, 1, 3'd1, 8'(8'h80 | rn), q);
+                        $display("WB R#%0d = %02h written at line %0d dot %0d", rn, v, vdp9968.w_screen_pos_y, $signed(vdp9968.w_screen_pos_x[13:4]));
+                    end
+                end
+            join
+            $finish;
+        end
         //  +tput=2 (ninjakid2_v9968's mode: G7, 192 lines, R#20 = 1Fh, R#25 = 01h) and +tput=3
         //  (shaolin-v9968's: G4, R#20 = 1Eh | +hsr, 212 lines): 16 x 16 commands between banks,
         //  with the results read back through the CPU port.
