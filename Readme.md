@@ -1,62 +1,123 @@
-# MSX1/MSX2 for [MiSTer Board](https://github.com/MiSTer-devel/Main_MiSTer/wiki)
+# MSX2/MSX2++ for [MiSTer Board](https://github.com/MiSTer-devel/Main_MiSTer/wiki) (WIP)
 
 A fork of [MiSTer-devel/MSX1_MiSTer](https://github.com/MiSTer-devel/MSX1_MiSTer) that adds
 MoonSound (YMF278B/OPL4), turbo R machines with an R800, a Z80 turbo, MSX-MIDI with
 MT32-pi support, IKASCC-based SCC+, the ASCII16-X and NEO-8/16 mappers, expanded slots,
 standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
 
+이 브랜치(`V9968_Geo3D`)는 그 위에 HRA!의 V9968 VDP와 Geo3D 3D 엔진을 얹은 **실험판**이다.
+*This branch (`V9968_Geo3D`) adds HRA!'s V9968 VDP and the Geo3D engine on top: **experimental**.*
+
 ---
 
 ## 이 브랜치: V9968_Geo3D / This branch: V9968_Geo3D
 
-**실험 브랜치 / Experimental.** 기존 V9958 코어는 `nextz80` 브랜치에 있다.
+기존 V9958 코어는 `nextz80` 브랜치에 있다.
 *The regular V9958 core lives on the `nextz80` branch.*
 
-- **V9968 VDP** — HRA!의 [V9968_Cartridge](https://github.com/hra1129/V9968_Cartridge) RTL을 내부 VDP로 쓰는 별도 빌드(Quartus 리비전 `MSX1_V9968`). 모든 기계 종류에서 V9968, VRAM 4MB(256KB × 16뱅크, R#28–R#30)는 SDRAM(32/64/128MB 보드 모두), 출력 31kHz
-  *A separate build (Quartus revision `MSX1_V9968`) with HRA!'s V9968 RTL as the internal VDP, on every machine type; 4MB VRAM (16 banks of 256KB, R#28–R#30) in SDRAM on 32/64/128MB boards; 31 kHz output.*
-- **Geo3D v2.0.0** — Alex Moncks의 3D 엔진, 포트 9Dh/9Fh, 42.95MHz
+### 바로 쓰기 / Quick start
+
+1. `releases/MSX1_20261124a_sdram128v9968_ec79e13.rbf`를 MiSTer의 `_Computer/`에 복사한다(현재판).
+   *Copy the current rbf to `_Computer/` on the MiSTer.*
+2. 기계 팩·FW 팩은 기존 코어와 같다(아래 MSX2의 [ROM BIOS](#rom-bios-1)). SDRAM 모듈이 필요하다. 128MB 보드를 권장한다(실기 확인). 64MB·32MB 보드도 동작하지만 32MB 보드에는 제한이 있다(아래 알려진 문제).
+   *Machine and FW packs are the same as for the regular core (see [ROM BIOS](#rom-bios-1) under MSX2). An SDRAM module is required. A 128MB board is recommended (confirmed on the board); 64MB and 32MB boards work too, with a limit on 32MB (see Known issues).*
+3. VDP 점검용으로 `releases/V9968_VDPTOOLS_20261124_688ab71.rom`을 카트리지로 넣을 수 있다(매퍼 auto, 아래 참고).
+   *For a VDP check, load `releases/V9968_VDPTOOLS_20261124_688ab71.rom` as a cartridge (mapper on auto; see below).*
+
+### 무엇이 다른가 / What is different
+
+- **V9968 VDP** — HRA!의 [V9968_Cartridge](https://github.com/hra1129/V9968_Cartridge) RTL을 내부 VDP로 쓰는 별도 빌드(Quartus 리비전 `MSX1_V9968`). 모든 기계 종류에서 V9968로 동작하고, VRAM 4MB(256KB × 16뱅크, R#28–R#30)는 SDRAM에 있으며, 출력은 31kHz다
+  *A separate build (Quartus revision `MSX1_V9968`) with HRA!'s V9968 RTL as the internal VDP on every machine type; 4MB VRAM (16 banks of 256KB, R#28–R#30) in SDRAM; 31 kHz output.*
+- **upstream V9968 v0.99.14** (453d5f3, 20261124a부터) — 4MB VRAM 뱅크(R#28 CPU, R#29 배경/스프라이트, R#30 명령 소스/목적지), V9958 표와 같은 명령 종료 상태, 인터럽트 정리(F/FH를 실시간으로 읽음), SP3·SCREEN 8·YJK 스프라이트 수정
+  *4MB VRAM banks (R#28 CPU, R#29 background / sprites, R#30 command source / destination), command end state as the V9958's table, interrupt rework (F / FH read live), SP3 / SCREEN 8 / YJK sprite fixes.*
+  - **주의: R#26/R#27은 이제 줄 단위로 래치되지 않고 쓰는 즉시 반영된다**(V9958·openMSX와 같음). 라인 인터럽트에서 가로 스크롤을 바꾸는 소프트는 쓰는 시각에 따라 결과가 달라진다
+    ***Note: R#26 / R#27 are no longer latched per line; a write takes effect at once** (as on the V9958 and in openMSX). Software that changes the horizontal scroll from a line interrupt now depends on when it writes.*
+  - 32MB 보드는 DQM이 A11/A12에 묶여 있어 VRAM 위쪽 2MB를 bank 3 행 01에 두고, SDRAM 컨트롤러가 가려진 워드를 다시 읽는다(`docs/sdram_tdm_design.md` 15절)
+    *On 32MB boards (DQM tied to A11/A12) the upper 2MB of VRAM sits on bank 3's rows 01 and the SDRAM controller re-reads the masked words (`docs/sdram_tdm_design.md` section 15).*
+- **Geo3D v2.0.0** — Alex Moncks의 3D 엔진. 포트 9Dh/9Fh, 42.95MHz
   *Alex Moncks' 3D engine on ports 9Dh/9Fh at 42.95 MHz.*
-- **SDRAM 128.86MHz** — 고정 12클럭 TDM 컨트롤러(`rtl/peripheral/sdram_tdm.sv`), V9968 VRAM은 bank 3 전용 슬롯
+  - OSD `Geo3D fill (SCREEN 8)`: LINE(기본) / HMMV. HMMV를 고르면 SCREEN 8에서 면의 가로줄을 HMMV 한 번으로 칠해 그리기가 약 2배 빨라진다(이 코어에만 있는 옵션)
+    *OSD `Geo3D fill (SCREEN 8)`: LINE (default) / HMMV. With HMMV a face row in SCREEN 8 goes out as one HMMV, about twice as fast (an option of this core only).*
+  - Geo3D 데모는 내장 98h 판을 쓴다. 데모의 ASCII16 롬은 자동 판별이 틀리므로 OSD 매퍼를 `ASCII16X`로 고르거나 파일 오프셋 10h에 `ASCII16X` 헤더를 넣는다
+    *Use the internal 98h builds of the demos. Auto-detect gets their ASCII16 ROMs wrong: pick `ASCII16X` in the OSD mapper menu, or put an `ASCII16X` header at file offset 10h.*
+- **SDRAM 128.86MHz** — 고정 12클럭 TDM 컨트롤러(`rtl/peripheral/sdram_tdm.sv`). V9968 VRAM은 bank 3 전용 슬롯을 쓴다
   *A fixed 12-clock TDM SDRAM controller; the V9968's VRAM has its own slot in bank 3.*
-- **OPL4 PCM engine3** — 새로 만든 PCM 엔진(20261029d부터 기본). 슬롯 제어를 프레임 경계에 몰아 돌리고 웨이브 데이터는 정해진 시각에 소비한다. openMSX(`YMF278.cc`) 기준 골든 23개 시나리오와 비트 단위 일치, ALM 2,815 → 1,291. 이전 엔진은 `PCM_ENGINE2=1 tools/sdram128/mk_v9968_qsf.sh`로 빌드
-  *A rebuilt PCM engine (default from 20261029d): slot control bunched at the frame edge, wave data consumed at fixed times; bit-exact with the openMSX-based golden model on 23 scenarios; 2,815 → 1,291 ALM. Build the previous engine with `PCM_ENGINE2=1 tools/sdram128/mk_v9968_qsf.sh`.*
-- **Geo3D 채우기 / fill** — OSD `Geo3D fill (SCREEN 8)`: LINE(기본) / HMMV. SCREEN 8에서 면의 가로줄을 HMMV로 칠해 Geo3D 그리기가 약 2배 빨라진다(이 코어 전용 옵션)
-  *OSD `Geo3D fill (SCREEN 8)`: LINE (default) / HMMV. In SCREEN 8 a face row goes out as one HMMV, about twice as fast (an option of this core only).*
-- **OSD** — `VDP command speed V9968/V9938`(V9938 속도에 맞춘 명령 대기), `Scandoubler Fx`의 CRT 25/50/75%가 V9968 자체 스캔라인으로 동작
+- **OPL4 PCM engine3** — 새로 만든 PCM 엔진(20261029d부터 기본). 슬롯 제어를 프레임 경계에 모아 처리하고, 웨이브 데이터는 정해진 시각에 읽는다. openMSX(`YMF278.cc`) 기준 골든 23개 시나리오와 비트 단위로 일치하고, ALM은 2,815 → 1,291로 줄었다. 이전 엔진은 `PCM_ENGINE2=1 tools/sdram128/mk_v9968_qsf.sh`로 빌드한다
+  *A rebuilt PCM engine (default from 20261029d): slot control bunched at the frame edge, wave data read at fixed times; bit-exact with the openMSX-based golden model on 23 scenarios; 2,815 → 1,291 ALM. Build the previous engine with `PCM_ENGINE2=1 tools/sdram128/mk_v9968_qsf.sh`.*
+- **OSD** — `VDP command speed V9968/V9938`(명령 대기를 V9938 속도에 맞춤). `Scandoubler Fx`의 CRT 25/50/75%는 V9968 자체 스캔라인으로 동작한다
   *`VDP command speed V9968/V9938` (V9938-paced command waits); the CRT 25/50/75% choices of `Scandoubler Fx` drive the V9968's own scanlines.*
-- **upstream V9968 v0.99.14** (453d5f3, 20261124a부터) — 4MB VRAM 뱅크(R#28 CPU, R#29 배경/스프라이트, R#30 명령 소스/목적지), V9958 표와 같은 명령 종료 상태, 인터럽트 정리(F/FH를 실시간으로 읽음), SP3·SCREEN 8·YJK 스프라이트 수정. **R#26/R#27은 이제 줄 단위로 래치되지 않고 쓰는 즉시 반영**(V9958·openMSX와 같음) — 라인 인터럽트에서 가로 스크롤을 바꾸는 소프트는 쓰는 시각이 중요해진다. 이 코어의 FH 규칙 두 가지(아래)는 유지. 32MB 보드는 DQM이 A11/A12에 묶여 있어 VRAM 위쪽 2MB를 bank 3 행 01에 두고 SDRAM 컨트롤러가 가려진 워드를 다시 읽는다(`docs/sdram_tdm_design.md` 15절)
-  *4MB VRAM banks (R#28 CPU, R#29 background / sprites, R#30 command source / destination), command end state as the V9958's table, interrupt rework (F / FH read live), SP3 / SCREEN 8 / YJK sprite fixes. **R#26 / R#27 are no longer latched per line; a write takes effect at once** (as on the V9958 and in openMSX), so software that changes the horizontal scroll from a line interrupt now depends on when it writes. The core's two FH rules (below) are kept. On 32MB boards (DQM tied to A11/A12) the upper 2MB of VRAM sits on bank 3's rows 01 and the SDRAM controller re-reads the masked words (`docs/sdram_tdm_design.md` section 15).*
-- **VDP 체크 툴 롬 / VDP check tools ROM** — `releases/V9968_VDPTOOLS_20261124_688ab71.rom`: HRA!의 [V9968_Cartridge](https://github.com/hra1129/V9968_Cartridge) `test/` 시험 프로그램 8종(VDPCHK, VDPREG, VDPVIEW, VDPINT, VDPDIAG, VRAMSTRS, VDPTEST, VRAMRW; upstream 453d5f3, **MIT, © 2026 HRA!**)을 디스크·MSX-DOS 없이 메뉴 하나로 실행하는 512KB ASCII16 롬. 메뉴는 커서/조이스틱, Space·A 버튼 실행, ESC·B 버튼 복귀(프로그램 안에서도 A=Space, B=ESC). OSD 매퍼는 auto. 소스·빌드·openMSX 시험은 `tools/vdptools/`, 라이선스 원문은 `tools/vdptools/LICENSE_V9968_Cartridge.txt`
-  *HRA!'s [V9968_Cartridge](https://github.com/hra1129/V9968_Cartridge) `test/` programs (upstream 453d5f3, **MIT, (c) 2026 HRA!**) on one 512KB ASCII16 ROM with a menu, no disk or MSX-DOS needed. Cursor keys / joystick, SPACE or button A runs, ESC or button B returns (inside the programs A = SPACE, B = ESC too). Leave the OSD mapper on auto. Source, build and openMSX checks in `tools/vdptools/`; the licence text is `tools/vdptools/LICENSE_V9968_Cartridge.txt`.*
-- **upstream V9968 수정 / fixes to upstream V9968** — 모두 `rtl/video/v9968/ORIGIN.md`에 재현 방법과 함께 기록. upstream 보고 초안은 `docs/upstream_issues_v9968_20261022.md`
-  *All recorded with repro commands in `rtl/video/v9968/ORIGIN.md`; upstream report drafts in `docs/upstream_issues_v9968_20261022.md`.*
-  - 화면을 끌 때 붙잡힌 스프라이트 VRAM 요청이 VDP 명령을 멈춤 *(a sprite VRAM request held across display-off froze VDP commands)*
-  - R#9 LN을 프레임 중간에 바꾸면 화면 시작이 10줄 움직임(224라인 오버스캔) *(a mid-frame R#9 LN change moved the display start by 10 lines)*
-  - status 읽기와 같은 클럭의 인터럽트 이벤트 유실, 그리고 한 클럭 늦은 status 래치로 인한 FH/F 유실 *(interrupt events lost on the clock of a status read, and FH/F lost through the one-clock-late status latch)*
-  - 프레임 인터럽트 시점에 FH가 지워져 늦게 S#1을 읽는 라인 인터럽트 처리가 FH=0을 봄 — ASO 224(R800) 검은 화면의 원인, 실기 확인 *(FH was cleared at the frame interrupt, so a line-interrupt handler that reads S#1 late saw FH = 0 -- the cause of ASO 224's black screen; confirmed on hardware)*
-  - IE1이 꺼져 있어도 FH가 세워짐 — 위 수정 뒤 VBLANK까지 남아 Knightmare 224 v2가 시작되지 않던 원인(20261024b~20261027a), 20261029a부터 수정, 실기 확인 *(FH was set with IE1 off; after the fix above it survived into VBLANK and Knightmare 224 v2 did not start on 20261024b-20261027a; fixed from 20261029a, confirmed on hardware)*
-- **R800/터보 VDP 대기 / R800 and turbo VDP waits** — R800의 VDP 대기(8.66µs)는 실기 터보R처럼 98h–9Bh에만 걸린다. Geo3D 포트 9Dh/9Fh는 대기 없이 동작(R800에서 Geo3D가 빨라짐). V9968 빌드의 터보 Z80에는 VDP 간격 대기가 없다(V9968 버스가 요청을 잃지 않음). OSD `R800 VDP access wait`: 8.66µs(실기, 기본), None, 1.0–7.5µs
-  *The R800 VDP wait (8.66 µs) covers 98h–9Bh only, as on a turbo R; Geo3D's 9Dh/9Fh run unpaced (Geo3D is faster on the R800). A turbo Z80 gets no VDP spacing in the V9968 build (the V9968 bus cannot drop a request). OSD `R800 VDP access wait`: 8.66 µs (real, default), None, 1.0–7.5 µs.*
+- **R800/터보 VDP 대기 / R800 and turbo VDP waits** — R800의 VDP 대기(8.66µs)는 실기 turbo R처럼 98h–9Bh에만 걸린다. Geo3D 포트 9Dh/9Fh에는 대기가 없어 R800에서 Geo3D가 빨라진다. 터보 Z80에는 VDP 간격 대기가 없다(V9968 버스는 요청을 잃지 않는다). OSD `R800 VDP access wait`: 8.66µs(실기, 기본), None, 1.0–7.5µs
+  *The R800 VDP wait (8.66 µs) covers 98h–9Bh only, as on a turbo R; Geo3D's 9Dh/9Fh have no wait, so Geo3D is faster on the R800. A turbo Z80 gets no VDP spacing (the V9968 bus cannot drop a request). OSD `R800 VDP access wait`: 8.66 µs (real, default), None, 1.0–7.5 µs.*
 - **화면 폭 / Width** — upstream 8a37b33의 가로 표시 폭(1600→1440 클럭)을 반영
   *upstream 8a37b33's horizontal display width (1600 → 1440 clocks).*
-- **빌드 / Build** — `REV=MSX1_V9968 ASM=1 tools/sdram128/compile.sh` (Quartus 17.0, `SEED=N`으로 시드 지정, 시드 비교는 `tools/sdram128/seed_table.sh`). 일반 V9958 빌드는 `tools/sdram128/compile.sh`
-  *Quartus 17.0; `SEED=N` picks the fitter seed. The plain V9958 build is `tools/sdram128/compile.sh`.*
-- **Geo3D 데모 / demos** — 내장 98h 판을 쓴다. ASCII16 롬은 자동 판별이 틀리므로 OSD 매퍼를 `ASCII16X`로 고르거나 파일 오프셋 10h에 `ASCII16X` 헤더를 넣는다
-  *Use the internal 98h builds. Auto-detect gets these ASCII16 ROMs wrong: pick `ASCII16X` in the OSD mapper menu, or put an `ASCII16X` header at file offset 10h.*
-- **릴리스 / Releases** (`releases/`) — `MSX1_20261124a_sdram128v9968_ec79e13.rbf`: 현재판(upstream V9968 v0.99.14 병합, VRAM 4MB, Y8960 카트리지(`SLOT B` = `Y8960`, BIOS 별도))
-  *`20261124a`: current (upstream V9968 v0.99.14 merged, 4MB VRAM, the Y8960 cartridge (`SLOT B` = `Y8960`, BIOS not included)).*
-  `MSX1_20261113a_sdram128v9968_7e4e67a.rbf`: 이전판(MSX-AUDIO 추가 — OSD `Audio Card`에서 MoonSound / MSX-AUDIO / None 선택, `JoyMega Buttons` 옵션이 Slot A 카트리지 종류와 같은 설정 비트를 쓰던 문제 수정; 실기 확인)
-  *`20261113a`: previous (MSX-AUDIO added — OSD `Audio Card`: MoonSound / MSX-AUDIO / None; the `JoyMega Buttons` option no longer shares a setting bit with the slot A cartridge type; confirmed on the board).*
-  `MSX1_20261111a_sdram128v9968_45b8fb3.rbf`: 이전판(upstream V9968 v0.99(2a99ac9) 병합, 16번째 스프라이트 수정, R800 OTIR 첫 바이트 간격 수정, JoyMega 수정). **JoyMega를 3버튼으로 두면 Slot A 카트리지 종류가 바뀌는 문제가 있다 — 20261113a를 쓸 것**
-  *`20261111a`: previous (upstream V9968 v0.99 merged, the 16th-sprite fix, R800 OTIR first-byte spacing, the JoyMega fix). **Its 3-button JoyMega setting changes the slot A cartridge type — use 20261113a.***
-  `MSX1_20261029d_sdram128v9968_923140c.rbf`: engine3, V9968 FH 수정, Geo3D HMMV 옵션. `MSX1_20261029c_sdram128v9968_9b1cea1.rbf`: engine2, 비교용
-  *`20261029d`: engine3, the V9968 FH fix, the Geo3D HMMV option. `20261029c`: engine2, for comparison.*
-  이전 rbf(20261025b, 20261027a, 20261029a)도 그대로 둔다 *(the earlier rbfs stay in `releases/`)*
-- **라이선스 / Licence** — V9968 RTL 파일 헤더는 HRA!의 3조항 조건(**허가 없는 상업적 이용 금지** 포함), Geo3D는 MIT
-  *The V9968 RTL file headers carry HRA!'s 3-clause terms (including **no commercial use without written permission**); Geo3D is MIT.*
 
-**알려진 문제 / Known issues** — 업로드 한도 32MB(V9968 VRAM bank와 겹침). MSX1 기계의 색은 MSX2 표준 팔레트. R800 VDP 대기를 낮추면 SUPER CAT·PRISM FLIGHT 화면이 깨지던 문제는 20261025b에서 수정(명령 실행 중 CPU 쓰기가 두 번 실행되던 V9968 결함, a85c175; 실기 확인)
-*SUPER CAT / PRISM FLIGHT corruption at a short R800 VDP wait is fixed in 20261025b (the V9968 ran a CPU write twice while a command was running, a85c175; confirmed on the board). The upload limit is 32MB (it would overlap the V9968's VRAM bank). MSX1 machines show the MSX2 standard palette.*
+### VDP 체크 툴 롬 / VDP check tools ROM
+
+`releases/V9968_VDPTOOLS_20261124_688ab71.rom` — HRA!의 [V9968_Cartridge](https://github.com/hra1129/V9968_Cartridge) `test/` 시험 프로그램 8종(upstream 453d5f3, **MIT, © 2026 HRA!**)을 디스크나 MSX-DOS 없이 메뉴에서 실행하는 512KB ASCII16 롬이다.
+*HRA!'s V9968_Cartridge `test/` programs (upstream 453d5f3, **MIT, (c) 2026 HRA!**) on one 512KB ASCII16 ROM with a menu; no disk or MSX-DOS needed.*
+
+| 프로그램 / Program | 내용 / What it checks |
+|---|---|
+| VDPCHK | 레지스터·VRAM·명령 자가 점검 / registers, VRAM, commands |
+| VDPREG | 명령 종료 후 레지스터 / registers after a command ends |
+| VDPVIEW | 그림 P01–P19 / pictures P01–P19 |
+| VDPINT | 라인 인터럽트 그림 P20–P23 / line-interrupt pictures P20–P23 |
+| VDPDIAG | 화면 모드 전환 진단 / screen-mode switching |
+| VRAMSTRS | VRAM 부하(3회) / VRAM stress (3 rounds) |
+| VDPTEST | 명령 종료 부하 / command termination stress |
+| VRAMRW | VRAM 읽기·쓰기 경로 / VRAM read and write paths |
+
+- 조작: 커서 키나 조이스틱으로 고르고 Space·A 버튼으로 실행, 끝나면 ESC·B 버튼으로 메뉴로 돌아온다. 프로그램 안에서도 A 버튼은 Space, B 버튼은 ESC다
+  *Cursor keys or joystick to choose, SPACE or button A to run, ESC or button B back to the menu. Inside the programs A is SPACE and B is ESC.*
+- OSD 매퍼는 auto로 둔다(ASCII16으로 판별된다). 파일을 쓰지 못하므로 결과는 화면으로만 본다
+  *Leave the OSD mapper on auto (it is detected as ASCII16). There is no file output; results are on screen only.*
+- 소스·빌드·openMSX 시험은 `tools/vdptools/`, 라이선스 원문은 `tools/vdptools/LICENSE_V9968_Cartridge.txt`
+  *Source, build and openMSX checks: `tools/vdptools/`; licence text: `tools/vdptools/LICENSE_V9968_Cartridge.txt`.*
+
+### upstream V9968에 더한 수정 / Fixes on top of upstream V9968
+
+모두 `rtl/video/v9968/ORIGIN.md`에 재현 방법과 함께 적어 두었다. upstream 보고 초안은 `docs/upstream_issues_v9968_20261022.md`.
+*All recorded with repro commands in `rtl/video/v9968/ORIGIN.md`; upstream report drafts in `docs/upstream_issues_v9968_20261022.md`.*
+
+- 화면을 끌 때 붙잡힌 스프라이트 VRAM 요청이 VDP 명령을 멈춤 *(a sprite VRAM request held across display-off froze VDP commands)*
+- R#9 LN을 프레임 중간에 바꾸면 화면 시작이 10줄 움직임(224라인 오버스캔) *(a mid-frame R#9 LN change moved the display start by 10 lines)*
+- status 읽기와 같은 클럭의 인터럽트 이벤트 유실, 그리고 한 클럭 늦은 status 래치로 인한 FH/F 유실 *(interrupt events lost on the clock of a status read, and FH/F lost through the one-clock-late status latch)*
+- 프레임 인터럽트 시점에 FH가 지워져, S#1을 늦게 읽는 라인 인터럽트 처리가 FH=0을 봄 — ASO 224(R800) 검은 화면의 원인, 실기 확인 *(FH was cleared at the frame interrupt, so a line-interrupt handler that reads S#1 late saw FH = 0 — the cause of ASO 224's black screen; confirmed on hardware)*
+- IE1이 꺼져 있어도 FH가 세워짐 — 위 수정 뒤 VBLANK까지 남아 Knightmare 224 v2가 시작되지 않던 원인(20261024b~20261027a). 20261029a부터 수정, 실기 확인 *(FH was set with IE1 off; after the fix above it survived into VBLANK and Knightmare 224 v2 did not start on 20261024b–20261027a; fixed from 20261029a, confirmed on hardware)*
+- 명령 실행 중 CPU 쓰기가 두 번 실행됨 — R800 VDP 대기를 낮추면 SUPER CAT·PRISM FLIGHT 화면이 깨지던 원인. 20261025b부터 수정(a85c175), 실기 확인 *(the V9968 ran a CPU write twice while a command was running — SUPER CAT / PRISM FLIGHT broke at a short R800 VDP wait; fixed from 20261025b, a85c175, confirmed on hardware)*
+
+v0.99.14 병합 뒤에도 위의 FH 규칙 두 가지는 이 코어 쪽 것을 유지한다.
+*The two FH rules above are kept after the v0.99.14 merge.*
+
+### 릴리스 / Releases (`releases/`)
+
+| 파일 / File | 내용 / Contents | 비고 / Note |
+|---|---|---|
+| **`MSX1_20261124a_sdram128v9968_ec79e13.rbf`** | 현재판: upstream V9968 v0.99.14, VRAM 4MB, Y8960 카트리지(`SLOT B` = `Y8960`, BIOS 별도)<br>*current: V9968 v0.99.14, 4MB VRAM, the Y8960 cartridge (BIOS not included)* | 128MB 보드 실기 확인, Y8960은 미확인<br>*confirmed on a 128MB board; Y8960 not yet checked* |
+| `MSX1_20261113a_sdram128v9968_7e4e67a.rbf` | MSX-AUDIO 추가(OSD `Audio Card`: MoonSound / MSX-AUDIO / None), `JoyMega Buttons`가 Slot A 카트리지 종류와 설정 비트를 같이 쓰던 문제 수정<br>*MSX-AUDIO added; the `JoyMega Buttons` option no longer shares a setting bit with the slot A cartridge type* | 실기 확인 / confirmed on the board |
+| `MSX1_20261111a_sdram128v9968_45b8fb3.rbf` | upstream V9968 v0.99(2a99ac9), 16번째 스프라이트, R800 OTIR 첫 바이트 간격, JoyMega 수정<br>*V9968 v0.99, the 16th sprite, R800 OTIR first-byte spacing, the JoyMega fix* | **JoyMega를 3버튼으로 두면 Slot A 카트리지 종류가 바뀜 — 20261113a 이후를 쓸 것**<br>***Its 3-button JoyMega setting changes the slot A cartridge type — use 20261113a or later*** |
+| `MSX1_20261029d_sdram128v9968_923140c.rbf` | PCM engine3, V9968 FH 수정, Geo3D HMMV 옵션<br>*engine3, the V9968 FH fix, the Geo3D HMMV option* | |
+| `MSX1_20261029c_sdram128v9968_9b1cea1.rbf` | 같은 수정에 이전 PCM 엔진(engine2)<br>*the same fixes with engine2* | 비교용 / for comparison |
+
+그 전 rbf(20261025b, 20261027a, 20261029a)도 `releases/`에 그대로 있다.
+*The earlier rbfs (20261025b, 20261027a, 20261029a) stay in `releases/`.*
+
+### 빌드 / Build
+
+`REV=MSX1_V9968 ASM=1 tools/sdram128/compile.sh` (Quartus 17.0). `SEED=N`으로 시드를 지정하고, 시드 비교는 `tools/sdram128/seed_table.sh`로 한다. 일반 V9958 빌드는 `tools/sdram128/compile.sh`.
+*Quartus 17.0; `SEED=N` picks the fitter seed and `tools/sdram128/seed_table.sh` compares seeds. The plain V9958 build is `tools/sdram128/compile.sh`.*
+
+### 라이선스 / Licence
+
+V9968 RTL 파일 헤더는 HRA!의 3조항 조건을 따른다(**허가 없는 상업적 이용 금지** 포함). Geo3D와 VDP 체크 툴의 시험 프로그램은 MIT다.
+*The V9968 RTL file headers carry HRA!'s 3-clause terms (including **no commercial use without written permission**). Geo3D and the test programs in the VDP check tools ROM are MIT.*
+
+### 알려진 문제 / Known issues
+
+- SDRAM의 일부는 V9968 VRAM 몫이라, 롬·기계 RAM·MoonSound 샘플이 들어가는 일반 영역은 128MB 보드 28MB, 64MB 보드 32MB, 32MB 보드 24MB다. 가장 큰 구성(4MB 기계 + MoonSound + 8MB 카트 2개)이 약 24.4MB여서, **32MB 보드에서는 기계 RAM이 최대 2MB로 줄어든다**(4MB 팩도 2MB로 동작)
+  *Part of the SDRAM belongs to the V9968's VRAM, so the general area (ROMs, machine RAM, MoonSound samples) is 28MB on a 128MB board, 32MB on a 64MB board and 24MB on a 32MB board. The largest setup (a 4MB machine + MoonSound + two 8MB carts) is about 24.4MB, so **on a 32MB board the machine RAM is capped at 2MB** (a 4MB pack runs with 2MB).*
+- MSX1 기계도 MSX2 표준 팔레트로 표시된다
+  *MSX1 machines show the MSX2 standard palette.*
 
 ---
 
@@ -217,8 +278,9 @@ Any other pack gets none of it, whatever the OSD says.
   the OSD's `CPU (turbo R)`: `Auto` (software decides), `Force Z80`, `Force R800`. The OSD
   choice is applied when the menu closes. A popup says which CPU the machine has settled on.
 - `R800 Speed`: `7.16MHz` or `21.5MHz`. `R800 VDP access wait` spaces R800 writes to the VDP
-  the way a real turbo R does (`8.66us`, the default) -- without it R800 software that writes
-  the VDP back to back drops data.
+  the way a real turbo R does (`8.66us`, the default) -- on the V9958 build, without it R800
+  software that writes the VDP back to back drops data (the V9968 build does not drop writes;
+  see above).
 - The R800 is NextZ80 run at the R800's clock: fast, but not cycle-exact R800 timing.
 - The `CPU` page shows the R800 rows only on a turbo R pack, and only the Z80 ladder on any
   other machine.
@@ -384,7 +446,9 @@ A per-source mixer in the OSD, all on one 2 dB ladder (`0` .. `±8 dB`). It is o
 - Labels are dB versus unity, so `+8dB` is a real +8 dB
 
 ### VDP accuracy
-Several timing and behaviour fixes measured against real hardware and openMSX:
+Several timing and behaviour fixes measured against real hardware and openMSX. They are in
+the V9938/V9958 VDP of the regular build; the `MSX1_V9968` build uses the V9968 instead (see
+the top of this page):
 
 - Sprite pipeline restricted to display-area lines — removes ghost `S#0` collisions that
   made `ON SPRITE` traps fire continuously (sprites parked at Y=209 by `CLRSPR`)
@@ -404,11 +468,7 @@ Several timing and behaviour fixes measured against real hardware and openMSX:
 - Support two cartridges
 - Automatic cartridge mapper detection
 - Manual select mapper: `none, ASCII8, ASCII16X, Konami, KonamiSCC, KOEI, linear64, R-TYPE, WIZARDRY, Yamanooto, NEO-8, NEO-16`
-  - The `ASCII16X` entry is one menu item for two mappers: a ROM of 4MB or less is read as plain
-    **ASCII16** (8-bit banks, optional SRAM); a ROM above 4MB, or any ROM whose header carries the
-    `ASCII16X` signature (file offset 0x10), is read as **ASCII16X** (12-bit banks, flash chip, no SRAM).
-    An ASCII16X cart is always laid out as a full 8MB flash chip, whatever the image size.
-    Automatic detection honours the same signature at any size; `NEO-8`/`NEO-16` carry theirs too.
+  - `ASCII16X` covers plain ASCII16 too: see [ASCII16-X mapper](#ascii16-x-mapper-large-flash-carts) above
 - Joystick.
 - FDD support (VY0010). Use DSK image
 - Cassette support: analog input or CAS emulation
@@ -421,13 +481,13 @@ Several timing and behaviour fixes measured against real hardware and openMSX:
 - Without SDRAM (BRAM fallback): small ROMs only, 64kB machine RAM
 
 ## ROM BIOS
-Load them manually from the menu
+Load them manually from the menu.
 
 # Features MSX2
 - reference HW Philips SVG8240/00
 - RAM in slot 3/2
 - Sound YM2149(PSG)
-- Video V9938 (V9958 selectable)
+- Video V9938 (V9958 selectable; the V9968 in the `MSX1_V9968` build)
 - Support two cartridges
 - Cartridge emulation:
   - Slot A: `ROM, SCC, SCC+, FM-PAC, MegaFlashROM SCC+ SD, GameMaster2, FDC, Empty`
@@ -435,11 +495,7 @@ Load them manually from the menu
   - Either slot can instead be expanded into four sub-slots (see *Expanded slots* above)
 - Automatic cartridge mapper detection
 - Manual select mapper: `none, ASCII8, ASCII16X, Konami, KonamiSCC, KOEI, linear64, R-TYPE, WIZARDRY, Yamanooto, NEO-8, NEO-16`
-  - The `ASCII16X` entry is one menu item for two mappers: a ROM of 4MB or less is read as plain
-    **ASCII16** (8-bit banks, optional SRAM); a ROM above 4MB, or any ROM whose header carries the
-    `ASCII16X` signature (file offset 0x10), is read as **ASCII16X** (12-bit banks, flash chip, no SRAM).
-    An ASCII16X cart is always laid out as a full 8MB flash chip, whatever the image size.
-    Automatic detection honours the same signature at any size; `NEO-8`/`NEO-16` carry theirs too.
+  - `ASCII16X` covers plain ASCII16 too: see [ASCII16-X mapper](#ascii16-x-mapper-large-flash-carts) above
 - Selectable SRAM size (auto, 1kB-32kB, none)
 - Joystick.
 - FDD support.
@@ -456,13 +512,13 @@ Load them manually from the menu
 - Without SDRAM (BRAM fallback): small ROMs only, reduced machine RAM
 
 ## ROM BIOS
-Copy bios files to Games/MSX1 folder or load them manually from the menu
+Copy the BIOS files to the `games/MSX1` folder, or load them manually from the menu
 - BIOS files use the `.MSX` file extension.
-- Use the script `tools/CreateMSXPack/createMSXpack.py` to generate them.
+- Use the script `tools/CreateMSXpack/createMSXpack.py` to generate them.
 - Refer to the XML files in the `Computer` and `Extension` directories to determine which BIOS ROM files are needed.
-- Copy the required ROM files into the `tools/CreateMSXPack/ROM` directory.
+- Copy the required ROM files into the `tools/CreateMSXpack/ROM` directory.
 - Then, run the `createMSXpack.py` script.
-- The generated `.MSX` files will be located in the `tools/CreateMSXPack/MSX` directory.
+- The generated `.MSX` files will be located in the `tools/CreateMSXpack/MSX` directory.
 - **`SRAM.NVR` (the save file for FM-PAC / GameMaster2 / machine SRAM / RTC) is written next
   to `MSX/`, not inside it. Copy it to the board once yourself and select it with
   `SRAM(PAC/Turbo-R/...)` in the OSD — see [SRAM.NVR](#sramnvr--fm-pac-gamemaster2-machine-sram-rtc-settings).**
@@ -475,5 +531,5 @@ Game Master 2, MegaFlashROM SCC+ SD (Nextor) and the MoonSound wavetable.
 |---|---|---|
 | MOONSOUND | `yrw801.rom` | `32760893ce06dbe3930627755ba065cc3d8ec6ca` |
 
-Place the ROMs in `tools/CreateMSXPack/ROM/` and build the pack with `createMSXpack.py`,
+Place the ROMs in `tools/CreateMSXpack/ROM/` and build the pack with `createMSXpack.py`,
 the same way as the BIOS pack.
