@@ -1,8 +1,13 @@
 # vdptools.rom
 
-The V9968 Cartridge test programs (hra1129/V9968_Cartridge `test/`, MIT licence,
-(c) 2026 HRA!) on one 512 KB ASCII16 ROM with a menu, so they run on the MiSTer
-MSX core without a disk or MSX-DOS.
+The V9968 Cartridge test programs on one 512 KB ASCII16 ROM with a menu, so they
+run on the MiSTer MSX core without a disk or MSX-DOS.
+
+**Source of the programs**: [hra1129/V9968_Cartridge](https://github.com/hra1129/V9968_Cartridge)
+`test/` at revision 453d5f3, MIT licence, Copyright (c) 2026 HRA!. The full licence
+text is [`LICENSE_V9968_Cartridge.txt`](LICENSE_V9968_Cartridge.txt) and has to go
+with any copy of the ROM. The menu, loader and stub in `vdptools.asm` are this
+repository's. Released as `releases/V9968_VDPTOOLS_20261124_688ab71.rom`.
 
 | item | program | what it does |
 |---|---|---|

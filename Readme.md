@@ -12,8 +12,8 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
 **실험 브랜치 / Experimental.** 기존 V9958 코어는 `nextz80` 브랜치에 있다.
 *The regular V9958 core lives on the `nextz80` branch.*
 
-- **V9968 VDP** — HRA!의 [V9968_Cartridge](https://github.com/hra1129/V9968_Cartridge) RTL을 내부 VDP로 쓰는 별도 빌드(Quartus 리비전 `MSX1_V9968`). 모든 기계 종류에서 V9968, VRAM 256KB는 SDRAM, 출력 31kHz
-  *A separate build (Quartus revision `MSX1_V9968`) with HRA!'s V9968 RTL as the internal VDP, on every machine type; 256KB VRAM in SDRAM; 31 kHz output.*
+- **V9968 VDP** — HRA!의 [V9968_Cartridge](https://github.com/hra1129/V9968_Cartridge) RTL을 내부 VDP로 쓰는 별도 빌드(Quartus 리비전 `MSX1_V9968`). 모든 기계 종류에서 V9968, VRAM 4MB(256KB × 16뱅크, R#28–R#30)는 SDRAM(32/64/128MB 보드 모두), 출력 31kHz
+  *A separate build (Quartus revision `MSX1_V9968`) with HRA!'s V9968 RTL as the internal VDP, on every machine type; 4MB VRAM (16 banks of 256KB, R#28–R#30) in SDRAM on 32/64/128MB boards; 31 kHz output.*
 - **Geo3D v2.0.0** — Alex Moncks의 3D 엔진, 포트 9Dh/9Fh, 42.95MHz
   *Alex Moncks' 3D engine on ports 9Dh/9Fh at 42.95 MHz.*
 - **SDRAM 128.86MHz** — 고정 12클럭 TDM 컨트롤러(`rtl/peripheral/sdram_tdm.sv`), V9968 VRAM은 bank 3 전용 슬롯
@@ -24,6 +24,10 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *OSD `Geo3D fill (SCREEN 8)`: LINE (default) / HMMV. In SCREEN 8 a face row goes out as one HMMV, about twice as fast (an option of this core only).*
 - **OSD** — `VDP command speed V9968/V9938`(V9938 속도에 맞춘 명령 대기), `Scandoubler Fx`의 CRT 25/50/75%가 V9968 자체 스캔라인으로 동작
   *`VDP command speed V9968/V9938` (V9938-paced command waits); the CRT 25/50/75% choices of `Scandoubler Fx` drive the V9968's own scanlines.*
+- **upstream V9968 v0.99.14** (453d5f3, 20261124a부터) — 4MB VRAM 뱅크(R#28 CPU, R#29 배경/스프라이트, R#30 명령 소스/목적지), V9958 표와 같은 명령 종료 상태, 인터럽트 정리(F/FH를 실시간으로 읽음), SP3·SCREEN 8·YJK 스프라이트 수정. **R#26/R#27은 이제 줄 단위로 래치되지 않고 쓰는 즉시 반영**(V9958·openMSX와 같음) — 라인 인터럽트에서 가로 스크롤을 바꾸는 소프트는 쓰는 시각이 중요해진다. 이 코어의 FH 규칙 두 가지(아래)는 유지. 32MB 보드는 DQM이 A11/A12에 묶여 있어 VRAM 위쪽 2MB를 bank 3 행 01에 두고 SDRAM 컨트롤러가 가려진 워드를 다시 읽는다(`docs/sdram_tdm_design.md` 15절)
+  *4MB VRAM banks (R#28 CPU, R#29 background / sprites, R#30 command source / destination), command end state as the V9958's table, interrupt rework (F / FH read live), SP3 / SCREEN 8 / YJK sprite fixes. **R#26 / R#27 are no longer latched per line; a write takes effect at once** (as on the V9958 and in openMSX), so software that changes the horizontal scroll from a line interrupt now depends on when it writes. The core's two FH rules (below) are kept. On 32MB boards (DQM tied to A11/A12) the upper 2MB of VRAM sits on bank 3's rows 01 and the SDRAM controller re-reads the masked words (`docs/sdram_tdm_design.md` section 15).*
+- **VDP 체크 툴 롬 / VDP check tools ROM** — `releases/V9968_VDPTOOLS_20261124_688ab71.rom`: HRA!의 [V9968_Cartridge](https://github.com/hra1129/V9968_Cartridge) `test/` 시험 프로그램 8종(VDPCHK, VDPREG, VDPVIEW, VDPINT, VDPDIAG, VRAMSTRS, VDPTEST, VRAMRW; upstream 453d5f3, **MIT, © 2026 HRA!**)을 디스크·MSX-DOS 없이 메뉴 하나로 실행하는 512KB ASCII16 롬. 메뉴는 커서/조이스틱, Space·A 버튼 실행, ESC·B 버튼 복귀(프로그램 안에서도 A=Space, B=ESC). OSD 매퍼는 auto. 소스·빌드·openMSX 시험은 `tools/vdptools/`, 라이선스 원문은 `tools/vdptools/LICENSE_V9968_Cartridge.txt`
+  *HRA!'s [V9968_Cartridge](https://github.com/hra1129/V9968_Cartridge) `test/` programs (upstream 453d5f3, **MIT, (c) 2026 HRA!**) on one 512KB ASCII16 ROM with a menu, no disk or MSX-DOS needed. Cursor keys / joystick, SPACE or button A runs, ESC or button B returns (inside the programs A = SPACE, B = ESC too). Leave the OSD mapper on auto. Source, build and openMSX checks in `tools/vdptools/`; the licence text is `tools/vdptools/LICENSE_V9968_Cartridge.txt`.*
 - **upstream V9968 수정 / fixes to upstream V9968** — 모두 `rtl/video/v9968/ORIGIN.md`에 재현 방법과 함께 기록. upstream 보고 초안은 `docs/upstream_issues_v9968_20261022.md`
   *All recorded with repro commands in `rtl/video/v9968/ORIGIN.md`; upstream report drafts in `docs/upstream_issues_v9968_20261022.md`.*
   - 화면을 끌 때 붙잡힌 스프라이트 VRAM 요청이 VDP 명령을 멈춤 *(a sprite VRAM request held across display-off froze VDP commands)*
@@ -39,8 +43,10 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *Quartus 17.0; `SEED=N` picks the fitter seed. The plain V9958 build is `tools/sdram128/compile.sh`.*
 - **Geo3D 데모 / demos** — 내장 98h 판을 쓴다. ASCII16 롬은 자동 판별이 틀리므로 OSD 매퍼를 `ASCII16X`로 고르거나 파일 오프셋 10h에 `ASCII16X` 헤더를 넣는다
   *Use the internal 98h builds. Auto-detect gets these ASCII16 ROMs wrong: pick `ASCII16X` in the OSD mapper menu, or put an `ASCII16X` header at file offset 10h.*
-- **릴리스 / Releases** (`releases/`) — `MSX1_20261113a_sdram128v9968_7e4e67a.rbf`: 현재판(MSX-AUDIO 추가 — OSD `Audio Card`에서 MoonSound / MSX-AUDIO / None 선택, `JoyMega Buttons` 옵션이 Slot A 카트리지 종류와 같은 설정 비트를 쓰던 문제 수정; 실기 확인)
-  *`20261113a`: current (MSX-AUDIO added — OSD `Audio Card`: MoonSound / MSX-AUDIO / None; the `JoyMega Buttons` option no longer shares a setting bit with the slot A cartridge type; confirmed on the board).*
+- **릴리스 / Releases** (`releases/`) — `MSX1_20261124a_sdram128v9968_ec79e13.rbf`: 현재판(upstream V9968 v0.99.14 병합, VRAM 4MB, Y8960 카트리지(`SLOT B` = `Y8960`, BIOS 별도))
+  *`20261124a`: current (upstream V9968 v0.99.14 merged, 4MB VRAM, the Y8960 cartridge (`SLOT B` = `Y8960`, BIOS not included)).*
+  `MSX1_20261113a_sdram128v9968_7e4e67a.rbf`: 이전판(MSX-AUDIO 추가 — OSD `Audio Card`에서 MoonSound / MSX-AUDIO / None 선택, `JoyMega Buttons` 옵션이 Slot A 카트리지 종류와 같은 설정 비트를 쓰던 문제 수정; 실기 확인)
+  *`20261113a`: previous (MSX-AUDIO added — OSD `Audio Card`: MoonSound / MSX-AUDIO / None; the `JoyMega Buttons` option no longer shares a setting bit with the slot A cartridge type; confirmed on the board).*
   `MSX1_20261111a_sdram128v9968_45b8fb3.rbf`: 이전판(upstream V9968 v0.99(2a99ac9) 병합, 16번째 스프라이트 수정, R800 OTIR 첫 바이트 간격 수정, JoyMega 수정). **JoyMega를 3버튼으로 두면 Slot A 카트리지 종류가 바뀌는 문제가 있다 — 20261113a를 쓸 것**
   *`20261111a`: previous (upstream V9968 v0.99 merged, the 16th-sprite fix, R800 OTIR first-byte spacing, the JoyMega fix). **Its 3-button JoyMega setting changes the slot A cartridge type — use 20261113a.***
   `MSX1_20261029d_sdram128v9968_923140c.rbf`: engine3, V9968 FH 수정, Geo3D HMMV 옵션. `MSX1_20261029c_sdram128v9968_9b1cea1.rbf`: engine2, 비교용
@@ -62,6 +68,8 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
   *YMF278B FM plus the PCM wavetable engine, with 2MB of sample RAM.*
 - **MSX-AUDIO (Y8950)** — MoonSound의 OPL3를 FM으로 쓰고 ADPCM·타이머·샘플 RAM을 더했다. MoonSound와 동시에는 못 쓴다(OSD `Audio Card`). ADPCM은 openMSX와 샘플 단위로 일치(VGMPlay로 재생한 6곡). BIOS ROM 없음 — 포트를 직접 쓰는 소프트용
   *The MoonSound's OPL3 as the FM part, plus ADPCM, timers and sample RAM. Exclusive with MoonSound (OSD `Audio Card`). The ADPCM matches openMSX sample for sample (six tunes played by VGMPlay). No BIOS ROM: for software that drives the ports itself.*
+- **Y8960 Cartridge** — [hra1129의 복합 음원 카트리지](https://github.com/hra1129/Y8960_Cartridge). 카트리지의 SSG2·OPM·타이머·매퍼를 더하고, SSG1·OPLL·OPL2+ADPCM·SCC는 코어에 이미 있는 PSG·OPLL·MSX-AUDIO·SCC가 맡는다. `SLOT B`를 `Y8960`으로 고르고 BIOS ROM을 로드한다
+  *[hra1129's combo sound cartridge](https://github.com/hra1129/Y8960_Cartridge). Its SSG2, OPM, timer and mapper are added; its SSG1, OPLL, OPL2 + ADPCM and SCC are the PSG, OPLL, MSX-AUDIO and SCC the core already has. Set `SLOT B` to `Y8960` and load its BIOS ROM.*
 - **turbo R** — FS-A1GT / FS-A1ST 기계 팩, R800과 Z80 실행 중 전환(소프트웨어 또는 OSD), R800 7.16 / 21.5 MHz
   *FS-A1GT / FS-A1ST machine packs; the R800 and the Z80 switch at run time (by software or the OSD); R800 at 7.16 / 21.5 MHz.*
 - **Z80 터보 / Z80 turbo** — 3.58 기본에 5.37 / 7.16 / 10.7 / 21.5 MHz 추가. 파나소닉 MSX2+ 방식 포트 토글도 지원
@@ -127,6 +135,44 @@ read-back are added.
   the keyboard and I/O port
 - Checked with `sim/msx_audio/replay_omsx.sh`: a VGM played by VGMPlay on openMSX, its port
   log replayed through the RTL, ADPCM output compared with openMSX's own channel recording
+
+### Y8960 Cartridge
+[Y8960 Cartridge](https://github.com/hra1129/Y8960_Cartridge) by hra1129 (upstream `a83d807`) is
+SSG x2, OPLL, OPL2 + ADPCM, SCC and OPM behind an SCC-style mapper with 128 KB BIOS ROM and
+128 KB RAM. The machine already has most of those chips, so the core adds only what it lacks
+and lets its own chips play the rest:
+
+| Cartridge chip | Here |
+|---|---|
+| SSG1 | the main PSG (also reached through `7FF0h`/`7FF1h`) |
+| SSG2 | upstream `ssg_core` (registers `10h`-`1Fh`, read at `A2h`) |
+| OPLL | the core's OPLL (`7Ch`/`7Dh`, `7FF4h`/`7FF5h`) |
+| OPL2 + ADPCM | the Audio Card as MSX-AUDIO (`C0h`/`C1h`, `7FF2h`/`7FF3h`) |
+| SCC | the SCC of the cartridge's slot |
+| OPM (YM2151) | upstream IKAOPM (`7Eh`/`7Fh`, `7FFBh`/`7FFCh`) |
+| timer (`B0h`-`B3h`), I/O enablers, mapper | upstream / `y8960_cart.sv` |
+
+- **How to use**: set `SLOT B` to `Y8960` and load the cartridge's BIOS as that slot's ROM
+  (the mapper is fixed; with no ROM loaded the slot is empty). The BIOS is `y8960bas.rom` from
+  [MSX Sound Suite Extension](https://github.com/madscient/MsxSoundSuiteExtension) releases
+  (personal use only, not redistributable, so it is not in any pack here). Software finds the
+  cartridge by the ROM header, so a ROM image has to be there. One Y8960, on SLOT B only
+- **While a Y8960 is in a slot the Audio Card is an MSX-AUDIO**, whatever the OSD says (the
+  MoonSound shares its OPL3 and is not available then). `C0h`/`C1h` answer once the cartridge's
+  enabler (`7FFFh` bit 0) is set. The ADPCM sample RAM follows the MSX-AUDIO rule above
+  (256 KB with the `MOONSOUND` record in the pack, 32 KB otherwise)
+- **Mixer volume registers** (`7FF7h`-`7FFAh`, `7FFDh`, `7FFEh`; 0-128) act on top of the OSD
+  volumes: SSG on every PSG, OPLL on the OPLL, OPL2 on the Audio Card's output, SCC on every
+  SCC, OPM on the OPM, and the master on all of those. Key click, cassette input and the
+  turbo R PCM are not affected. With no cartridge every factor is exactly 1
+- **Timer**: counts in units of the cartridge's 42.95 MHz system clock, as the BIOS expects
+  (the core clocks it at 21.48 MHz and steps it by two)
+- **Not there**: the per-channel pan registers, the OPLL voice banks and the OPL2 waveform
+  select (the reused chips do not have them), and the system controller (I/O `40h`-`4Fh`, the
+  cartridge's flash updater). The OPLL voices are the YM2413's own; the cartridge's bank 0 is
+  a re-creation that differs slightly in 13 of the 15 melodic voices
+- Checks: `sim/y8960/run.sh` (the wrapper alone; the core's 21.48 MHz clocking against
+  upstream's 42.95 MHz), `sim/fullsys/yprobe/run.sh` (through the whole machine)
 
 ### MoonSound (YMF278B / OPL4)
 Full OPL4 emulation — OPL3-compatible FM plus the PCM wavetable engine.
