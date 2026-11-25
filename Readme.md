@@ -49,6 +49,7 @@ V9968 RTL은 HRA!의 조건(**허가 없는 상업적 이용 금지**)을 따른
 - **MoonSound (OPL4)** — FM + PCM, 2MB sample RAM. Needs `yrw801.rom` (FW pack) and a pack with the `MOONSOUND` record
 - **MSX-AUDIO (Y8950)** — OSD `Audio Card`. Ports C0h/C1h. No BIOS ROM. Not together with MoonSound
 - **Y8960 Cartridge** — hra1129's combo sound cart. `SLOT B` = `Y8960`, then load its BIOS `y8960bas.rom` (not included: personal use only). Adds SSG2, OPM, timer and mapper; the core's PSG, OPLL, MSX-AUDIO and SCC play the rest. The Audio Card is MSX-AUDIO while it is in
+- **turbo R PCM** — 8-bit PCM (ports A4h/A5h) on turbo R packs. The BIOS `PCMPLY` plays samples from RAM; CTRL+STOP stops it. Not yet: playing from VRAM, recording (`PCMREC`). No OSD volume
 - **SCC / SCC+** — IKASCC, two SCC+ at once
 - **MIDI** — MSX-MIDI at E8h–EFh on any machine, μ·PACK in slot B, MT32-pi on the USER port
 - **Mixer** — per-source volume ±8dB and mute, per-channel SCC mute (`Video & Audio settings`)

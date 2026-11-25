@@ -284,6 +284,13 @@ Any other pack gets none of it, whatever the OSD says.
   software that writes the VDP back to back drops data (the V9968 build does not drop writes;
   see above).
 - The R800 is NextZ80 run at the R800's clock: fast, but not cycle-exact R800 timing.
+- **PCM** (`rtl/peripheral/turbor/`): the 8-bit D/A at `A4h` (write: sample; read: the 15.7 kHz
+  counter) and `A5h` (BUFF / MUTE / FILT / SEL / SMPL, read bit 7 = comparator), following
+  openMSX `MSXTurboRPCM.cc`. The MUTE bit silences all sound, as on the real machine, but only
+  after software has written `A5h`. The BIOS `PCMPLY` (0186h) is played in hardware: the CPU
+  is held while `pcm_play.sv` reads the samples from RAM at 15.75 / 7.875 / 5.25 / 3.94 kHz,
+  and CTRL+STOP aborts with carry set. Not implemented: `PCMPLY` from VRAM and `PCMREC`
+  (both return at once, carry clear). The PCM has no OSD volume or mute row.
 - The `CPU` page shows the R800 rows only on a turbo R pack, and only the Z80 ladder on any
   other machine.
 
