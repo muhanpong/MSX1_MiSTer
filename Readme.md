@@ -71,8 +71,8 @@ standard OSD cheats, extended saves, and a number of VDP accuracy fixes.
 - OSD 로드 중 OPL4 홀드가 플래시 카트 접근 뒤 풀리던 문제 (소스 수정, 실기 미확인)
   *The OPL4 hold during an OSD load dropped once a flash cart had been touched (fixed in source, not yet confirmed on the board).*
 
-**릴리스 / Releases** — `releases/MSX1_20261031b_nextz80_v9990_a62bef2.rbf` (V9990, turbo R 실기식 CPU 컨텍스트, V9958 FH 레벨 읽기 + 현재 R#23 비교; 실기 확인). 직전은 `MSX1_20261031a_nextz80_v9990_8d19b51.rbf`. nextz80 본선의 마지막은 `MSX1_20261030c_nextz80_dqcap_03894c0.rbf`. 이전 rbf는 `releases/`에 그대로 있다
-*`releases/MSX1_20261031b_nextz80_v9990_a62bef2.rbf` (V9990, real turbo R CPU contexts, V9958 FH level read compared with the current R#23; confirmed on the board). The previous one is `MSX1_20261031a_nextz80_v9990_8d19b51.rbf`. The last nextz80 mainline rbf is `MSX1_20261030c_nextz80_dqcap_03894c0.rbf`. The earlier rbfs stay in `releases/`.*
+**릴리스 / Releases** — `releases/MSX1_20261124a_nextz80_v9990_450201f.rbf` (V9990 P1/P2 표시 중 명령 엔진 대기로 화면 찢어짐 수정, JoyMega OSD 옵션 status[55]; 실기 확인). 직전은 `MSX1_20261031b_nextz80_v9990_a62bef2.rbf`. nextz80 본선의 마지막은 `MSX1_20261030c_nextz80_dqcap_03894c0.rbf`. 이전 rbf는 `releases/`에 그대로 있다
+*`releases/MSX1_20261124a_nextz80_v9990_450201f.rbf` (V9990: the command engine waits while a P1/P2 line is fetched, which fixes the torn picture; JoyMega OSD option at status[55]; confirmed on the board). The previous one is `MSX1_20261031b_nextz80_v9990_a62bef2.rbf`. The last nextz80 mainline rbf is `MSX1_20261030c_nextz80_dqcap_03894c0.rbf`. The earlier rbfs stay in `releases/`.*
 
 아래는 항목별 상세 / Details below.
 
@@ -142,6 +142,11 @@ SDRAM traffic). Ports `60h`-`6Fh`, the interrupt, and a WAIT handshake like Moon
   vertical blank; otherwise the MSX VDP. Same `CLK_VIDEO`, pixel clock 10.74 MHz: B0-B3, P1, P2
   at full resolution (B2 with uneven pixel widths); B4 shows 75 % and B7 50 % of the pixels;
   B5/B6 (25/31 kHz) not supported. No superimpose, no manual source select.
+- **VRAM arbitration** (local change): while the pattern unit fetches a P1/P2 line the command
+  engine waits (a transfer it has started still finishes). With the SDRAM latency the fetch
+  needs nearly the whole line, and the round robin let a long LMMM burst make the line late:
+  a torn band on the board (*Ninja-Kid II* V9990 port, area 24). The CPU keeps its turn.
+  Commands issued during P1/P2 display now run mostly in the line gaps and the blanking.
 - **Not in the core**: the kanji ROM command (CMMK), ADVN, PSET moving DX/DY. Open items are
   listed in [`docs/TODO_v9990.md`](docs/TODO_v9990.md).
 - **Licence**: the V9990 core is BSD-3 (Copyright 2026 Ramon Martinez); the full text is under
